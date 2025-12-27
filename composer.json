@@ -1,0 +1,26 @@
+{
+    "name": "syntexa/core",
+    "description": "Core framework functionality for Syntexa Framework",
+    "type": "library",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Syntexa",
+            "email": "support@syntexa.local"
+        }
+    ],
+    "require": {
+        "php": "^8.4",
+        "php-di/php-di": "^7.1",
+        "symfony/console": "^7.3",
+        "symfony/process": "^7.3"
+    },
+    "require-dev": {
+        "swoole/ide-helper": "^5.1"
+    },
+    "autoload": {
+        "psr-4": {
+            "Syntexa\\Core\\": "src/"
+        }
+    }
+}
