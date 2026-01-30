@@ -11,6 +11,7 @@
     ],
     "require": {
         "php": "^8.4",
+        "syntexa/docs": "^1.0",
         "php-di/php-di": "^7.1",
         "symfony/console": "^7.3",
         "symfony/process": "^7.3"
