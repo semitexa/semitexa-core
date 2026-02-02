@@ -29,7 +29,11 @@ class ServerStartCommand extends BaseCommand
         $io->title('Starting Syntexa Environment (Docker)');
 
         if (!file_exists($projectRoot . '/docker-compose.yml')) {
-            $io->error('docker-compose.yml not found. Cannot start environment.');
+            $io->error('docker-compose.yml not found.');
+            $io->text([
+                'Run <comment>syntexa init</comment> to generate project structure including docker-compose.yml, or add docker-compose.yml manually.',
+                'See docs/RUNNING.md or vendor/syntexa/core/docs/RUNNING.md for the supported way to run the app (Docker only).',
+            ]);
             return Command::FAILURE;
         }
 
@@ -48,13 +52,15 @@ class ServerStartCommand extends BaseCommand
         }
 
         $io->success('Syntexa environment started successfully!');
-        
-        $io->note([
-            'Blockchain Server: http://localhost:8080',
-            'Node 1 (Shop 1):   http://localhost:8081',
-            'Node 2 (Shop 2):   http://localhost:8082',
-        ]);
-        
+
+        $port = 9501;
+        if (file_exists($projectRoot . '/.env')) {
+            $envContent = file_get_contents($projectRoot . '/.env');
+            if (preg_match('/^\s*SWOOLE_PORT\s*=\s*(\d+)/m', $envContent, $m)) {
+                $port = (int) $m[1];
+            }
+        }
+        $io->note('App: http://localhost:' . $port);
         $io->text('To view logs: docker compose logs -f');
         $io->text('To stop: bin/syntexa server:stop (or docker compose down)');
 

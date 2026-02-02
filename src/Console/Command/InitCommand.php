@@ -12,7 +12,7 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 
 /**
  * Scaffolds Syntexa project structure: bin/, public/, src/, var/, .env.example, server.php, bin/syntexa,
- * AI_ENTRY.md, README.md, docs, example Request/Handler, autoload in composer.json, one test.
+ * docker-compose.yml, Dockerfile, AI_ENTRY.md, README.md, docs, example Request/Handler, autoload in composer.json, one test.
  */
 class InitCommand extends Command
 {
@@ -82,8 +82,11 @@ class InitCommand extends Command
             'bin/syntexa' => $this->getBinSyntexaContent(),
             '.gitignore' => $this->getGitignoreContent(),
             'public/.htaccess' => $this->getHtaccessContent(),
+            'docker-compose.yml' => $this->getDockerComposeContent(),
+            'Dockerfile' => $this->getDockerfileContent(),
             'docs/CONVENTIONS.md' => $this->getConventionsContent(),
             'docs/DEPENDENCIES.md' => $this->getDependenciesContent(),
+            'docs/RUNNING.md' => $this->getRunningDocContent(),
             'src/Request/HomeRequest.php' => $this->getHomeRequestContent(),
             'src/Handler/HomeHandler.php' => $this->getHomeHandlerContent(),
             'tests/HomeTest.php' => $this->getHomeTestContent(),
@@ -123,10 +126,10 @@ class InitCommand extends Command
         $io->text([
             'Next steps:',
             '  1. cp .env.example .env',
-            '  2. Edit .env (SWOOLE_PORT, etc.)',
+            '  2. Edit .env (SWOOLE_PORT, etc.) if needed',
             '  3. composer dump-autoload (if autoload was added)',
             '  4. Add your modules under src/modules/',
-            '  5. Run: php server.php (or vendor/bin/syntexa server:start)',
+            '  5. Run: bin/syntexa server:start (Docker)',
         ]);
 
         return Command::SUCCESS;
@@ -188,8 +191,8 @@ class InitCommand extends Command
 ## Quick start
 
 1. Read this file and docs/CONVENTIONS.md
-2. Run: `cp .env.example .env` then `php server.php` (or `vendor/bin/syntexa server:start`)
-3. Default URL: http://0.0.0.0:9501 (see .env SWOOLE_PORT)
+2. Run: `cp .env.example .env` then `bin/syntexa server:start` (Docker)
+3. Default URL: http://0.0.0.0:9501 (see .env SWOOLE_PORT). See docs/RUNNING.md for details.
 MD;
     }
 
@@ -202,9 +205,8 @@ Minimal Syntexa Framework application.
 
 ## Requirements
 
-- PHP 8.1+
-- Swoole extension
-- Composer
+- Docker and Docker Compose
+- Composer (on host for install)
 
 ## Install
 
@@ -213,15 +215,15 @@ composer install
 cp .env.example .env
 ```
 
-## Run
+## Run (Docker — supported way)
 
 ```bash
-php server.php
-# or
-vendor/bin/syntexa server:start
+bin/syntexa server:start
 ```
 
-Default URL: **http://0.0.0.0:9501** (configurable via `.env` `SWOOLE_PORT`).
+To stop: `bin/syntexa server:stop`.
+
+Default URL: **http://0.0.0.0:9501** (configurable via `.env` `SWOOLE_PORT`). See **docs/RUNNING.md** for details.
 
 ## Structure
 
@@ -247,6 +249,7 @@ MD;
 - **Handlers:** `src/Handler/` or per-module; use `#[AsRequestHandler(for: SomeRequest::class)]`; method `handle(RequestInterface $request, ResponseInterface $response): ResponseInterface`
 - **Response DTOs:** optional; or return `\Syntexa\Core\Response::json([...])` from handler
 - **CLI:** `vendor/bin/syntexa` or `bin/syntexa` – `init`, `server:start`, `server:stop`, etc.
+- **Running:** Only via Docker: `bin/syntexa server:start` / `server:stop`. See docs/RUNNING.md.
 MD;
     }
 
@@ -255,8 +258,9 @@ MD;
         return <<<'MD'
 # Syntexa dependencies
 
-- **syntexa/core** – see `composer.json` for version; framework docs in `vendor/syntexa/core/docs/attributes/`
-- Official docs / repo: check Packagist or GitHub for `syntexa/core`
+- **syntexa/core** – see `composer.json` for version; framework docs in `vendor/syntexa/core/docs/` (attributes, RUNNING.md)
+- Running: Docker only – see `docs/RUNNING.md` or `vendor/syntexa/core/docs/RUNNING.md`
+- Official repo: check Packagist or GitHub for `syntexa/core`
 MD;
     }
 
@@ -488,5 +492,60 @@ GIT;
 </IfModule>
 
 HTA;
+    }
+
+    private function getDockerComposeContent(): string
+    {
+        return <<<'YAML'
+# Minimal Syntexa app: PHP + Swoole in Docker.
+# Start: bin/syntexa server:start | Stop: bin/syntexa server:stop
+services:
+  app:
+    build: .
+    container_name: syntexa-app
+    env_file: .env
+    volumes:
+      - .:/var/www/html
+    ports:
+      - "${SWOOLE_PORT:-9501}:9501"
+    restart: unless-stopped
+    command: ["php", "server.php"]
+
+YAML;
+    }
+
+    private function getDockerfileContent(): string
+    {
+        return <<<'DOCKER'
+# Minimal PHP + Swoole for Syntexa (project is mounted at runtime)
+FROM php:8.2-cli-alpine
+
+RUN apk add --no-cache autoconf g++ make linux-headers openssl-dev \
+    && pecl install --nobuild swoole \
+    && cd "$(pecl config-get temp_dir)/swoole" \
+    && phpize && ./configure --enable-openssl --disable-brotli --disable-zstd \
+    && make -j$(nproc) && make install \
+    && docker-php-ext-enable swoole
+
+WORKDIR /var/www/html
+
+CMD ["php", "server.php"]
+
+DOCKER;
+    }
+
+    private function getRunningDocContent(): string
+    {
+        return <<<'MD'
+# Running the application
+
+The **only supported way** to run a Syntexa app is via Docker.
+
+- **Start:** `bin/syntexa server:start` (runs `docker compose up -d`)
+- **Stop:** `bin/syntexa server:stop` (runs `docker compose down`)
+- **Logs:** `docker compose logs -f`
+
+The app container runs `php server.php` inside Docker; the Swoole server listens on port 9501 (configurable via `.env` `SWOOLE_PORT`). Do not run `php server.php` on the host as the primary way to run the app.
+MD;
     }
 }

@@ -31,6 +31,10 @@ class ServerRestartCommand extends BaseCommand
 
         if (!file_exists($projectRoot . '/docker-compose.yml')) {
             $io->error('docker-compose.yml not found.');
+            $io->text([
+                'Run <comment>syntexa init</comment> to generate project structure including docker-compose.yml, or add docker-compose.yml manually.',
+                'See docs/RUNNING.md for the supported way to run the app (Docker only).',
+            ]);
             return Command::FAILURE;
         }
 

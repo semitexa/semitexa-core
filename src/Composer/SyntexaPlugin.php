@@ -14,8 +14,8 @@ use Symfony\Component\Process\Process;
 
 /**
  * Composer plugin: after install/update, if syntexa/core is installed, runs "syntexa init"
- * when project has no server.php yet, or when AI_ENTRY.md / README.md are missing
- * (so existing projects get these files after updating the package).
+ * when project is missing server.php, AI_ENTRY.md, README.md, or docker-compose.yml
+ * (so existing projects get these files, including Docker setup, after updating the package).
  */
 final class SyntexaPlugin implements PluginInterface, EventSubscriberInterface
 {
@@ -58,7 +58,8 @@ final class SyntexaPlugin implements PluginInterface, EventSubscriberInterface
 
         $needsInit = !file_exists($root . '/server.php')
             || !file_exists($root . '/AI_ENTRY.md')
-            || !file_exists($root . '/README.md');
+            || !file_exists($root . '/README.md')
+            || !file_exists($root . '/docker-compose.yml');
 
         if (!$needsInit) {
             return;
@@ -84,6 +85,6 @@ final class SyntexaPlugin implements PluginInterface, EventSubscriberInterface
             return;
         }
 
-        $this->io->write('<info>Syntexa: project structure created. Next: cp .env.example .env && php server.php</info>');
+        $this->io->write('<info>Syntexa: project structure created. Next: cp .env.example .env && bin/syntexa server:start</info>');
     }
 }
