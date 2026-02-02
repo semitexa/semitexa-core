@@ -21,7 +21,8 @@ class InitCommand extends Command
         $this->setName('init')
             ->setDescription('Create Syntexa project structure + AI_ENTRY, README, docs, example code, test')
             ->addOption('dir', 'd', InputOption::VALUE_REQUIRED, 'Target directory (default: current working directory)', null)
-            ->addOption('force', 'f', InputOption::VALUE_NONE, 'Overwrite existing files');
+            ->addOption('force', 'f', InputOption::VALUE_NONE, 'Overwrite existing files')
+            ->addOption('only-docs', null, InputOption::VALUE_NONE, 'Only update AI_ENTRY.md and project docs (CONVENTIONS, ADDING_ROUTES, etc.) from template — for existing projects after upgrading syntexa/core');
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
@@ -29,11 +30,16 @@ class InitCommand extends Command
         $io = new SymfonyStyle($input, $output);
         $dir = $input->getOption('dir');
         $force = (bool) $input->getOption('force');
+        $onlyDocs = (bool) $input->getOption('only-docs');
 
         $root = $dir !== null ? realpath($dir) : getcwd();
         if ($root === false || !is_dir($root)) {
             $io->error('Target directory does not exist or is not readable: ' . ($dir ?? getcwd()));
             return Command::FAILURE;
+        }
+
+        if ($onlyDocs) {
+            return $this->executeOnlyDocs($root, $io, $force);
         }
 
         $io->title('Syntexa project init');
@@ -133,6 +139,62 @@ class InitCommand extends Command
             '  5. Run: bin/syntexa server:start (Docker)',
         ]);
 
+        return Command::SUCCESS;
+    }
+
+    /**
+     * Update only AI_ENTRY.md and project docs from framework template (for existing projects after upgrading syntexa/core).
+     */
+    private function executeOnlyDocs(string $root, SymfonyStyle $io, bool $force): int
+    {
+        $io->title('Syntexa docs sync');
+        $io->text('Project root: ' . $root);
+
+        if (!is_dir($root . '/docs')) {
+            if (!@mkdir($root . '/docs', 0755, true)) {
+                $io->error('Failed to create directory: docs/');
+                return Command::FAILURE;
+            }
+            $io->text('Created: docs/');
+        }
+
+        $docFiles = [
+            'AI_ENTRY.md' => $this->getAiEntryContent(),
+            'README.md' => $this->getReadmeContent(),
+            'docs/CONVENTIONS.md' => $this->getConventionsContent(),
+            'docs/DEPENDENCIES.md' => $this->getDependenciesContent(),
+            'docs/RUNNING.md' => $this->getRunningDocContent(),
+            'docs/ADDING_ROUTES.md' => $this->getAddingRoutesStubContent(),
+        ];
+
+        $created = [];
+        $skipped = [];
+        foreach ($docFiles as $relPath => $content) {
+            $full = $root . '/' . $relPath;
+            if (file_exists($full) && !$force) {
+                $skipped[] = $relPath;
+                continue;
+            }
+            $dir = dirname($full);
+            if (!is_dir($dir)) {
+                @mkdir($dir, 0755, true);
+            }
+            if (file_put_contents($full, $content) === false) {
+                $io->error('Failed to write: ' . $relPath);
+                return Command::FAILURE;
+            }
+            $created[] = $relPath;
+        }
+
+        foreach ($created as $f) {
+            $io->text('Written: ' . $f);
+        }
+        foreach ($skipped as $f) {
+            $io->note('Skipped (exists): ' . $f . ' (use --force to overwrite)');
+        }
+
+        $io->success('Docs updated. AI_ENTRY and project docs refreshed from framework template.');
+        $io->text('AI will now see current conventions (var/docs, ADDING_ROUTES, Twig for HTML).');
         return Command::SUCCESS;
     }
 
