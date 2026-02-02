@@ -127,6 +127,14 @@ class InitCommand extends Command
             $io->note('Skipped (exists): ' . $f . ' (use --force to overwrite)');
         }
 
+        // AI_NOTES.md: create only if missing; never overwrite (so developer can keep own notes)
+        $aiNotesPath = $root . '/AI_NOTES.md';
+        if (!file_exists($aiNotesPath)) {
+            if (file_put_contents($aiNotesPath, $this->getAiNotesStubContent()) !== false) {
+                $io->text('Written: AI_NOTES.md (your notes; never overwritten by framework)');
+            }
+        }
+
         $this->patchComposerAutoload($root, $io, $force);
 
         $io->success('Project structure created.');
@@ -240,6 +248,7 @@ class InitCommand extends Command
 - **src/modules/** – application modules (where to add new pages and endpoints)
 - **var/log**, **var/cache** – runtime
 - **var/docs/** – working directory for AI: temporary notes, refactor plans, draft docs. Content not committed (`.gitignore`).
+- **AI_NOTES.md** – your own notes for AI (created once, never overwritten by the framework).
 - **vendor/syntexa/** – framework packages
 
 ## Framework docs (in vendor)
@@ -300,6 +309,7 @@ Default URL: **http://0.0.0.0:9501** (configurable via `.env` `SWOOLE_PORT`). Se
 - `docs/ADDING_ROUTES.md` – how to add new pages/routes (modules only)
 - `docs/DEPENDENCIES.md` – Syntexa version and docs
 - `AI_ENTRY.md` – entry point for AI assistants
+- `AI_NOTES.md` – your own notes for AI (never overwritten by framework)
 
 ## Tests
 
@@ -631,6 +641,19 @@ Request/Handler classes in project `src/Request/` or `src/Handler/` (namespace `
 - Run `composer dump-autoload` in the project root after adding/changing a module.
 
 **Full guide:** `vendor/syntexa/core/docs/ADDING_ROUTES.md`
+MD;
+    }
+
+    /**
+     * Stub for AI_NOTES.md — created once, never overwritten by the framework (developer's own notes).
+     */
+    private function getAiNotesStubContent(): string
+    {
+        return <<<'MD'
+# Your notes for AI
+
+Add your own context, instructions, or notes for AI here. This file is never overwritten by the framework.
+
 MD;
     }
 }
