@@ -255,6 +255,7 @@ class InitCommand extends Command
 
 ## Framework docs (in vendor)
 
+- **vendor/syntexa/docs/AI_REFERENCE.md** – main reference for AI; **before creating or changing module structure** read it → section **Module Structure** (Standard Module Layout).
 - **vendor/syntexa/core/docs/attributes/** – Request, Handler, Response attributes
 - **vendor/syntexa/core/docs/attributes/README.md** – attribute index
 - **vendor/syntexa/core/docs/ADDING_ROUTES.md** – how to add new pages/routes (modules only)
