@@ -1,0 +1,34 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+/**
+ * Syntexa CLI entry point (shipped with syntexa/core).
+ * When installed via Composer, this is linked as vendor/bin/syntexa.
+ */
+$dir = __DIR__;
+$autoload = null;
+for ($i = 0; $i < 5; $i++) {
+    $candidate = $dir . '/vendor/autoload.php';
+    if (file_exists($candidate)) {
+        $autoload = $candidate;
+        break;
+    }
+    $dir = dirname($dir);
+    if ($dir === '/' || $dir === '') {
+        break;
+    }
+}
+if ($autoload === null || !file_exists($autoload)) {
+    fwrite(STDERR, "Composer autoload not found. Run: composer install\n");
+    exit(1);
+}
+require_once $autoload;
+
+use Syntexa\Core\Discovery\AttributeDiscovery;
+use Syntexa\Core\Console\Application;
+
+AttributeDiscovery::initialize();
+$application = new Application();
+$application->run();
