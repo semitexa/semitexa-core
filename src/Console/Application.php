@@ -25,7 +25,7 @@ class Application extends SymfonyApplication
 {
     public function __construct()
     {
-        parent::__construct('Semitexa', '1.0.0');
+        parent::__construct('Semitexa', '1.1.0');
         
         $commands = [
             new InitCommand(),
