@@ -597,7 +597,7 @@ HTA;
     {
         return <<<'DOCKER'
 # Minimal PHP + Swoole for Semitexa (project is mounted at runtime)
-FROM php:8.2-cli-alpine
+FROM php:8.4-cli-alpine
 
 RUN apk add --no-cache autoconf g++ make linux-headers openssl-dev \
     && pecl install --nobuild swoole \
