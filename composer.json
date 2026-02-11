@@ -1,7 +1,7 @@
 {
     "name": "semitexa/core",
     "description": "Core framework functionality for Semitexa Framework",
-    "version": "v1.1.4",
+    "version": "v1.1.5",
     "type": "composer-plugin",
     "license": "MIT",
     "authors": [
@@ -26,7 +26,9 @@
             "Semitexa\\Core\\": "src/"
         }
     },
-    "bin": ["bin/semitexa"],
+    "bin": [
+        "bin/semitexa"
+    ],
     "extra": {
         "class": "Semitexa\\Core\\Composer\\SemitexaPlugin"
     }
