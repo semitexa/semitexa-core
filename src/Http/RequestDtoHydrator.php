@@ -36,6 +36,8 @@ class RequestDtoHydrator
         // Collect data from all sources
         $data = self::collectData($httpRequest);
         
+        error_log("RequestDtoHydrator: Hydrating " . get_class($dto) . " with data keys: " . implode(', ', array_keys($data)));
+
         // Merge path parameters (highest priority)
         $data = array_merge($data, $pathParams);
         
@@ -56,6 +58,8 @@ class RequestDtoHydrator
                 $type = $property->getType();
                 $typedValue = self::castValue($value, $type);
                 
+                error_log("RequestDtoHydrator: Setting $propertyName = " . json_encode($typedValue));
+
                 // Set property value
                 $property->setValue($dto, $typedValue);
             } elseif ($isPathParam && !$property->isInitialized($dto)) {

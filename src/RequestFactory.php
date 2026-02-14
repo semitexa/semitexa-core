@@ -38,21 +38,35 @@ class RequestFactory
 
         $method = strtoupper($swooleRequest->server['request_method'] ?? 'GET');
         $post = $swooleRequest->post ?? [];
+
         // Fallback: Swoole sometimes does not populate ->post for application/x-www-form-urlencoded
         if ($method === 'POST' && $post === [] && $content !== null && $content !== '') {
-            $parsed = self::parseFormUrlEncoded($content);
-            if ($parsed !== []) {
-                $post = $parsed;
+            $cType = self::getHeader($swooleRequest->header ?? [], 'content-type');
+            if ($cType === null || str_contains(strtolower((string) $cType), 'application/x-www-form-urlencoded')) {
+                $parsed = self::parseFormUrlEncoded($content);
+                if ($parsed !== []) {
+                    $post = $parsed;
+                }
             }
         }
 
-        $cookies = $swooleRequest->cookie ?? [];
+        $swooleCookies = $swooleRequest->cookie ?? [];
         $cookieHeader = self::getHeader($swooleRequest->header ?? [], 'cookie');
+        $cookies = $swooleCookies;
         if ($cookieHeader !== null && $cookieHeader !== '') {
             $parsed = self::parseCookieHeader($cookieHeader);
-            // Prefer Swoole's values when both have the same key (Swoole second = overwrites parsed)
             $cookies = array_merge($parsed, $cookies);
         }
+
+        \Semitexa\Core\Debug\SessionDebugLog::log('RequestFactory.fromSwoole', [
+            'method' => $method,
+            'uri' => $swooleRequest->server['request_uri'] ?? '',
+            'swoole_cookie_keys' => array_keys($swooleCookies),
+            'has_cookie_header' => $cookieHeader !== null && $cookieHeader !== '',
+            'cookie_header_len' => $cookieHeader !== null ? strlen($cookieHeader) : 0,
+            'final_cookie_keys' => array_keys($cookies),
+            'post_keys' => array_keys($post),
+        ]);
 
         return new Request(
             method: $method,

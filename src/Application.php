@@ -242,8 +242,8 @@ class Application
                         continue;
                     }
                     
-                    // Use request-scoped container to resolve handler dependencies
-                    // This ensures handlers get fresh instances for each request
+                    // Use request-scoped container to resolve handler (do not cache: handler must get
+                    // the same CookieJar as in finalizeSessionAndCookies, so cookies set in handler are sent).
                     try {
                         $handlerStart = microtime(true);
                         $handler = $this->requestScopedContainer->get($handlerClass);
@@ -409,7 +409,8 @@ class Application
     {
         $cookieName = Environment::getEnvValue('SESSION_COOKIE_NAME') ?? 'semitexa_session';
         $sessionId = $request->getCookie($cookieName, '');
-        if ($sessionId === '' || strlen($sessionId) !== 32) {
+        $fromCookie = $sessionId !== '' && strlen($sessionId) === 32;
+        if (!$fromCookie) {
             $sessionId = bin2hex(random_bytes(16));
         }
         $sessionLifetime = (int) (Environment::getEnvValue('SESSION_LIFETIME') ?? '3600');
@@ -418,6 +419,12 @@ class Application
         $this->requestScopedContainer->set(SessionInterface::class, $session);
         $this->requestScopedContainer->set(CookieJarInterface::class, new CookieJar($request));
         $this->requestScopedContainer->set(Request::class, $request);
+
+        \Semitexa\Core\Debug\SessionDebugLog::log('Application.initSessionAndCookies', [
+            'session_id_source' => $fromCookie ? 'from_cookie' : 'new',
+            'session_id_preview' => substr($sessionId, 0, 8) . '…',
+            'cookie_name' => $cookieName,
+        ]);
     }
 
     private function finalizeSessionAndCookies(Request $request, Response $response): Response
@@ -433,6 +440,11 @@ class Application
 
         $cookieName = $session->getCookieName();
         $sessionLifetime = (int) (Environment::getEnvValue('SESSION_LIFETIME') ?? '3600');
+        $linesBeforeSession = $cookieJar->getSetCookieLines();
+        \Semitexa\Core\Debug\SessionDebugLog::log('Application.finalizeSessionAndCookies.beforeAddSession', [
+            'jar_line_count' => count($linesBeforeSession),
+            'jar_line_previews' => array_map(fn ($l) => substr($l, 0, 50) . '…', $linesBeforeSession),
+        ]);
         $cookieJar->set($cookieName, $session->getSessionIdForCookie(), [
             'path' => '/',
             'httpOnly' => true,
@@ -444,6 +456,17 @@ class Application
         if ($lines !== []) {
             $response = $response->withHeaders(['Set-Cookie' => $lines]);
         }
+
+        $cookieNamesFromLines = [];
+        foreach ($lines as $line) {
+            $eq = strpos($line, '=');
+            $cookieNamesFromLines[] = $eq !== false ? rawurldecode(trim(substr($line, 0, $eq))) : '?';
+        }
+        \Semitexa\Core\Debug\SessionDebugLog::log('Application.finalizeSessionAndCookies', [
+            'set_cookie_count' => count($lines),
+            'set_cookie_names' => $cookieNamesFromLines,
+            'session_id_preview' => substr($session->getSessionIdForCookie(), 0, 8) . '…',
+        ]);
         return $response;
     }
 

@@ -1,35 +1,35 @@
 {
-  "name": "semitexa/core",
-  "description": "Core framework functionality for Semitexa Framework",
-  "version": "v1.1.12",
-  "type": "composer-plugin",
-  "license": "MIT",
-  "authors": [
-    {
-      "name": "Semitexa",
-      "email": "support@semitexa.com"
+    "name": "semitexa/core",
+    "description": "Core framework functionality for Semitexa Framework",
+    "version": "v1.1.13",
+    "type": "composer-plugin",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Semitexa",
+            "email": "support@semitexa.com"
+        }
+    ],
+    "require": {
+        "php": "^8.4",
+        "composer-plugin-api": "^2.0",
+        "semitexa/docs": "^1.0",
+        "php-di/php-di": "^7.1",
+        "symfony/console": "^7.3",
+        "symfony/process": "^7.3"
+    },
+    "require-dev": {
+        "swoole/ide-helper": "^5.1"
+    },
+    "autoload": {
+        "psr-4": {
+            "Semitexa\\Core\\": "src/"
+        }
+    },
+    "bin": [
+        "bin/semitexa"
+    ],
+    "extra": {
+        "class": "Semitexa\\Core\\Composer\\SemitexaPlugin"
     }
-  ],
-  "require": {
-    "php": "^8.4",
-    "composer-plugin-api": "^2.0",
-    "semitexa/docs": "^1.0",
-    "php-di/php-di": "^7.1",
-    "symfony/console": "^7.3",
-    "symfony/process": "^7.3"
-  },
-  "require-dev": {
-    "swoole/ide-helper": "^5.1"
-  },
-  "autoload": {
-    "psr-4": {
-      "Semitexa\\Core\\": "src/"
-    }
-  },
-  "bin": [
-    "bin/semitexa"
-  ],
-  "extra": {
-    "class": "Semitexa\\Core\\Composer\\SemitexaPlugin"
-  }
 }

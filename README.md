@@ -23,6 +23,7 @@ composer require semitexa/core
 |-------|------|
 | Adding pages and routes (modules) | [docs/ADDING_ROUTES.md](docs/ADDING_ROUTES.md) |
 | Running the app (Docker) | [docs/RUNNING.md](docs/RUNNING.md) |
+| Sessions and cookies | [docs/SESSIONS_AND_COOKIES.md](docs/SESSIONS_AND_COOKIES.md) |
 | Attributes (AsRequest, AsRequestHandler, etc.) | [docs/attributes/README.md](docs/attributes/README.md) |
 
 For the full framework guide and package map, see the **semitexa/docs** package (e.g. `vendor/semitexa/docs/README.md` when installed).

@@ -5,6 +5,9 @@ declare(strict_types=1);
 namespace Semitexa\Core\Container;
 
 use DI\Container;
+use Semitexa\Core\Cookie\CookieJarInterface;
+use Semitexa\Core\Request;
+use Semitexa\Core\Session\SessionInterface;
 use Semitexa\Core\Tenancy\TenantContext;
 
 /**
@@ -59,14 +62,9 @@ class RequestScopedContainer
             // For request-scoped services, check if we have a definition
             // If we have autowire() definition, use get() which properly handles property injection
             // But we need to ensure it's a new instance, not singleton
-            if ($this->container->has($id)) {
-                // For classes with autowire() definitions, get() should work correctly
-                // But to ensure it's a new instance, we'll use make() + manual property injection
-                $instance = $this->container->make($id);
-            } else {
-                // No definition - use make()
-                $instance = $this->container->make($id);
-            }
+            // Ensure handlers get the same Session/CookieJar/Request as Application::finalizeSessionAndCookies uses.
+            $makeParams = $this->getRequestScopedConstructorOverrides($id);
+            $instance = $this->container->make($id, $makeParams);
             
             // CRITICAL: Always call injectOn() for request-scoped services
             // make() doesn't automatically inject properties even with autowire() in some contexts
@@ -126,6 +124,39 @@ class RequestScopedContainer
 
         // Use singleton for infrastructure services
         return $this->container->get($id);
+    }
+
+    /**
+     * Build constructor parameter overrides so that Session, CookieJar, and Request
+     * always come from the request-scoped cache (same instances as in finalizeSessionAndCookies).
+     */
+    private function getRequestScopedConstructorOverrides(string $id): array
+    {
+        $params = [];
+        try {
+            $reflection = new \ReflectionClass($id);
+            $constructor = $reflection->getConstructor();
+            if ($constructor === null) {
+                return $params;
+            }
+            foreach ($constructor->getParameters() as $param) {
+                $type = $param->getType();
+                if (!$type || $type->isBuiltin()) {
+                    continue;
+                }
+                $name = $type->getName();
+                if ($name === SessionInterface::class && isset($this->requestScopedCache[SessionInterface::class])) {
+                    $params[$param->getName()] = $this->requestScopedCache[SessionInterface::class];
+                } elseif ($name === CookieJarInterface::class && isset($this->requestScopedCache[CookieJarInterface::class])) {
+                    $params[$param->getName()] = $this->requestScopedCache[CookieJarInterface::class];
+                } elseif ($name === Request::class && isset($this->requestScopedCache[Request::class])) {
+                    $params[$param->getName()] = $this->requestScopedCache[Request::class];
+                }
+            }
+        } catch (\Throwable) {
+            // If reflection fails, return no overrides (container will resolve as usual)
+        }
+        return $params;
     }
 
     /**
