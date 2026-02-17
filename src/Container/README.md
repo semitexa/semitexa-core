@@ -4,9 +4,8 @@ Semitexa uses a **custom DI container** (no PHP-DI). It is built once per worker
 
 ## Who gets into the container
 
-Only types registered via **#[AsServiceContract(of: SomeInterface::class)]** on implementation classes. The container discovers them through `ServiceContractRegistry` (same as `bin/semitexa contracts:list`). There is no separate “register anything” attribute: if a class is not an implementation of a contract with `AsServiceContract`, it is not in the container unless set manually for bootstrap (e.g. `Environment`).
-
-- **Handlers:** implement `HandlerInterface` and use `#[AsServiceContract(of: HandlerInterface::class)]`.
+- **Service contracts:** types registered via **#[AsServiceContract(of: SomeInterface::class)]** on implementation classes. The container discovers them through `ServiceContractRegistry` (same as `bin/semitexa contracts:list`).
+- **Handlers:** are **not** service contracts. They are discovered via **#[AsPayloadHandler(payload: ..., resource: ...)]** and registered automatically so the kernel can resolve them by concrete class when handling a route. Implement `HandlerInterface`; do not use `AsServiceContract` on handlers.
 - **Event listeners:** implement `EventListenerInterface` and use `#[AsServiceContract(of: EventListenerInterface::class)]`.
 - **Other services:** define an interface and put `#[AsServiceContract(of: ThatInterface::class)]` on the implementation(s). Classes in `Semitexa\Core\` are treated as module `Core`.
 
@@ -25,10 +24,10 @@ Dependencies are injected **only via protected properties** with exactly one of 
 - **What** is injected is determined by the **property type** (the type hint).
 - Only **protected** properties are considered. Constructor parameters are not used for DI (except for generated resolvers that receive implementations).
 
-Example:
+Example (handler; no AsServiceContract):
 
 ```php
-#[AsServiceContract(of: HandlerInterface::class)]
+#[AsPayloadHandler(payload: MyPayload::class, resource: MyResource::class)]
 final class MyHandler implements HandlerInterface
 {
     #[InjectAsReadonly]

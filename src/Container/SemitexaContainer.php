@@ -7,6 +7,7 @@ namespace Semitexa\Core\Container;
 use Semitexa\Core\Attributes\InjectAsFactory;
 use Semitexa\Core\Attributes\InjectAsMutable;
 use Semitexa\Core\Attributes\InjectAsReadonly;
+use Semitexa\Core\Discovery\AttributeDiscovery;
 use Semitexa\Core\Discovery\ClassDiscovery;
 use Semitexa\Core\Registry\RegistryContractResolverGenerator;
 use Semitexa\Core\Request;
@@ -106,10 +107,11 @@ final class SemitexaContainer implements ContainerInterface
     public function build(): void
     {
         ClassDiscovery::initialize();
+        AttributeDiscovery::initialize();
         $registry = new ServiceContractRegistry();
         $contractDetails = $registry->getContractDetails();
 
-        // id => concrete class: only from ServiceContractRegistry (AsServiceContract implementations)
+        // id => concrete class: from ServiceContractRegistry (AsServiceContract implementations)
         foreach ($contractDetails as $interface => $data) {
             $active = $data['active'] ?? null;
             foreach ($data['implementations'] ?? [] as $impl) {
@@ -124,6 +126,11 @@ final class SemitexaContainer implements ContainerInterface
                     $this->interfaceToResolver[$interface] = $resolverClass;
                 }
             }
+        }
+
+        // Handlers are not service contracts; register them so get($handlerClass) can resolve (mutable, per request).
+        foreach (AttributeDiscovery::getDiscoveredPayloadHandlerClassNames() as $handlerClass) {
+            $this->idToClass[$handlerClass] = $handlerClass;
         }
 
         // Mark mutable classes (any injection of type T as InjectAsMutable)

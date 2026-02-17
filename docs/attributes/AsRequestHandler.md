@@ -2,7 +2,7 @@
 
 ## Description
 
-Request handlers are classes that process a specific Request (Payload). They are marked with **#[AsPayloadHandler(payload: ..., resource: ...)]** and **#[AsServiceContract(of: HandlerInterface::class)]**, and must **implement HandlerInterface**. The framework discovers them in **modules** and invokes them to handle the corresponding route.
+Request handlers are classes that process a specific Request (Payload). They are marked with **#[AsPayloadHandler(payload: ..., resource: ...)]** and must **implement HandlerInterface**. Do **not** use `#[AsServiceContract]` on handlers — they are discovered by the kernel and invoked automatically; they are not service contracts. The framework discovers them in **modules** and invokes them to handle the corresponding route.
 
 **Placement:** Handler classes must live in **modules** (`src/modules/`, `packages/`, or `vendor/`).  
 Classes in project `src/` (namespace `App\`) are **not discovered** for routes — do not put new routes there. See [ADDING_ROUTES.md](../ADDING_ROUTES.md).
@@ -13,12 +13,10 @@ Classes in project `src/` (namespace `App\`) are **not discovered** for routes �
 
 ```php
 use Semitexa\Core\Attributes\AsPayloadHandler;
-use Semitexa\Core\Attributes\AsServiceContract;
 use Semitexa\Core\Contract\HandlerInterface;
 use Semitexa\Core\Contract\RequestInterface;
 use Semitexa\Core\Contract\ResponseInterface;
 
-#[AsServiceContract(of: HandlerInterface::class)]
 #[AsPayloadHandler(payload: UserListRequest::class, resource: UserListResource::class)]
 class UserListHandler implements HandlerInterface
 {
@@ -54,11 +52,9 @@ Synchronous handlers are executed immediately during request processing:
 
 ```php
 use Semitexa\Core\Attributes\AsPayloadHandler;
-use Semitexa\Core\Attributes\AsServiceContract;
 use Semitexa\Core\Attributes\InjectAsReadonly;
 use Semitexa\Core\Contract\HandlerInterface;
 
-#[AsServiceContract(of: HandlerInterface::class)]
 #[AsPayloadHandler(payload: DashboardRequest::class, resource: DashboardResource::class, execution: 'sync')]
 class DashboardHandler implements HandlerInterface
 {
@@ -81,12 +77,10 @@ Asynchronous handlers are executed via a queue:
 
 ```php
 use Semitexa\Core\Attributes\AsPayloadHandler;
-use Semitexa\Core\Attributes\AsServiceContract;
 use Semitexa\Core\Attributes\InjectAsReadonly;
 use Semitexa\Core\Contract\HandlerInterface;
 use Semitexa\Core\Queue\HandlerExecution;
 
-#[AsServiceContract(of: HandlerInterface::class)]
 #[AsPayloadHandler(
     payload: EmailSendRequest::class,
     resource: null,
@@ -114,15 +108,12 @@ class EmailSendHandler implements HandlerInterface
 If there are multiple handlers for the same Request, they are executed in priority order:
 
 ```php
-#[AsServiceContract(of: HandlerInterface::class)]
 #[AsPayloadHandler(payload: UserRequest::class, resource: null, priority: 10)]
 class UserValidationHandler implements HandlerInterface { ... }
 
-#[AsServiceContract(of: HandlerInterface::class)]
 #[AsPayloadHandler(payload: UserRequest::class, resource: null, priority: 5)]
 class UserLoggingHandler implements HandlerInterface { ... }
 
-#[AsServiceContract(of: HandlerInterface::class)]
 #[AsPayloadHandler(payload: UserRequest::class, resource: UserResource::class)]
 class UserProcessingHandler implements HandlerInterface { ... }
 ```
@@ -133,11 +124,9 @@ Handlers get dependencies via **property injection** only (no constructor inject
 
 ```php
 use Semitexa\Core\Attributes\AsPayloadHandler;
-use Semitexa\Core\Attributes\AsServiceContract;
 use Semitexa\Core\Attributes\InjectAsReadonly;
 use Semitexa\Core\Contract\HandlerInterface;
 
-#[AsServiceContract(of: HandlerInterface::class)]
 #[AsPayloadHandler(payload: UserListRequest::class, resource: UserListResource::class)]
 class UserListHandler implements HandlerInterface
 {
@@ -160,7 +149,7 @@ class UserListHandler implements HandlerInterface
 
 ## Requirements
 
-1. Class MUST implement **HandlerInterface** and be marked with **#[AsServiceContract(of: HandlerInterface::class)]**.
+1. Class MUST implement **HandlerInterface** and be marked with **#[AsPayloadHandler(payload: ..., resource: ...)]** (do not use AsServiceContract on handlers).
 2. Class MUST be marked with **#[AsPayloadHandler(payload: ..., resource: ...)]** so the route is registered.
 3. `handle()` MUST accept `RequestInterface` and `ResponseInterface` and return `ResponseInterface`.
 4. The `payload` parameter MUST point to a Request/Payload class (e.g. with `#[AsPayload]`).

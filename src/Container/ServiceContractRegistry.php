@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Semitexa\Core\Container;
 
 use Semitexa\Core\Attributes\AsServiceContract;
+use Semitexa\Core\Contract\HandlerInterface;
 use Semitexa\Core\Discovery\ClassDiscovery;
 use Semitexa\Core\Environment;
 use Semitexa\Core\ModuleRegistry;
@@ -100,6 +101,10 @@ final class ServiceContractRegistry
         $moduleOrder = ModuleRegistry::getModuleOrderByExtends();
 
         foreach ($byInterface as $interface => $candidatesList) {
+            // Handlers are not service contracts; they are discovered via #[AsPayloadHandler] and invoked by the kernel.
+            if ($interface === HandlerInterface::class) {
+                continue;
+            }
             $winner = null;
             $winnerRank = PHP_INT_MAX;
             foreach ($candidatesList as $item) {

@@ -69,7 +69,19 @@ class AttributeDiscovery
     {
         return self::$routes;
     }
-    
+
+    /**
+     * Class names of all handlers discovered via #[AsPayloadHandler].
+     * Used by the container to resolve handler instances (handlers are not service contracts).
+     *
+     * @return list<string>
+     */
+    public static function getDiscoveredPayloadHandlerClassNames(): array
+    {
+        self::initialize();
+        return array_keys(self::$httpHandlers);
+    }
+
     /**
      * Find a route by path and method
      * Supports both exact matches and pattern matching with parameters like {type}
