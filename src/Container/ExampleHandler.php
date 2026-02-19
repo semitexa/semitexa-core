@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Container;
 
-use Semitexa\Core\Contract\RequestInterface;
-use Semitexa\Core\Contract\ResponseInterface;
+use Semitexa\Core\Contract\PayloadInterface;
+use Semitexa\Core\Contract\ResourceInterface;
 
 /**
  * Example handler demonstrating DI usage
@@ -17,13 +17,13 @@ class ExampleHandler
         private ExampleService $exampleService
     ) {}
 
-    public function handle(RequestInterface $request, ResponseInterface $response): ResponseInterface
+    public function handle(PayloadInterface $payload, ResourceInterface $resource): ResourceInterface
     {
         // Use injected service
         $message = $this->exampleService->doSomething();
         echo "📝 Example handler: {$message}\n";
         
-        return $response;
+        return $resource;
     }
 }
 

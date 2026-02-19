@@ -18,7 +18,7 @@ The generated wrapper class lives in the module’s `Application/Payload/` and `
 1. **Base request** (any module or vendor) with `#[AsPayload(...)]`:
    ```php
    #[AsPayload(path: '/features/json', methods: ['GET'])]
-   final class FeaturesJsonRequest implements RequestInterface {}
+   final class FeaturesJsonRequest implements PayloadInterface {}
    ```
 
 2. **Trait** in any module (e.g. `Semitexa\Modules\FeatureShowcase\Application\Payload\...`) with `#[AsPayloadPart(base: ...)]`:

@@ -4,12 +4,12 @@ declare(strict_types=1);
 
 namespace Semitexa\Core;
 
-use Semitexa\Core\Contract\ResponseInterface;
+use Semitexa\Core\Contract\ResourceInterface;
 
 /**
  * HTTP Response representation
  */
-readonly class Response implements ResponseInterface
+readonly class Response implements ResourceInterface
 {
     public function __construct(
         public string $content,

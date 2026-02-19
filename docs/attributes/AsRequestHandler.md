@@ -14,13 +14,13 @@ Classes in project `src/` (namespace `App\`) are **not discovered** for routes â
 ```php
 use Semitexa\Core\Attributes\AsPayloadHandler;
 use Semitexa\Core\Contract\HandlerInterface;
-use Semitexa\Core\Contract\RequestInterface;
-use Semitexa\Core\Contract\ResponseInterface;
+use Semitexa\Core\Contract\PayloadInterface;
+use Semitexa\Core\Contract\ResourceInterface;
 
 #[AsPayloadHandler(payload: UserListRequest::class, resource: UserListResource::class)]
 class UserListHandler implements HandlerInterface
 {
-    public function handle(RequestInterface $request, ResponseInterface $response): ResponseInterface
+    public function handle(PayloadInterface $request, ResourceInterface $response): ResourceInterface
     {
         // Handler logic
         return $response;
@@ -61,7 +61,7 @@ class DashboardHandler implements HandlerInterface
     #[InjectAsReadonly]
     protected UserRepository $userRepository;
 
-    public function handle(RequestInterface $request, ResponseInterface $response): ResponseInterface
+    public function handle(PayloadInterface $request, ResourceInterface $response): ResourceInterface
     {
         /** @var DashboardRequest $request */
         $user = $this->userRepository->findCurrentUser();
@@ -94,7 +94,7 @@ class EmailSendHandler implements HandlerInterface
     #[InjectAsReadonly]
     protected EmailServiceInterface $emailService;
 
-    public function handle(RequestInterface $request, ResponseInterface $response): ResponseInterface
+    public function handle(PayloadInterface $request, ResourceInterface $response): ResourceInterface
     {
         // This code will run asynchronously in a worker process
         $this->emailService->send($request->email, $request->subject);
@@ -137,7 +137,7 @@ class UserListHandler implements HandlerInterface
     #[InjectAsReadonly]
     protected LoggerInterface $logger;
 
-    public function handle(RequestInterface $request, ResponseInterface $response): ResponseInterface
+    public function handle(PayloadInterface $request, ResourceInterface $response): ResourceInterface
     {
         $this->logger->info('Processing user list request');
         $users = $this->userRepository->findAll();
@@ -151,7 +151,7 @@ class UserListHandler implements HandlerInterface
 
 1. Class MUST implement **HandlerInterface** and be marked with **#[AsPayloadHandler(payload: ..., resource: ...)]** (do not use AsServiceContract on handlers).
 2. Class MUST be marked with **#[AsPayloadHandler(payload: ..., resource: ...)]** so the route is registered.
-3. `handle()` MUST accept `RequestInterface` and `ResponseInterface` and return `ResponseInterface`.
+3. `handle()` MUST accept `PayloadInterface` and `ResourceInterface` and return `ResourceInterface`.
 4. The `payload` parameter MUST point to a Request/Payload class (e.g. with `#[AsPayload]`).
 5. For async handlers the `transport` parameter is required.
 

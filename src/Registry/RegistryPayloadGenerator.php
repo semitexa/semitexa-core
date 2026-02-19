@@ -237,7 +237,7 @@ declare(strict_types=1);
 namespace App\Registry\Payloads;
 
 use Semitexa\Core\Attributes\AsPayload;
-use Semitexa\Core\Contract\RequestInterface;
+use Semitexa\Core\Contract\PayloadInterface;
 {$useBlock}
 
 /**

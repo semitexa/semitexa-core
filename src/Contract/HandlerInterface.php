@@ -10,5 +10,5 @@ namespace Semitexa\Core\Contract;
  */
 interface HandlerInterface
 {
-    public function handle(RequestInterface $request, ResponseInterface $response): ResponseInterface;
+    public function handle(PayloadInterface $payload, ResourceInterface $resource): ResourceInterface;
 }

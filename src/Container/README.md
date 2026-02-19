@@ -44,7 +44,7 @@ final class MyHandler implements HandlerInterface
     protected SessionInterface $session;
     protected CookieJarInterface $cookies;
 
-    public function handle(RequestInterface $request, ResponseInterface $response): ResponseInterface
+    public function handle(PayloadInterface $payload, ResourceInterface $resource): ResourceInterface
     {
         // ...
     }

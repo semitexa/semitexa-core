@@ -31,6 +31,7 @@ Namespaces: `Semitexa\Core\Validation\Trait\*`. You can add your own traits in m
 ## Example
 
 ```php
+use Semitexa\Core\Contract\PayloadInterface;
 use Semitexa\Core\Contract\ValidatablePayload;
 use Semitexa\Core\Http\PayloadValidationResult;
 use Semitexa\Core\Validation\Trait\EmailValidationTrait;
@@ -38,7 +39,7 @@ use Semitexa\Core\Validation\Trait\NotBlankValidationTrait;
 use Semitexa\Core\Validation\Trait\LengthValidationTrait;
 
 #[AsPayload(path: '/contact', methods: ['GET', 'POST'], responseWith: ContactFormResource::class)]
-class ContactFormPayload implements RequestInterface, ValidatablePayload
+class ContactFormPayload implements PayloadInterface, ValidatablePayload
 {
     use EmailValidationTrait, NotBlankValidationTrait, LengthValidationTrait;
 

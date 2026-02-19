@@ -14,7 +14,7 @@ use Attribute;
  * Example:
  * ```php
  * #[AsRequest(path: '/api/users/{id}')]
- * class UserRequest implements RequestInterface
+ * class UserRequest implements PayloadInterface
  * {
  *     #[PathParam(name: 'id')]
  *     public int $id;

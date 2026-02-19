@@ -12,7 +12,7 @@ Classes in project `src/` (namespace `App\`) are **not discovered** for routes â
 
 ```php
 use Semitexa\Core\Attributes\AsRequest;
-use Semitexa\Core\Contract\RequestInterface;
+use Semitexa\Core\Contract\PayloadInterface;
 
 #[AsRequest(
     doc: 'docs/attributes/AsRequest.md',
@@ -20,7 +20,7 @@ use Semitexa\Core\Contract\RequestInterface;
     methods: ['GET'],
     name: 'api.users.list'
 )]
-class UserListRequest implements RequestInterface
+class UserListRequest implements PayloadInterface
 {
     // Request properties
 }
@@ -66,7 +66,7 @@ because it allows colons in default values.
     name: 'env::API_LOGIN_ROUTE_NAME::api.login',
     responseWith: 'env::API_LOGIN_RESPONSE_CLASS::LoginApiResponse'
 )]
-class LoginRequest implements RequestInterface
+class LoginRequest implements PayloadInterface
 {
     public string $email;
     public string $password;
@@ -84,7 +84,7 @@ You can inherit parameters from another Request:
     path: '/api',
     methods: ['GET']
 )]
-class BaseApiRequest implements RequestInterface {}
+class BaseApiRequest implements PayloadInterface {}
 
 // Derived request
 #[AsRequest(
@@ -111,7 +111,7 @@ class UserListRequest extends BaseApiRequest {}
     path: '/dashboard',
     methods: ['GET']
 )]
-class DashboardRequest implements RequestInterface {}
+class DashboardRequest implements PayloadInterface {}
 ```
 
 ### POST request with validation
@@ -123,7 +123,7 @@ class DashboardRequest implements RequestInterface {}
     methods: ['POST'],
     name: 'api.users.create'
 )]
-class CreateUserRequest implements RequestInterface
+class CreateUserRequest implements PayloadInterface
 {
     public string $email;
     public string $name;
@@ -140,7 +140,7 @@ class CreateUserRequest implements RequestInterface
     requirements: ['id' => '\d+'],
     defaults: ['id' => null]
 )]
-class UserRequest implements RequestInterface
+class UserRequest implements PayloadInterface
 {
     public ?int $id = null;
 }
@@ -148,7 +148,7 @@ class UserRequest implements RequestInterface
 
 ## Requirements
 
-1. Class MUST implement `RequestInterface`.
+1. Class MUST implement `PayloadInterface`.
 2. The `path` parameter is required (unless `base` is used).
 3. The `doc` parameter is required and MUST point to an existing documentation file.
 

@@ -2,10 +2,10 @@
 
 namespace Semitexa\Core\Handler;
 
-use Semitexa\Core\Contract\RequestInterface;
-use Semitexa\Core\Contract\ResponseInterface;
+use Semitexa\Core\Contract\PayloadInterface;
+use Semitexa\Core\Contract\ResourceInterface;
 
 interface HttpHandlerInterface
 {
-    public function handle(RequestInterface $request, ResponseInterface $response): ResponseInterface;
+    public function handle(PayloadInterface $payload, ResourceInterface $resource): ResourceInterface;
 }

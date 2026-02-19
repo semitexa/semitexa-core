@@ -12,7 +12,7 @@ Attributes can optionally reference a documentation file via the `doc` parameter
     path: '/api/users',
     methods: ['GET']
 )]
-class UserListRequest implements RequestInterface {}
+class UserListRequest implements PayloadInterface {}
 ```
 
 When framework docs live in `packages/semitexa/`, use a path relative to the **application** root (e.g. `packages/semitexa/core/docs/attributes/AsRequest.md`).

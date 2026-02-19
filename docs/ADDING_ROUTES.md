@@ -43,11 +43,11 @@ Request/Handler classes in the project folder `src/` (namespace `App\`) are **no
    namespace Semitexa\Modules\Website\Application\Payload\Request;
 
    use Semitexa\Core\Attributes\AsPayload;
-   use Semitexa\Core\Contract\RequestInterface;
+   use Semitexa\Core\Contract\PayloadInterface;
    use Semitexa\Modules\Website\Application\Resource\HomeResource;
 
    #[AsPayload(path: '/', methods: ['GET'], responseWith: HomeResource::class)]
-   class HomePayload implements RequestInterface
+   class HomePayload implements PayloadInterface
    {
    }
    ```
@@ -62,8 +62,8 @@ Request/Handler classes in the project folder `src/` (namespace `App\`) are **no
    namespace Semitexa\Modules\Website\Application\Handler\Request;
 
    use Semitexa\Core\Attributes\AsPayloadHandler;
-   use Semitexa\Core\Contract\RequestInterface;
-   use Semitexa\Core\Contract\ResponseInterface;
+   use Semitexa\Core\Contract\PayloadInterface;
+   use Semitexa\Core\Contract\ResourceInterface;
    use Semitexa\Core\Response;
    use Semitexa\Modules\Website\Application\Payload\Request\HomePayload;
    use Semitexa\Modules\Website\Application\Resource\HomeResource;
@@ -71,7 +71,7 @@ Request/Handler classes in the project folder `src/` (namespace `App\`) are **no
    #[AsPayloadHandler(payload: HomePayload::class, resource: HomeResource::class)]
    class HomeHandler
    {
-       public function handle(RequestInterface $request, ResponseInterface $response): ResponseInterface
+       public function handle(PayloadInterface $request, ResourceInterface $response): ResourceInterface
        {
            return Response::json(['message' => 'Hello from Website module']);
        }

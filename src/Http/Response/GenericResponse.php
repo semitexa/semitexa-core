@@ -4,10 +4,11 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Http\Response;
 
-use Semitexa\Core\Contract\ResponseInterface as ContractResponse;
+use Semitexa\Core\Contract\LayoutRenderableInterface;
+use Semitexa\Core\Contract\ResourceInterface;
 use Semitexa\Core\Response as CoreResponse;
 
-class GenericResponse implements ContractResponse
+class GenericResponse implements ResourceInterface, LayoutRenderableInterface
 {
     public function __construct(
         private string $content = '',
