@@ -33,12 +33,22 @@ class ServerStopCommand extends BaseCommand
 
         // 1. If started via Docker (server:start), stop containers first
         $composeFile = $rootDir . '/docker-compose.yml';
-        $rabbitMqComposeFile = $rootDir . '/docker-compose.rabbitmq.yml';
         if (file_exists($composeFile)) {
             $io->section('Stopping Docker containers (docker compose down)...');
             $composeArgs = ['docker', 'compose'];
-            if (file_exists($rabbitMqComposeFile)) {
-                $composeArgs = array_merge($composeArgs, ['-f', 'docker-compose.yml', '-f', 'docker-compose.rabbitmq.yml']);
+            $overlays = [
+                'docker-compose.rabbitmq.yml',
+                'docker-compose.mysql.yml',
+                'docker-compose.redis.yml',
+            ];
+            $activeOverlays = array_filter($overlays, fn (string $f) => file_exists($rootDir . '/' . $f));
+            if ($activeOverlays !== []) {
+                $composeArgs[] = '-f';
+                $composeArgs[] = 'docker-compose.yml';
+                foreach ($activeOverlays as $overlay) {
+                    $composeArgs[] = '-f';
+                    $composeArgs[] = $overlay;
+                }
             }
             $process = new Process(array_merge($composeArgs, ['down']), $rootDir);
             $process->setTimeout(30);

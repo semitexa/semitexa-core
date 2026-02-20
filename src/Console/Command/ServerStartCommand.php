@@ -25,7 +25,7 @@ class ServerStartCommand extends BaseCommand
     {
         $io = new SymfonyStyle($input, $output);
         $projectRoot = $this->getProjectRoot();
-        
+
         $io->title('Starting Semitexa Environment (Docker)');
 
         if (!file_exists($projectRoot . '/docker-compose.yml')) {
@@ -38,16 +38,29 @@ class ServerStartCommand extends BaseCommand
         }
 
         $useRabbitMq = $this->shouldUseRabbitMqCompose($projectRoot);
-        $composeArgs = $this->getComposeBaseArgs($projectRoot, $useRabbitMq);
+        $useMysql = $this->shouldUseMysqlCompose($projectRoot);
+        $useRedis = $this->shouldUseRedisCompose($projectRoot);
+        $composeArgs = $this->getComposeBaseArgs($projectRoot, $useRabbitMq, $useMysql, $useRedis);
 
         $io->section('Starting containers...');
+
+        $overlays = [];
         if ($useRabbitMq) {
-            $io->text('Using docker-compose.yml + docker-compose.rabbitmq.yml (EVENTS_ASYNC=1).');
+            $overlays[] = 'docker-compose.rabbitmq.yml (EVENTS_ASYNC=1)';
+        }
+        if ($useMysql) {
+            $overlays[] = 'docker-compose.mysql.yml (DB_DRIVER set)';
+        }
+        if ($useRedis) {
+            $overlays[] = 'docker-compose.redis.yml (REDIS_HOST set)';
+        }
+        if ($overlays !== []) {
+            $io->text('Using docker-compose.yml + ' . implode(' + ', $overlays) . '.');
         }
 
         $process = new Process(array_merge(['docker', 'compose'], $composeArgs, ['up', '-d']), $projectRoot);
         $process->setTimeout(null);
-        
+
         $process->run(function ($type, $buffer) use ($io) {
             $io->write($buffer);
         });
@@ -74,7 +87,9 @@ class ServerStartCommand extends BaseCommand
         $io->text('To view logs: docker compose logs -f');
         $io->text('To stop: bin/semitexa server:stop (or docker compose down)');
 
-        $this->reportRabbitMqStatus($io, $projectRoot, $eventsAsync, $useRabbitMq);
+        $this->reportRabbitMqStatus($io, $projectRoot, $eventsAsync, $useRabbitMq, $composeArgs);
+        $this->reportMysqlStatus($io, $projectRoot, $useMysql, $composeArgs);
+        $this->reportRedisStatus($io, $projectRoot, $useRedis, $composeArgs);
 
         return Command::SUCCESS;
     }
@@ -93,25 +108,65 @@ class ServerStartCommand extends BaseCommand
         return (bool) preg_match('/^\s*EVENTS_ASYNC\s*=\s*(1|true|yes)\s*$/mi', $content);
     }
 
+    private function shouldUseMysqlCompose(string $projectRoot): bool
+    {
+        if (!file_exists($projectRoot . '/docker-compose.mysql.yml')) {
+            return false;
+        }
+        $envFile = $projectRoot . '/.env';
+        if (!file_exists($envFile)) {
+            return false;
+        }
+        $content = file_get_contents($envFile);
+        return (bool) preg_match('/^\s*DB_DRIVER\s*=\s*\S+/m', $content);
+    }
+
+    private function shouldUseRedisCompose(string $projectRoot): bool
+    {
+        if (!file_exists($projectRoot . '/docker-compose.redis.yml')) {
+            return false;
+        }
+        $envFile = $projectRoot . '/.env';
+        if (!file_exists($envFile)) {
+            return false;
+        }
+        $content = file_get_contents($envFile);
+        return (bool) preg_match('/^\s*REDIS_HOST\s*=\s*\S+/m', $content);
+    }
+
     /**
      * @return list<string>
      */
-    private function getComposeBaseArgs(string $projectRoot, bool $useRabbitMq): array
+    private function getComposeBaseArgs(string $projectRoot, bool $useRabbitMq, bool $useMysql = false, bool $useRedis = false): array
     {
+        $overlays = [];
         if ($useRabbitMq && file_exists($projectRoot . '/docker-compose.rabbitmq.yml')) {
-            return ['-f', 'docker-compose.yml', '-f', 'docker-compose.rabbitmq.yml'];
+            $overlays[] = 'docker-compose.rabbitmq.yml';
         }
-        return [];
+        if ($useMysql && file_exists($projectRoot . '/docker-compose.mysql.yml')) {
+            $overlays[] = 'docker-compose.mysql.yml';
+        }
+        if ($useRedis && file_exists($projectRoot . '/docker-compose.redis.yml')) {
+            $overlays[] = 'docker-compose.redis.yml';
+        }
+        if ($overlays === []) {
+            return [];
+        }
+        $args = ['-f', 'docker-compose.yml'];
+        foreach ($overlays as $overlay) {
+            $args[] = '-f';
+            $args[] = $overlay;
+        }
+        return $args;
     }
 
-    private function reportRabbitMqStatus(SymfonyStyle $io, string $projectRoot, string $eventsAsync, bool $useRabbitMqCompose): void
+    private function reportRabbitMqStatus(SymfonyStyle $io, string $projectRoot, string $eventsAsync, bool $useRabbitMqCompose, array $composeArgs): void
     {
         $enabled = in_array(strtolower(trim($eventsAsync)), ['1', 'true', 'yes'], true);
         if (!$enabled || !$useRabbitMqCompose) {
             return;
         }
 
-        $composeArgs = $this->getComposeBaseArgs($projectRoot, true);
         $cmd = array_merge(
             ['docker', 'compose'],
             $composeArgs,
@@ -145,6 +200,92 @@ class ServerStartCommand extends BaseCommand
             $io->warning([
                 'RabbitMQ: not reachable after ' . $maxAttempts . ' attempts (network may still be starting).',
                 'Queued events will run synchronously. If the rabbitmq service is in docker-compose, try again in a few seconds or set EVENTS_ASYNC=0 in .env to disable queue usage.',
+            ]);
+        }
+    }
+
+    private function reportMysqlStatus(SymfonyStyle $io, string $projectRoot, bool $useMysqlCompose, array $composeArgs): void
+    {
+        if (!$useMysqlCompose) {
+            return;
+        }
+
+        $cmd = array_merge(
+            ['docker', 'compose'],
+            $composeArgs,
+            ['exec', '-T', 'app',
+            'php', '-r',
+            '$h = getenv("DB_HOST") ?: "127.0.0.1"; $p = (int)(getenv("DB_PORT") ?: "3306"); $s = @fsockopen($h, $p, $err, $errstr, 3); if ($s) { fclose($s); exit(0); } exit(1);',
+            ]
+        );
+        $maxAttempts = 3;
+        $delaySeconds = 2;
+        $reachable = false;
+
+        sleep(1);
+
+        for ($attempt = 1; $attempt <= $maxAttempts; $attempt++) {
+            if ($attempt > 1) {
+                sleep($delaySeconds);
+            }
+            $check = new Process($cmd, $projectRoot);
+            $check->setTimeout(8);
+            $check->run();
+            if ($check->isSuccessful()) {
+                $reachable = true;
+                break;
+            }
+        }
+
+        if ($reachable) {
+            $io->success('MySQL: reachable.');
+        } else {
+            $io->warning([
+                'MySQL: not reachable after ' . $maxAttempts . ' attempts (container may still be starting).',
+                'The healthcheck has start_period=30s. Try again in a few seconds.',
+            ]);
+        }
+    }
+
+    private function reportRedisStatus(SymfonyStyle $io, string $projectRoot, bool $useRedisCompose, array $composeArgs): void
+    {
+        if (!$useRedisCompose) {
+            return;
+        }
+
+        $cmd = array_merge(
+            ['docker', 'compose'],
+            $composeArgs,
+            ['exec', '-T', 'app',
+            'php', '-r',
+            '$h = getenv("REDIS_HOST") ?: "127.0.0.1"; $p = (int)(getenv("REDIS_PORT") ?: "6379"); $s = @fsockopen($h, $p, $err, $errstr, 3); if ($s) { fclose($s); exit(0); } exit(1);',
+            ]
+        );
+        $maxAttempts = 3;
+        $delaySeconds = 2;
+        $reachable = false;
+
+        sleep(1);
+
+        for ($attempt = 1; $attempt <= $maxAttempts; $attempt++) {
+            if ($attempt > 1) {
+                sleep($delaySeconds);
+            }
+            $check = new Process($cmd, $projectRoot);
+            $check->setTimeout(8);
+            $check->run();
+            if ($check->isSuccessful()) {
+                $reachable = true;
+                break;
+            }
+        }
+
+        if ($reachable) {
+            $io->success('Redis: reachable.');
+        } else {
+            $io->warning([
+                'Redis: not reachable after ' . $maxAttempts . ' attempts (container may still be starting).',
+                'Try again in a few seconds.',
             ]);
         }
     }

@@ -115,6 +115,8 @@ class InitCommand extends Command
             'public/.htaccess' => $this->getHtaccessContent(),
             'docker-compose.yml' => $this->getDockerComposeContent(),
             'docker-compose.rabbitmq.yml' => $this->getDockerComposeRabbitMqContent(),
+            'docker-compose.mysql.yml' => $this->getDockerComposeMysqlContent(),
+            'docker-compose.redis.yml' => $this->getDockerComposeRedisContent(),
             'Dockerfile' => $this->getDockerfileContent(),
             'phpunit.xml.dist' => $this->getPhpunitXmlContent(),
         ];
@@ -187,6 +189,8 @@ class InitCommand extends Command
             'Dockerfile' => $this->getDockerfileContent(),
             'docker-compose.yml' => $this->getDockerComposeContent(),
             'docker-compose.rabbitmq.yml' => $this->getDockerComposeRabbitMqContent(),
+            'docker-compose.mysql.yml' => $this->getDockerComposeMysqlContent(),
+            'docker-compose.redis.yml' => $this->getDockerComposeRedisContent(),
             'phpunit.xml.dist' => $this->getPhpunitXmlContent(),
             'bin/semitexa' => $this->getBinSemitexaContent(),
             '.gitignore' => $this->getGitignoreContent(),
@@ -221,7 +225,7 @@ class InitCommand extends Command
             $io->note('Skipped (exists): ' . $f . ' (use --force to overwrite)');
         }
 
-        $io->success('Docs and scaffold (AI_ENTRY, docs/AI_CONTEXT, README, server.php, .env.example, Dockerfile, docker-compose, phpunit, bin/semitexa, .gitignore) synced from framework.');
+        $io->success('Docs and scaffold (AI_ENTRY, docs/AI_CONTEXT, README, server.php, .env.example, Dockerfile, docker-compose (+ mysql, redis, rabbitmq overlays), phpunit, bin/semitexa, .gitignore) synced from framework.');
         $io->text('.env is never touched. Copy new vars from .env.example to .env if needed.');
         return Command::SUCCESS;
     }
@@ -311,6 +315,40 @@ class InitCommand extends Command
         return "# Optional RabbitMQ overlay. When EVENTS_ASYNC=1, use: docker compose -f docker-compose.yml -f docker-compose.rabbitmq.yml up -d\n"
             . "services:\n  app:\n    environment:\n      RABBITMQ_HOST: rabbitmq\n    depends_on:\n      rabbitmq:\n        condition: service_healthy\n"
             . "  rabbitmq:\n    image: rabbitmq:3-alpine\n    restart: unless-stopped\n    healthcheck:\n      test: [\"CMD\", \"rabbitmq-diagnostics\", \"-q\", \"ping\"]\n      interval: 30s\n      timeout: 10s\n      retries: 5\n      start_period: 30s\n";
+    }
+
+    private function getDockerComposeMysqlContent(): string
+    {
+        $dir = $this->getInitResourcesDir();
+        $path = $dir !== '' ? $dir . '/docker-compose.mysql.yml' : '';
+        if ($path !== '' && is_readable($path)) {
+            return file_get_contents($path);
+        }
+        return "# Optional: MySQL for ORM. Used automatically when DB_DRIVER is set in .env.\n"
+            . "# Start: docker compose -f docker-compose.yml -f docker-compose.mysql.yml up -d\n"
+            . "# Or: bin/semitexa server:start (uses this file automatically when DB_DRIVER is set).\n"
+            . "services:\n  app:\n    environment:\n      DB_HOST: mysql\n    depends_on:\n      mysql:\n        condition: service_healthy\n"
+            . "\n  mysql:\n    image: mysql:8.4\n    restart: unless-stopped\n    environment:\n      MYSQL_ROOT_PASSWORD: \${DB_PASSWORD:-root}\n      MYSQL_DATABASE: \${DB_DATABASE:-semitexa}\n"
+            . "    ports:\n      - \"\${DB_PORT:-3306}:3306\"\n    volumes:\n      - mysql_data:/var/lib/mysql\n"
+            . "    healthcheck:\n      test: [\"CMD\", \"mysqladmin\", \"ping\", \"-h\", \"localhost\"]\n      interval: 10s\n      timeout: 5s\n      retries: 5\n      start_period: 30s\n"
+            . "\nvolumes:\n  mysql_data:\n";
+    }
+
+    private function getDockerComposeRedisContent(): string
+    {
+        $dir = $this->getInitResourcesDir();
+        $path = $dir !== '' ? $dir . '/docker-compose.redis.yml' : '';
+        if ($path !== '' && is_readable($path)) {
+            return file_get_contents($path);
+        }
+        return "# Optional: Redis for cache/sessions. Used when REDIS_HOST is set in .env.\n"
+            . "# Start: docker compose -f docker-compose.yml -f docker-compose.redis.yml up -d\n"
+            . "# Or: bin/semitexa server:start (uses this file automatically when REDIS_HOST is set).\n"
+            . "services:\n  app:\n    environment:\n      REDIS_HOST: redis\n    depends_on:\n      redis:\n        condition: service_healthy\n"
+            . "\n  redis:\n    image: redis:7-alpine\n    restart: unless-stopped\n"
+            . "    ports:\n      - \"\${REDIS_PORT:-6379}:6379\"\n    volumes:\n      - redis_data:/data\n"
+            . "    healthcheck:\n      test: [\"CMD\", \"redis-cli\", \"ping\"]\n      interval: 10s\n      timeout: 5s\n      retries: 5\n      start_period: 10s\n"
+            . "\nvolumes:\n  redis_data:\n";
     }
 
     private function getDockerComposeContent(): string
