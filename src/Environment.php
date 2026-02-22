@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Semitexa\Core;
 
+use Semitexa\Core\Util\ProjectRoot;
+
 /**
  * Immutable Environment configuration handler
  */
@@ -64,20 +66,18 @@ readonly class Environment
     private static function loadEnv(): array
     {
         $env = [];
-        
-        // Load .env file
-        // Load .env file
-        $envFile = __DIR__ . '/../../../../.env';
-        if (file_exists($envFile)) {
+        $root = ProjectRoot::get();
+
+        $envFile = $root . '/.env';
+        if (is_file($envFile)) {
             $env = array_merge($env, self::parseEnvFile($envFile));
         }
-        
-        // Load .env.local if exists (overrides .env)
-        $envLocalFile = __DIR__ . '/../../../../.env.local';
-        if (file_exists($envLocalFile)) {
+
+        $envLocalFile = $root . '/.env.local';
+        if (is_file($envLocalFile)) {
             $env = array_merge($env, self::parseEnvFile($envLocalFile));
         }
-        
+
         return $env;
     }
     
@@ -174,5 +174,19 @@ readonly class Environment
         }
         
         return $default;
+    }
+
+    /**
+     * Load .env and .env.local into getenv() / $_ENV / $_SERVER.
+     * Call from Swoole WorkerStart so workers have DB_*, etc. (fork may not inherit env in some setups).
+     */
+    public static function syncEnvFromFiles(): void
+    {
+        $env = self::loadEnv();
+        foreach ($env as $key => $value) {
+            putenv("$key=$value");
+            $_ENV[$key] = $value;
+            $_SERVER[$key] = $value;
+        }
     }
 }

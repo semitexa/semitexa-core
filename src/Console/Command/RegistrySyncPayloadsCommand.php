@@ -7,6 +7,7 @@ namespace Semitexa\Core\Console\Command;
 use ReflectionClass;
 use Semitexa\Core\Attributes\AsPayload;
 use Semitexa\Core\Attributes\AsPayloadPart;
+use Semitexa\Core\Config\RegistryConfig;
 use Semitexa\Core\Discovery\ClassDiscovery;
 use Semitexa\Core\ModuleRegistry;
 use Semitexa\Core\Registry\RegistryPayloadGenerator;
@@ -17,8 +18,9 @@ use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Style\SymfonyStyle;
 
 /**
- * Discover AsPayload and AsPayloadPart, generate PHP classes in src/registry/Payloads/ and write manifest.
- * Run after adding/removing modules. Respects existing parts_order from manifest.
+ * Discover AsPayload and AsPayloadPart, generate PHP classes in src/registry/Payloads/.
+ * When extra.semitexa.registry.use_manifest is true (default), reads/writes manifest.json.
+ * When use_manifest is false (composer.json extra), uses only discovery and does not write manifest.
  */
 class RegistrySyncPayloadsCommand extends BaseCommand
 {
@@ -41,30 +43,32 @@ class RegistrySyncPayloadsCommand extends BaseCommand
 
         $payloads = $this->collectPayloads();
         $payloadParts = $this->collectPayloadParts();
-        $existing = $this->loadExistingManifest($root);
-        $payloads = $this->mergePayloads($payloads, $existing['payloads'] ?? []);
-        $payloadParts = $this->mergePayloadParts($payloadParts, $existing['payload_parts'] ?? []);
 
+        $useManifest = RegistryConfig::useManifest();
+        if ($useManifest) {
+            $existing = $this->loadExistingManifest($root);
+            $payloads = $this->mergePayloads($payloads, $existing['payloads'] ?? []);
+            $payloadParts = $this->mergePayloadParts($payloadParts, $existing['payload_parts'] ?? []);
+        }
+
+        $generated = RegistryPayloadGenerator::generateAll($payloads, $payloadParts);
         $manifest = [
             'version' => 1,
             'updated' => date('c'),
-            'payloads' => array_values($payloads),
-            'payload_parts' => array_values($payloadParts),
+            'payloads' => $generated['payloads'],
+            'payload_parts' => $generated['payload_parts'],
         ];
 
-        $generated = RegistryPayloadGenerator::generateAll($payloads, $payloadParts);
-        $manifest['payloads'] = $generated['payloads'];
-        $manifest['payload_parts'] = $generated['payload_parts'];
-
-        $manifestPath = $root . '/' . RegistryPayloadGenerator::REGISTRY_MANIFEST;
-        $written = @file_put_contents(
-            $manifestPath,
-            json_encode($manifest, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT) . "\n"
-        );
-
-        if ($written === false) {
-            $output->writeln('<error>Failed to write manifest.</error>');
-            return Command::FAILURE;
+        if ($useManifest) {
+            $manifestPath = $root . '/' . RegistryPayloadGenerator::REGISTRY_MANIFEST;
+            $written = @file_put_contents(
+                $manifestPath,
+                json_encode($manifest, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT) . "\n"
+            );
+            if ($written === false) {
+                $output->writeln('<error>Failed to write manifest.</error>');
+                return Command::FAILURE;
+            }
         }
 
         if ($asJson) {

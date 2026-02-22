@@ -32,6 +32,7 @@ class SwooleBootstrap
         $healthHandler = new HealthCheckHandler();
 
         $server->on('WorkerStart', function (Server $server, int $workerId) {
+            Environment::syncEnvFromFiles();
             ContainerFactory::create();
         });
 

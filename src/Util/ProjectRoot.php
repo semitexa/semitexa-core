@@ -14,6 +14,12 @@ class ProjectRoot
             return self::$root;
         }
 
+        // 0. Explicit root (set in server.php so Swoole workers see it after fork)
+        if (defined('SEMITEXA_PROJECT_ROOT') && SEMITEXA_PROJECT_ROOT !== '' && is_dir(SEMITEXA_PROJECT_ROOT)) {
+            self::$root = rtrim(SEMITEXA_PROJECT_ROOT, '/\\');
+            return self::$root;
+        }
+
         // 1. Try known candidates (Docker, CWD)
         $candidates = ['/var/www/html'];
         $cwd = getcwd();

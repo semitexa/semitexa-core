@@ -218,11 +218,12 @@ class ServerStartCommand extends BaseCommand
             '$h = getenv("DB_HOST") ?: "127.0.0.1"; $p = (int)(getenv("DB_PORT") ?: "3306"); $s = @fsockopen($h, $p, $err, $errstr, 3); if ($s) { fclose($s); exit(0); } exit(1);',
             ]
         );
-        $maxAttempts = 3;
-        $delaySeconds = 2;
+        $maxAttempts = 5;
+        $delaySeconds = 4;
         $reachable = false;
 
-        sleep(1);
+        // MySQL healthcheck has start_period=30s; wait before first attempt so container can become healthy
+        sleep(20);
 
         for ($attempt = 1; $attempt <= $maxAttempts; $attempt++) {
             if ($attempt > 1) {
@@ -242,7 +243,7 @@ class ServerStartCommand extends BaseCommand
         } else {
             $io->warning([
                 'MySQL: not reachable after ' . $maxAttempts . ' attempts (container may still be starting).',
-                'The healthcheck has start_period=30s. Try again in a few seconds.',
+                'The healthcheck has start_period=30s. Try again in a few seconds or run: bin/semitexa orm:status',
             ]);
         }
     }

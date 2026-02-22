@@ -7,6 +7,7 @@ namespace Semitexa\Core\Console\Command;
 use ReflectionClass;
 use Semitexa\Core\Attributes\AsResource;
 use Semitexa\Core\Attributes\AsResourcePart;
+use Semitexa\Core\Config\RegistryConfig;
 use Semitexa\Core\Discovery\ClassDiscovery;
 use Semitexa\Core\ModuleRegistry;
 use Semitexa\Core\Registry\RegistryPayloadGenerator;
@@ -18,8 +19,9 @@ use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Style\SymfonyStyle;
 
 /**
- * Discover AsResource and AsResourcePart, generate PHP classes in src/registry/Resources/ and update manifest.
- * Run after adding/removing modules. Respects existing parts_order from manifest.
+ * Discover AsResource and AsResourcePart, generate PHP classes in src/registry/Resources/.
+ * When extra.semitexa.registry.use_manifest is true (default), reads/writes manifest.json.
+ * When use_manifest is false, uses only discovery and does not write manifest.
  */
 class RegistrySyncResourcesCommand extends BaseCommand
 {
@@ -42,36 +44,48 @@ class RegistrySyncResourcesCommand extends BaseCommand
 
         $resources = $this->collectResources();
         $resourceParts = $this->collectResourceParts();
-        $existing = $this->loadExistingManifest($root);
-        $resources = $this->mergeResources($resources, $existing['resources'] ?? []);
-        $resourceParts = $this->mergeResourceParts($resourceParts, $existing['resource_parts'] ?? []);
+
+        $useManifest = RegistryConfig::useManifest();
+        if ($useManifest) {
+            $existing = $this->loadExistingManifest($root);
+            $resources = $this->mergeResources($resources, $existing['resources'] ?? []);
+            $resourceParts = $this->mergeResourceParts($resourceParts, $existing['resource_parts'] ?? []);
+        }
 
         $generated = RegistryResourceGenerator::generateAll($resources, $resourceParts);
 
-        $manifestPath = $root . '/' . RegistryPayloadGenerator::REGISTRY_MANIFEST;
-        $manifest = [];
-        if (is_file($manifestPath)) {
-            $raw = @file_get_contents($manifestPath);
-            if ($raw !== false) {
-                $decoded = json_decode($raw, true);
-                $manifest = is_array($decoded) ? $decoded : [];
+        $manifest = [
+            'version' => 1,
+            'updated' => date('c'),
+            'resources' => $generated['resources'],
+            'resource_parts' => $generated['resource_parts'],
+        ];
+
+        if ($useManifest) {
+            $manifestPath = $root . '/' . RegistryPayloadGenerator::REGISTRY_MANIFEST;
+            $existingManifest = [];
+            if (is_file($manifestPath)) {
+                $raw = @file_get_contents($manifestPath);
+                if ($raw !== false) {
+                    $decoded = json_decode($raw, true);
+                    $existingManifest = is_array($decoded) ? $decoded : [];
+                }
             }
-        }
-        $manifest['resources'] = $generated['resources'];
-        $manifest['resource_parts'] = $generated['resource_parts'];
-        if (!isset($manifest['version'])) {
-            $manifest['version'] = 1;
-        }
-        $manifest['updated'] = date('c');
+            $manifest['payloads'] = $existingManifest['payloads'] ?? [];
+            $manifest['payload_parts'] = $existingManifest['payload_parts'] ?? [];
+            if (!isset($manifest['version'])) {
+                $manifest['version'] = 1;
+            }
+            $manifest['updated'] = date('c');
 
-        $written = @file_put_contents(
-            $manifestPath,
-            json_encode($manifest, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT) . "\n"
-        );
-
-        if ($written === false) {
-            $output->writeln('<error>Failed to write manifest.</error>');
-            return Command::FAILURE;
+            $written = @file_put_contents(
+                $manifestPath,
+                json_encode($manifest, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT) . "\n"
+            );
+            if ($written === false) {
+                $output->writeln('<error>Failed to write manifest.</error>');
+                return Command::FAILURE;
+            }
         }
 
         if ($asJson) {
