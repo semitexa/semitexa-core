@@ -290,6 +290,8 @@ class Application
                     'handler' => $handlerClass,
                     'duration_ms' => round((microtime(true) - $handlerStart) * 1000, 2),
                 ], 'initial');
+
+                $this->dispatchHandlerCompletedEvent($handlerClass, $resDto);
             }
         }
 
@@ -324,15 +326,15 @@ class Application
                 $resDto->setHeader('Content-Type', 'application/json');
             }
         } elseif ($format === \Semitexa\Core\Http\Response\ResponseFormat::Layout) {
-            $renderer = $rendererClass ?: 'Semitexa\\Frontend\\Layout\\LayoutRenderer';
+            $renderer = $rendererClass ?: 'Semitexa\\Ssr\\Layout\\LayoutRenderer';
             if (!class_exists($renderer)) {
                 throw new \RuntimeException(
-                    'LayoutRenderer not found. For HTML pages install semitexa/core-frontend: composer require semitexa/core-frontend. Do not implement a custom Twig renderer in the project.'
+                    'LayoutRenderer not found. For HTML pages install semitexa/ssr: composer require semitexa/ssr. Do not implement a custom Twig renderer in the project.'
                 );
             }
             if (!method_exists($renderer, 'renderHandle')) {
                 throw new \RuntimeException(
-                    'LayoutRenderer::renderHandle not found. Use semitexa/core-frontend for HTML rendering. Do not implement a custom renderer in the project.'
+                    'LayoutRenderer::renderHandle not found. Use semitexa/ssr for HTML rendering. Do not implement a custom renderer in the project.'
                 );
             }
             if (!isset($context['response'])) {
@@ -361,6 +363,33 @@ class Application
         ], 'initial');
 
         return $resDto;
+    }
+
+    private function dispatchHandlerCompletedEvent(string $handlerClass, object $resDto): void
+    {
+        try {
+            $events = $this->container->get(EventDispatcherInterface::class);
+        } catch (\Throwable) {
+            return;
+        }
+
+        if (!$events instanceof EventDispatcherInterface) {
+            return;
+        }
+
+        $handle = method_exists($resDto, 'getRenderHandle') ? $resDto->getRenderHandle() : null;
+        
+        if (!$handle) {
+            return;
+        }
+
+        $event = new \Semitexa\Core\Events\HandlerCompleted(
+            $handlerClass,
+            $resDto,
+            $handle
+        );
+
+        $events->dispatch($event);
     }
 
     private function adaptResponse(object $resDto): Response

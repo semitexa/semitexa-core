@@ -418,14 +418,14 @@ class AttributeDiscovery
                     $class = new \ReflectionClass($className);
                     $attrs = $class->getAttributes($slotAttribute);
                     foreach ($attrs as $attr) {
-                        /** @var \Semitexa\Frontend\Attributes\AsLayoutSlot $meta */
+                        /** @var \Semitexa\Ssr\Attributes\AsLayoutSlot $meta */
                         $meta = $attr->newInstance();
                         $handle = $meta->handle;
                         $slot = $meta->slot;
                         $template = EnvValueResolver::resolve($meta->template);
                         $context = EnvValueResolver::resolve($meta->context);
                         $priority = $meta->priority;
-                        \Semitexa\Frontend\Layout\LayoutSlotRegistry::register(
+                        \Semitexa\Ssr\Layout\LayoutSlotRegistry::register(
                             $handle,
                             $slot,
                             $template,
