@@ -52,6 +52,7 @@ class ContractsListCommand extends BaseCommand
 
     /**
      * Human-readable table: Contract (interface) | Implementations | Active
+     * @param array<string, array{implementations: list<array{module: string, class: string}>, active: string}> $details
      */
     private function outputTable(SymfonyStyle $io, array $details): void
     {
@@ -84,6 +85,7 @@ class ContractsListCommand extends BaseCommand
 
     /**
      * JSON output for AI agents and scripts: stable structure, easy to parse.
+     * @param array<string, array{implementations: list<array{module: string, class: string}>, active: string}> $details
      */
     private function outputJson(OutputInterface $output, array $details): void
     {
@@ -95,7 +97,8 @@ class ContractsListCommand extends BaseCommand
                 'implementations' => $data['implementations'],
             ];
         }
-        $output->writeln(json_encode(['contracts' => $out], JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT));
+        $json = json_encode(['contracts' => $out], JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT);
+        $output->writeln($json !== false ? $json : '{}');
     }
 
     private function shortClass(string $fqcn): string

@@ -72,7 +72,8 @@ class RegistrySyncPayloadsCommand extends BaseCommand
         }
 
         if ($asJson) {
-            $output->writeln(json_encode($manifest, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT));
+            $json = json_encode($manifest, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
+            $output->writeln($json !== false ? $json : '{}');
             return Command::SUCCESS;
         }
 
@@ -103,6 +104,9 @@ class RegistrySyncPayloadsCommand extends BaseCommand
         );
         $out = [];
         foreach ($classes as $className) {
+            if (!class_exists($className)) {
+                continue;
+            }
             try {
                 $ref = new ReflectionClass($className);
                 if ($ref->getAttributes(AsPayload::class) === []) {
@@ -130,6 +134,9 @@ class RegistrySyncPayloadsCommand extends BaseCommand
         );
         $out = [];
         foreach ($classes as $className) {
+            if (!class_exists($className)) {
+                continue;
+            }
             try {
                 $ref = new ReflectionClass($className);
                 if (!$ref->isTrait()) {
@@ -179,6 +186,11 @@ class RegistrySyncPayloadsCommand extends BaseCommand
         return is_array($decoded) ? $decoded : [];
     }
 
+    /**
+     * @param array<int, array{class: string, module: string, file: string, parts_order?: list<string>}> $discovered
+     * @param array<int, array{class: string, module: string, file: string, parts_order?: list<string>}> $existing
+     * @return array<int, array{class: string, module: string, file: string, parts_order?: list<string>}>
+     */
     private function mergePayloads(array $discovered, array $existing): array
     {
         $byClass = [];
@@ -207,6 +219,11 @@ class RegistrySyncPayloadsCommand extends BaseCommand
         return $byClass;
     }
 
+    /**
+     * @param array<string, array{class: string, base: string, module: string, file: string}> $discovered
+     * @param array<string, array{class: string, base: string, module: string, file: string}> $existing
+     * @return array<string, array{class: string, base: string, module: string, file: string}>
+     */
     private function mergePayloadParts(array $discovered, array $existing): array
     {
         $byKey = [];

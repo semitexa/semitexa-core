@@ -25,6 +25,7 @@ use Semitexa\Core\Util\ProjectRoot;
  */
 final class RegistryConfig
 {
+    /** @var array<string, mixed>|null */
     private static ?array $extra = null;
 
     /**

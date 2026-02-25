@@ -69,7 +69,7 @@ class CacheClearCommand extends BaseCommand
             $io->warning('Could not clear: ' . implode('; ', $failed) . '. Run with --via-docker to clear from inside the app container, or: docker compose exec app bin/semitexa cache:clear');
             return Command::FAILURE;
         }
-        if ($cleared === [] && $failed === []) {
+        if (count($cleared) === 0 && count($failed) === 0) {
             $io->text('Nothing to clear (no cache directories found under var/cache).');
         }
 

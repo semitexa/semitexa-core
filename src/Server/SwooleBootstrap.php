@@ -12,9 +12,18 @@ use Semitexa\Core\Request;
 use Swoole\Http\Request as SwooleRequest;
 use Swoole\Http\Response as SwooleResponse;
 use Swoole\Http\Server;
+use Swoole\Table;
 
 class SwooleBootstrap
 {
+    /** @var array{0: SwooleRequest, 1: SwooleResponse, 2: Server, 3: Table, 4: Table}|null */
+    private static ?array $currentSwooleContext = null;
+
+    public static function getCurrentSwooleRequestResponse(): ?array
+    {
+        return self::$currentSwooleContext;
+    }
+
     public static function run(): void
     {
         self::verifyRequirements();
@@ -28,12 +37,31 @@ class SwooleBootstrap
         $server = new Server($config->getHost(), $config->getPort());
         $server->set($config->getServerOptions());
 
+        $sessionWorkerTable = new Table(4096);
+        $sessionWorkerTable->column('worker_id', Table::TYPE_INT, 4);
+        $sessionWorkerTable->create();
+
+        $deliverTable = new Table(8192);
+        $deliverTable->column('session_id', Table::TYPE_STRING, 128);
+        $deliverTable->column('worker_id', Table::TYPE_INT, 4);
+        $deliverTable->column('payload', Table::TYPE_STRING, 262144);
+        $deliverTable->create();
+
+        $pendingDeliverTable = new Table(8192);
+        $pendingDeliverTable->column('session_id', Table::TYPE_STRING, 128);
+        $pendingDeliverTable->column('payload', Table::TYPE_STRING, 262144);
+        $pendingDeliverTable->create();
+
         $corsHandler = new CorsHandler($env);
         $healthHandler = new HealthCheckHandler();
 
-        $server->on('WorkerStart', function (Server $server, int $workerId) {
+        $server->on('WorkerStart', function (Server $server, int $workerId) use ($sessionWorkerTable, $deliverTable, $pendingDeliverTable) {
             Environment::syncEnvFromFiles();
             ContainerFactory::create();
+            if (class_exists(\Semitexa\Ssr\Async\AsyncResourceSseServer::class)) {
+                \Semitexa\Ssr\Async\AsyncResourceSseServer::setServer($server);
+                \Semitexa\Ssr\Async\AsyncResourceSseServer::setTables($sessionWorkerTable, $deliverTable, $pendingDeliverTable);
+            }
         });
 
         $server->on('WorkerStop', function (Server $server, int $workerId) {
@@ -52,7 +80,7 @@ class SwooleBootstrap
             // future: cleanup
         });
 
-        $server->on('request', function (SwooleRequest $request, SwooleResponse $response) use ($corsHandler, $healthHandler) {
+        $server->on('request', function (SwooleRequest $request, SwooleResponse $response) use ($corsHandler, $healthHandler, $server, $sessionWorkerTable, $deliverTable, $pendingDeliverTable) {
             if ($healthHandler->handle($request, $response)) {
                 return;
             }
@@ -61,6 +89,7 @@ class SwooleBootstrap
                 return;
             }
 
+            self::$currentSwooleContext = [$request, $response, $server, $sessionWorkerTable, $deliverTable, $pendingDeliverTable];
             $app = new Application();
 
             try {
@@ -71,10 +100,13 @@ class SwooleBootstrap
                 foreach ($semitexaResponse->getHeaders() as $name => $value) {
                     $response->header($name, $value);
                 }
-                $response->end($semitexaResponse->getContent());
+                if (!$semitexaResponse->isAlreadySent()) {
+                    $response->end($semitexaResponse->getContent());
+                }
             } catch (\Throwable $e) {
                 self::handleError($e, $response, $app->getEnvironment());
             } finally {
+                self::$currentSwooleContext = null;
                 $app->getRequestScopedContainer()->reset();
             }
         });

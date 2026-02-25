@@ -47,18 +47,28 @@ class Application extends SymfonyApplication
             new TestHandlerCommand(),
         ];
 
-        // Add ORM commands if available
-        if (class_exists(\Semitexa\Orm\Console\Command\OrmSyncCommand::class)) {
-            $commands[] = new \Semitexa\Orm\Console\Command\OrmSyncCommand();
+        // Add ORM commands if available and OrmManager is registered
+        $container = \Semitexa\Core\Container\ContainerFactory::get();
+        $hasOrmManager = $container->has(\Semitexa\Orm\OrmManager::class);
+        if ($hasOrmManager && class_exists(\Semitexa\Orm\Console\Command\OrmSyncCommand::class)) {
+            $commands[] = new \Semitexa\Orm\Console\Command\OrmSyncCommand(
+                $container->get(\Semitexa\Orm\OrmManager::class)
+            );
         }
-        if (class_exists(\Semitexa\Orm\Console\Command\OrmDiffCommand::class)) {
-            $commands[] = new \Semitexa\Orm\Console\Command\OrmDiffCommand();
+        if ($hasOrmManager && class_exists(\Semitexa\Orm\Console\Command\OrmDiffCommand::class)) {
+            $commands[] = new \Semitexa\Orm\Console\Command\OrmDiffCommand(
+                $container->get(\Semitexa\Orm\OrmManager::class)
+            );
         }
-        if (class_exists(\Semitexa\Orm\Console\Command\OrmSeedCommand::class)) {
-            $commands[] = new \Semitexa\Orm\Console\Command\OrmSeedCommand();
+        if ($hasOrmManager && class_exists(\Semitexa\Orm\Console\Command\OrmSeedCommand::class)) {
+            $commands[] = new \Semitexa\Orm\Console\Command\OrmSeedCommand(
+                $container->get(\Semitexa\Orm\OrmManager::class)
+            );
         }
-        if (class_exists(\Semitexa\Orm\Console\Command\OrmStatusCommand::class)) {
-            $commands[] = new \Semitexa\Orm\Console\Command\OrmStatusCommand();
+        if ($hasOrmManager && class_exists(\Semitexa\Orm\Console\Command\OrmStatusCommand::class)) {
+            $commands[] = new \Semitexa\Orm\Console\Command\OrmStatusCommand(
+                $container->get(\Semitexa\Orm\OrmManager::class)
+            );
         }
 
         // Add Tenancy commands if available

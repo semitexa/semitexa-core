@@ -71,7 +71,7 @@ final class SemitexaContainer implements ContainerInterface
         $resolverClass = $this->interfaceToResolver[$id] ?? null;
         if ($resolverClass !== null) {
             $resolver = $this->readonlyInstances[$resolverClass] ?? null;
-            if ($resolver !== null) {
+            if ($resolver !== null && method_exists($resolver, 'getContract')) {
                 $active = $resolver->getContract();
                 $activeClass = $active::class;
                 if (isset($this->mutablePrototypes[$activeClass])) {

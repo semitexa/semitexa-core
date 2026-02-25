@@ -35,7 +35,7 @@ class Application
     private Environment $environment;
     private ContainerInterface $container;
     private RequestScopedContainer $requestScopedContainer;
-    private ?TenancyBootstrapper $tenancy;
+    private ?TenancyBootstrapper $tenancy = null;
 
     public function __construct(?ContainerInterface $container = null)
     {
@@ -82,7 +82,7 @@ class Application
         \Semitexa\Core\Http\SecurityHelper::clearSuperglobals();
         
         // Resolve tenant context via tenancy module (coroutine-safe, event-driven)
-        if ($this->tenancy->isEnabled()) {
+        if ($this->tenancy !== null && $this->tenancy->isEnabled()) {
             $tenantResponse = $this->tenancy->getHandler()->handle($request);
             if ($tenantResponse !== null) {
                 return $tenantResponse; // Short-circuit: tenant not found or required
@@ -122,13 +122,7 @@ class Application
             } else {
                 $path = $request->getPath();
                 if ($path === '/sse' && $request->getMethod() === 'GET') {
-                    $ctx = \Semitexa\Core\Server\SwooleBootstrap::getCurrentSwooleRequestResponse();
-                    if ($ctx !== null && count($ctx) >= 5 && $ctx[2] !== null && $ctx[3] !== null && $ctx[4] !== null && class_exists(\Semitexa\Ssr\Async\AsyncResourceSseServer::class)) {
-                        \Semitexa\Ssr\Async\AsyncResourceSseServer::setServer($ctx[2]);
-                        \Semitexa\Ssr\Async\AsyncResourceSseServer::setTables($ctx[3], $ctx[4]);
-                        \Semitexa\Ssr\Async\AsyncResourceSseServer::handle($ctx[0], $ctx[1]);
-                        return $this->finalizeSessionAndCookies($request, Response::alreadySent());
-                    }
+                    // SSE support requires semitexa/ssr package
                 }
                 $response = $this->getNotFoundResponse($request);
             }
@@ -138,6 +132,9 @@ class Application
         });
     }
     
+    /**
+     * @param array{type?: string, class?: string, handlers?: list<array{class?: string, execution?: string}>, responseClass?: string, method?: string, name?: string} $route
+     */
     private function handleRoute(array $route, Request $request): Response
     {
         return self::measure('Application::handleRoute', function() use ($route, $request) {
@@ -149,12 +146,22 @@ class Application
                     }
 
                     $resDto = $this->resolveResponseDto($route);
-                    $resDto = $this->executeHandlers($route['handlers'] ?? [], $route['class'], $reqDto, $resDto, $request);
+                    $handlers = $route['handlers'] ?? [];
+                    $class = $route['class'] ?? null;
+                    if ($class !== null) {
+                        $resDto = $this->executeHandlers($handlers, $class, $reqDto, $resDto, $request);
+                    }
                     $resDto = $this->renderResponse($resDto, $reqDto);
                     return $this->adaptResponse($resDto);
                 }
 
-                return $this->handleLegacyRoute($route);
+                $routeClass = $route['class'] ?? null;
+                $routeMethod = $route['method'] ?? null;
+                if ($routeClass !== null && $routeMethod !== null) {
+                    return $this->handleLegacyRoute($route);
+                }
+
+                throw new \RuntimeException('Unknown route type: ' . ($route['type'] ?? 'undefined'));
             } catch (\Throwable $e) {
                 return $this->handleRouteException($e, $route, $request);
             }
@@ -162,11 +169,15 @@ class Application
     }
 
     /**
+     * @param array{type?: string, class?: string, handlers?: list<array{class?: string, execution?: string}>, responseClass?: string, method?: string, name?: string} $route
      * @return array{0: object, 1: ?Response}
      */
     private function hydrateRequestDto(array $route, Request $request): array
     {
-        $requestClass = $route['class'];
+        $requestClass = $route['class'] ?? null;
+        if ($requestClass === null) {
+            throw new \RuntimeException('Route has no class defined');
+        }
         $segmentStart = microtime(true);
 
         $reqDto = class_exists($requestClass) ? new $requestClass() : null;
@@ -196,6 +207,9 @@ class Application
         return [$reqDto, null];
     }
 
+    /**
+     * @param array{type?: string, class?: string, handlers?: list<array{class?: string, execution?: string}>, responseClass?: string, method?: string, name?: string} $route
+     */
     private function resolveResponseDto(array $route): object
     {
         $responseClass = $route['responseClass'] ?? null;
@@ -265,6 +279,9 @@ class Application
         return $resDto;
     }
 
+    /**
+     * @param list<array{class?: string, execution?: string}|string> $handlerClasses
+     */
     private function executeHandlers(array $handlerClasses, string $requestClass, object $reqDto, object $resDto, Request $request): object
     {
         $sessionId = $this->getSessionIdForAsyncDelivery($request);
@@ -297,7 +314,7 @@ class Application
                 throw new \RuntimeException("Failed to resolve handler {$handlerClass}: " . $e->getMessage(), 0, $e);
             }
 
-            if (method_exists($handler, 'handle')) {
+            if (method_exists($handler, 'handle') && is_object($handler)) {
                 $resDto = $handler->handle($reqDto, $resDto);
                 $this->debugLog('H2', 'Application::handleRoute', 'handler_completed', [
                     'handler' => $handlerClass,
@@ -429,13 +446,26 @@ class Application
         return Response::json(['ok' => true]);
     }
 
+    /**
+     * @param array{class: string, method: string, name?: string} $route
+     */
     private function handleLegacyRoute(array $route): Response
     {
+        /** @var object $controller */
         $controller = new $route['class']();
         $method = $route['method'];
-        return $method === '__invoke' ? $controller() : $controller->$method();
+        if ($method === '__invoke' && is_callable($controller)) {
+            return $controller();
+        }
+        if (is_callable([$controller, $method])) {
+            return $controller->$method();
+        }
+        throw new \RuntimeException("Controller method {$route['class']}::{$method} is not callable");
     }
 
+    /**
+     * @param array{name?: string} $route
+     */
     private function handleRouteException(\Throwable $e, array $route, Request $request): Response
     {
         if ($e instanceof \Semitexa\Core\Http\Exception\NotFoundException) {
@@ -564,6 +594,9 @@ class Application
         return $response;
     }
 
+    /**
+     * @param array<string, mixed> $data
+     */
     private function debugLog(string $hypothesisId, string $location, string $message, array $data, string $runId): void
     {
         // #region agent log

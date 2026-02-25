@@ -22,6 +22,7 @@ class AsResource
         public ?string $handle = null,
         ?string $doc = null,
         public ?string $base = null,
+        /** @var array<string, mixed>|null $context */
         public ?array $context = null,
         public ?ResponseFormat $format = null,
         public ?string $renderer = null,

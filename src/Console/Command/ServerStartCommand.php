@@ -76,11 +76,13 @@ class ServerStartCommand extends BaseCommand
         $eventsAsync = '0';
         if (file_exists($projectRoot . '/.env')) {
             $envContent = file_get_contents($projectRoot . '/.env');
-            if (preg_match('/^\s*SWOOLE_PORT\s*=\s*(\d+)/m', $envContent, $m)) {
-                $port = (int) $m[1];
-            }
-            if (preg_match('/^\s*EVENTS_ASYNC\s*=\s*(\S+)/m', $envContent, $m)) {
-                $eventsAsync = trim($m[1]);
+            if ($envContent !== false) {
+                if (preg_match('/^\s*SWOOLE_PORT\s*=\s*(\d+)/m', $envContent, $m)) {
+                    $port = (int) $m[1];
+                }
+                if (preg_match('/^\s*EVENTS_ASYNC\s*=\s*(\S+)/m', $envContent, $m)) {
+                    $eventsAsync = trim($m[1]);
+                }
             }
         }
         $io->note('App: http://localhost:' . $port);
@@ -105,7 +107,7 @@ class ServerStartCommand extends BaseCommand
             return false;
         }
         $content = file_get_contents($envFile);
-        return (bool) preg_match('/^\s*EVENTS_ASYNC\s*=\s*(1|true|yes)\s*$/mi', $content);
+        return $content !== false && (bool) preg_match('/^\s*EVENTS_ASYNC\s*=\s*(1|true|yes)\s*$/mi', $content);
     }
 
     private function shouldUseMysqlCompose(string $projectRoot): bool
@@ -118,7 +120,7 @@ class ServerStartCommand extends BaseCommand
             return false;
         }
         $content = file_get_contents($envFile);
-        return (bool) preg_match('/^\s*DB_DRIVER\s*=\s*\S+/m', $content);
+        return $content !== false && (bool) preg_match('/^\s*DB_DRIVER\s*=\s*\S+/m', $content);
     }
 
     private function shouldUseRedisCompose(string $projectRoot): bool
@@ -131,7 +133,7 @@ class ServerStartCommand extends BaseCommand
             return false;
         }
         $content = file_get_contents($envFile);
-        return (bool) preg_match('/^\s*REDIS_HOST\s*=\s*\S+/m', $content);
+        return $content !== false && (bool) preg_match('/^\s*REDIS_HOST\s*=\s*\S+/m', $content);
     }
 
     /**
@@ -160,6 +162,9 @@ class ServerStartCommand extends BaseCommand
         return $args;
     }
 
+    /**
+     * @param list<string> $composeArgs
+     */
     private function reportRabbitMqStatus(SymfonyStyle $io, string $projectRoot, string $eventsAsync, bool $useRabbitMqCompose, array $composeArgs): void
     {
         $enabled = in_array(strtolower(trim($eventsAsync)), ['1', 'true', 'yes'], true);
@@ -204,6 +209,9 @@ class ServerStartCommand extends BaseCommand
         }
     }
 
+    /**
+     * @param list<string> $composeArgs
+     */
     private function reportMysqlStatus(SymfonyStyle $io, string $projectRoot, bool $useMysqlCompose, array $composeArgs): void
     {
         if (!$useMysqlCompose) {
@@ -248,6 +256,9 @@ class ServerStartCommand extends BaseCommand
         }
     }
 
+    /**
+     * @param list<string> $composeArgs
+     */
     private function reportRedisStatus(SymfonyStyle $io, string $projectRoot, bool $useRedisCompose, array $composeArgs): void
     {
         if (!$useRedisCompose) {

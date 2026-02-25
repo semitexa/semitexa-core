@@ -112,6 +112,7 @@ class LayoutGenerator
 
     /**
      * @param array<int, array<string, mixed>> $layouts
+     * @return array<string, mixed>|null
      */
     private static function resolveTarget(array $layouts, string $identifier): ?array
     {

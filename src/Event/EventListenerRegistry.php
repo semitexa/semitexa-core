@@ -16,13 +16,13 @@ use ReflectionClass;
  */
 final class EventListenerRegistry
 {
-    /** @var array<string, list<array{class: string, event: string, execution: string, transport: ?string, queue: ?string, priority: int}> */
+    /** @var array<string, array<array{class: string, event: string, execution: string, transport: mixed, queue: mixed, priority: int}>> */
     private static array $listenersByEvent = [];
 
     private static bool $built = false;
 
     /**
-     * @return list<array{class: string, event: string, execution: string, transport: ?string, queue: ?string, priority: int}>
+     * @return array<array{class: string, event: string, execution: string, transport: mixed, queue: mixed, priority: int}>
      */
     public static function getListeners(string $eventClass): array
     {

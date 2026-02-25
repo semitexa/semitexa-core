@@ -42,11 +42,16 @@ class AsPayload
         public ?string $overrides = null,
         public ?string $responseWith = null,
         public ?string $path = null,
+        /** @var list<string>|null $methods */
         public ?array $methods = null,
         public ?string $name = null,
+        /** @var array<string, mixed>|null $requirements */
         public ?array $requirements = null,
+        /** @var array<string, mixed>|null $defaults */
         public ?array $defaults = null,
+        /** @var array<string, mixed>|null $options */
         public ?array $options = null,
+        /** @var array<string>|null $tags */
         public ?array $tags = null,
         public ?bool $public = null,
         public string $protocol = 'http',

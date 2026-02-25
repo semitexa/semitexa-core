@@ -73,7 +73,7 @@ class RegistrySyncResourcesCommand extends BaseCommand
             }
             $manifest['payloads'] = $existingManifest['payloads'] ?? [];
             $manifest['payload_parts'] = $existingManifest['payload_parts'] ?? [];
-            if (!isset($manifest['version'])) {
+            if (!array_key_exists('version', $manifest)) {
                 $manifest['version'] = 1;
             }
             $manifest['updated'] = date('c');
@@ -89,7 +89,8 @@ class RegistrySyncResourcesCommand extends BaseCommand
         }
 
         if ($asJson) {
-            $output->writeln(json_encode($manifest, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT));
+            $json = json_encode($manifest, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
+            $output->writeln($json !== false ? $json : '{}');
             return Command::SUCCESS;
         }
 

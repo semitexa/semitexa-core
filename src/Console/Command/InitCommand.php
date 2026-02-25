@@ -35,6 +35,9 @@ class InitCommand extends Command
         $path = $dir !== '' ? $dir . '/' . $filename : '';
         if ($path !== '' && is_readable($path)) {
             $content = file_get_contents($path);
+            if ($content === false) {
+                throw new \RuntimeException("Init template could not be read: {$filename}");
+            }
             return str_replace(self::PLACEHOLDER_PORT, (string) self::DEFAULT_SWOOLE_PORT, $content);
         }
         throw new \RuntimeException("Init template missing: {$filename} (expected in resources/init/). Reinstall semitexa/core.");
@@ -236,7 +239,11 @@ class InitCommand extends Command
         if (!is_file($path)) {
             return;
         }
-        $json = json_decode(file_get_contents($path), true);
+        $fileContent = file_get_contents($path);
+        if ($fileContent === false) {
+            return;
+        }
+        $json = json_decode($fileContent, true);
         if (!is_array($json)) {
             return;
         }
@@ -310,7 +317,8 @@ class InitCommand extends Command
         $dir = $this->getInitResourcesDir();
         $path = $dir !== '' ? $dir . '/docker-compose.rabbitmq.yml' : '';
         if ($path !== '' && is_readable($path)) {
-            return file_get_contents($path);
+            $content = file_get_contents($path);
+            return $content !== false ? $content : '';
         }
         return "# Optional RabbitMQ overlay. When EVENTS_ASYNC=1, use: docker compose -f docker-compose.yml -f docker-compose.rabbitmq.yml up -d\n"
             . "services:\n  app:\n    environment:\n      RABBITMQ_HOST: rabbitmq\n    depends_on:\n      rabbitmq:\n        condition: service_healthy\n"
@@ -322,14 +330,15 @@ class InitCommand extends Command
         $dir = $this->getInitResourcesDir();
         $path = $dir !== '' ? $dir . '/docker-compose.mysql.yml' : '';
         if ($path !== '' && is_readable($path)) {
-            return file_get_contents($path);
+            $content = file_get_contents($path);
+            return $content !== false ? $content : '';
         }
         return "# Optional: MySQL for ORM. Used automatically when DB_DRIVER is set in .env.\n"
             . "# Start: docker compose -f docker-compose.yml -f docker-compose.mysql.yml up -d\n"
             . "# Or: bin/semitexa server:start (uses this file automatically when DB_DRIVER is set).\n"
             . "services:\n  app:\n    environment:\n      DB_HOST: mysql\n    depends_on:\n      mysql:\n        condition: service_healthy\n"
             . "\n  mysql:\n    image: mysql:8.4\n    restart: unless-stopped\n    environment:\n      MYSQL_ROOT_PASSWORD: \${DB_PASSWORD:-root}\n      MYSQL_DATABASE: \${DB_DATABASE:-semitexa}\n"
-            . "    ports:\n      - \"\${DB_PORT:-3306}:3306\"\n    volumes:\n      - mysql_data:/var/lib/mysql\n"
+            . "    ports:\n      - \"\${DB_PORT:-3307}:3306\"\n    volumes:\n      - mysql_data:/var/lib/mysql\n"
             . "    healthcheck:\n      test: [\"CMD\", \"mysqladmin\", \"ping\", \"-h\", \"localhost\"]\n      interval: 10s\n      timeout: 5s\n      retries: 5\n      start_period: 30s\n"
             . "\nvolumes:\n  mysql_data:\n";
     }
@@ -339,7 +348,8 @@ class InitCommand extends Command
         $dir = $this->getInitResourcesDir();
         $path = $dir !== '' ? $dir . '/docker-compose.redis.yml' : '';
         if ($path !== '' && is_readable($path)) {
-            return file_get_contents($path);
+            $content = file_get_contents($path);
+            return $content !== false ? $content : '';
         }
         return "# Optional: Redis for cache/sessions. Used when REDIS_HOST is set in .env.\n"
             . "# Start: docker compose -f docker-compose.yml -f docker-compose.redis.yml up -d\n"
@@ -366,7 +376,9 @@ class InitCommand extends Command
                 . "    restart: unless-stopped\n    command: [\"php\", \"server.php\"]\n";
         }
         $content = file_get_contents($templatePath);
-        return str_replace(self::PLACEHOLDER_PORT, (string) self::DEFAULT_SWOOLE_PORT, $content);
+        return $content !== false 
+            ? str_replace(self::PLACEHOLDER_PORT, (string) self::DEFAULT_SWOOLE_PORT, $content)
+            : '';
     }
 
     private function getDockerfileContent(): string

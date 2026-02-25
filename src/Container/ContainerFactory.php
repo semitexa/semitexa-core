@@ -21,9 +21,10 @@ class ContainerFactory
     public static function create(): ContainerInterface
     {
         if (self::$container === null) {
-            self::$container = new SemitexaContainer();
-            self::registerBootstrapEntries(self::$container);
-            self::$container->build();
+            $container = new SemitexaContainer();
+            self::registerBootstrapEntries($container);
+            $container->build();
+            self::$container = $container;
         }
         return self::$container;
     }
