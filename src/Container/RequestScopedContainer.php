@@ -7,6 +7,11 @@ namespace Semitexa\Core\Container;
 use Semitexa\Core\Cookie\CookieJarInterface;
 use Semitexa\Core\Request;
 use Semitexa\Core\Session\SessionInterface;
+use Semitexa\Core\Tenant\TenantContextInterface;
+use Semitexa\Core\Auth\AuthContextInterface;
+use Semitexa\Core\Auth\GuestAuthContext;
+use Semitexa\Core\Locale\LocaleContextInterface;
+use Semitexa\Core\Locale\DefaultLocaleContext;
 use Psr\Container\ContainerInterface;
 
 /**
@@ -42,8 +47,24 @@ class RequestScopedContainer
         $request = $this->requestScopedCache[Request::class] ?? null;
         $session = $this->requestScopedCache[SessionInterface::class] ?? null;
         $cookieJar = $this->requestScopedCache[CookieJarInterface::class] ?? null;
+        $tenantContext = $this->requestScopedCache[TenantContextInterface::class] ?? null;
+        $authContext = $this->requestScopedCache[AuthContextInterface::class] ?? null;
+        $localeContext = $this->requestScopedCache[LocaleContextInterface::class] ?? null;
+        
         if ($request instanceof Request && $session instanceof SessionInterface && $cookieJar instanceof CookieJarInterface) {
             $this->container->setRequestContext(new RequestContext($request, $session, $cookieJar));
+        }
+        
+        if ($tenantContext instanceof TenantContextInterface) {
+            $this->container->setTenantContext($tenantContext);
+        }
+        
+        if ($authContext instanceof AuthContextInterface) {
+            $this->container->setAuthContext($authContext);
+        }
+        
+        if ($localeContext instanceof LocaleContextInterface) {
+            $this->container->setLocaleContext($localeContext);
         }
     }
 

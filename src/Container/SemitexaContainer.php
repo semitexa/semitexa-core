@@ -12,6 +12,9 @@ use Semitexa\Core\Discovery\ClassDiscovery;
 use Semitexa\Core\Registry\RegistryContractResolverGenerator;
 use Semitexa\Core\Request;
 use Semitexa\Core\Environment;
+use Semitexa\Core\Tenant\TenantContextInterface;
+use Semitexa\Core\Auth\AuthContextInterface;
+use Semitexa\Core\Locale\LocaleContextInterface;
 use Psr\Container\ContainerInterface;
 use ReflectionClass;
 use ReflectionNamedType;
@@ -45,10 +48,28 @@ final class SemitexaContainer implements ContainerInterface
     private array $injections = [];
 
     private ?RequestContext $requestContext = null;
+    private ?TenantContextInterface $tenantContext = null;
+    private ?AuthContextInterface $authContext = null;
+    private ?LocaleContextInterface $localeContext = null;
 
     public function setRequestContext(RequestContext $context): void
     {
         $this->requestContext = $context;
+    }
+
+    public function setTenantContext(TenantContextInterface $context): void
+    {
+        $this->tenantContext = $context;
+    }
+
+    public function setAuthContext(AuthContextInterface $context): void
+    {
+        $this->authContext = $context;
+    }
+
+    public function setLocaleContext(LocaleContextInterface $context): void
+    {
+        $this->localeContext = $context;
     }
 
     /**
@@ -594,9 +615,6 @@ final class SemitexaContainer implements ContainerInterface
 
     private function injectRequestContextInto(object $instance): void
     {
-        if ($this->requestContext === null) {
-            return;
-        }
         $ref = new ReflectionClass($instance);
         foreach ($ref->getProperties() as $prop) {
             if (!$prop->isProtected() && !$prop->isPublic()) {
@@ -609,11 +627,17 @@ final class SemitexaContainer implements ContainerInterface
             $name = $type->getName();
             $prop->setAccessible(true);
             if ($name === Request::class) {
-                $prop->setValue($instance, $this->requestContext->request);
+                $prop->setValue($instance, $this->requestContext?->request);
             } elseif ($name === \Semitexa\Core\Session\SessionInterface::class) {
-                $prop->setValue($instance, $this->requestContext->session);
+                $prop->setValue($instance, $this->requestContext?->session);
             } elseif ($name === \Semitexa\Core\Cookie\CookieJarInterface::class) {
-                $prop->setValue($instance, $this->requestContext->cookieJar);
+                $prop->setValue($instance, $this->requestContext?->cookieJar);
+            } elseif ($name === TenantContextInterface::class && $this->tenantContext !== null) {
+                $prop->setValue($instance, $this->tenantContext);
+            } elseif ($name === AuthContextInterface::class && $this->authContext !== null) {
+                $prop->setValue($instance, $this->authContext);
+            } elseif ($name === LocaleContextInterface::class && $this->localeContext !== null) {
+                $prop->setValue($instance, $this->localeContext);
             }
         }
     }

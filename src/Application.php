@@ -16,6 +16,12 @@ use Semitexa\Core\Session\SwooleTableSessionHandler;
 use Psr\Container\ContainerInterface;
 use Semitexa\Core\Container\RequestScopedContainer;
 use Semitexa\Core\Event\EventDispatcherInterface;
+use Semitexa\Core\Tenant\TenantContextInterface;
+use Semitexa\Core\Tenant\DefaultTenantContext;
+use Semitexa\Core\Auth\AuthContextInterface;
+use Semitexa\Core\Auth\GuestAuthContext;
+use Semitexa\Core\Locale\LocaleContextInterface;
+use Semitexa\Core\Locale\DefaultLocaleContext;
 use Semitexa\Tenancy\TenancyBootstrapper;
 /**
  * Minimal Semitexa Application
@@ -544,6 +550,8 @@ class Application
         $this->requestScopedContainer->set(CookieJarInterface::class, new CookieJar($request));
         $this->requestScopedContainer->set(Request::class, $request);
 
+        $this->initContextInterfaces();
+
         \Semitexa\Core\Debug\SessionDebugLog::log('Application.initSessionAndCookies', [
             'session_id_source' => $fromCookie ? 'from_cookie' : 'new',
             'session_id_preview' => substr($sessionId, 0, 8) . '…',
@@ -592,6 +600,22 @@ class Application
             'session_id_preview' => substr($session->getSessionIdForCookie(), 0, 8) . '…',
         ]);
         return $response;
+    }
+
+    /**
+     * Initialize request-scoped context interfaces (Tenant, Auth, Locale).
+     * These are set into RequestScopedContainer for injection into handlers.
+     */
+    private function initContextInterfaces(): void
+    {
+        $tenantContext = DefaultTenantContext::getInstance();
+        $this->requestScopedContainer->set(TenantContextInterface::class, $tenantContext);
+
+        $authContext = GuestAuthContext::getInstance();
+        $this->requestScopedContainer->set(AuthContextInterface::class, $authContext);
+
+        $localeContext = DefaultLocaleContext::getInstance();
+        $this->requestScopedContainer->set(LocaleContextInterface::class, $localeContext);
     }
 
     /**
