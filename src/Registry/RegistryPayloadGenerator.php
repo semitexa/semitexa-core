@@ -10,6 +10,7 @@ use Semitexa\Core\Attributes\AsPayloadPart;
 use Semitexa\Core\Config\EnvValueResolver;
 use Semitexa\Core\Discovery\ClassDiscovery;
 use Semitexa\Core\ModuleRegistry;
+use Semitexa\Core\Support\CodeExporter;
 use Semitexa\Core\Util\CodeGenHelper;
 use Semitexa\Core\Util\ProjectRoot;
 
@@ -175,28 +176,28 @@ class RegistryPayloadGenerator
         }
 
         $attrMap = [];
-        $attrMap['path'] = "path: " . CodeGenHelper::exportValue(EnvValueResolver::resolve($attr->path));
+        $attrMap['path'] = "path: " . CodeExporter::exportValue(EnvValueResolver::resolve($attr->path));
         if ($attr->methods !== null && $attr->methods !== []) {
-            $attrMap['methods'] = "methods: " . CodeGenHelper::exportValue(EnvValueResolver::resolve($attr->methods));
+            $attrMap['methods'] = "methods: " . CodeExporter::exportValue(EnvValueResolver::resolve($attr->methods));
         }
         if ($attr->name !== null && $attr->name !== '') {
-            $attrMap['name'] = "name: " . CodeGenHelper::exportValue(EnvValueResolver::resolve($attr->name));
+            $attrMap['name'] = "name: " . CodeExporter::exportValue(EnvValueResolver::resolve($attr->name));
         }
         if ($attr->responseWith !== null && $attr->responseWith !== '') {
             $responseClass = EnvValueResolver::resolve($attr->responseWith);
             $attrMap['responseWith'] = "responseWith: " . CodeGenHelper::registerImport($responseClass, $imports, $used) . "::class";
         }
         if ($attr->requirements !== null && $attr->requirements !== []) {
-            $attrMap['requirements'] = "requirements: " . CodeGenHelper::exportValue(EnvValueResolver::resolve($attr->requirements));
+            $attrMap['requirements'] = "requirements: " . CodeExporter::exportValue(EnvValueResolver::resolve($attr->requirements));
         }
         if ($attr->defaults !== null && $attr->defaults !== []) {
-            $attrMap['defaults'] = "defaults: " . CodeGenHelper::exportValue(EnvValueResolver::resolve($attr->defaults));
+            $attrMap['defaults'] = "defaults: " . CodeExporter::exportValue(EnvValueResolver::resolve($attr->defaults));
         }
         if ($attr->options !== null && $attr->options !== []) {
-            $attrMap['options'] = "options: " . CodeGenHelper::exportValue(EnvValueResolver::resolve($attr->options));
+            $attrMap['options'] = "options: " . CodeExporter::exportValue(EnvValueResolver::resolve($attr->options));
         }
         if ($attr->tags !== null && $attr->tags !== []) {
-            $attrMap['tags'] = "tags: " . CodeGenHelper::exportValue(EnvValueResolver::resolve($attr->tags));
+            $attrMap['tags'] = "tags: " . CodeExporter::exportValue(EnvValueResolver::resolve($attr->tags));
         }
         if ($attr->public !== null) {
             $attrMap['public'] = "public: " . ($attr->public ? 'true' : 'false');

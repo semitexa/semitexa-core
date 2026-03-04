@@ -14,6 +14,8 @@ use Semitexa\Core\Util\ProjectRoot;
 class QueueWorker
 {
     private string $statsFile;
+    private ?string $currentTransport = null;
+    private ?string $currentQueue = null;
 
     public function __construct()
     {
@@ -32,14 +34,14 @@ class QueueWorker
 
     public function run(?string $transportName, ?string $queueName = null): void
     {
-        $transportName = $transportName ?: QueueConfig::defaultTransport();
-        $queueName = $queueName ?: QueueConfig::defaultQueueName('default');
+        $this->currentTransport = $transportName ?: QueueConfig::defaultTransport();
+        $this->currentQueue = $queueName ?: QueueConfig::defaultQueueName('default');
 
-        $transport = QueueTransportRegistry::create($transportName);
+        $transport = QueueTransportRegistry::create($this->currentTransport);
 
-        echo "👷  Queue worker started (transport={$transportName}, queue={$queueName})\n";
+        echo "👷  Queue worker started (transport={$this->currentTransport}, queue={$this->currentQueue})\n";
 
-        $transport->consume($queueName, function (string $payload): void {
+        $transport->consume($this->currentQueue, function (string $payload): void {
             $this->processPayload($payload);
         });
     }
@@ -144,7 +146,40 @@ class QueueWorker
             $this->updateStats('processed');
         } catch (\Throwable $e) {
             echo "❌ Error executing handler: {$e->getMessage()}\n";
-            $this->updateStats('failed');
+            
+            if ($message->attempts < $message->maxRetries) {
+                $message->attempts++;
+                $delay = $message->retryDelay;
+                echo "ℹ️  Retrying handler ({$message->attempts}/{$message->maxRetries}) in {$delay}s...\n";
+                
+                if ($delay > 0) {
+                    sleep($delay);
+                }
+                
+                if ($this->currentTransport && $this->currentQueue) {
+                    $transport = QueueTransportRegistry::create($this->currentTransport);
+                    $transport->publish($this->currentQueue, $message->toJson());
+                }
+            } else {
+                echo "💀 Max retries reached or no retries configured. Moving to DLQ.\n";
+                $this->moveToDeadLetterQueue($message, $e->getMessage());
+                $this->updateStats('failed');
+            }
+        }
+    }
+
+    private function moveToDeadLetterQueue(QueuedHandlerMessage $message, string $error): void
+    {
+        try {
+            $transport = QueueTransportRegistry::create(QueueConfig::defaultTransport());
+            $dlqName = QueueConfig::defaultQueueName($message->requestClass) . '.failed';
+            $data = $message->jsonSerialize();
+            $data['error'] = $error;
+            $data['failed_at'] = date(DATE_ATOM);
+            $transport->publish($dlqName, json_encode($data));
+            echo "📥 Message moved to DLQ: {$dlqName}\n";
+        } catch (\Throwable $dlqError) {
+            echo "❌ Failed to move message to DLQ: {$dlqError->getMessage()}\n";
         }
     }
 

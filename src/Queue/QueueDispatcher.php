@@ -28,6 +28,8 @@ class QueueDispatcher
             requestPayload: DtoSerializer::toArray($requestDto),
             responsePayload: DtoSerializer::toArray($responseDto),
             sessionId: $sessionId,
+            maxRetries: $handlerMeta['maxRetries'] ?? 0,
+            retryDelay: $handlerMeta['retryDelay'] ?? 0,
         );
 
         $transport = QueueTransportRegistry::create($transportName);

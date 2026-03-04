@@ -14,7 +14,7 @@ final class SessionDebugLog
 
     public static function log(string $place, array $data): void
     {
-        $dir = getcwd() ? (getcwd() . '/var/log') : null;
+        $dir = \Semitexa\Core\Util\ProjectRoot::get() . '/var/log';
         if ($dir === null || !is_dir($dir)) {
             @mkdir($dir, 0755, true);
         }

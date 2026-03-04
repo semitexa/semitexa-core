@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace Semitexa\Core;
 
-use Semitexa\Core\Util\CodeGenHelper;
 use Semitexa\Core\Util\ProjectRoot;
+use Semitexa\Core\Support\Str;
 
 /**
  * Module Registry for managing different types of modules
@@ -465,7 +465,7 @@ class ModuleRegistry
 
     private static function buildNamespaceFromVendor(string $vendor, string $package): string
     {
-        return CodeGenHelper::slugToStudly($vendor) . '\\' . CodeGenHelper::slugToStudly($package);
+        return Str::toStudly($vendor) . '\\' . Str::toStudly($package);
     }
 
     

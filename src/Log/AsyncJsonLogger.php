@@ -130,13 +130,6 @@ final class AsyncJsonLogger implements LoggerInterface
 
     private function resolveProjectRoot(): string
     {
-        $dir = __DIR__;
-        while ($dir !== '' && $dir !== '/') {
-            if (file_exists($dir . '/composer.json') && is_dir($dir . '/src/modules')) {
-                return $dir;
-            }
-            $dir = dirname($dir);
-        }
-        return getcwd() ?: __DIR__;
+        return \Semitexa\Core\Util\ProjectRoot::get();
     }
 }

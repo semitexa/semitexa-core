@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Semitexa\Core\CodeGen;
 
 use Semitexa\Core\ModuleRegistry;
-use Semitexa\Core\Util\CodeGenHelper;
+use Semitexa\Core\Support\Str;
 use Semitexa\Core\Util\ProjectRoot;
 
 class LayoutGenerator
@@ -92,7 +92,7 @@ class LayoutGenerator
             }
 
             $moduleName = $module['name'] ?? 'module';
-            $studly = CodeGenHelper::slugToStudly($moduleName);
+            $studly = Str::toStudly($moduleName);
 
             foreach ($files as $file) {
                 $handle = basename($file, '.html.twig');

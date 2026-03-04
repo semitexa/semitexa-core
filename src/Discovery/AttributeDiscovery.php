@@ -389,6 +389,8 @@ class AttributeDiscovery
                         'transport' => $transport ?: null,
                         'queue' => $queue ?: null,
                         'priority' => $priority,
+                        'maxRetries' => $attr->maxRetries,
+                        'retryDelay' => $attr->retryDelay,
                     ];
                     $key = $payloadClass . "\0" . $resourceClass;
                     if (!isset(self::$handlersByPayloadAndResource[$key])) {

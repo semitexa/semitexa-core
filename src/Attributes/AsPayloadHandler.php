@@ -24,6 +24,8 @@ class AsPayloadHandler
         public ?string $transport = null,
         public ?string $queue = null,
         public ?int $priority = null,
+        public int $maxRetries = 0,
+        public int $retryDelay = 0,
         ?string $doc = null,
     ) {
         $this->doc = $doc;

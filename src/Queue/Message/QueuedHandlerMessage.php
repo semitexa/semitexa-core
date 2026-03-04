@@ -18,6 +18,9 @@ class QueuedHandlerMessage implements \JsonSerializable
         public array $responsePayload,
         public string $queuedAt = '',
         public string $sessionId = '',
+        public int $attempts = 0,
+        public int $maxRetries = 0,
+        public int $retryDelay = 0,
     ) {
         $this->queuedAt = $queuedAt ?: date(DATE_ATOM);
     }
@@ -33,6 +36,9 @@ class QueuedHandlerMessage implements \JsonSerializable
             'responsePayload' => $this->responsePayload,
             'queuedAt' => $this->queuedAt,
             'sessionId' => $this->sessionId,
+            'attempts' => $this->attempts,
+            'maxRetries' => $this->maxRetries,
+            'retryDelay' => $this->retryDelay,
         ];
     }
 
@@ -58,6 +64,9 @@ class QueuedHandlerMessage implements \JsonSerializable
             responsePayload: $data['responsePayload'] ?? [],
             queuedAt: $data['queuedAt'] ?? date(DATE_ATOM),
             sessionId: $data['sessionId'] ?? '',
+            attempts: $data['attempts'] ?? 0,
+            maxRetries: $data['maxRetries'] ?? 0,
+            retryDelay: $data['retryDelay'] ?? 0,
         );
     }
 }

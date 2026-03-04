@@ -4,18 +4,23 @@ declare(strict_types=1);
 
 namespace Semitexa\Core;
 
-use Semitexa\Core\Cookie\CookieJar;
-use Semitexa\Core\Cookie\CookieJarInterface;
+use Semitexa\Core\Http\Request;
+use Semitexa\Core\Http\Response;
+use Semitexa\Core\Http\RouteType;
+use Semitexa\Core\Pipeline\RouteExecutor;
+use Semitexa\Core\Environment;
 use Semitexa\Core\Discovery\AttributeDiscovery;
 use Semitexa\Core\Log\LoggerInterface;
+use Semitexa\Core\Container\RequestScopedContainer;
+use Psr\Container\ContainerInterface;
+use Semitexa\Core\Event\EventDispatcherInterface;
+use Semitexa\Core\Cookie\CookieJar;
+use Semitexa\Core\Cookie\CookieJarInterface;
 use Semitexa\Core\Session\RedisSessionHandler;
 use Semitexa\Core\Session\Session;
 use Semitexa\Core\Session\SessionHandlerInterface;
 use Semitexa\Core\Session\SessionInterface;
 use Semitexa\Core\Session\SwooleTableSessionHandler;
-use Psr\Container\ContainerInterface;
-use Semitexa\Core\Container\RequestScopedContainer;
-use Semitexa\Core\Event\EventDispatcherInterface;
 use Semitexa\Core\Tenant\TenantContextInterface;
 use Semitexa\Core\Tenant\DefaultTenantContext;
 use Semitexa\Core\Auth\AuthContextInterface;
@@ -161,234 +166,28 @@ class Application
     {
         return self::measure('Application::handleRoute', function() use ($route, $request) {
             try {
-                if (($route['type'] ?? null) === 'http-request') {
-                    [$reqDto, $validationResponse] = $this->hydrateRequestDto($route, $request);
-                    if ($validationResponse) {
-                        return $validationResponse;
-                    }
-
-                    $resDto = $this->resolveResponseDto($route);
-                    $context = new \Semitexa\Core\Pipeline\RequestPipelineContext(
-                        requestDto: $reqDto,
-                        route: $route,
-                        request: $request,
-                        resourceDto: $resDto,
-                        authBootstrapper: $this->authBootstrapper,
+                $type = $route['type'] ?? null;
+                
+                if ($type === RouteType::HttpRequest->value) {
+                    $executor = new RouteExecutor(
+                        $this->requestScopedContainer, 
+                        $this->container, 
+                        $this->authBootstrapper
                     );
-                    $executor = new \Semitexa\Core\Pipeline\PipelineExecutor($this->requestScopedContainer, $this->container);
-                    $executor->execute($context);
-                    $resDto = $context->resourceDto;
-                    $resDto = $this->renderResponse($resDto, $reqDto);
-                    return $this->adaptResponse($resDto);
+                    return $executor->execute($route, $request);
                 }
 
-                $routeClass = $route['class'] ?? null;
-                $routeMethod = $route['method'] ?? null;
-                if ($routeClass !== null && $routeMethod !== null) {
+                if ($type === RouteType::Legacy->value || ($route['class'] ?? null && $route['method'] ?? null)) {
                     return $this->handleLegacyRoute($route);
                 }
 
-                throw new \RuntimeException('Unknown route type: ' . ($route['type'] ?? 'undefined'));
-            } catch (\Semitexa\Core\Pipeline\Exception\AuthenticationRequiredException $e) {
-                return Response::json(['error' => 'Unauthorized', 'message' => $e->getMessage()], 401);
-            } catch (\Semitexa\Core\Pipeline\Exception\AccessDeniedException $e) {
-                return Response::json(['error' => 'Forbidden', 'message' => $e->getMessage()], 403);
+                throw new \RuntimeException('Unknown route type: ' . ($type ?? 'undefined'));
             } catch (\Throwable $e) {
                 return $this->handleRouteException($e, $route, $request);
             }
         });
     }
 
-    /**
-     * @param array{type?: string, class?: string, handlers?: list<array{class?: string, execution?: string}>, responseClass?: string, method?: string, name?: string} $route
-     * @return array{0: object, 1: ?Response}
-     */
-    private function hydrateRequestDto(array $route, Request $request): array
-    {
-        $requestClass = $route['class'] ?? null;
-        if ($requestClass === null) {
-            throw new \RuntimeException('Route has no class defined');
-        }
-        $segmentStart = microtime(true);
-
-        $reqDto = class_exists($requestClass) ? new $requestClass() : null;
-        if (!$reqDto) {
-            throw new \RuntimeException("Cannot instantiate request class: {$requestClass}");
-        }
-
-        try {
-            $reqDto = \Semitexa\Core\Http\RequestDtoHydrator::hydrate($reqDto, $request);
-            if (method_exists($reqDto, 'setHttpRequest')) {
-                $reqDto->setHttpRequest($request);
-            }
-        } catch (\Semitexa\Core\Http\Exception\TypeMismatchException $e) {
-            return [$reqDto, Response::json(['errors' => [$e->field => [$e->getMessage()]]], 422)];
-        } catch (\Throwable $e) {
-            // Continue with empty DTO if hydration fails
-        }
-
-        $validationResult = \Semitexa\Core\Http\PayloadValidator::validate($reqDto, $request);
-        if (!$validationResult->isValid()) {
-            return [$reqDto, Response::json(['errors' => $validationResult->getErrors()], 422)];
-        }
-
-        $this->debugLog('H2', 'Application::handleRoute', 'request_hydrated', [
-            'requestClass' => $requestClass,
-            'duration_ms' => round((microtime(true) - $segmentStart) * 1000, 2),
-        ], 'initial');
-
-        return [$reqDto, null];
-    }
-
-    /**
-     * @param array{type?: string, class?: string, handlers?: list<array{class?: string, execution?: string}>, responseClass?: string, method?: string, name?: string} $route
-     */
-    private function resolveResponseDto(array $route): object
-    {
-        $responseClass = $route['responseClass'] ?? null;
-        $resDto = ($responseClass && class_exists($responseClass)) ? new $responseClass() : null;
-
-        if ($resDto === null) {
-            $resDto = new \Semitexa\Core\Http\Response\GenericResponse();
-        }
-
-        // Apply AsResource defaults from resolved attributes
-        $resolvedResponse = AttributeDiscovery::getResolvedResponseAttributes(get_class($resDto));
-        if ($resolvedResponse) {
-            if (isset($resolvedResponse['handle']) && $resolvedResponse['handle'] && method_exists($resDto, 'setRenderHandle')) {
-                $resDto->setRenderHandle($resolvedResponse['handle']);
-            }
-            if (isset($resolvedResponse['context']) && method_exists($resDto, 'setRenderContext')) {
-                $resDto->setRenderContext($resolvedResponse['context']);
-            }
-            if (array_key_exists('format', $resolvedResponse) && method_exists($resDto, 'setRenderFormat')) {
-                $resDto->setRenderFormat($resolvedResponse['format']);
-            }
-            if (isset($resolvedResponse['renderer']) && method_exists($resDto, 'setRendererClass')) {
-                $resDto->setRendererClass($resolvedResponse['renderer']);
-            }
-        }
-
-        // Fallback: try to read attribute directly (3-level: class → attribute → parent attribute)
-        if (!method_exists($resDto, 'getRenderHandle') || !$resDto->getRenderHandle()) {
-            try {
-                $r = new \ReflectionClass($resDto);
-                $attrs = $r->getAttributes(\Semitexa\Core\Attributes\AsResource::class);
-                if (!empty($attrs)) {
-                    $a = $attrs[0]->newInstance();
-                    if (method_exists($resDto, 'setRenderHandle') && $a->handle) {
-                        $resDto->setRenderHandle($a->handle);
-                    }
-                    if (method_exists($resDto, 'setRenderContext') && isset($a->context)) {
-                        $resDto->setRenderContext($a->context);
-                    }
-                    if (method_exists($resDto, 'setRenderFormat') && $a->format) {
-                        $resDto->setRenderFormat($a->format);
-                    }
-                    if (method_exists($resDto, 'setRendererClass') && $a->renderer) {
-                        $resDto->setRendererClass($a->renderer);
-                    }
-                }
-                if (!method_exists($resDto, 'getRenderHandle') || !$resDto->getRenderHandle()) {
-                    $parent = $r->getParentClass();
-                    if ($parent) {
-                        $parentAttrs = $parent->getAttributes(\Semitexa\Core\Attributes\AsResource::class);
-                        if (!empty($parentAttrs)) {
-                            $parentAttr = $parentAttrs[0]->newInstance();
-                            if (method_exists($resDto, 'setRenderHandle') && $parentAttr->handle) {
-                                $resDto->setRenderHandle($parentAttr->handle);
-                            }
-                            if (method_exists($resDto, 'setRenderFormat') && $parentAttr->format) {
-                                $resDto->setRenderFormat($parentAttr->format);
-                            }
-                        }
-                    }
-                }
-            } catch (\Throwable $e) {
-                // ignore
-            }
-        }
-
-        return $resDto;
-    }
-
-    private function renderResponse(object $resDto, ?object $reqDto): object
-    {
-        if (!method_exists($resDto, 'getRenderHandle')) {
-            return $resDto;
-        }
-
-        $handle = $resDto->getRenderHandle();
-        if (!$handle) {
-            return $resDto;
-        }
-
-        $renderStart = microtime(true);
-        $context = method_exists($resDto, 'getRenderContext') ? $resDto->getRenderContext() : [];
-        $format = method_exists($resDto, 'getRenderFormat') ? $resDto->getRenderFormat() : null;
-        if ($format === null) {
-            $format = \Semitexa\Core\Http\Response\ResponseFormat::Layout;
-        }
-        $rendererClass = method_exists($resDto, 'getRendererClass') ? $resDto->getRendererClass() : null;
-
-        if ($format === \Semitexa\Core\Http\Response\ResponseFormat::Json) {
-            $json = json_encode($context, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-            if (method_exists($resDto, 'setContent')) {
-                $resDto->setContent($json ?: '');
-            }
-            if (method_exists($resDto, 'setHeader')) {
-                $resDto->setHeader('Content-Type', 'application/json');
-            }
-        } elseif ($format === \Semitexa\Core\Http\Response\ResponseFormat::Layout) {
-            $renderer = $rendererClass ?: 'Semitexa\\Ssr\\Layout\\LayoutRenderer';
-            if (!class_exists($renderer)) {
-                throw new \RuntimeException(
-                    'LayoutRenderer not found. For HTML pages install semitexa/ssr: composer require semitexa/ssr. Do not implement a custom Twig renderer in the project.'
-                );
-            }
-            if (!method_exists($renderer, 'renderHandle')) {
-                throw new \RuntimeException(
-                    'LayoutRenderer::renderHandle not found. Use semitexa/ssr for HTML rendering. Do not implement a custom renderer in the project.'
-                );
-            }
-            if (!isset($context['response'])) {
-                $context = ['response' => $context] + $context;
-            }
-            if (!isset($context['request']) && isset($reqDto)) {
-                $context['request'] = $reqDto;
-            }
-            if (method_exists($resDto, 'getLayoutFrame') && $resDto->getLayoutFrame() !== null) {
-                $context['layout_frame'] = $resDto->getLayoutFrame();
-            }
-            $html = $renderer::renderHandle($handle, $context);
-            if (method_exists($resDto, 'setContent')) {
-                $resDto->setContent($html);
-            }
-            if (method_exists($resDto, 'setHeader')) {
-                $resDto->setHeader('Content-Type', 'text/html; charset=utf-8');
-            }
-        }
-
-        $this->debugLog('H3', 'Application::handleRoute', 'render_completed', [
-            'handle' => $handle,
-            'format' => is_object($format) && property_exists($format, 'value') ? $format->value : $format,
-            'renderer' => $rendererClass ?: ($renderer ?? null),
-            'duration_ms' => round((microtime(true) - $renderStart) * 1000, 2),
-        ], 'initial');
-
-        return $resDto;
-    }
-
-    private function adaptResponse(object $resDto): Response
-    {
-        if ($resDto instanceof Response) {
-            return $resDto;
-        }
-        if (method_exists($resDto, 'toCoreResponse')) {
-            return $resDto->toCoreResponse();
-        }
-        return Response::json(['ok' => true]);
-    }
 
     /**
      * @param array{class: string, method: string, name?: string} $route
@@ -412,25 +211,40 @@ class Application
      */
     private function handleRouteException(\Throwable $e, array $route, Request $request): Response
     {
+        $logger = null;
+        try {
+            $logger = $this->container->get(\Semitexa\Core\Log\LoggerInterface::class);
+        } catch (\Throwable) {
+            // Logger not available
+        }
+
         if ($e instanceof \Semitexa\Core\Http\Exception\NotFoundException) {
+            if ($logger) {
+                $logger->debug('Route not found', ['path' => $request->getPath(), 'message' => $e->getMessage()]);
+            }
+
             $currentRouteName = $route['name'] ?? null;
             if ($currentRouteName !== self::ROUTE_NAME_404) {
-                $route404 = AttributeDiscovery::findRouteByName(self::ROUTE_NAME_404);
+                $route404 = \Semitexa\Core\Discovery\AttributeDiscovery::findRouteByName(self::ROUTE_NAME_404);
                 if ($route404 !== null) {
                     return $this->handleRoute($route404, $request);
                 }
             }
             return Response::notFound($e->getMessage() ?: 'The requested resource was not found');
         }
-        try {
-            $this->container->get(LoggerInterface::class)->error($e->getMessage(), [
+
+        if ($logger) {
+            $logger->error($e->getMessage(), [
                 'exception' => get_debug_type($e),
                 'file' => $e->getFile(),
                 'line' => $e->getLine(),
+                'trace' => $this->environment->appDebug ? $e->getTraceAsString() : 'hidden',
             ]);
-        } catch (\Throwable) {
-            // avoid failing error handling when logger is unavailable
+        } else {
+            // Fallback for critical errors when logger fails
+            error_log("[Semitexa] Critical Error: " . $e->getMessage() . " in " . $e->getFile() . ":" . $e->getLine());
         }
+
         return \Semitexa\Core\Http\ErrorRenderer::render($e, $request, $this->environment->appDebug);
     }
 
@@ -617,8 +431,8 @@ class Application
             'data' => $data,
             'timestamp' => (int) round(microtime(true) * 1000),
         ];
-        $logDir = getcwd() ? (getcwd() . '/var/log') : null;
-        if ($logDir && is_dir($logDir)) {
+        $logDir = \Semitexa\Core\Util\ProjectRoot::get() . '/var/log';
+        if (is_dir($logDir)) {
             @file_put_contents(
                 $logDir . '/debug.log',
                 json_encode($payload) . "\n",

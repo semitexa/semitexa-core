@@ -11,6 +11,7 @@ use Semitexa\Core\Config\EnvValueResolver;
 use Semitexa\Core\Http\Response\ResponseFormat;
 use Semitexa\Core\Discovery\ClassDiscovery;
 use Semitexa\Core\ModuleRegistry;
+use Semitexa\Core\Support\CodeExporter;
 use Semitexa\Core\Util\CodeGenHelper;
 use Semitexa\Core\Util\ProjectRoot;
 
@@ -178,17 +179,17 @@ class RegistryResourceGenerator
 
         $attrMap = [];
         if ($attr->handle !== null && $attr->handle !== '') {
-            $attrMap['handle'] = "handle: " . CodeGenHelper::exportValue(EnvValueResolver::resolve($attr->handle));
+            $attrMap['handle'] = "handle: " . CodeExporter::exportValue(EnvValueResolver::resolve($attr->handle));
         }
         if ($attr->context !== null && $attr->context !== []) {
-            $attrMap['context'] = "context: " . CodeGenHelper::exportValue(EnvValueResolver::resolve($attr->context));
+            $attrMap['context'] = "context: " . CodeExporter::exportValue(EnvValueResolver::resolve($attr->context));
         }
         if ($attr->format !== null) {
             $formatVal = $attr->format instanceof ResponseFormat ? $attr->format->value : (string) $attr->format;
             $attrMap['format'] = "format: ResponseFormat::" . ucfirst(strtolower($formatVal));
         }
         if ($attr->renderer !== null && $attr->renderer !== '') {
-            $attrMap['renderer'] = "renderer: " . CodeGenHelper::exportValue(EnvValueResolver::resolve($attr->renderer));
+            $attrMap['renderer'] = "renderer: " . CodeExporter::exportValue(EnvValueResolver::resolve($attr->renderer));
         }
 
         $attrLines = self::orderAttributeLines($attrMap, $outPath);
