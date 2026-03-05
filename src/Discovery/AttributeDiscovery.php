@@ -106,13 +106,15 @@ class AttributeDiscovery
             
             // Pattern match (e.g., /window-manager/{type}/{file} matches /window-manager/js/window-manager.js)
             if (is_string($routePath) && strpos($routePath, '{') !== false && in_array($method, $routeMethods)) {
+                $requirements = $route['requirements'] ?? [];
                 // Build regex pattern: replace {param} with placeholders first, then escape, then replace with regex
                 $placeholders = [];
                 $tempPath = preg_replace_callback(
                     '/\{([^}]+)\}/',
-                    function($m) use (&$placeholders) {
+                    function($m) use (&$placeholders, $requirements) {
                         $placeholder = '__PLACEHOLDER_' . count($placeholders) . '__';
-                        $placeholders[$placeholder] = '([^/]+)';
+                        $paramName = $m[1];
+                        $placeholders[$placeholder] = '(' . ($requirements[$paramName] ?? '[^/]+') . ')';
                         return $placeholder;
                     },
                     $routePath

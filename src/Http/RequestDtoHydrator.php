@@ -107,6 +107,7 @@ class RequestDtoHydrator
         try {
             $requestAttr = $requestAttrs[0]->newInstance();
             $routePattern = $requestAttr->path ?? null;
+            $requirements = $requestAttr->requirements ?? [];
         } catch (\Throwable) {
             return [];
         }
@@ -129,7 +130,14 @@ class RequestDtoHydrator
         }
 
         $regexPattern = preg_quote($routePattern, '#');
-        $regexPattern = preg_replace('#\\\{([^}]+)\\\}#', '([^/]+)', $regexPattern);
+        $regexPattern = preg_replace_callback(
+            '#\\\{([^}]+)\\\}#',
+            function ($m) use ($requirements) {
+                $paramName = $m[1];
+                return '(' . ($requirements[$paramName] ?? '[^/]+') . ')';
+            },
+            $regexPattern
+        );
         $regexPattern = '#^' . $regexPattern . '$#';
 
         if (!preg_match($regexPattern, $httpRequest->getPath(), $matches)) {

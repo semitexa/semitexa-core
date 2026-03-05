@@ -245,8 +245,11 @@ class ModuleRegistry
 
         $meta = self::readComposerMeta($path);
 
-        // Default template path inside module
-        $defaultTemplatePath = $path . '/Application/View/templates';
+        // Default template path inside module (check src/ first for PSR-4 packages)
+        $defaultTemplatePath = $path . '/src/Application/View/templates';
+        if (!is_dir($defaultTemplatePath)) {
+            $defaultTemplatePath = $path . '/Application/View/templates';
+        }
 
         // Aliases
         $aliases = [];

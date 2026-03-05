@@ -10,6 +10,8 @@ use Semitexa\Core\Environment;
 use Semitexa\Core\ErrorHandler;
 use Semitexa\Core\Request;
 use Semitexa\Core\Session\SwooleSessionTableHolder;
+use Semitexa\Ssr\Asset\ModuleAssetRegistry;
+use Semitexa\Ssr\Asset\StaticAssetHandler;
 use Swoole\Coroutine;
 use Swoole\Http\Request as SwooleRequest;
 use Swoole\Http\Response as SwooleResponse;
@@ -73,10 +75,12 @@ class SwooleBootstrap
 
         $corsHandler = new CorsHandler($env);
         $healthHandler = new HealthCheckHandler();
+        $staticAssetHandler = new StaticAssetHandler();
 
         $server->on('WorkerStart', function (Server $server, int $workerId) use ($sessionWorkerTable, $deliverTable, $pendingDeliverTable) {
             Environment::syncEnvFromFiles();
             ContainerFactory::create();
+            ModuleAssetRegistry::initialize();
             if (class_exists(\Semitexa\Ssr\Async\AsyncResourceSseServer::class)) {
                 \Semitexa\Ssr\Async\AsyncResourceSseServer::setServer($server);
                 \Semitexa\Ssr\Async\AsyncResourceSseServer::setTables($sessionWorkerTable, $deliverTable, $pendingDeliverTable);
@@ -99,7 +103,7 @@ class SwooleBootstrap
             // future: cleanup
         });
 
-        $server->on('request', function (SwooleRequest $request, SwooleResponse $response) use ($corsHandler, $healthHandler, $server, $sessionWorkerTable, $deliverTable, $pendingDeliverTable) {
+        $server->on('request', function (SwooleRequest $request, SwooleResponse $response) use ($corsHandler, $healthHandler, $staticAssetHandler, $server, $sessionWorkerTable, $deliverTable, $pendingDeliverTable) {
             $sent = false;
             $ensureResponseSent = function () use ($response, &$sent): void {
                 if ($sent) {
@@ -115,6 +119,10 @@ class SwooleBootstrap
             };
 
             if ($healthHandler->handle($request, $response)) {
+                return;
+            }
+
+            if ($staticAssetHandler->handle($request, $response)) {
                 return;
             }
 

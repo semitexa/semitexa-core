@@ -89,9 +89,12 @@ class LayoutGenerator
             if ($modulePath === null) {
                 continue;
             }
-            $layoutDir = rtrim($modulePath, '/') . '/Application/View/templates/layout';
+            $layoutDir = rtrim($modulePath, '/') . '/src/Application/View/templates/layout';
             if (!is_dir($layoutDir)) {
-                continue;
+                $layoutDir = rtrim($modulePath, '/') . '/Application/View/templates/layout';
+                if (!is_dir($layoutDir)) {
+                    continue;
+                }
             }
 
             $files = glob($layoutDir . '/*.html.twig') ?: [];

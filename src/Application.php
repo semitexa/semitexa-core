@@ -21,7 +21,6 @@ use Semitexa\Core\Session\SwooleTableSessionHandler;
 use Semitexa\Core\Tenant\TenantContextInterface;
 use Semitexa\Core\Tenant\DefaultTenantContext;
 use Semitexa\Core\Auth\AuthContextInterface;
-use Semitexa\Core\Auth\GuestAuthContext;
 use Semitexa\Core\Locale\LocaleContextInterface;
 use Semitexa\Core\Locale\DefaultLocaleContext;
 use Semitexa\Locale\LocaleBootstrapper;
@@ -410,7 +409,7 @@ class Application
         }
         $this->requestScopedContainer->set(TenantContextInterface::class, $tenantContext);
 
-        $authContext = GuestAuthContext::getInstance();
+        $authContext = \Semitexa\Auth\Context\AuthManager::getInstance();
         $this->requestScopedContainer->set(AuthContextInterface::class, $authContext);
 
         $localeContext = DefaultLocaleContext::getInstance();
