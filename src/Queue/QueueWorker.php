@@ -16,6 +16,27 @@ class QueueWorker
     private string $statsFile;
     private ?string $currentTransport = null;
     private ?string $currentQueue = null;
+    private ?\Symfony\Component\Console\Output\OutputInterface $output = null;
+
+    public function setOutput(?\Symfony\Component\Console\Output\OutputInterface $output): void
+    {
+        $this->output = $output;
+    }
+
+    private function log(string $message, string $level = 'info'): void
+    {
+        if ($this->output) {
+            $tag = match ($level) {
+                'error' => 'error',
+                'warning' => 'comment',
+                'success' => 'info', // Using info tag for success lines in console to appear green
+                default => 'info',
+            };
+            $this->output->writeln("<{$tag}>{$message}</{$tag}>");
+        } else {
+            echo "{$message}\n";
+        }
+    }
 
     public function __construct()
     {
@@ -39,7 +60,7 @@ class QueueWorker
 
         $transport = QueueTransportRegistry::create($this->currentTransport);
 
-        echo "👷  Queue worker started (transport={$this->currentTransport}, queue={$this->currentQueue})\n";
+        $this->log("👷  Queue worker started (transport={$this->currentTransport}, queue={$this->currentQueue})");
 
         $transport->consume($this->currentQueue, function (string $payload): void {
             $this->processPayload($payload);
@@ -51,7 +72,7 @@ class QueueWorker
         try {
             $data = json_decode($payload, true, 512, JSON_THROW_ON_ERROR);
         } catch (\Throwable $e) {
-            echo "❌ Failed to decode queued message: {$e->getMessage()}\n";
+            $this->log("❌ Failed to decode queued message: {$e->getMessage()}", 'error');
             $this->updateStats('failed');
             return;
         }
@@ -69,13 +90,13 @@ class QueueWorker
         try {
             $message = QueuedEventListenerMessage::fromJson($payload);
         } catch (\Throwable $e) {
-            echo "❌ Failed to decode event message: {$e->getMessage()}\n";
+            $this->log("❌ Failed to decode event message: {$e->getMessage()}", 'error');
             $this->updateStats('failed');
             return;
         }
 
         if (!class_exists($message->listenerClass)) {
-            echo "⚠️  Event listener {$message->listenerClass} not found\n";
+            $this->log("⚠️  Event listener {$message->listenerClass} not found", 'warning');
             $this->updateStats('failed');
             return;
         }
@@ -85,22 +106,22 @@ class QueueWorker
             $container = ContainerFactory::get();
             $listener = $container->get($message->listenerClass);
             if (!method_exists($listener, 'handle')) {
-                echo "⚠️  Listener {$message->listenerClass} has no handle() method\n";
+                $this->log("⚠️  Listener {$message->listenerClass} has no handle() method", 'warning');
                 $this->updateStats('failed');
                 return;
             }
         } catch (\Throwable $e) {
-            echo "❌ Error preparing event listener: {$e->getMessage()}\n";
+            $this->log("❌ Error preparing event listener: {$e->getMessage()}", 'error');
             $this->updateStats('failed');
             return;
         }
 
         try {
             $listener->handle($event);
-            echo "✅ Async event listener executed: {$message->listenerClass}\n";
+            $this->log("✅ Async event listener executed: {$message->listenerClass}", 'success');
             $this->updateStats('processed');
         } catch (\Throwable $e) {
-            echo "❌ Error executing event listener: {$e->getMessage()}\n";
+            $this->log("❌ Error executing event listener: {$e->getMessage()}", 'error');
             $this->updateStats('failed');
         }
     }
@@ -110,14 +131,14 @@ class QueueWorker
         try {
             $message = QueuedHandlerMessage::fromJson($payload);
         } catch (\Throwable $e) {
-            echo "❌ Failed to decode handler message: {$e->getMessage()}\n";
+            $this->log("❌ Failed to decode handler message: {$e->getMessage()}", 'error');
             $this->updateStats('failed');
             return;
         }
 
         $handlerClass = $message->handlerClass;
         if (!class_exists($handlerClass)) {
-            echo "⚠️  Handler {$handlerClass} not found\n";
+            $this->log("⚠️  Handler {$handlerClass} not found", 'warning');
             $this->updateStats('failed');
             return;
         }
@@ -129,12 +150,12 @@ class QueueWorker
             $container = ContainerFactory::get();
             $handler = $container->get($handlerClass);
             if (!method_exists($handler, 'handle')) {
-                echo "⚠️  Handler {$handlerClass} has no handle() method\n";
+                $this->log("⚠️  Handler {$handlerClass} has no handle() method", 'warning');
                 $this->updateStats('failed');
                 return;
             }
         } catch (\Throwable $e) {
-            echo "❌ Error processing payload: {$e->getMessage()}\n";
+            $this->log("❌ Error processing payload: {$e->getMessage()}", 'error');
             $this->updateStats('failed');
             return;
         }
@@ -142,15 +163,15 @@ class QueueWorker
         try {
             $handler->handle($request, $response);
             $this->deliverAsyncResult($message->sessionId, $response, $handlerClass);
-            echo "✅ Async handler executed: {$handlerClass}\n";
+            $this->log("✅ Async handler executed: {$handlerClass}", 'success');
             $this->updateStats('processed');
         } catch (\Throwable $e) {
-            echo "❌ Error executing handler: {$e->getMessage()}\n";
+            $this->log("❌ Error executing handler: {$e->getMessage()}", 'error');
             
             if ($message->attempts < $message->maxRetries) {
                 $message->attempts++;
                 $delay = $message->retryDelay;
-                echo "ℹ️  Retrying handler ({$message->attempts}/{$message->maxRetries}) in {$delay}s...\n";
+                $this->log("ℹ️  Retrying handler ({$message->attempts}/{$message->maxRetries}) in {$delay}s...", 'warning');
                 
                 if ($delay > 0) {
                     sleep($delay);
@@ -161,7 +182,7 @@ class QueueWorker
                     $transport->publish($this->currentQueue, $message->toJson());
                 }
             } else {
-                echo "💀 Max retries reached or no retries configured. Moving to DLQ.\n";
+                $this->log("💀 Max retries reached or no retries configured. Moving to DLQ.", 'error');
                 $this->moveToDeadLetterQueue($message, $e->getMessage());
                 $this->updateStats('failed');
             }
@@ -177,9 +198,9 @@ class QueueWorker
             $data['error'] = $error;
             $data['failed_at'] = date(DATE_ATOM);
             $transport->publish($dlqName, json_encode($data));
-            echo "📥 Message moved to DLQ: {$dlqName}\n";
+            $this->log("📥 Message moved to DLQ: {$dlqName}", 'warning');
         } catch (\Throwable $dlqError) {
-            echo "❌ Failed to move message to DLQ: {$dlqError->getMessage()}\n";
+            $this->log("❌ Failed to move message to DLQ: {$dlqError->getMessage()}", 'error');
         }
     }
 

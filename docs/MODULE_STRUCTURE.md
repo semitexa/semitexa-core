@@ -14,13 +14,13 @@ All DTOs (payloads) and event-driven handlers in a Semitexa module use a **singl
 
 **Namespaces:** `Semitexa\Modules\{Module}\Application\Payload\Request\`, `...\Payload\Session\`, `...\Payload\Event\`.
 
-Do **not** put these in `Application/Session/` or `Application/Event/` at module root — use **`Application/Payload/Request/`**, **`Payload/Session/`**, **`Payload/Event/`** only.
+Do **not** put these in `Application/Session/` or `Application/Handler/` at module root — use **`Application/Payload/Request/`**, **`Payload/Session/`**, **`Payload/Event/`** only.
 
 Request DTOs can declare pipeline requirements: `#[RequiresAuth]`, `#[RequiresAbility('ability')]`.
 
 ---
 
-## Event: `Application/Event/{Type}/`
+## Handler: `Application/Handler/{Type}/`
 
 | Subfolder | Purpose | Attribute |
 |-----------|---------|-----------|
@@ -38,7 +38,7 @@ Application/
 │   ├── Request/          # HTTP request DTOs
 │   ├── Session/          # Session segment DTOs
 │   └── Event/            # Event DTOs
-├── Event/
+├── Handler/
 │   ├── PayloadHandler/   # HTTP handlers
 │   ├── System/           # Pipeline listeners
 │   └── DomainListener/   # Domain event listeners

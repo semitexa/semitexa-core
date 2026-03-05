@@ -31,11 +31,9 @@ class LayoutGenerateCommand extends BaseCommand
 
         try {
             if ($all || $layout === null) {
-                \Semitexa\Core\CodeGen\LayoutGenerator::generateAll();
-                $io->success('Generated all layouts');
+                \Semitexa\Core\CodeGen\LayoutGenerator::generateAll($io);
             } else {
-                \Semitexa\Core\CodeGen\LayoutGenerator::generate($layout);
-                $io->success("Generated layout for: {$layout}");
+                \Semitexa\Core\CodeGen\LayoutGenerator::generate($layout, $io);
             }
         } catch (\Throwable $e) {
             $io->error($e->getMessage());

@@ -27,7 +27,7 @@ Detailed, technical documentation stays in each package (e.g. vendor/semitexa/co
 ### Adding a New Page/Endpoint
 1.  **Create Module**: `src/modules/MyFeature/` + `composer.json` (`type: semitexa-module`).
 2.  **Request DTO**: Create `Application/Payload/Request/MyPagePayload.php` with `#[AsPayload(path, methods, responseWith)]`. See **docs/MODULE_STRUCTURE.md** (Payload/Request, Session, Event; Handlers by type).
-3.  **Handler**: Create `Application/Event/PayloadHandler/MyPageHandler.php` with `#[AsPayloadHandler(payload: ..., resource: ...)]`.
+3.  **Handler**: Create `Application/Handler/PayloadHandler/MyPageHandler.php` with `#[AsPayloadHandler(payload: ..., resource: ...)]`.
 4.  **Response**: Return `Response::json(...)` or a Twig-based Response DTO. After adding/changing payloads run **`bin/semitexa registry:sync:payloads`**.
 
 ### Adding a Service

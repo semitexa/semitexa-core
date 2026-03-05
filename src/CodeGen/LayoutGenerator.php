@@ -22,7 +22,7 @@ class LayoutGenerator
      *  - Module/handle (e.g. "UserFrontend/login")
      *  - module-handle/handle (e.g. "module-user-frontend/login")
      */
-    public static function generate(string $identifier): void
+    public static function generate(string $identifier, ?\Symfony\Component\Console\Style\SymfonyStyle $io = null): void
     {
         $layouts = self::bootstrap();
         $target = self::resolveTarget($layouts, $identifier);
@@ -30,27 +30,35 @@ class LayoutGenerator
             throw new \RuntimeException("Layout '{$identifier}' not found. Use 'Module/handle' if the handle is duplicated.");
         }
 
-        self::writeLayout($target);
+        self::writeLayout($target, false, $io);
     }
 
     /**
      * Generate layout copies for every discovered module layout.
      */
-    public static function generateAll(): void
+    public static function generateAll(?\Symfony\Component\Console\Style\SymfonyStyle $io = null): void
     {
         $layouts = self::bootstrap();
         $generated = 0;
 
         foreach ($layouts as $layout) {
-            if (self::writeLayout($layout, true)) {
+            if (self::writeLayout($layout, true, $io)) {
                 $generated++;
             }
         }
 
         if ($generated === 0) {
-            echo "ℹ️  No new layouts to copy – everything already exists in src/.\n";
+            if ($io) {
+                $io->info('No new layouts to copy – everything already exists in src/.');
+            } else {
+                echo "ℹ️  No new layouts to copy – everything already exists in src/.\n";
+            }
         } else {
-            echo "✨ Copied {$generated} layout(s) into src/modules/*/Layout.\n";
+            if ($io) {
+                $io->success("Copied {$generated} layout(s) into src/modules/*/Layout.");
+            } else {
+                echo "✨ Copied {$generated} layout(s) into src/modules/*/Layout.\n";
+            }
         }
     }
 
@@ -144,7 +152,7 @@ class LayoutGenerator
     /**
      * @param array<string, mixed> $layout
      */
-    private static function writeLayout(array $layout, bool $silentSkip = false): bool
+    private static function writeLayout(array $layout, bool $silentSkip = false, ?\Symfony\Component\Console\Style\SymfonyStyle $io = null): bool
     {
         $destination = $layout['destination'];
         $dir = dirname($destination);
@@ -154,7 +162,11 @@ class LayoutGenerator
 
         if (is_file($destination)) {
             if (!$silentSkip) {
-                echo "↩️  Layout {$layout['id']} already exists. Skipping.\n";
+                if ($io) {
+                    $io->note("Layout {$layout['id']} already exists. Skipping.");
+                } else {
+                    echo "↩️  Layout {$layout['id']} already exists. Skipping.\n";
+                }
             }
             return false;
         }
@@ -171,7 +183,11 @@ class LayoutGenerator
             throw new \RuntimeException("Unable to write layout copy to {$destination}");
         }
 
-        echo "✅ Layout {$layout['id']} copied to {$destination}\n";
+        if ($io) {
+            $io->success("Layout {$layout['id']} copied to {$destination}");
+        } else {
+            echo "✅ Layout {$layout['id']} copied to {$destination}\n";
+        }
         return true;
     }
 

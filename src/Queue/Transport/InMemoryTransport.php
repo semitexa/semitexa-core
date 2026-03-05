@@ -22,7 +22,6 @@ class InMemoryTransport implements QueueTransportInterface
     public function consume(string $queueName, callable $callback): void
     {
         $queueName = $this->normalizeQueue($queueName);
-        echo "📥 [in-memory] Listening on queue '{$queueName}'...\n";
         while (true) {
             if (!empty(self::$queues[$queueName])) {
                 $payload = array_shift(self::$queues[$queueName]);

@@ -31,7 +31,7 @@ Exact versions are in `composer.lock`. Do not assume Laravel, Illuminate, or Ker
 
 ## Before you generate code (checklist)
 
-- **Modules:** only in `src/modules/`; standard layout: `Application/Payload/`, `Application/Resource/`, `Application/Event/PayloadHandler/`, `Application/View/templates/`.
+- **Modules:** only in `src/modules/`; standard layout: `Application/Payload/`, `Application/Resource/`, `Application/Handler/PayloadHandler/`, `Application/View/templates/`.
 - **Routes:** only via modules (Request + Handler with attributes). Do not add routes in project `src/` (App\ is not discovered).
 - **Payloads:** after adding or changing Payload classes (or `#[AsPayloadPart]` traits), run **`bin/semitexa registry:sync:payloads`** so routes are generated in `src/registry/Payloads/`. Without this, new payloads have no route; the app will throw a clear error at startup if you forget.
 - **Module autoload:** do not add per-module PSR-4 entries to project root `composer.json`; the framework autoloads from `src/modules/` at runtime.

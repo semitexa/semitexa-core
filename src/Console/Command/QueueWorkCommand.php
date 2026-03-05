@@ -34,6 +34,7 @@ class QueueWorkCommand extends Command
         
         try {
             $worker = new \Semitexa\Core\Queue\QueueWorker();
+            $worker->setOutput($output);
             $worker->run($transport, $queue);
         } catch (\Throwable $e) {
             $io->error('Worker failed: ' . $e->getMessage());
