@@ -13,16 +13,16 @@ use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Style\SymfonyStyle;
 
 /**
- * Convenience command: runs registry:sync:payloads, registry:sync:contracts, and (if available) registry:sync:entities.
- * Use this to sync all registry types with one call.
+ * Convenience command: runs registry:sync:contracts and (if available) registry:sync:entities.
+ * Payload and resource sync have been removed — discovery happens at runtime.
  */
-#[AsCommand(name: 'registry:sync', description: 'Run all registry sync commands (payloads, resources, contracts, and entities if available).')]
+#[AsCommand(name: 'registry:sync', description: 'Run all registry sync commands (contracts, and entities if available).')]
 class RegistrySyncCommand extends BaseCommand
 {
     protected function configure(): void
     {
         $this->setName('registry:sync')
-            ->setDescription('Run all registry sync commands (payloads, resources, contracts, and entities if available).')
+            ->setDescription('Run all registry sync commands (contracts, and entities if available).')
             ->addOption('json', null, InputOption::VALUE_NONE, 'Pass --json to sub-commands that support it');
     }
 
@@ -37,18 +37,6 @@ class RegistrySyncCommand extends BaseCommand
         $io = new SymfonyStyle($input, $output);
         $json = (bool) $input->getOption('json');
         $exitCode = Command::SUCCESS;
-
-        $payloadsCmd = $app->find('registry:sync:payloads');
-        $payloadsInput = new ArrayInput($json ? ['--json' => true] : []);
-        if ($payloadsCmd->run($payloadsInput, $output) !== Command::SUCCESS) {
-            $exitCode = Command::FAILURE;
-        }
-
-        $resourcesCmd = $app->find('registry:sync:resources');
-        $resourcesInput = new ArrayInput($json ? ['--json' => true] : []);
-        if ($resourcesCmd->run($resourcesInput, $output) !== Command::SUCCESS) {
-            $exitCode = Command::FAILURE;
-        }
 
         $contractsCmd = $app->find('registry:sync:contracts');
         if ($contractsCmd->run(new ArrayInput([]), $output) !== Command::SUCCESS) {

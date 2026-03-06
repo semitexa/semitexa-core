@@ -170,14 +170,13 @@ class AttributeDiscovery
     }
 
     /**
-     * Ensures every payload referenced by a handler has a registry entry (generated in src/registry/Payloads/).
-     * Routes are discovered only from registry; without sync the new payload would not get a route.
+     * Ensures every payload referenced by a handler has a corresponding discovered route.
      *
-     * @throws \RuntimeException when a handler payload has no corresponding App\Registry\Payloads\* class
+     * @throws \RuntimeException when a handler payload has no discovered route
      */
-    private static function assertPayloadsHaveRegistryEntries(): void
+    private static function assertPayloadsHaveDiscoveredRoutes(): void
     {
-        $registryRequestClasses = array_keys(self::$httpRequests);
+        $discoveredPayloadClasses = array_keys(self::$httpRequests);
         $missing = [];
         foreach (self::$handlersByPayloadAndResource as $key => $handlers) {
             $parts = explode("\0", $key, 2);
@@ -185,21 +184,22 @@ class AttributeDiscovery
                 continue;
             }
             $payloadClass = $parts[0];
-            $hasRegistry = false;
-            foreach ($registryRequestClasses as $requestClass) {
+            $hasRoute = false;
+            foreach ($discoveredPayloadClasses as $requestClass) {
                 if ($requestClass === $payloadClass || is_subclass_of($requestClass, $payloadClass)) {
-                    $hasRegistry = true;
+                    $hasRoute = true;
                     break;
                 }
             }
-            if (!$hasRegistry) {
+            if (!$hasRoute) {
                 $missing[] = $payloadClass;
             }
         }
         if ($missing !== []) {
             $list = implode(', ', array_unique($missing));
             throw new \RuntimeException(
-                "Payload(s) have no registry entry (routes are built from src/registry/Payloads/). Missing: {$list}. Run: bin/semitexa registry:sync:payloads"
+                "Payload(s) referenced by handlers have no discovered route. Missing: {$list}. " .
+                "Ensure the payload class has #[AsPayload] and belongs to an active module or project src/."
             );
         }
     }
@@ -253,11 +253,11 @@ class AttributeDiscovery
         self::$resolvedResponseAttrs = [];
         self::$responseClassAliases = [];
 
-        // Single source of truth: only src/registry/Payloads. No route if class is not there.
+        // Runtime discovery: accept payloads from active modules and project src/
         $allPayloadClasses = ClassDiscovery::findClassesWithAttribute(AsPayload::class);
         $httpRequestClasses = array_values(array_filter(
             $allPayloadClasses,
-            fn ($class) => str_starts_with($class, 'App\\Registry\\Payloads\\')
+            fn ($class) => self::isModuleActiveForClass($class) || self::isProjectPayload($class)
         ));
         $requestMeta = [];
         $requestGroups = [];
@@ -408,7 +408,7 @@ class AttributeDiscovery
             }
         }
 
-        self::assertPayloadsHaveRegistryEntries();
+        self::assertPayloadsHaveDiscoveredRoutes();
 
         // Discover layout slot contributions (optional)
         if (
@@ -500,11 +500,11 @@ class AttributeDiscovery
 
     private static function processResponseAttributes(): void
     {
-        // Single source of truth: only src/registry/Resources (same as Payloads from src/registry/Payloads)
+        // Runtime discovery: accept resources from active modules and project src/
         $allResourceClasses = ClassDiscovery::findClassesWithAttribute(AsResource::class);
         $responseClasses = array_values(array_filter(
             $allResourceClasses,
-            fn ($class) => str_starts_with($class, 'App\\Registry\\Resources\\')
+            fn ($class) => self::isModuleActiveForClass($class) || self::isProjectResource($class)
         ));
         if (empty($responseClasses)) {
             return;
@@ -538,12 +538,7 @@ class AttributeDiscovery
                 $groupKey = $meta['attr']['base'] ?? $className;
                 $responseGroups[$groupKey][] = $meta;
 
-                // Map registry class to itself and base (module) class to this registry class for canonicalResponseClass()
                 self::$responseClassAliases[$className] = $className;
-                $parent = $class->getParentClass();
-                if ($parent) {
-                    self::$responseClassAliases[$parent->getName()] = $className;
-                }
             } catch (\Throwable $e) {
                 if (Environment::getEnvValue('APP_DEBUG') === '1') {
                     error_log("[Semitexa] AttributeDiscovery resource reflection: " . $e->getMessage());
@@ -694,7 +689,7 @@ class AttributeDiscovery
             return 300;
         }
 
-        if (str_contains($file, '/packages/')) {
+        if (str_contains($file, '/packages/') || str_contains($file, '/pakages/')) {
             return 200;
         }
 
@@ -722,6 +717,32 @@ class AttributeDiscovery
         } catch (\Throwable $e) {
             if (Environment::getEnvValue('APP_DEBUG') === '1') {
                 error_log("[Semitexa] AttributeDiscovery::isProjectHandler: " . $e->getMessage());
+            }
+            return false;
+        }
+    }
+
+    private static function isProjectPayload(string $className): bool
+    {
+        try {
+            $file = (new ReflectionClass($className))->getFileName();
+            return $file !== false && self::isProjectRequest($file);
+        } catch (\Throwable $e) {
+            if (Environment::getEnvValue('APP_DEBUG') === '1') {
+                error_log("[Semitexa] AttributeDiscovery::isProjectPayload: " . $e->getMessage());
+            }
+            return false;
+        }
+    }
+
+    private static function isProjectResource(string $className): bool
+    {
+        try {
+            $file = (new ReflectionClass($className))->getFileName();
+            return $file !== false && self::isProjectRequest($file);
+        } catch (\Throwable $e) {
+            if (Environment::getEnvValue('APP_DEBUG') === '1') {
+                error_log("[Semitexa] AttributeDiscovery::isProjectResource: " . $e->getMessage());
             }
             return false;
         }

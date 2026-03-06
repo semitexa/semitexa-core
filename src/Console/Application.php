@@ -89,13 +89,38 @@ class Application extends SymfonyApplication
             try {
                 $args[] = $container->get($typeName);
             } catch (NotFoundException $e) {
-                if (Environment::getEnvValue('APP_DEBUG') === '1') {
-                    error_log("[Semitexa] Console Application: skip {$className}, container has no {$typeName}");
+                $resolved = $this->tryAutoInstantiate($typeName);
+                if ($resolved === null) {
+                    if (Environment::getEnvValue('APP_DEBUG') === '1') {
+                        error_log("[Semitexa] Console Application: skip {$className}, container has no {$typeName}");
+                    }
+                    return null;
                 }
-                return null;
+                $args[] = $resolved;
             }
         }
 
         return new $className(...$args);
+    }
+
+    /**
+     * Try to instantiate a concrete class that is not registered in the container.
+     * Only works for classes with no required constructor parameters.
+     */
+    private function tryAutoInstantiate(string $className): ?object
+    {
+        try {
+            $ref = new ReflectionClass($className);
+            if ($ref->isAbstract() || $ref->isInterface()) {
+                return null;
+            }
+            $ctor = $ref->getConstructor();
+            if ($ctor !== null && $ctor->getNumberOfRequiredParameters() > 0) {
+                return null;
+            }
+            return new $className();
+        } catch (\Throwable) {
+            return null;
+        }
     }
 }
