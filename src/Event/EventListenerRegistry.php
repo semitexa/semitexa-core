@@ -82,6 +82,21 @@ final class EventListenerRegistry
         self::$built = true;
     }
 
+    /**
+     * @return string[] All discovered listener class names (across all events).
+     */
+    public static function getAllListenerClasses(): array
+    {
+        self::ensureBuilt();
+        $classes = [];
+        foreach (self::$listenersByEvent as $listeners) {
+            foreach ($listeners as $meta) {
+                $classes[$meta['class']] = true;
+            }
+        }
+        return array_keys($classes);
+    }
+
     private static function isModuleActiveForClass(string $class): bool
     {
         return ModuleRegistry::getModuleNameForClass($class) !== null;

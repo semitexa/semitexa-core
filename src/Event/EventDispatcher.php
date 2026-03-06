@@ -54,7 +54,23 @@ final class EventDispatcher implements EventDispatcherInterface
     private function runListenerSync(array $meta, object $event): void
     {
         $container = ContainerFactory::get();
-        $listener = $container->get($meta['class']);
+        try {
+            if ($container->has($meta['class'])) {
+                $listener = $container->get($meta['class']);
+            } else {
+                $listener = $container->resolve($meta['class']);
+            }
+        } catch (\Throwable $e) {
+            // Listener has unresolvable dependencies (e.g. interface not yet implemented) — skip gracefully
+            if (function_exists('error_log')) {
+                error_log(sprintf(
+                    'Semitexa EventDispatcher: skipping listener "%s" — %s',
+                    $meta['class'],
+                    $e->getMessage()
+                ));
+            }
+            return;
+        }
         if (!method_exists($listener, 'handle')) {
             return;
         }
