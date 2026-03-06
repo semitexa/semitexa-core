@@ -40,6 +40,10 @@ class AttributeDiscovery
     private static array $payloadParts = [];
     /** @var array<string, list<string>> baseClass => [traitFQN, ...] */
     private static array $resourceParts = [];
+    /** @var array<string, string> className => attribute base class */
+    private static array $payloadBaseMap = [];
+    /** @var array<string, string> className => attribute base class */
+    private static array $resourceBaseMap = [];
     private static bool $initialized = false;
     
     /**
@@ -260,6 +264,8 @@ class AttributeDiscovery
         self::$responseClassAliases = [];
         self::$payloadParts = [];
         self::$resourceParts = [];
+        self::$payloadBaseMap = [];
+        self::$resourceBaseMap = [];
 
         // Runtime discovery: accept payloads from active modules and project src/
         $allPayloadClasses = ClassDiscovery::findClassesWithAttribute(AsPayload::class);
@@ -298,6 +304,9 @@ class AttributeDiscovery
                     ],
                 ];
                 $requestMeta[$className] = $meta;
+                if ($meta['attr']['base'] !== null) {
+                    self::$payloadBaseMap[$className] = $meta['attr']['base'];
+                }
                 $groupKey = $meta['attr']['base'] ?? $className;
                 $requestGroups[$groupKey][] = $meta;
             } catch (\Throwable $e) {
@@ -547,6 +556,9 @@ class AttributeDiscovery
                     ],
                 ];
                 $responseMeta[$className] = $meta;
+                if ($meta['attr']['base'] !== null) {
+                    self::$resourceBaseMap[$className] = $meta['attr']['base'];
+                }
                 $groupKey = $meta['attr']['base'] ?? $className;
                 $responseGroups[$groupKey][] = $meta;
 
@@ -844,7 +856,7 @@ class AttributeDiscovery
     {
         $classes = ClassDiscovery::findClassesWithAttribute(AsPayloadPart::class);
         foreach ($classes as $className) {
-            if (!self::isModuleActiveForClass($className)) {
+            if (!self::isModuleActiveForClass($className) && !self::isProjectPayload($className)) {
                 continue;
             }
             try {
@@ -873,7 +885,7 @@ class AttributeDiscovery
     {
         $classes = ClassDiscovery::findClassesWithAttribute(AsResourcePart::class);
         foreach ($classes as $className) {
-            if (!self::isModuleActiveForClass($className)) {
+            if (!self::isModuleActiveForClass($className) && !self::isProjectResource($className)) {
                 continue;
             }
             try {
@@ -896,16 +908,18 @@ class AttributeDiscovery
     }
 
     /**
-     * Get trait list for a payload class (exact match or subclass of a registered base).
+     * Get trait list for a payload class.
+     * Matches via PHP inheritance and attribute base chain.
      *
      * @return list<string>
      */
     public static function getPayloadPartsForClass(string $requestClass): array
     {
         self::initialize();
+        $chain = self::buildBaseChain($requestClass, self::$payloadBaseMap);
         $traits = [];
         foreach (self::$payloadParts as $base => $traitList) {
-            if ($requestClass === $base || is_subclass_of($requestClass, $base)) {
+            if (in_array($base, $chain, true) || is_subclass_of($requestClass, $base)) {
                 array_push($traits, ...$traitList);
             }
         }
@@ -913,20 +927,38 @@ class AttributeDiscovery
     }
 
     /**
-     * Get trait list for a resource class (exact match or subclass of a registered base).
+     * Get trait list for a resource class.
+     * Matches via PHP inheritance and attribute base chain.
      *
      * @return list<string>
      */
     public static function getResourcePartsForClass(string $responseClass): array
     {
         self::initialize();
+        $chain = self::buildBaseChain($responseClass, self::$resourceBaseMap);
         $traits = [];
         foreach (self::$resourceParts as $base => $traitList) {
-            if ($responseClass === $base || is_subclass_of($responseClass, $base)) {
+            if (in_array($base, $chain, true) || is_subclass_of($responseClass, $base)) {
                 array_push($traits, ...$traitList);
             }
         }
         return $traits;
+    }
+
+    /**
+     * Walk the attribute base chain for a class.
+     *
+     * @return list<string> The class itself and all ancestors via attribute base
+     */
+    private static function buildBaseChain(string $className, array $baseMap): array
+    {
+        $chain = [];
+        $current = $className;
+        while ($current !== null) {
+            $chain[] = $current;
+            $current = $baseMap[$current] ?? null;
+        }
+        return $chain;
     }
 
     private static function isModuleActiveForClass(string $className): bool

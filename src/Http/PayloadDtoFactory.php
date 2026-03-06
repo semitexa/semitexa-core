@@ -16,6 +16,12 @@ final class PayloadDtoFactory
 
     public static function createInstance(string $baseClass, array $traits): object
     {
+        $traits = array_values(array_unique(array_map(
+            static fn(string $t): string => ltrim($t, '\\'),
+            $traits
+        )));
+        sort($traits);
+
         if (empty($traits)) {
             return new $baseClass();
         }
@@ -37,7 +43,7 @@ final class PayloadDtoFactory
 
         if (!class_exists($fqn, false)) {
             $traitUses = implode("\n    ", array_map(
-                fn(string $t) => 'use \\' . ltrim($t, '\\') . ';',
+                fn(string $t) => 'use \\' . $t . ';',
                 $traits
             ));
             eval("namespace Semitexa\\Runtime; class {$className} extends \\" . ltrim($baseClass, '\\') . " { {$traitUses} }");
