@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Semitexa\Core\Server;
 
 use Semitexa\Core\Environment;
+use Semitexa\Core\Util\ProjectRoot;
 
 readonly class ServerConfigurator
 {
@@ -35,7 +36,7 @@ readonly class ServerConfigurator
 
     private function getPidFilePath(): string
     {
-        $dir = dirname(__DIR__, 5) . '/var/run';
+        $dir = ProjectRoot::get() . '/var/run';
         if (!is_dir($dir)) {
             @mkdir($dir, 0755, true);
         }
