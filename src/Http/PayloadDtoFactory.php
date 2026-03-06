@@ -22,16 +22,16 @@ final class PayloadDtoFactory
 
         $cacheKey = $baseClass . "\0" . implode("\0", $traits);
         if (!isset(self::$classCache[$cacheKey])) {
-            self::$classCache[$cacheKey] = self::buildWrapperClass($baseClass, $traits);
+            self::$classCache[$cacheKey] = self::buildWrapperClass($cacheKey, $baseClass, $traits);
         }
 
         $wrapperClass = self::$classCache[$cacheKey];
         return new $wrapperClass();
     }
 
-    private static function buildWrapperClass(string $baseClass, array $traits): string
+    private static function buildWrapperClass(string $signature, string $baseClass, array $traits): string
     {
-        $hash = substr(md5($baseClass . implode(',', $traits)), 0, 10);
+        $hash = substr(hash('sha256', $signature), 0, 16);
         $className = 'PayloadWrapper_' . $hash;
         $fqn = 'Semitexa\\Runtime\\' . $className;
 

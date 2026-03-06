@@ -106,7 +106,10 @@ class RouteExecutor
     private function resolveResponseDto(array $route): object
     {
         $responseClass = $route['responseClass'] ?? null;
-        if ($responseClass && class_exists($responseClass)) {
+        if ($responseClass !== null && !class_exists($responseClass)) {
+            throw new \RuntimeException("Cannot instantiate response class: {$responseClass}");
+        }
+        if ($responseClass !== null) {
             $traits = AttributeDiscovery::getResourcePartsForClass($responseClass);
             $resDto = PayloadDtoFactory::createInstance($responseClass, $traits);
         } else {
@@ -118,7 +121,7 @@ class RouteExecutor
         }
 
         // Apply AsResource defaults from resolved attributes
-        $resolvedResponse = AttributeDiscovery::getResolvedResponseAttributes(get_class($resDto));
+        $resolvedResponse = AttributeDiscovery::getResolvedResponseAttributes($responseClass ?? get_class($resDto));
         if ($resolvedResponse) {
             if (isset($resolvedResponse['handle']) && $resolvedResponse['handle'] && method_exists($resDto, 'setRenderHandle')) {
                 $resDto->setRenderHandle($resolvedResponse['handle']);

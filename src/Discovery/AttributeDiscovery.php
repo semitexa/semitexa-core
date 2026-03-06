@@ -849,6 +849,9 @@ class AttributeDiscovery
             }
             try {
                 $ref = new ReflectionClass($className);
+                if (!$ref->isTrait()) {
+                    continue;
+                }
                 $attrs = $ref->getAttributes(AsPayloadPart::class);
                 foreach ($attrs as $attr) {
                     $instance = $attr->newInstance();
@@ -875,6 +878,9 @@ class AttributeDiscovery
             }
             try {
                 $ref = new ReflectionClass($className);
+                if (!$ref->isTrait()) {
+                    continue;
+                }
                 $attrs = $ref->getAttributes(AsResourcePart::class);
                 foreach ($attrs as $attr) {
                     $instance = $attr->newInstance();
