@@ -127,6 +127,36 @@ final class SemitexaContainer implements ContainerInterface
     }
 
     /**
+     * Auto-wire and create a class instance that is not pre-registered in the container.
+     * Constructor dependencies are resolved from readonly/mutable pools.
+     */
+    public function resolve(string $class): object
+    {
+        $ref = new ReflectionClass($class);
+        $ctor = $ref->getConstructor();
+        $args = [];
+        if ($ctor !== null) {
+            foreach ($ctor->getParameters() as $param) {
+                $type = $param->getType();
+                if ($type instanceof ReflectionNamedType && !$type->isBuiltin()) {
+                    $name = $type->getName();
+                    // Try existing container resolution (handles interfaces, readonly, mutable)
+                    if ($this->has($name)) {
+                        $args[] = $this->get($name);
+                        continue;
+                    }
+                }
+                if ($param->isDefaultValueAvailable()) {
+                    $args[] = $param->getDefaultValue();
+                    continue;
+                }
+                throw new \RuntimeException("Container: cannot resolve constructor param \${$param->getName()} for {$class}");
+            }
+        }
+        return $args !== [] ? $ref->newInstanceArgs($args) : $ref->newInstance();
+    }
+
+    /**
      * Build the container (call once per worker).
      */
     public function build(): void
@@ -171,6 +201,7 @@ final class SemitexaContainer implements ContainerInterface
                 $this->idToClass[$meta['class']] = $meta['class'];
             }
         }
+
 
         // Mark mutable classes (any injection of type T as InjectAsMutable)
         $this->collectMutableClasses();
