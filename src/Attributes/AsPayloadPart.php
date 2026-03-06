@@ -7,11 +7,10 @@ namespace Semitexa\Core\Attributes;
 use Attribute;
 
 /**
- * Marks a trait (or helper class) as an extension part of a payload (request) DTO.
+ * Marks a trait as an extension part of a payload (request) DTO.
  *
- * Modules can provide payload parts that will be combined into the final
- * project-specific request class during code generation.
- *
+ * Modules can provide payload parts that will be composed into the DTO instance
+ * at runtime via dynamic class composition (eval'd wrapper class).
  */
 #[Attribute(Attribute::TARGET_CLASS)]
 class AsPayloadPart

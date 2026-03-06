@@ -6,7 +6,9 @@ namespace Semitexa\Core\Discovery;
 
 use Semitexa\Core\Attributes\AsPayload;
 use Semitexa\Core\Attributes\AsPayloadHandler;
+use Semitexa\Core\Attributes\AsPayloadPart;
 use Semitexa\Core\Attributes\AsResource;
+use Semitexa\Core\Attributes\AsResourcePart;
 use Semitexa\Core\Config\EnvValueResolver;
 use Semitexa\Core\Environment;
 use Semitexa\Core\ModuleRegistry;
@@ -34,6 +36,14 @@ class AttributeDiscovery
     private static array $rawResponseAttrs = [];
     private static array $resolvedResponseAttrs = [];
     private static array $responseClassAliases = [];
+    /** @var array<string, list<string>> baseClass => [traitFQN, ...] */
+    private static array $payloadParts = [];
+    /** @var array<string, list<string>> baseClass => [traitFQN, ...] */
+    private static array $resourceParts = [];
+    /** @var array<string, string> className => attribute base class */
+    private static array $payloadBaseMap = [];
+    /** @var array<string, string> className => attribute base class */
+    private static array $resourceBaseMap = [];
     private static bool $initialized = false;
     
     /**
@@ -252,6 +262,10 @@ class AttributeDiscovery
         self::$rawResponseAttrs = [];
         self::$resolvedResponseAttrs = [];
         self::$responseClassAliases = [];
+        self::$payloadParts = [];
+        self::$resourceParts = [];
+        self::$payloadBaseMap = [];
+        self::$resourceBaseMap = [];
 
         // Runtime discovery: accept payloads from active modules and project src/
         $allPayloadClasses = ClassDiscovery::findClassesWithAttribute(AsPayload::class);
@@ -290,6 +304,9 @@ class AttributeDiscovery
                     ],
                 ];
                 $requestMeta[$className] = $meta;
+                if ($meta['attr']['base'] !== null) {
+                    self::$payloadBaseMap[$className] = $meta['attr']['base'];
+                }
                 $groupKey = $meta['attr']['base'] ?? $className;
                 $requestGroups[$groupKey][] = $meta;
             } catch (\Throwable $e) {
@@ -409,6 +426,10 @@ class AttributeDiscovery
         }
 
         self::assertPayloadsHaveDiscoveredRoutes();
+
+        // Discover payload/resource part traits
+        self::discoverPayloadParts();
+        self::discoverResourceParts();
 
         // Discover layout slot contributions (optional)
         if (
@@ -535,6 +556,9 @@ class AttributeDiscovery
                     ],
                 ];
                 $responseMeta[$className] = $meta;
+                if ($meta['attr']['base'] !== null) {
+                    self::$resourceBaseMap[$className] = $meta['attr']['base'];
+                }
                 $groupKey = $meta['attr']['base'] ?? $className;
                 $responseGroups[$groupKey][] = $meta;
 
@@ -823,6 +847,118 @@ class AttributeDiscovery
         }
         
         return new ReflectionClass($fullClassName);
+    }
+
+    /**
+     * Discover traits marked with #[AsPayloadPart] from active modules.
+     */
+    private static function discoverPayloadParts(): void
+    {
+        $classes = ClassDiscovery::findClassesWithAttribute(AsPayloadPart::class);
+        foreach ($classes as $className) {
+            if (!self::isModuleActiveForClass($className) && !self::isProjectPayload($className)) {
+                continue;
+            }
+            try {
+                $ref = new ReflectionClass($className);
+                if (!$ref->isTrait()) {
+                    continue;
+                }
+                $attrs = $ref->getAttributes(AsPayloadPart::class);
+                foreach ($attrs as $attr) {
+                    $instance = $attr->newInstance();
+                    $base = ltrim($instance->base, '\\');
+                    self::$payloadParts[$base][] = $className;
+                }
+            } catch (\Throwable $e) {
+                if (Environment::getEnvValue('APP_DEBUG') === '1') {
+                    error_log("[Semitexa] AttributeDiscovery payload part: " . $e->getMessage());
+                }
+            }
+        }
+    }
+
+    /**
+     * Discover traits marked with #[AsResourcePart] from active modules.
+     */
+    private static function discoverResourceParts(): void
+    {
+        $classes = ClassDiscovery::findClassesWithAttribute(AsResourcePart::class);
+        foreach ($classes as $className) {
+            if (!self::isModuleActiveForClass($className) && !self::isProjectResource($className)) {
+                continue;
+            }
+            try {
+                $ref = new ReflectionClass($className);
+                if (!$ref->isTrait()) {
+                    continue;
+                }
+                $attrs = $ref->getAttributes(AsResourcePart::class);
+                foreach ($attrs as $attr) {
+                    $instance = $attr->newInstance();
+                    $base = ltrim($instance->base, '\\');
+                    self::$resourceParts[$base][] = $className;
+                }
+            } catch (\Throwable $e) {
+                if (Environment::getEnvValue('APP_DEBUG') === '1') {
+                    error_log("[Semitexa] AttributeDiscovery resource part: " . $e->getMessage());
+                }
+            }
+        }
+    }
+
+    /**
+     * Get trait list for a payload class.
+     * Matches via PHP inheritance and attribute base chain.
+     *
+     * @return list<string>
+     */
+    public static function getPayloadPartsForClass(string $requestClass): array
+    {
+        self::initialize();
+        $chain = self::buildBaseChain($requestClass, self::$payloadBaseMap);
+        $traits = [];
+        foreach (self::$payloadParts as $base => $traitList) {
+            if (in_array($base, $chain, true) || is_subclass_of($requestClass, $base)) {
+                array_push($traits, ...$traitList);
+            }
+        }
+        return $traits;
+    }
+
+    /**
+     * Get trait list for a resource class.
+     * Matches via PHP inheritance and attribute base chain.
+     *
+     * @return list<string>
+     */
+    public static function getResourcePartsForClass(string $responseClass): array
+    {
+        self::initialize();
+        $chain = self::buildBaseChain($responseClass, self::$resourceBaseMap);
+        $traits = [];
+        foreach (self::$resourceParts as $base => $traitList) {
+            if (in_array($base, $chain, true) || is_subclass_of($responseClass, $base)) {
+                array_push($traits, ...$traitList);
+            }
+        }
+        return $traits;
+    }
+
+    /**
+     * Walk the attribute base chain for a class.
+     *
+     * @return list<string> The class itself and all ancestors via attribute base
+     */
+    private static function buildBaseChain(string $className, array $baseMap): array
+    {
+        $chain = [];
+        $current = $className;
+        while ($current !== null) {
+            $chain[] = $current;
+            $current = $baseMap[$current] ?? null;
+        }
+        return $chain;
     }
 
     private static function isModuleActiveForClass(string $className): bool

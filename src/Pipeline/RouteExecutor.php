@@ -10,6 +10,7 @@ use Semitexa\Core\Http\RequestDtoHydrator;
 use Semitexa\Core\Http\PayloadValidator;
 use Semitexa\Core\Http\Response\GenericResponse;
 use Semitexa\Core\Discovery\AttributeDiscovery;
+use Semitexa\Core\Http\PayloadDtoFactory;
 use Semitexa\Core\Http\Response\ResponseFormat;
 use Semitexa\Core\Pipeline\Exception\AuthenticationRequiredException;
 use Semitexa\Core\Pipeline\Exception\AccessDeniedException;
@@ -77,7 +78,8 @@ class RouteExecutor
             throw new \RuntimeException('Route has no class defined');
         }
 
-        $reqDto = class_exists($requestClass) ? new $requestClass() : null;
+        $traits = AttributeDiscovery::getPayloadPartsForClass($requestClass);
+        $reqDto = class_exists($requestClass) ? PayloadDtoFactory::createInstance($requestClass, $traits) : null;
         if (!$reqDto) {
             throw new \RuntimeException("Cannot instantiate request class: {$requestClass}");
         }
@@ -104,14 +106,22 @@ class RouteExecutor
     private function resolveResponseDto(array $route): object
     {
         $responseClass = $route['responseClass'] ?? null;
-        $resDto = ($responseClass && class_exists($responseClass)) ? new $responseClass() : null;
+        if ($responseClass !== null && !class_exists($responseClass)) {
+            throw new \RuntimeException("Cannot instantiate response class: {$responseClass}");
+        }
+        if ($responseClass !== null) {
+            $traits = AttributeDiscovery::getResourcePartsForClass($responseClass);
+            $resDto = PayloadDtoFactory::createInstance($responseClass, $traits);
+        } else {
+            $resDto = null;
+        }
 
         if ($resDto === null) {
             $resDto = new GenericResponse();
         }
 
         // Apply AsResource defaults from resolved attributes
-        $resolvedResponse = AttributeDiscovery::getResolvedResponseAttributes(get_class($resDto));
+        $resolvedResponse = AttributeDiscovery::getResolvedResponseAttributes($responseClass ?? get_class($resDto));
         if ($resolvedResponse) {
             if (isset($resolvedResponse['handle']) && $resolvedResponse['handle'] && method_exists($resDto, 'setRenderHandle')) {
                 $resDto->setRenderHandle($resolvedResponse['handle']);

@@ -9,8 +9,8 @@ use Attribute;
 /**
  * Marks a trait as an extension part of a resource (response) DTO.
  *
- * Modules can provide resource parts that will be combined into the final
- * project-specific resource class during code generation.
+ * Modules can provide resource parts that will be composed into the DTO instance
+ * at runtime via dynamic class composition (eval'd wrapper class).
  */
 #[Attribute(Attribute::TARGET_CLASS)]
 class AsResourcePart
