@@ -22,6 +22,11 @@ class ServerReloadCommand extends BaseCommand
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
         $io = new SymfonyStyle($input, $output);
+
+        if (!$this->rebuildAutoload($io)) {
+            return Command::FAILURE;
+        }
+
         $pid = $this->findMasterPid();
 
         if ($pid === null) {
