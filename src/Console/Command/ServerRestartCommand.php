@@ -31,6 +31,8 @@ class ServerRestartCommand extends BaseCommand
 
         $io->title('Restarting Semitexa Environment (Docker)');
 
+        $this->rebuildAutoload($io);
+
         if (!file_exists($projectRoot . '/docker-compose.yml')) {
             $io->error('docker-compose.yml not found.');
             $io->text([
