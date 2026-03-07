@@ -25,12 +25,16 @@ abstract class BaseCommand extends Command
     protected function rebuildAutoload(SymfonyStyle $io): bool
     {
         $root = $this->getProjectRoot();
-        $composer = PHP_BINARY . ' ' . escapeshellarg($root . '/vendor/bin/composer');
 
         // Prefer system composer if available
         $which = trim((string) shell_exec('which composer 2>/dev/null'));
         if ($which !== '') {
             $composer = escapeshellarg($which);
+        } elseif (is_file($root . '/vendor/bin/composer')) {
+            $composer = PHP_BINARY . ' ' . escapeshellarg($root . '/vendor/bin/composer');
+        } else {
+            $io->error('Composer not found. Install it globally or require composer/composer as a dependency.');
+            return false;
         }
 
         $cmd = $composer . ' dump-autoload --working-dir=' . escapeshellarg($root) . ' 2>&1';

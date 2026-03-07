@@ -30,7 +30,9 @@ class ServerStartCommand extends BaseCommand
 
         $io->title('Starting Semitexa Environment (Docker)');
 
-        $this->rebuildAutoload($io);
+        if (!$this->rebuildAutoload($io)) {
+            return Command::FAILURE;
+        }
 
         if (!file_exists($projectRoot . '/docker-compose.yml')) {
             $io->error('docker-compose.yml not found.');

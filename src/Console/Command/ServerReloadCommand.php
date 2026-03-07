@@ -23,7 +23,9 @@ class ServerReloadCommand extends BaseCommand
     {
         $io = new SymfonyStyle($input, $output);
 
-        $this->rebuildAutoload($io);
+        if (!$this->rebuildAutoload($io)) {
+            return Command::FAILURE;
+        }
 
         $pid = $this->findMasterPid();
 
