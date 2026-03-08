@@ -44,6 +44,11 @@ class ContainerFactory
             modulesPath: $root . '/src/modules',
             packagesPath: $root . '/packages',
         ));
+
+        $orm = new \Semitexa\Orm\OrmManager();
+        $container->set(\Semitexa\Orm\OrmManager::class, $orm);
+        $container->set(\Semitexa\Orm\Adapter\DatabaseAdapterInterface::class, $orm->getAdapter());
+        $container->set(\Semitexa\Orm\Transaction\TransactionManager::class, $orm->getTransactionManager());
     }
 
     public static function reset(): void
