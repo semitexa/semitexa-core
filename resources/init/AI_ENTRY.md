@@ -33,7 +33,7 @@ Exact versions are in `composer.lock`. Do not assume Laravel, Illuminate, or Ker
 
 - **Modules:** only in `src/modules/`; standard layout: `Application/Payload/`, `Application/Resource/`, `Application/Handler/PayloadHandler/`, `Application/View/templates/`.
 - **Routes:** only via modules (Request + Handler with attributes). Do not add routes in project `src/` (App\ is not discovered).
-- **Payloads:** after adding or changing Payload classes (or `#[AsPayloadPart]` traits), run **`bin/semitexa registry:sync:payloads`** so routes are generated in `src/registry/Payloads/`. Without this, new payloads have no route; the app will throw a clear error at startup if you forget.
+- **Payloads:** after adding or changing Payload classes (or `#[AsPayloadPart]` traits), do **not** run registry sync manually. Route/registry generation is handled automatically by the framework workflow.
 - **Module autoload:** do not add per-module PSR-4 entries to project root `composer.json`; the framework autoloads from `src/modules/` at runtime.
 - **Contracts/DI:** before changing a contract or adding an override, run `bin/semitexa contracts:list` or `contracts:list --json` to see current implementations and active binding.
 
@@ -64,7 +64,7 @@ These commands produce **stable, parseable output** — use them instead of scra
 | Command | Output | Use when |
 |---------|--------|----------|
 | `bin/semitexa contracts:list --json` | JSON: `contracts[]` with `contract`, `active`, `implementations` | Debugging DI, checking bindings before/after changing contracts or modules. See vendor/semitexa/core/docs/SERVICE_CONTRACTS.md. |
-| `bin/semitexa registry:sync` | Syncs payloads + contracts into `src/registry/` | After adding/changing Payloads or contract implementations. Run after `composer install`/`update` (plugin runs it automatically). |
+| `bin/semitexa registry:sync` | Syncs payloads + contracts into `src/registry/` | Maintenance/debug command. Do not treat it as a required manual step after ordinary payload or contract changes. |
 
 (More commands may be added here with `--json` or similar; check `bin/semitexa list` and framework docs.)
 

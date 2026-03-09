@@ -34,7 +34,7 @@ Detailed, technical documentation stays in each package (e.g. vendor/semitexa/co
 1.  **Create Module**: `src/modules/MyFeature/` + `composer.json` (`type: semitexa-module`).
 2.  **Request DTO**: Create `Application/Payload/Request/MyPagePayload.php` with `#[AsPayload(path, methods, responseWith)]`. See **docs/MODULE_STRUCTURE.md** (Payload/Request, Session, Event; Handlers by type).
 3.  **Handler**: Create `Application/Handler/PayloadHandler/MyPageHandler.php` with `#[AsPayloadHandler(payload: ..., resource: ...)]`.
-4.  **Response**: Return `Response::json(...)` or a Twig-based Response DTO. After adding/changing payloads run **`bin/semitexa registry:sync:payloads`**.
+4.  **Response**: Return `Response::json(...)` or a Twig-based Response DTO. Do not add a manual `registry:sync` step for payload changes.
 
 ### Adding a Service
 1.  Define Interface: `Domain/Contract/MyServiceInterface.php` (no attribute on the interface).
