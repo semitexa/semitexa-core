@@ -40,8 +40,10 @@ readonly class Environment
     {
         $fileEnv = self::loadEnv();
 
-        $get = fn(string $key, $default = null) =>
-            getenv($key) !== false ? getenv($key) : ($fileEnv[$key] ?? $default);
+        $get = function (string $key, $default = null) use ($fileEnv) {
+            $value = getenv($key);
+            return $value !== false ? $value : ($fileEnv[$key] ?? $default);
+        };
         
         return new self(
             appEnv: $get('APP_ENV', 'prod'),

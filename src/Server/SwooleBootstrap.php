@@ -104,7 +104,9 @@ class SwooleBootstrap
             // future: cleanup
         });
 
-        $server->on('request', function (SwooleRequest $request, SwooleResponse $response) use ($corsHandler, $healthHandler, $staticAssetHandler, $server, $sessionWorkerTable, $deliverTable, $pendingDeliverTable) {
+        $emitter = new SwooleResponseEmitter();
+
+        $server->on('request', function (SwooleRequest $request, SwooleResponse $response) use ($emitter, $corsHandler, $healthHandler, $staticAssetHandler, $server, $sessionWorkerTable, $deliverTable, $pendingDeliverTable) {
             $sent = false;
             $ensureResponseSent = function () use ($response, &$sent): void {
                 if ($sent) {
@@ -135,7 +137,6 @@ class SwooleBootstrap
             $app = null;
 
             try {
-                $emitter = new SwooleResponseEmitter();
                 $app = new Application();
                 $semitexaRequest = Request::create($request);
                 $semitexaResponse = $app->handleRequest($semitexaRequest);
