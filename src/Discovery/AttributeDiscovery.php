@@ -15,6 +15,8 @@ use Semitexa\Core\ModuleRegistry;
 use Semitexa\Core\Discovery\ClassDiscovery;
 use Semitexa\Core\Util\ProjectRoot;
 use Semitexa\Core\Queue\HandlerExecution;
+use Semitexa\Core\Contract\TypedHandlerInterface;
+use Semitexa\Core\Pipeline\HandlerReflectionCache;
 use ReflectionClass;
 
 /**
@@ -430,6 +432,11 @@ class AttributeDiscovery
                     }
                     self::$handlersByPayloadAndResource[$key][] = $handlerMeta;
                     self::$httpHandlers[$class->getName()] = $handlerMeta;
+
+                    // Warm reflection cache for TypedHandlerInterface handlers
+                    if ($class->implementsInterface(TypedHandlerInterface::class)) {
+                        HandlerReflectionCache::warm($class->getName());
+                    }
                 }
             } catch (\Throwable $e) {
                 if (Environment::getEnvValue('APP_DEBUG') === '1') {

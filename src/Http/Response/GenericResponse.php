@@ -29,6 +29,11 @@ class GenericResponse implements ResourceInterface, LayoutRenderableInterface
         return $this;
     }
 
+    public function getStatusCode(): int
+    {
+        return $this->statusCode;
+    }
+
     public function setHeader(string $name, string $value): self
     {
         $this->headers[$name] = $value;
@@ -38,6 +43,21 @@ class GenericResponse implements ResourceInterface, LayoutRenderableInterface
     public function toCoreResponse(): CoreResponse
     {
         return new CoreResponse($this->content, $this->statusCode, $this->headers);
+    }
+
+    // Redirect support
+    private ?string $redirectUrl = null;
+
+    public function setRedirect(string $url, int $statusCode = 302): self
+    {
+        $this->redirectUrl = $url;
+        $this->statusCode = $statusCode;
+        return $this;
+    }
+
+    public function getRedirectUrl(): ?string
+    {
+        return $this->redirectUrl;
     }
 
     // Render pipeline hints (optional)

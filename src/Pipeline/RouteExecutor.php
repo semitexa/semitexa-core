@@ -14,8 +14,7 @@ use Semitexa\Core\Http\PayloadDtoFactory;
 use Semitexa\Core\Http\Response\ResponseFormat;
 use Semitexa\Core\Http\ContentNegotiator;
 use Semitexa\Core\Http\Exception\NegotiationFailedException;
-use Semitexa\Core\Pipeline\Exception\AuthenticationRequiredException;
-use Semitexa\Core\Pipeline\Exception\AccessDeniedException;
+use Semitexa\Core\Exception\DomainException;
 use Psr\Container\ContainerInterface;
 use Semitexa\Core\Container\RequestScopedContainer;
 
@@ -33,6 +32,8 @@ class RouteExecutor
      */
     public function execute(array $route, Request $request): Response
     {
+        $exceptionMapper = new ExceptionMapper();
+
         try {
             // 0. Reject unsupported Content-Type early
             $consumesResult = ContentNegotiator::checkConsumes(
@@ -76,10 +77,10 @@ class RouteExecutor
             // 6. Adapt to Core Response
             return $this->adaptResponse($resDto);
 
-        } catch (AuthenticationRequiredException $e) {
-            return Response::json(['error' => 'Unauthorized', 'message' => $e->getMessage()], 401);
-        } catch (AccessDeniedException $e) {
-            return Response::json(['error' => 'Forbidden', 'message' => $e->getMessage()], 403);
+        } catch (DomainException $e) {
+            return $exceptionMapper->map($e, $request, $route);
+        } catch (\Throwable $e) {
+            return $exceptionMapper->map($e, $request, $route);
         }
     }
 
@@ -157,18 +158,24 @@ class RouteExecutor
 
     private function renderResponse(object $resDto, ?object $reqDto, Request $request, array $route): object
     {
-        if (!method_exists($resDto, 'getRenderHandle')) {
-            return $resDto;
+        // Redirect short-circuit: if the resource has a redirect URL, skip rendering
+        if (method_exists($resDto, 'getRedirectUrl') && $resDto->getRedirectUrl() !== null) {
+            return Response::redirect($resDto->getRedirectUrl(), $resDto->getStatusCode());
         }
 
-        $handle = $resDto->getRenderHandle();
-        if (!$handle) {
-            return $resDto;
-        }
-
+        $handle = method_exists($resDto, 'getRenderHandle') ? $resDto->getRenderHandle() : null;
         $context = method_exists($resDto, 'getRenderContext') ? $resDto->getRenderContext() : [];
         /** @var ResponseFormat|null $format */
         $format = method_exists($resDto, 'getRenderFormat') ? $resDto->getRenderFormat() : null;
+
+        // No render handle: render as JSON if context is set, otherwise return as-is
+        if (!$handle) {
+            if ($context !== []) {
+                $format = $format ?? ResponseFormat::Json;
+            } else {
+                return $resDto;
+            }
+        }
         $rendererClass = method_exists($resDto, 'getRendererClass') ? $resDto->getRendererClass() : null;
 
         // Negotiate format when produces is set on the route

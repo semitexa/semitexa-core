@@ -6,7 +6,9 @@ namespace Semitexa\Core\Pipeline;
 
 use Psr\Container\ContainerInterface;
 use Semitexa\Core\Contract\HandlerInterface;
+use Semitexa\Core\Contract\TypedHandlerInterface;
 use Semitexa\Core\Event\EventDispatcherInterface;
+use Semitexa\Core\Response;
 use Semitexa\Core\Events\HandlerCompleted;
 use Semitexa\Core\Queue\HandlerExecution;
 use Semitexa\Core\Queue\QueueDispatcher;
@@ -56,19 +58,41 @@ final class PipelineExecutor
     }
 
     /**
-     * Bridge: HandlerInterface instances keep their contract (handle($req, $res): $res);
-     * PipelineListenerInterface instances receive the full context.
+     * Bridge: dispatches to the appropriate handler contract.
+     * - TypedHandlerInterface: invoke via reflection cache (concrete types, no instanceof in handler)
+     * - HandlerInterface (legacy): handle($req, $res): $res
+     * - PipelineListenerInterface: handle($context)
      */
     private function invokeListener(object $instance, RequestPipelineContext $context): void
     {
+        if ($instance instanceof TypedHandlerInterface) {
+            $result = HandlerReflectionCache::invoke(
+                $instance,
+                $context->requestDto,
+                $context->resourceDto,
+            );
+
+            if ($result instanceof Response) {
+                throw new \LogicException(sprintf(
+                    'Handler %s must return a ResourceInterface, not a Response object. '
+                    . 'Use domain exceptions for errors and resource DTO methods for data.',
+                    $instance::class,
+                ));
+            }
+
+            $context->resourceDto = $result;
+            return;
+        }
+
         if ($instance instanceof HandlerInterface) {
             $context->resourceDto = $instance->handle(
                 $context->requestDto,
                 $context->resourceDto,
             );
-        } else {
-            $instance->handle($context);
+            return;
         }
+
+        $instance->handle($context);
     }
 
     private function executeRouteHandlers(RequestPipelineContext $context): void
