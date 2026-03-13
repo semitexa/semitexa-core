@@ -221,7 +221,7 @@ class Application
             // Logger not available
         }
 
-        if ($e instanceof \Semitexa\Core\Http\Exception\NotFoundException) {
+        if ($e instanceof \Semitexa\Core\Exception\NotFoundException) {
             if ($logger) {
                 $logger->debug('Route not found', ['path' => $request->getPath(), 'message' => $e->getMessage()]);
             }
@@ -405,7 +405,7 @@ class Application
             && $config->urlRedirectDefault
             && in_array($request->getMethod(), ['GET', 'HEAD'], true)
         ) {
-            $target = $resolution->strippedPath;
+            $target = $resolution->strippedPath ?: '/';
             $qs = $request->getQueryString();
             if ($qs !== '') {
                 $target .= '?' . $qs;

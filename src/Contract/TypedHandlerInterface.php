@@ -16,8 +16,11 @@ namespace Semitexa\Core\Contract;
  * never a raw Response object.
  *
  * PHP interfaces cannot express covariant parameter types, so no handle() method
- * is declared here. The pipeline validates the signature at discovery time (boot)
- * and invokes via reflection-cached closures at runtime.
+ * is declared here. The pipeline validates the handle() signature at discovery time
+ * (boot) via HandlerReflectionCache::warm(): it checks that parameter 0 is a
+ * concrete class, parameter 1 implements ResourceInterface, extra parameters are
+ * optional, and the return type is not Response. Invocation uses the cached
+ * ReflectionMethod at request time.
  */
 interface TypedHandlerInterface
 {

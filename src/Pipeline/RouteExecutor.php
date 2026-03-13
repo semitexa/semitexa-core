@@ -77,6 +77,10 @@ class RouteExecutor
             // 6. Adapt to Core Response
             return $this->adaptResponse($resDto);
 
+        } catch (\Semitexa\Core\Exception\NotFoundException $e) {
+            // Let NotFoundException bubble up so Application::handleRouteException()
+            // can dispatch the custom error.404 route when registered.
+            throw $e;
         } catch (DomainException $e) {
             return $exceptionMapper->map($e, $request, $route);
         } catch (\Throwable $e) {
@@ -172,7 +176,9 @@ class RouteExecutor
         // No render handle: render as JSON if context is set, otherwise return as-is
         if (!$handle) {
             if ($context !== []) {
-                $format = $format ?? ResponseFormat::Json;
+                if ($format === null || $format === ResponseFormat::Layout) {
+                    $format = ResponseFormat::Json;
+                }
             } else {
                 return $resDto;
             }

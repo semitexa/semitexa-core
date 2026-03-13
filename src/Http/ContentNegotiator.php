@@ -21,7 +21,7 @@ final class ContentNegotiator
             return true;
         }
 
-        $method = $request->getMethod();
+        $method = strtoupper($request->getMethod());
         if (in_array($method, ['GET', 'HEAD', 'DELETE', 'OPTIONS'], true)) {
             return true;
         }
@@ -112,8 +112,12 @@ final class ContentNegotiator
             for ($i = 1, $n = count($segments); $i < $n; $i++) {
                 $kv = explode('=', trim($segments[$i]), 2);
                 if (count($kv) === 2 && strtolower(trim($kv[0])) === 'q') {
-                    $q = (float) trim($kv[1]);
+                    $q = max(0.0, min(1.0, (float) trim($kv[1])));
                 }
+            }
+
+            if ($q <= 0.0) {
+                continue;
             }
 
             $entries[] = [$mime, $q];

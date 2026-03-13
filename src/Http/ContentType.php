@@ -32,6 +32,10 @@ readonly class ContentType
 
         [$type, $subtype] = explode('/', $mediaType, 2);
 
+        if ($type === '' || $subtype === '' || str_contains($subtype, '/')) {
+            return null;
+        }
+
         $params = [];
         for ($i = 1, $count = count($segments); $i < $count; $i++) {
             $kv = explode('=', trim($segments[$i]), 2);

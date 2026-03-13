@@ -34,7 +34,7 @@ final class ExceptionMapper
         $body = [
             'error' => $e->getErrorCode(),
             'message' => $e->getMessage(),
-            ...$e->getErrorContext(),
+            'context' => $e->getErrorContext(),
         ];
 
         $format = $this->negotiateErrorFormat($request, $route);
@@ -93,11 +93,10 @@ final class ExceptionMapper
     private function arrayToXmlRecursive(array $data, \SimpleXMLElement $xml): void
     {
         foreach ($data as $key => $value) {
-            $key = is_int($key) ? 'item' : $key;
+            $key = is_int($key) ? 'item' : (string) $key;
             // Sanitize key to be a valid XML element name
-            $key = preg_replace('/[^a-zA-Z_][^a-zA-Z0-9_-]*/', '_', (string) $key);
-            $key = preg_replace('/^[0-9]/', '_', $key);
-            if ($key === '' || ctype_digit($key[0] ?? '')) {
+            $key = preg_replace('/[^a-zA-Z0-9_-]+/', '_', $key) ?? '_';
+            if (!preg_match('/^[a-zA-Z_]/', $key)) {
                 $key = '_' . $key;
             }
             if (is_array($value)) {

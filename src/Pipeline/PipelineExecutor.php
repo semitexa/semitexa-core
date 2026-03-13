@@ -66,6 +66,13 @@ final class PipelineExecutor
     private function invokeListener(object $instance, RequestPipelineContext $context): void
     {
         if ($instance instanceof TypedHandlerInterface) {
+            if ($context->resourceDto === null) {
+                throw new \LogicException(sprintf(
+                    'TypedHandlerInterface %s requires a resource DTO, but none was provided.',
+                    $instance::class,
+                ));
+            }
+
             $result = HandlerReflectionCache::invoke(
                 $instance,
                 $context->requestDto,

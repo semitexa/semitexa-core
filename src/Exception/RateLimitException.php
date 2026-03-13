@@ -11,6 +11,9 @@ class RateLimitException extends DomainException
     public function __construct(
         private readonly int $retryAfter = 60,
     ) {
+        if ($retryAfter < 0) {
+            throw new \InvalidArgumentException('$retryAfter must be non-negative.');
+        }
         parent::__construct('Too many requests.');
     }
 

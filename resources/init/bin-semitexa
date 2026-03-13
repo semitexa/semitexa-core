@@ -64,7 +64,6 @@ env_val() {
 
 # ── Docker Compose helpers ──────────────────────────────────────────────────
 has_compose() {
-    docker info >/dev/null 2>&1 && return 0
     docker compose version >/dev/null 2>&1 && return 0
     docker-compose version >/dev/null 2>&1 && return 0
     return 1
@@ -547,13 +546,19 @@ cmd_proxy() {
                     fi
                     info "Waiting for app container to be ready..."
                     _attempt=1
+                    _ready=0
                     while [ "$_attempt" -le 30 ]; do
                         if $_compose ps --format '{{.State}}' app 2>/dev/null | grep -q running; then
+                            _ready=1
                             break
                         fi
                         _attempt=$((_attempt + 1))
                         sleep 1
                     done
+                    if [ "$_ready" -ne 1 ]; then
+                        error "App container failed to reach running state after 30 seconds."
+                        exit 1
+                    fi
                     if [ -t 0 ] && [ -t 1 ]; then run_compose exec app php vendor/bin/semitexa "$@"; else run_compose exec -T app php vendor/bin/semitexa "$@"; fi
                 else
                     info "Running locally with PHP (no .env file for Docker)..."
@@ -564,7 +569,7 @@ cmd_proxy() {
                 php "$PROJECT_ROOT/vendor/bin/semitexa" "$@"
             fi
         else
-            error "vendor/bin/semitexa not found. Run: composer install"
+            error "vendor/bin/semitexa not found. Run: bin/semitexa install"
             exit 1
         fi
     else
