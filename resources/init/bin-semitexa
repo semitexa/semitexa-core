@@ -528,8 +528,66 @@ cmd_init() {
 }
 
 cmd_proxy() {
-    if ! is_app_running; then error "App container is not running."; info "Start with: bin/semitexa server:start"; exit 1; fi
-    if [ -t 0 ] && [ -t 1 ]; then run_compose exec app php vendor/bin/semitexa "$@"; else run_compose exec -T app php vendor/bin/semitexa "$@"; fi
+    if command -v php >/dev/null 2>&1; then
+        if [ -f "$PROJECT_ROOT/vendor/bin/semitexa" ]; then
+            if is_app_running; then
+                if [ -t 0 ] && [ -t 1 ]; then run_compose exec app php vendor/bin/semitexa "$@"; else run_compose exec -T app php vendor/bin/semitexa "$@"; fi
+            elif has_compose; then
+                if [ -f "$PROJECT_ROOT/.env" ]; then
+                    warn "App container is not running."
+                    info "Starting container to run command..."
+                    _compose="$(compose_bin)"
+                    _overlays="$(compose_args)"
+                    if [ -n "$_overlays" ]; then
+                        # shellcheck disable=SC2086
+                        $_compose $_overlays up -d app
+                    else
+                        $_compose up -d app
+                    fi
+                    info "Waiting for app container to be ready..."
+                    _attempt=1
+                    _ready=0
+                    while [ "$_attempt" -le 30 ]; do
+                        if $_compose ps --format '{{.State}}' app 2>/dev/null | grep -q running; then
+                            _ready=1
+                            break
+                        fi
+                        _attempt=$((_attempt + 1))
+                        sleep 1
+                    done
+                    if [ "$_ready" -ne 1 ]; then
+                        error "App container failed to reach running state after 30 seconds."
+                        exit 1
+                    fi
+                    if [ -t 0 ] && [ -t 1 ]; then run_compose exec app php vendor/bin/semitexa "$@"; else run_compose exec -T app php vendor/bin/semitexa "$@"; fi
+                else
+                    info "Running locally with PHP (no .env file for Docker)..."
+                    php "$PROJECT_ROOT/vendor/bin/semitexa" "$@"
+                fi
+            else
+                info "Running locally with PHP (Docker not available)..."
+                php "$PROJECT_ROOT/vendor/bin/semitexa" "$@"
+            fi
+        else
+            error "vendor/bin/semitexa not found. Run: bin/semitexa install"
+            exit 1
+        fi
+    else
+        if has_compose; then
+            if is_app_running; then
+                if [ -t 0 ] && [ -t 1 ]; then run_compose exec app php vendor/bin/semitexa "$@"; else run_compose exec -T app php vendor/bin/semitexa "$@"; fi
+            else
+                error "App container is not running."
+                info "Start with: bin/semitexa server:start"
+                exit 1
+            fi
+        else
+            error "PHP is not available and Docker is not running."
+            info "Either start Docker and run: bin/semitexa server:start"
+            info "Or install PHP locally"
+            exit 1
+        fi
+    fi
 }
 
 # ═══════════════════════════════════════════════════════════════════════

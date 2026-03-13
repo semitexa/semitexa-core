@@ -15,6 +15,8 @@ use Semitexa\Core\ModuleRegistry;
 use Semitexa\Core\Discovery\ClassDiscovery;
 use Semitexa\Core\Util\ProjectRoot;
 use Semitexa\Core\Queue\HandlerExecution;
+use Semitexa\Core\Contract\TypedHandlerInterface;
+use Semitexa\Core\Pipeline\HandlerReflectionCache;
 use ReflectionClass;
 
 /**
@@ -430,13 +432,25 @@ class AttributeDiscovery
                     }
                     self::$handlersByPayloadAndResource[$key][] = $handlerMeta;
                     self::$httpHandlers[$class->getName()] = $handlerMeta;
+
+                    // Warm reflection cache for TypedHandlerInterface handlers
+                    if ($class->implementsInterface(TypedHandlerInterface::class)) {
+                        try {
+                            HandlerReflectionCache::warm($class->getName());
+                        } catch (\LogicException $e) {
+                            throw new \LogicException(
+                                "Failed to warm reflection cache for TypedHandlerInterface handler {$class->getName()}: " . $e->getMessage(),
+                                0,
+                                $e
+                            );
+                        }
+                    }
                 }
             } catch (\Throwable $e) {
                 if (Environment::getEnvValue('APP_DEBUG') === '1') {
                     error_log("[Semitexa] AttributeDiscovery handler reflection: " . $e->getMessage());
                 }
             }
-        }
 
         self::assertPayloadsHaveDiscoveredRoutes();
 

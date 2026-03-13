@@ -24,6 +24,7 @@ use Semitexa\Core\Auth\AuthContextInterface;
 use Semitexa\Core\Locale\LocaleContextInterface;
 use Semitexa\Core\Locale\DefaultLocaleContext;
 use Semitexa\Locale\LocaleBootstrapper;
+use Semitexa\Locale\Context\LocaleContextStore;
 use Semitexa\Tenancy\Context\CoroutineContextStore;
 use Semitexa\Tenancy\Context\TenantContext as TenancyTenantContext;
 use Semitexa\Tenancy\TenancyBootstrapper;
@@ -67,6 +68,7 @@ class Application
 
     /** @var LocaleBootstrapper|null */
     private ?LocaleBootstrapper $localeBootstrapper = null;
+    private ?string $localeStrippedPath = null;
 
     public function __construct(?ContainerInterface $container = null)
     {
@@ -96,6 +98,7 @@ class Application
     public function handleRequest(Request $request): Response
     {
         return self::measure('Application::handleRequest', function() use ($request) {
+            $this->localeStrippedPath = null;
             $runId = 'initial';
             $segmentStart = microtime(true);
             $this->debugLog('H1', 'Application::handleRequest', 'request_received', [
@@ -115,15 +118,19 @@ class Application
             $this->initSessionAndCookies($request);
 
             // Locale resolution (Tenant → Locale order; locale can use request path/header)
-            $this->resolveLocaleAndUpdateContainer($request);
+            $localeRedirect = $this->resolveLocaleAndUpdateContainer($request);
+            if ($localeRedirect !== null) {
+                return $this->finalizeSessionAndCookies($request, $localeRedirect);
+            }
 
             // Initialize attribute discovery
             AttributeDiscovery::initialize();
 
             // Try to find route using AttributeDiscovery
-            $route = AttributeDiscovery::findRoute($request->getPath(), $request->getMethod());
+            $routingPath = $this->getRoutingPath($request);
+            $route = AttributeDiscovery::findRoute($routingPath, $request->getMethod());
             $this->debugLog('H1', 'Application::handleRequest', 'route_discovery', [
-                'path' => $request->getPath(),
+                'path' => $routingPath,
                 'method' => $request->getMethod(),
                 'routeFound' => (bool) $route,
                 'duration_ms' => round((microtime(true) - $segmentStart) * 1000, 2),
@@ -135,9 +142,8 @@ class Application
             if ($route) {
                 $response = $this->handleRoute($route, $request);
             } else {
-                $path = $request->getPath();
-                if ($path === '/' || $path === '') {
-                    $altPath = $path === '/' ? '' : '/';
+                if ($routingPath === '/' || $routingPath === '') {
+                    $altPath = $routingPath === '/' ? '' : '/';
                     $route = AttributeDiscovery::findRoute($altPath, $request->getMethod());
                     if ($route) {
                         $response = $this->handleRoute($route, $request);
@@ -145,8 +151,7 @@ class Application
                         $response = $this->helloWorld($request);
                     }
                 } else {
-                    $path = $request->getPath();
-                    if ($path === '/sse' && $request->getMethod() === 'GET') {
+                    if ($routingPath === '/sse' && $request->getMethod() === 'GET') {
                         // SSE support requires semitexa/ssr package
                     }
                     $response = $this->getNotFoundResponse($request);
@@ -216,7 +221,7 @@ class Application
             // Logger not available
         }
 
-        if ($e instanceof \Semitexa\Core\Http\Exception\NotFoundException) {
+        if ($e instanceof \Semitexa\Core\Exception\NotFoundException) {
             if ($logger) {
                 $logger->debug('Route not found', ['path' => $request->getPath(), 'message' => $e->getMessage()]);
             }
@@ -374,16 +379,55 @@ class Application
      * Resolve locale from request and set LocaleContextInterface in container.
      * Called after initSessionAndCookies so order is Tenant → Locale.
      */
-    private function resolveLocaleAndUpdateContainer(Request $request): void
+    private function resolveLocaleAndUpdateContainer(Request $request): ?Response
     {
         if ($this->localeBootstrapper === null || !$this->localeBootstrapper->isEnabled()) {
-            return;
+            return null;
         }
+
         $cookieJar = $this->requestScopedContainer->has(CookieJarInterface::class)
             ? $this->requestScopedContainer->get(CookieJarInterface::class)
             : null;
-        $this->localeBootstrapper->resolve($request, $cookieJar);
+
+        $resolution = $this->localeBootstrapper->resolve($request, $cookieJar);
         $this->requestScopedContainer->set(LocaleContextInterface::class, $this->localeBootstrapper->getLocaleContext());
+
+        $config = $this->localeBootstrapper->getConfig();
+
+        LocaleContextStore::setUrlPrefixEnabled($config->urlPrefixEnabled);
+        LocaleContextStore::setDefaultLocale($config->defaultLocale);
+
+        // 301 redirect: /{defaultLocale}/path → /path (GET/HEAD only)
+        if ($resolution !== null
+            && $resolution->hadPathPrefix
+            && $resolution->locale === $config->defaultLocale
+            && $config->urlPrefixEnabled
+            && $config->urlRedirectDefault
+            && in_array($request->getMethod(), ['GET', 'HEAD'], true)
+        ) {
+            $target = $resolution->strippedPath ?: '/';
+            $qs = $request->getQueryString();
+            if ($qs !== '') {
+                $target .= '?' . $qs;
+            }
+            return new Response('', 301, ['Location' => $target]);
+        }
+
+        // Store stripped path for routing
+        if ($resolution !== null && $resolution->strippedPath !== null && $config->urlPrefixEnabled) {
+            $this->localeStrippedPath = $resolution->strippedPath;
+        }
+
+        return null;
+    }
+
+    private function getRoutingPath(Request $request): string
+    {
+        if ($this->localeStrippedPath !== null) {
+            return $this->localeStrippedPath;
+        }
+
+        return $request->getPath();
     }
 
     /**
