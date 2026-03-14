@@ -1,7 +1,7 @@
 {
     "name": "semitexa/core",
     "description": "Core framework functionality for Semitexa Framework",
-    "version": "v1.1.48",
+    "version": "v1.1.49",
     "type": "composer-plugin",
     "license": "MIT",
     "authors": [
@@ -24,7 +24,10 @@
     "autoload": {
         "psr-4": {
             "Semitexa\\Core\\": "src/"
-        }
+        },
+        "exclude-from-classmap": [
+            "src/PHPStan/"
+        ]
     },
     "bin": [
         "bin/semitexa"
