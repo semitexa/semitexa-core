@@ -361,7 +361,7 @@ class InitCommand extends Command
             . "# Or: bin/semitexa server:start (uses this file automatically when REDIS_HOST is set).\n"
             . "services:\n  app:\n    environment:\n      REDIS_HOST: redis\n      REDIS_PORT: \"6379\"\n    depends_on:\n      redis:\n        condition: service_healthy\n"
             . "\n  redis:\n    image: redis:7-alpine\n    restart: unless-stopped\n"
-            . "    ports:\n      - \"\${REDIS_PORT:-6379}:6379\"\n    volumes:\n      - redis_data:/data\n"
+            . "    volumes:\n      - redis_data:/data\n"
             . "    healthcheck:\n      test: [\"CMD\", \"redis-cli\", \"ping\"]\n      interval: 10s\n      timeout: 5s\n      retries: 5\n      start_period: 10s\n"
             . "\nvolumes:\n  redis_data:\n";
     }
