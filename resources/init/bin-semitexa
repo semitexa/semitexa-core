@@ -510,7 +510,7 @@ cmd_install() {
     info "Building Docker image and running composer install inside container..."
     info "(This may take a few minutes on the first run)\n"
     _compose="$(compose_bin)"; $_compose build app
-    $_compose run --rm --no-deps app composer install --no-interaction --prefer-dist
+    $_compose run --rm --no-deps --user "$(id -u):$(id -g)" app composer install --no-interaction --prefer-dist
     if [ $? -eq 0 ]; then printf "\n"; success "Dependencies installed successfully!"; info "Next: bin/semitexa server:start"
     else printf "\n"; error "Installation failed. Check the output above."; exit 1; fi
     printf "\n"
@@ -524,7 +524,7 @@ cmd_init() {
         else printf 'APP_ENV=dev\nAPP_DEBUG=1\nSWOOLE_HOST=0.0.0.0\nSWOOLE_PORT=9502\n' > "$PROJECT_ROOT/.env"; fi
     fi
     info "Running init via Docker..."
-    _compose="$(compose_bin)"; $_compose run --rm --no-deps app php vendor/bin/semitexa init "$@"
+    _compose="$(compose_bin)"; $_compose run --rm --no-deps --user "$(id -u):$(id -g)" app php vendor/bin/semitexa init "$@"
 }
 
 cmd_proxy() {
