@@ -228,6 +228,23 @@ class RouteExecutor
 
     private function renderLayout(object $resDto, ?object $reqDto, string $handle, array $context, ?string $rendererClass): object
     {
+        // Resources that render via Twig template inheritance (HtmlResponse subclasses with a
+        // declared template or already-rendered content) bypass LayoutRenderer entirely.
+        // LayoutRenderer is intended for slot-based layout composition without Twig inheritance.
+        $existingContent = method_exists($resDto, 'getContent') ? $resDto->getContent() : '';
+
+        if ($existingContent === '' && method_exists($resDto, 'getDeclaredTemplate')) {
+            $declaredTemplate = $resDto->getDeclaredTemplate();
+            if ($declaredTemplate !== null && method_exists($resDto, 'renderTemplate')) {
+                $resDto->renderTemplate($declaredTemplate);
+                $existingContent = $resDto->getContent();
+            }
+        }
+
+        if ($existingContent !== '') {
+            return $resDto;
+        }
+
         $renderer = $rendererClass ?: 'Semitexa\\Ssr\\Layout\\LayoutRenderer';
         if (!class_exists($renderer)) {
             throw new \RuntimeException(

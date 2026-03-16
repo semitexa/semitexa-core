@@ -28,6 +28,7 @@ class AsResource
         public ?string $renderer = null,
         /** @var list<string>|null Response Content-Types this resource can produce. null = format-driven. */
         public ?array $produces = null,
+        public ?string $template = null,
     ) {
         $this->doc = $doc;
         if ($this->produces !== null) {

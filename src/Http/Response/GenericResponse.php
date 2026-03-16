@@ -23,6 +23,11 @@ class GenericResponse implements ResourceInterface, LayoutRenderableInterface
         return $this;
     }
 
+    public function getContent(): string
+    {
+        return $this->content;
+    }
+
     public function setStatusCode(int $statusCode): self
     {
         $this->statusCode = $statusCode;
