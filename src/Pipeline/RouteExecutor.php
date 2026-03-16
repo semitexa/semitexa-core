@@ -244,6 +244,9 @@ class RouteExecutor
         }
 
         if ($existingContent !== '') {
+            if (method_exists($resDto, 'setHeader')) {
+                $resDto->setHeader('Content-Type', 'text/html; charset=utf-8');
+            }
             return $resDto;
         }
 
