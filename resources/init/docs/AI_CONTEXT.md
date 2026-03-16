@@ -37,7 +37,7 @@ Detailed, technical documentation stays in each package (e.g. vendor/semitexa/co
 
 ## 🔍 Discovery
 - **Routes**: Built from `src/registry/Payloads/` (generated); module request DTOs live in `Application/Payload/Request/`. Session/Event DTOs in `Payload/Session/`, `Payload/Event/`. See **docs/MODULE_STRUCTURE.md**.
-- **Modules**: Discovered via `composer.json` in `src/modules/*` and `pakages/*` (or vendor).
+- **Modules**: Discovered via `composer.json` in `src/modules/*` and `packages/*` (or vendor).
 
 ## 🧪 Testing
 - **Unit**: `vendor/bin/phpunit`

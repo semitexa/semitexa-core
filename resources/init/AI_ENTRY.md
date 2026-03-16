@@ -7,7 +7,7 @@
 Use these versions so you don't assume outdated syntax or APIs:
 
 - **PHP:** ^8.4 (see `composer.json` / `composer.lock`)
-- **semitexa/core:** dev-main or v1.x (path packages: `pakages/semitexa-core` or `vendor/semitexa/core`)
+- **semitexa/core:** dev-main or v1.x (path packages: `packages/semitexa-core` or `vendor/semitexa/core`)
 - **semitexa/docs:** ^1.0 (AI_REFERENCE, guides)
 - **Key dependencies:** Symfony 7.x (console, process, etc.), Twig ^3.10, PSR Container (Semitexa custom DI: AsServiceContract, InjectAsReadonly/Mutable/Factory — see vendor/semitexa/core/src/Container/README.md)
 
@@ -24,7 +24,7 @@ Exact versions are in `composer.lock`. Do not assume Laravel, Illuminate, or Ker
 
 | Before you… | Read first |
 |-------------|------------|
-| Understand **why** Semitexa (philosophy, goals, pain) | **vendor/semitexa/docs/README.md** (vision) and **AI_REFERENCE.md** (for agents). Monorepo: **pakages/semitexa-docs/** |
+| Understand **why** Semitexa (philosophy, goals, pain) | **vendor/semitexa/docs/README.md** (vision) and **AI_REFERENCE.md** (for agents). Monorepo: **packages/semitexa-docs/** |
 | Create or change **module structure** (folders, Application/…) | **docs/MODULE_STRUCTURE.md** and **vendor/semitexa/core/docs/ADDING_ROUTES.md** |
 | Change **service contracts** or DI bindings | **vendor/semitexa/core/docs/SERVICE_CONTRACTS.md**; run `bin/semitexa contracts:list --json` to see current bindings |
 | Add **new pages or routes** | **vendor/semitexa/core/docs/ADDING_ROUTES.md** |

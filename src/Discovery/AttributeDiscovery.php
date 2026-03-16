@@ -744,7 +744,7 @@ class AttributeDiscovery
             return 300;
         }
 
-        if (str_contains($file, '/packages/') || str_contains($file, '/pakages/')) {
+        if (str_contains($file, '/packages/') || str_contains($file, '/packages/')) {
             return 200;
         }
 
