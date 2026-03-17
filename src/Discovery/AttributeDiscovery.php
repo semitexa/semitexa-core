@@ -694,7 +694,10 @@ class AttributeDiscovery
     {
         $result = $base;
         foreach (['handle', 'format', 'renderer', 'template', 'context', 'produces'] as $key) {
-            if ($override[$key] !== null && $override[$key] !== []) {
+            if (!\array_key_exists($key, $override)) {
+                continue;
+            }
+            if ($override[$key] !== null) {
                 $result[$key] = $override[$key];
             }
         }
@@ -709,7 +712,7 @@ class AttributeDiscovery
             'format' => $attr['format'] ?? null,
             'renderer' => $attr['renderer'] ?? null,
             'template' => $attr['template'] ?? null,
-            'context' => $attr['context'] ?? [],
+            'context' => \array_key_exists('context', $attr) ? $attr['context'] : null,
             'produces' => $attr['produces'] ?? null,
         ];
     }
