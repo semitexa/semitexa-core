@@ -473,10 +473,10 @@ class AttributeDiscovery
 
         // Discover layout slot contributions (optional)
         if (
-            class_exists('Semitexa\\Frontend\\Attributes\\AsLayoutSlot')
-            && class_exists('Semitexa\\Frontend\\Layout\\LayoutSlotRegistry')
+            class_exists('Semitexa\\Ssr\\Attributes\\AsLayoutSlot')
+            && class_exists('Semitexa\\Ssr\\Layout\\LayoutSlotRegistry')
         ) {
-            $slotAttribute = 'Semitexa\\Frontend\\Attributes\\AsLayoutSlot';
+            $slotAttribute = 'Semitexa\\Ssr\\Attributes\\AsLayoutSlot';
             $slotClasses = ClassDiscovery::findClassesWithAttribute($slotAttribute);
             foreach ($slotClasses as $className) {
                 try {
@@ -491,16 +491,16 @@ class AttributeDiscovery
                         $context = EnvValueResolver::resolve($meta->context);
                         $priority = $meta->priority;
                         \Semitexa\Ssr\Layout\LayoutSlotRegistry::register(
-                            handle: $handle,
-                            slot: $slot,
-                            template: $template,
-                            context: is_array($context) ? $context : [],
-                            priority: $priority,
-                            deferred: $meta->deferred ?? false,
-                            cacheTtl: $meta->cacheTtl ?? 0,
-                            dataProvider: $meta->dataProvider ?? null,
-                            skeletonTemplate: $meta->skeletonTemplate ?? null,
-                            mode: $meta->mode ?? 'html',
+                            $handle,
+                            $slot,
+                            $template,
+                            is_array($context) ? $context : [],
+                            $priority,
+                            $meta->deferred ?? false,
+                            $meta->cacheTtl ?? 0,
+                            $meta->dataProvider ?? null,
+                            $meta->skeletonTemplate ?? null,
+                            $meta->mode ?? 'html',
                         );
                     }
                 } catch (\Throwable $e) {
@@ -527,10 +527,14 @@ class AttributeDiscovery
                     $attrs = $class->getAttributes($dpAttribute);
                     foreach ($attrs as $attr) {
                         $meta = $attr->newInstance();
+                        if (!property_exists($meta, 'slot') || $meta->slot === null || $meta->slot === '') {
+                            throw new \RuntimeException("AsDataProvider on {$className} is missing slot.");
+                        }
+                        $handles = property_exists($meta, 'handles') && is_array($meta->handles) ? $meta->handles : [];
                         \Semitexa\Ssr\Application\Service\DataProviderRegistry::register(
                             $meta->slot,
                             $className,
-                            $meta->handles,
+                            $handles,
                         );
                     }
                 } catch (\Throwable $e) {
