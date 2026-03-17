@@ -155,6 +155,9 @@ class RouteExecutor
             if (isset($resolvedResponse['renderer']) && method_exists($resDto, 'setRendererClass')) {
                 $resDto->setRendererClass($resolvedResponse['renderer']);
             }
+            if (isset($resolvedResponse['template']) && method_exists($resDto, 'setDeclaredTemplate')) {
+                $resDto->setDeclaredTemplate($resolvedResponse['template']);
+            }
         }
 
         return $resDto;
@@ -235,7 +238,7 @@ class RouteExecutor
 
         if ($existingContent === '' && method_exists($resDto, 'getDeclaredTemplate')) {
             $declaredTemplate = $resDto->getDeclaredTemplate();
-            if ($declaredTemplate !== null && method_exists($resDto, 'renderTemplate')) {
+            if ($declaredTemplate !== null && $declaredTemplate !== '' && method_exists($resDto, 'renderTemplate')) {
                 $resDto->renderTemplate($declaredTemplate);
                 if (method_exists($resDto, 'getContent')) {
                     $existingContent = $resDto->getContent();

@@ -517,7 +517,10 @@ class AttributeDiscovery
             && class_exists('Semitexa\\Ssr\\Application\\Service\\DataProviderRegistry')
         ) {
             $dpAttribute = 'Semitexa\\Ssr\\Attributes\\AsDataProvider';
-            $dpClasses = ClassDiscovery::findClassesWithAttribute($dpAttribute);
+            $dpClasses = array_values(array_filter(
+                ClassDiscovery::findClassesWithAttribute($dpAttribute),
+                fn (string $class) => self::isModuleActiveForClass($class) || self::isProjectResource($class)
+            ));
             foreach ($dpClasses as $className) {
                 try {
                     $class = new \ReflectionClass($className);
@@ -624,6 +627,7 @@ class AttributeDiscovery
                         'handle' => $attr->handle !== null ? EnvValueResolver::resolve($attr->handle) : null,
                         'format' => $attr->format,
                         'renderer' => $attr->renderer !== null ? EnvValueResolver::resolve($attr->renderer) : null,
+                        'template' => $attr->template !== null ? EnvValueResolver::resolve($attr->template) : null,
                         'context' => $attr->context ?? [],
                         'base' => $attr->base !== null && $attr->base !== '' ? ltrim($attr->base, '\\') : null,
                         'produces' => $attr->produces,
@@ -685,7 +689,7 @@ class AttributeDiscovery
     private static function mergeResponseAttributes(array $base, array $override): array
     {
         $result = $base;
-        foreach (['handle', 'format', 'renderer', 'context', 'produces'] as $key) {
+        foreach (['handle', 'format', 'renderer', 'template', 'context', 'produces'] as $key) {
             if ($override[$key] !== null && $override[$key] !== []) {
                 $result[$key] = $override[$key];
             }
@@ -700,6 +704,7 @@ class AttributeDiscovery
             'handle' => $handle,
             'format' => $attr['format'] ?? null,
             'renderer' => $attr['renderer'] ?? null,
+            'template' => $attr['template'] ?? null,
             'context' => $attr['context'] ?? [],
             'produces' => $attr['produces'] ?? null,
         ];
@@ -788,7 +793,7 @@ class AttributeDiscovery
             return 300;
         }
 
-        if (str_contains($file, '/packages/') || str_contains($file, '/packages/')) {
+        if (str_contains($file, '/packages/')) {
             return 200;
         }
 
