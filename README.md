@@ -14,7 +14,7 @@ composer require semitexa/ultimate
 
 ## What's inside
 
-- **Request / Response / Handler** — Attributes `#[AsRequest]`, `#[AsRequestHandler]`, `#[AsResponse]`; discovery and routing
+- **Request / Response / Handler** — Attributes `#[AsPayload]`, `#[AsPayloadHandler]`, response DTOs, discovery, and routing
 - **CLI** — `bin/semitexa` with `init`, `server:start`, `server:stop`, `server:restart`, and code-generation commands
 - **Container** — PSR-style DI; request-scoped container for Swoole
 - **Docs** — In this package: [docs/ADDING_ROUTES.md](docs/ADDING_ROUTES.md), [docs/RUNNING.md](docs/RUNNING.md), [docs/attributes/README.md](docs/attributes/README.md)
@@ -26,7 +26,7 @@ composer require semitexa/ultimate
 | Adding pages and routes (modules) | [docs/ADDING_ROUTES.md](docs/ADDING_ROUTES.md) |
 | Running the app (Docker) | [docs/RUNNING.md](docs/RUNNING.md) |
 | Sessions and cookies | [docs/SESSIONS_AND_COOKIES.md](docs/SESSIONS_AND_COOKIES.md) |
-| Attributes (AsRequest, AsRequestHandler, etc.) | [docs/attributes/README.md](docs/attributes/README.md) |
+| Attributes (AsPayload, AsPayloadHandler, legacy aliases, etc.) | [docs/attributes/README.md](docs/attributes/README.md) |
 | Project scaffold templates (AI_ENTRY, docs/AI_CONTEXT, etc.) | [docs/scaffold/README.md](docs/scaffold/README.md) |
 
 For the full framework guide and package map, see the **semitexa/docs** package (e.g. `vendor/semitexa/docs/README.md` when installed).

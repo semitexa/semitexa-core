@@ -18,13 +18,15 @@ Exact versions are in `composer.lock`. Do not assume Laravel, Illuminate, or Ker
 - **Do not** add root-level directories or change module discovery without explicit user approval.
 - **Do not** add Composer dependencies without explicit user approval.
 - **Do not** create documentation files (README, guides, extra `.md` in the project) unless the user explicitly asks for them.
-- **Do not** create or use a `docs/` folder in the project root; use `var/docs/` for AI working files only.
+- Treat **`docs/`** as the canonical project documentation.
+- Treat **`var/docs/`** as scratch space for drafts, research notes, and temporary AI working files.
 
 ## Read before you change (mandatory)
 
 | Before you… | Read first |
 |-------------|------------|
 | Understand **why** Semitexa (philosophy, goals, pain) | **vendor/semitexa/docs/README.md** (vision) and **AI_REFERENCE.md** (for agents). Monorepo: **packages/semitexa-docs/** |
+| Understand the **project docs map** | **docs/README.md** |
 | Create or change **module structure** (folders, Application/…) | **docs/MODULE_STRUCTURE.md** and **vendor/semitexa/core/docs/ADDING_ROUTES.md** |
 | Change **service contracts** or DI bindings | **vendor/semitexa/core/docs/SERVICE_CONTRACTS.md**; run `bin/semitexa contracts:list --json` to see current bindings |
 | Add **new pages or routes** | **vendor/semitexa/core/docs/ADDING_ROUTES.md** |
@@ -33,7 +35,7 @@ Exact versions are in `composer.lock`. Do not assume Laravel, Illuminate, or Ker
 
 - **Modules:** only in `src/modules/`; standard layout: `Application/Payload/`, `Application/Resource/`, `Application/Handler/PayloadHandler/`, `Application/View/templates/`.
 - **Routes:** only via modules (Request + Handler with attributes). Do not add routes in project `src/` (App\ is not discovered).
-- **Payloads:** after adding or changing Payload classes (or `#[AsPayloadPart]` traits), do **not** run registry sync manually. Route/registry generation is handled automatically by the framework workflow.
+- **Payloads:** after adding or changing Payload classes (or `#[AsPayloadPart]` traits), do **not** treat `registry:sync` as a required manual step. Use registry commands only for maintenance/debug flows documented by the framework.
 - **Module autoload:** do not add per-module PSR-4 entries to project root `composer.json`; the framework autoloads from `src/modules/` at runtime.
 - **Contracts/DI:** before changing a contract or adding an override, run `bin/semitexa contracts:list` or `contracts:list --json` to see current implementations and active binding.
 
@@ -43,12 +45,20 @@ Exact versions are in `composer.lock`. Do not assume Laravel, Illuminate, or Ker
 - **public/** – web root
 - **src/** – application code; **new routes** go in **modules** (src/modules/), not in src/Request or src/Handler (App\ is not discovered for routes).
 - **src/modules/** – application modules (where to add new pages and endpoints). **Do not add per-module PSR-4 entries to composer.json** – the framework autoloads all modules from src/modules/ via IntelligentAutoloader at runtime.
+- **docs/** – canonical project docs for humans and AI: onboarding, architecture, conventions, decisions.
 - **var/log**, **var/cache** – runtime
-- **var/docs/** – working directory for AI only: temporary notes, plans, drafts. Content not committed (`.gitignore`). **Do not create or use a docs/ folder in the project root.**
+- **var/docs/** – working directory for notes, plans, drafts, and research. Do not treat it as canonical documentation.
 - **AI_NOTES.md** – your own notes for AI (created once, never overwritten by the framework).
 - **vendor/semitexa/** – framework packages
 
-## Framework docs (in vendor — read these, do not copy into project)
+## Documentation map
+
+- **docs/README.md** – project docs index and navigation.
+- **docs/AI_CONTEXT.md** – short project-specific AI context.
+- **vendor/semitexa/docs/README.md** and **AI_REFERENCE.md** – philosophy and goals.
+- **vendor/semitexa/core/docs/** – canonical framework reference.
+
+## Framework docs (package reference)
 
 - **vendor/semitexa/docs/README.md** and **AI_REFERENCE.md** – philosophy and goals; read first so changes align with project intent.
 - **vendor/semitexa/core/docs/ADDING_ROUTES.md** – how to add new pages/routes (modules only)
@@ -64,7 +74,7 @@ These commands produce **stable, parseable output** — use them instead of scra
 | Command | Output | Use when |
 |---------|--------|----------|
 | `bin/semitexa contracts:list --json` | JSON: `contracts[]` with `contract`, `active`, `implementations` | Debugging DI, checking bindings before/after changing contracts or modules. See vendor/semitexa/core/docs/SERVICE_CONTRACTS.md. |
-| `bin/semitexa registry:sync` | Syncs payloads + contracts into `src/registry/` | Maintenance/debug command. Do not treat it as a required manual step after ordinary payload or contract changes. |
+| `bin/semitexa registry:sync` | Runs available registry maintenance tasks | Maintenance/debug command. Do not treat it as a required manual step after ordinary payload changes unless a specific package doc tells you to. |
 
 (More commands may be added here with `--json` or similar; check `bin/semitexa list` and framework docs.)
 

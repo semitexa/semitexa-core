@@ -82,8 +82,8 @@ Request/Handler classes in the project folder `src/` (namespace `App\`) are **no
 
    The example above returns JSON. **For HTML pages** use a Response DTO with a Twig template — see the section **"Responses: JSON and HTML pages"** below (or AI_REFERENCE / guides in semitexa/docs).
 
-4. **Sync the registry**  
-   After adding or changing Request (Payload) classes, run **`bin/semitexa registry:sync:payloads`** (or **`bin/semitexa registry:sync`** to sync payloads and contracts). Routes are built from generated classes in `src/registry/Payloads/`; without this step the new page will not have a route. On `composer install`/`update` the Semitexa plugin runs `registry:sync` automatically.
+4. **Reload / clear stale runtime state if needed**  
+   After adding or changing Request (Payload) classes, treat this as ordinary code changes: reload the app or restart the container if your runtime has not picked them up yet. Do **not** treat `bin/semitexa registry:sync` as a required manual step for ordinary payload changes.
 
 5. **Reload**  
    Restart the app (e.g. `bin/semitexa server:stop` then `bin/semitexa server:start`) or ensure your runtime picks up the new classes; the framework will discover the new Request/Handler from the module.
@@ -140,15 +140,15 @@ If no route matches the request, or a handler throws `Semitexa\Core\Http\Excepti
 ## Common mistakes / FAQ
 
 **Why don’t my Request/Handler in `src/Request/` or `src/Handler/` work (404)?**  
-Because route discovery only uses **modules**. Classes in the project `src/` with namespace `App\` are not scanned for `#[AsRequest]` / `#[AsRequestHandler]`. Create a module in `src/modules/` with a `composer.json` (`"type": "semitexa-module"` and PSR-4 autoload) and put your Request/Handler there. See the step-by-step above.
+Because route discovery only uses **modules**. Classes in the project `src/` with namespace `App\` are not scanned for route attributes. Create a module in `src/modules/` with a `composer.json` (`"type": "semitexa-module"` and PSR-4 autoload) and put your Request/Handler there. See the step-by-step above.
 
 **I added a new Payload and Handler but the route doesn't exist (404)?**  
-Routes are built from **generated** classes in `src/registry/Payloads/`. After adding or changing a Payload (or `#[AsPayloadPart]` traits), run **`bin/semitexa registry:sync:payloads`** (or **`bin/semitexa registry:sync`**). If you forget, the app will throw a clear error at startup telling you to run that command.
+First verify the class lives inside a discovered module, the namespace matches the module PSR-4 mapping, and the app/container was reloaded after the change. `registry:sync` is a maintenance command, not the default fix for ordinary payload changes.
 
 **Can I patch `IntelligentAutoloader` or `AttributeDiscovery` to scan `App\`?**  
 Do not patch vendor. The supported way to add routes is via modules; changing framework discovery to scan `App\` would break the intended architecture (everything route-related lives in modules).
 
-**A future project check** could warn if classes with `#[AsRequest]` or `#[AsRequestHandler]` are found in project `src/Request/` or `src/Handler/` (namespace `App\`), and suggest moving them into a module (`src/modules/`).
+**A future project check** could warn if route-defining classes are found in project `src/Request/` or `src/Handler/` (namespace `App\`), and suggest moving them into a module (`src/modules/`).
 
 ---
 
@@ -156,5 +156,5 @@ Do not patch vendor. The supported way to add routes is via modules; changing fr
 
 - **New pages/routes = only via modules** (`src/modules/`, `packages/`, or `vendor/`).
 - **Never** add new routes as `App\Request\*` / `App\Handler\*` in project `src/Request/` or `src/Handler/`.
-- Each module: directory, `composer.json` with `"type": "semitexa-module"` and PSR-4 (e.g. `Semitexa\Modules\Website\` → `.`); root has `Semitexa\Modules\` → `src/modules/`. Then Request/Handler classes with `#[AsRequest]` and `#[AsRequestHandler]` in that namespace.
-- **After adding or changing Payloads:** run **`bin/semitexa registry:sync:payloads`** (or **`bin/semitexa registry:sync`**) so routes are generated; `composer install`/`update` runs this automatically.
+- Each module: directory, `composer.json` with `"type": "semitexa-module"` and PSR-4 (e.g. `Semitexa\Modules\Website\` → `.`); root has `Semitexa\Modules\` → `src/modules/`. Then Request/Handler classes with route attributes in that namespace.
+- **After adding or changing Payloads:** reload the running app if needed. Use `registry:sync` only for maintenance flows explicitly documented by a package.

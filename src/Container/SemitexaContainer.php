@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Container;
 
+use Semitexa\Core\Attributes\AsService;
 use Semitexa\Core\Attributes\InjectAsFactory;
 use Semitexa\Core\Attributes\InjectAsMutable;
 use Semitexa\Core\Attributes\InjectAsReadonly;
@@ -186,6 +187,11 @@ final class SemitexaContainer implements ContainerInterface
         // Handlers are not service contracts; register them so get($handlerClass) can resolve (mutable, per request).
         foreach (AttributeDiscovery::getDiscoveredPayloadHandlerClassNames() as $handlerClass) {
             $this->idToClass[$handlerClass] = $handlerClass;
+        }
+
+        // Plain singleton services marked with #[AsService] — readonly, shared per worker.
+        foreach (ClassDiscovery::findClassesWithAttribute(AsService::class) as $serviceClass) {
+            $this->idToClass[$serviceClass] = $serviceClass;
         }
 
         // Auth handlers (e.g. SessionAuthHandler) need request-scoped injection; register so they are mutable.
@@ -579,6 +585,12 @@ final class SemitexaContainer implements ContainerInterface
                 if ($factory !== null) {
                     $prop->setValue($instance, $factory);
                 }
+                continue;
+            }
+            // Allow pre-registered instances (e.g. interfaces set via set()) to be injected
+            // even when resolveToClass() would return null (interfaces not in idToClass).
+            if ($kind === 'readonly' && isset($this->readonlyInstances[$typeName])) {
+                $prop->setValue($instance, $this->readonlyInstances[$typeName]);
                 continue;
             }
             $targetClass = $this->resolveToClass($typeName);

@@ -36,6 +36,7 @@ class ContainerFactory
     private static function registerBootstrapEntries(SemitexaContainer $container): void
     {
         $container->set(\Semitexa\Core\Environment::class, \Semitexa\Core\Environment::create());
+        $container->set(\Psr\Container\ContainerInterface::class, $container);
         
         $root = \Semitexa\Core\Util\ProjectRoot::get();
         $container->set(\Semitexa\Core\ProjectContext::class, new \Semitexa\Core\ProjectContext(

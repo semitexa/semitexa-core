@@ -501,6 +501,7 @@ class AttributeDiscovery
                             $meta->dataProvider ?? null,
                             $meta->skeletonTemplate ?? null,
                             $meta->mode ?? 'html',
+                            $meta->refreshInterval ?? 0,
                         );
                     }
                 } catch (\Throwable $e) {
@@ -540,6 +541,80 @@ class AttributeDiscovery
                 } catch (\Throwable $e) {
                     if (Environment::getEnvValue('APP_DEBUG') === '1') {
                         error_log("[Semitexa] AttributeDiscovery data provider: " . $e->getMessage());
+                    }
+                }
+            }
+        }
+
+        // Discover AsSlotResource contributions (optional)
+        if (
+            class_exists('Semitexa\\Ssr\\Attributes\\AsSlotResource')
+            && class_exists('Semitexa\\Ssr\\Layout\\LayoutSlotRegistry')
+        ) {
+            $slotResourceAttribute = 'Semitexa\\Ssr\\Attributes\\AsSlotResource';
+            $slotResourceClasses = array_values(array_filter(
+                ClassDiscovery::findClassesWithAttribute($slotResourceAttribute),
+                fn (string $class) => self::isModuleActiveForClass($class) || self::isProjectResource($class)
+            ));
+            foreach ($slotResourceClasses as $className) {
+                try {
+                    $class = new \ReflectionClass($className);
+                    $attrs = $class->getAttributes($slotResourceAttribute);
+                    foreach ($attrs as $attr) {
+                        /** @var \Semitexa\Ssr\Attributes\AsSlotResource $meta */
+                        $meta = $attr->newInstance();
+                        $template = EnvValueResolver::resolve($meta->template);
+                        $context = EnvValueResolver::resolve($meta->context);
+                        \Semitexa\Ssr\Layout\LayoutSlotRegistry::register(
+                            handle: $meta->handle,
+                            slot: $meta->slot,
+                            template: is_string($template) ? $template : $meta->template,
+                            context: is_array($context) ? $context : [],
+                            priority: $meta->priority,
+                            deferred: $meta->deferred,
+                            cacheTtl: $meta->cacheTtl,
+                            dataProvider: null,
+                            skeletonTemplate: $meta->skeletonTemplate,
+                            mode: $meta->mode,
+                            refreshInterval: $meta->refreshInterval,
+                            resourceClass: $className,
+                            clientModules: $meta->clientModules,
+                        );
+                    }
+                } catch (\Throwable $e) {
+                    if (Environment::getEnvValue('APP_DEBUG') === '1') {
+                        error_log("[Semitexa] AttributeDiscovery slot resource: " . $e->getMessage());
+                    }
+                }
+            }
+        }
+
+        // Discover AsSlotHandler contributions (optional)
+        if (
+            class_exists('Semitexa\\Ssr\\Attributes\\AsSlotHandler')
+            && class_exists('Semitexa\\Ssr\\Layout\\SlotHandlerRegistry')
+        ) {
+            $slotHandlerAttribute = 'Semitexa\\Ssr\\Attributes\\AsSlotHandler';
+            $slotHandlerClasses = array_values(array_filter(
+                ClassDiscovery::findClassesWithAttribute($slotHandlerAttribute),
+                fn (string $class) => self::isModuleActiveForClass($class) || self::isProjectResource($class)
+            ));
+            foreach ($slotHandlerClasses as $className) {
+                try {
+                    $class = new \ReflectionClass($className);
+                    $attrs = $class->getAttributes($slotHandlerAttribute);
+                    foreach ($attrs as $attr) {
+                        /** @var \Semitexa\Ssr\Attributes\AsSlotHandler $meta */
+                        $meta = $attr->newInstance();
+                        \Semitexa\Ssr\Layout\SlotHandlerRegistry::register(
+                            slotClass: $meta->slot,
+                            handlerClass: $className,
+                            priority: $meta->priority,
+                        );
+                    }
+                } catch (\Throwable $e) {
+                    if (Environment::getEnvValue('APP_DEBUG') === '1') {
+                        error_log("[Semitexa] AttributeDiscovery slot handler: " . $e->getMessage());
                     }
                 }
             }

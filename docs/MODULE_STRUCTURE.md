@@ -1,6 +1,6 @@
-# Module structure: Payloads and Event Handlers
+# Module structure: Payloads and Handlers
 
-All DTOs (payloads) and event-driven handlers in a Semitexa module use a **single Payload folder with subfolders by type**.
+This is the canonical Semitexa module layout for request payloads, handlers, and response DTOs.
 
 ---
 
@@ -14,7 +14,7 @@ All DTOs (payloads) and event-driven handlers in a Semitexa module use a **singl
 
 **Namespaces:** `Semitexa\Modules\{Module}\Application\Payload\Request\`, `...\Payload\Session\`, `...\Payload\Event\`.
 
-Do **not** put these in `Application/Session/` or `Application/Handler/` at module root — use **`Application/Payload/Request/`**, **`Payload/Session/`**, **`Payload/Event/`** only.
+Do **not** put these in `Application/Session/` or other ad-hoc module-root folders. Use **`Application/Payload/Request/`**, **`Payload/Session/`**, **`Payload/Event/`** only.
 
 Request DTOs can declare pipeline requirements: `#[RequiresAuth]`, `#[RequiresAbility('ability')]`.
 
@@ -49,4 +49,4 @@ Application/
 
 ---
 
-See **ADDING_ROUTES.md** for adding new routes; project **docs/MODULE_STRUCTURE.md** for the full layout with pipeline docs.
+See **ADDING_ROUTES.md** for adding new routes. Project-level docs may extend this with app-specific conventions, but package and project docs should keep the same folder names.

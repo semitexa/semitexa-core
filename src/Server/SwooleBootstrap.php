@@ -74,17 +74,41 @@ class SwooleBootstrap
         $pendingDeliverTable->column('payload', Table::TYPE_STRING, $env->swooleSsePayloadMaxBytes);
         $pendingDeliverTable->create();
 
+        // Isomorphic SSR deferred-request registry — must be created pre-fork so all
+        // workers share the same mmap-backed Table (page context keyed by request ID).
+        $deferredRequestTable = null;
+        if (class_exists(\Semitexa\Ssr\Isomorphic\DeferredRequestRegistry::class)) {
+            $isomorphicConfig = \Semitexa\Ssr\Configuration\IsomorphicConfig::fromEnvironment();
+            if ($isomorphicConfig->enabled) {
+                $deferredRequestTable = \Semitexa\Ssr\Isomorphic\DeferredRequestRegistry::createSharedTable($isomorphicConfig);
+            }
+        }
+
         $corsHandler = new CorsHandler($env);
         $healthHandler = new HealthCheckHandler();
         $staticAssetHandler = new StaticAssetHandler();
 
-        $server->on('WorkerStart', function (Server $server, int $workerId) use ($sessionWorkerTable, $deliverTable, $pendingDeliverTable) {
+        $server->on('WorkerStart', function (Server $server, int $workerId) use ($sessionWorkerTable, $deliverTable, $pendingDeliverTable, $deferredRequestTable) {
             Environment::syncEnvFromFiles();
             ContainerFactory::create();
             ModuleAssetRegistry::initialize();
+            if (class_exists(\Semitexa\Ssr\Asset\AssetCollector::class)) {
+                \Semitexa\Ssr\Asset\AssetCollector::boot();
+            }
             if (class_exists(\Semitexa\Ssr\Async\AsyncResourceSseServer::class)) {
                 \Semitexa\Ssr\Async\AsyncResourceSseServer::setServer($server);
                 \Semitexa\Ssr\Async\AsyncResourceSseServer::setTables($sessionWorkerTable, $deliverTable, $pendingDeliverTable);
+            }
+            // Inject the pre-fork shared table so every worker can read deferred request
+            // context written by any other worker, then start the per-worker GC timer.
+            if ($deferredRequestTable !== null && class_exists(\Semitexa\Ssr\Isomorphic\DeferredRequestRegistry::class)) {
+                \Semitexa\Ssr\Isomorphic\DeferredRequestRegistry::setTable($deferredRequestTable);
+                \Semitexa\Ssr\Isomorphic\DeferredRequestRegistry::initialize();
+            }
+            // Register the 'ssr' asset alias and publish template files in every worker
+            // so StaticAssetHandler can serve /assets/ssr/tpl/*.twig from any worker.
+            if (class_exists(\Semitexa\Ssr\Isomorphic\DeferredTemplateRegistry::class)) {
+                \Semitexa\Ssr\Isomorphic\DeferredTemplateRegistry::initialize();
             }
         });
 
@@ -155,6 +179,9 @@ class SwooleBootstrap
                 unset(Coroutine::getContext()[self::COROUTINE_CONTEXT_KEY]);
                 if ($app !== null) {
                     $app->requestScopedContainer->reset();
+                }
+                if (class_exists(\Semitexa\Ssr\Asset\AssetCollectorStore::class)) {
+                    \Semitexa\Ssr\Asset\AssetCollectorStore::reset();
                 }
                 if (!$sent) {
                     $ensureResponseSent();
