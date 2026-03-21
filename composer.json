@@ -1,7 +1,7 @@
 {
     "name": "semitexa/core",
     "description": "Core framework functionality for Semitexa Framework",
-    "version": "v1.1.54",
+    "version": "1.1.55",
     "type": "composer-plugin",
     "license": "MIT",
     "authors": [
