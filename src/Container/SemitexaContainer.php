@@ -10,7 +10,6 @@ use Semitexa\Core\Attributes\InjectAsMutable;
 use Semitexa\Core\Attributes\InjectAsReadonly;
 use Semitexa\Core\Discovery\AttributeDiscovery;
 use Semitexa\Core\Discovery\ClassDiscovery;
-use Semitexa\Core\Pipeline\AccessCheck;
 use Semitexa\Core\Pipeline\AuthCheck;
 use Semitexa\Core\Pipeline\HandleRequest;
 use Semitexa\Core\Pipeline\PipelineListenerRegistry;
@@ -201,8 +200,8 @@ final class SemitexaContainer implements ContainerInterface
             }
         }
 
-        // Pipeline listeners (e.g. AuthCheckListener) are resolved per request; register so they are mutable.
-        foreach ([AuthCheck::class, AccessCheck::class, HandleRequest::class] as $phaseClass) {
+        // Pipeline listeners are resolved per request; register so they are mutable.
+        foreach ([AuthCheck::class, HandleRequest::class] as $phaseClass) {
             foreach (PipelineListenerRegistry::getListeners($phaseClass) as $meta) {
                 $this->idToClass[$meta['class']] = $meta['class'];
             }

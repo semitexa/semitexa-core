@@ -90,6 +90,9 @@ class SwooleBootstrap
 
         $server->on('WorkerStart', function (Server $server, int $workerId) use ($sessionWorkerTable, $deliverTable, $pendingDeliverTable, $deferredRequestTable) {
             Environment::syncEnvFromFiles();
+            // Refresh the Composer autoloader classmap so any packages added since the master
+            // process started (e.g. after composer update + graceful reload) are auto-loadable.
+            self::refreshComposerClassMap();
             ContainerFactory::create();
             ModuleAssetRegistry::initialize();
             if (class_exists(\Semitexa\Ssr\Asset\AssetCollector::class)) {
@@ -191,6 +194,43 @@ class SwooleBootstrap
 
         self::printBanner($env, $config);
         $server->start();
+    }
+
+    /**
+     * Re-read the Composer classmap from disk and add any new entries to the registered ClassLoader.
+     * Needed in graceful-reload scenarios: the master process loaded an older classmap, and forked
+     * workers inherit the stale autoloader. Calling this at WorkerStart ensures newly-installed
+     * packages are auto-loadable without a full server restart.
+     */
+    private static function refreshComposerClassMap(): void
+    {
+        $composerDir = \Semitexa\Core\Util\ProjectRoot::get() . '/vendor/composer';
+        $classMapFile = $composerDir . '/autoload_classmap.php';
+        $psr4File = $composerDir . '/autoload_psr4.php';
+
+        if (!is_file($classMapFile)) {
+            return;
+        }
+
+        try {
+            $freshClassMap = require $classMapFile;
+            $freshPsr4 = is_file($psr4File) ? require $psr4File : [];
+
+            foreach (spl_autoload_functions() as $loader) {
+                if (!is_array($loader) || !($loader[0] instanceof \Composer\Autoload\ClassLoader)) {
+                    continue;
+                }
+                /** @var \Composer\Autoload\ClassLoader $classLoader */
+                $classLoader = $loader[0];
+                $classLoader->addClassMap($freshClassMap);
+                foreach ($freshPsr4 as $namespace => $dirs) {
+                    $classLoader->addPsr4($namespace, $dirs);
+                }
+                break;
+            }
+        } catch (\Throwable) {
+            // Autoloader refresh is best-effort; never block worker startup.
+        }
     }
 
     private static function verifyRequirements(): void

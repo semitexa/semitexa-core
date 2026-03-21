@@ -24,7 +24,13 @@ class ClassDiscovery
             return;
         }
 
-        $composerClassMap = require ProjectRoot::get() . '/vendor/composer/autoload_classmap.php';
+        $composerDir = ProjectRoot::get() . '/vendor/composer';
+        $composerClassMap = require $composerDir . '/autoload_classmap.php';
+
+        // Refresh the Composer ClassLoader with the current classmap and PSR-4 namespaces.
+        // Needed after graceful Swoole reload: workers inherit the master's stale ClassLoader,
+        // so newly-installed packages fail to autoload at request time.
+        self::refreshComposerAutoloader($composerDir, $composerClassMap);
 
         foreach ($composerClassMap as $className => $filePath) {
             if (self::isNamespaceAllowed($className)) {
@@ -61,8 +67,9 @@ class ClassDiscovery
 
             try {
                 $reflection = new \ReflectionClass($className);
+                $attrs = $reflection->getAttributes($attributeClass);
 
-                if ($reflection->getAttributes($attributeClass)) {
+                if ($attrs) {
                     $classes[] = $className;
                 }
             } catch (\Throwable $e) {
@@ -82,6 +89,36 @@ class ClassDiscovery
         self::initialize();
 
         return self::$classMap;
+    }
+
+    /**
+     * Inject the current classmap and PSR-4 namespace map into the Composer ClassLoader.
+     * This is a no-op on first boot (the ClassLoader is already current), but after a
+     * Swoole graceful reload the master's forked workers inherit a stale ClassLoader —
+     * calling this at ClassDiscovery::initialize() time ensures every newly-installed
+     * package is autoloadable without a full server restart.
+     */
+    private static function refreshComposerAutoloader(string $composerDir, array $freshClassMap): void
+    {
+        try {
+            $psr4File = $composerDir . '/autoload_psr4.php';
+            $freshPsr4 = is_file($psr4File) ? (require $psr4File) : [];
+
+            foreach (spl_autoload_functions() as $loader) {
+                if (!is_array($loader) || !($loader[0] instanceof \Composer\Autoload\ClassLoader)) {
+                    continue;
+                }
+                /** @var \Composer\Autoload\ClassLoader $classLoader */
+                $classLoader = $loader[0];
+                $classLoader->addClassMap($freshClassMap);
+                foreach ($freshPsr4 as $namespace => $dirs) {
+                    $classLoader->addPsr4($namespace, $dirs);
+                }
+                break;
+            }
+        } catch (\Throwable) {
+            // Autoloader refresh is best-effort; never block initialization.
+        }
     }
 
     private static function isNamespaceAllowed(string $className): bool

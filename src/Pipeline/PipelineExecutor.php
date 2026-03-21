@@ -14,7 +14,7 @@ use Semitexa\Core\Queue\HandlerExecution;
 use Semitexa\Core\Queue\QueueDispatcher;
 
 /**
- * Executes the request pipeline: a fixed sequence of phases (Auth → Access → Handle).
+ * Executes the request pipeline: a fixed sequence of phases (AuthCheck → HandleRequest).
  *
  * Pipeline listeners are always synchronous — the response depends on their result.
  * Domain events (HandlerCompleted) are dispatched after the pipeline completes.
@@ -32,7 +32,7 @@ final class PipelineExecutor
      */
     protected function getPhases(): array
     {
-        return [AuthCheck::class, AccessCheck::class, HandleRequest::class];
+        return [AuthCheck::class, HandleRequest::class];
     }
 
     public function execute(RequestPipelineContext $context): void
