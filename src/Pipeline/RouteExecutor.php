@@ -28,7 +28,7 @@ class RouteExecutor
     ) {}
 
     /**
-     * @param array{type?: string, class?: string, handlers?: list<array{class?: string, execution?: string}>, responseClass?: string, method?: string, name?: string} $route
+     * @param array{type?: string, class?: string, handlers?: list<array{class?: string, execution?: string}>, responseClass?: string, method?: string, name?: string, consumes?: list<string>, produces?: list<string>} $route
      */
     public function execute(array $route, Request $request): Response
     {
