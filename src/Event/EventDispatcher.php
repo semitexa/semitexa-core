@@ -53,6 +53,7 @@ final class EventDispatcher implements EventDispatcherInterface
 
     private function runListenerSync(array $meta, object $event): void
     {
+        /** @var \Semitexa\Core\Container\SemitexaContainer $container */
         $container = ContainerFactory::get();
         try {
             if ($container->has($meta['class'])) {
