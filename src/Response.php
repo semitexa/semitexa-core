@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Semitexa\Core;
 
 use Semitexa\Core\Contract\ResourceInterface;
+use Semitexa\Core\Http\HttpStatus;
 
 /**
  * HTTP Response representation
@@ -13,7 +14,7 @@ readonly class Response implements ResourceInterface
 {
     public function __construct(
         public string $content,
-        public int $statusCode = 200,
+        public int $statusCode = HttpStatus::Ok->value,
         public array $headers = [],
         public bool $alreadySent = false,
     ) {}
@@ -21,7 +22,7 @@ readonly class Response implements ResourceInterface
     /** Use when the response was already sent (e.g. SSE stream); bootstrap will not call end(). */
     public static function alreadySent(): self
     {
-        return new self('', 200, [], true);
+        return new self('', HttpStatus::Ok->value, [], true);
     }
 
     public function isAlreadySent(): bool
@@ -29,7 +30,7 @@ readonly class Response implements ResourceInterface
         return $this->alreadySent;
     }
     
-    public static function json(array $data, int $statusCode = 200): self
+    public static function json(array $data, int $statusCode = HttpStatus::Ok->value): self
     {
         $encoded = json_encode(
             $data,
@@ -42,7 +43,7 @@ readonly class Response implements ResourceInterface
         );
     }
     
-    public static function text(string $content, int $statusCode = 200): self
+    public static function text(string $content, int $statusCode = HttpStatus::Ok->value): self
     {
         return new self(
             content: $content,
@@ -51,7 +52,7 @@ readonly class Response implements ResourceInterface
         );
     }
     
-    public static function html(string $content, int $statusCode = 200): self
+    public static function html(string $content, int $statusCode = HttpStatus::Ok->value): self
     {
         return new self(
             content: $content,
@@ -65,10 +66,10 @@ readonly class Response implements ResourceInterface
         return self::json([
             'error' => 'Not Found',
             'message' => $message
-        ], 404);
+        ], HttpStatus::NotFound->value);
     }
     
-    public static function redirect(string $url, int $statusCode = 302): self
+    public static function redirect(string $url, int $statusCode = HttpStatus::Found->value): self
     {
         return new self(
             content: '',

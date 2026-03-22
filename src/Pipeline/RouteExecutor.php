@@ -13,6 +13,7 @@ use Semitexa\Core\Discovery\AttributeDiscovery;
 use Semitexa\Core\Http\PayloadDtoFactory;
 use Semitexa\Core\Http\Response\ResponseFormat;
 use Semitexa\Core\Http\ContentNegotiator;
+use Semitexa\Core\Http\HttpStatus;
 use Semitexa\Core\Http\Exception\NegotiationFailedException;
 use Semitexa\Core\Exception\DomainException;
 use Psr\Container\ContainerInterface;
@@ -45,7 +46,7 @@ class RouteExecutor
                     'error' => 'Unsupported Media Type',
                     'message' => "Content-Type '{$consumesResult}' is not supported.",
                     'supported' => $route['consumes'],
-                ], 415);
+                ], HttpStatus::UnsupportedMediaType->value);
             }
 
             // 1. Hydrate and Validate
@@ -110,14 +111,14 @@ class RouteExecutor
                 $reqDto->setHttpRequest($request);
             }
         } catch (\Semitexa\Core\Http\Exception\TypeMismatchException $e) {
-            return [$reqDto, Response::json(['errors' => [$e->field => [$e->getMessage()]]], 422)];
+            return [$reqDto, Response::json(['errors' => [$e->field => [$e->getMessage()]]], HttpStatus::UnprocessableEntity->value)];
         } catch (\Throwable) {
             // Continue with empty DTO if hydration fails
         }
 
         $validationResult = PayloadValidator::validate($reqDto, $request);
         if (!$validationResult->isValid()) {
-            return [$reqDto, Response::json(['errors' => $validationResult->getErrors()], 422)];
+            return [$reqDto, Response::json(['errors' => $validationResult->getErrors()], HttpStatus::UnprocessableEntity->value)];
         }
 
         return [$reqDto, null];
@@ -167,7 +168,7 @@ class RouteExecutor
     {
         // Redirect short-circuit: if the resource has a redirect URL, skip rendering
         if (method_exists($resDto, 'getRedirectUrl') && $resDto->getRedirectUrl() !== null) {
-            $statusCode = method_exists($resDto, 'getStatusCode') ? $resDto->getStatusCode() : 302;
+            $statusCode = method_exists($resDto, 'getStatusCode') ? $resDto->getStatusCode() : HttpStatus::Found->value;
             return Response::redirect($resDto->getRedirectUrl(), $statusCode);
         }
 
@@ -200,7 +201,7 @@ class RouteExecutor
                     'error' => 'Not Acceptable',
                     'message' => $e->getMessage(),
                     'available' => $e->produces,
-                ], 406);
+                ], HttpStatus::NotAcceptable->value);
             }
         }
 

@@ -6,13 +6,14 @@ namespace Semitexa\Core\Http\Response;
 
 use Semitexa\Core\Contract\LayoutRenderableInterface;
 use Semitexa\Core\Contract\ResourceInterface;
+use Semitexa\Core\Http\HttpStatus;
 use Semitexa\Core\Response as CoreResponse;
 
 class GenericResponse implements ResourceInterface, LayoutRenderableInterface
 {
     public function __construct(
         private string $content = '',
-        private int $statusCode = 200,
+        private int $statusCode = HttpStatus::Ok->value,
         private array $headers = []
     ) {
     }
@@ -53,7 +54,7 @@ class GenericResponse implements ResourceInterface, LayoutRenderableInterface
     // Redirect support
     private ?string $redirectUrl = null;
 
-    public function setRedirect(string $url, int $statusCode = 302): self
+    public function setRedirect(string $url, int $statusCode = HttpStatus::Found->value): self
     {
         $this->redirectUrl = $url;
         $this->statusCode = $statusCode;

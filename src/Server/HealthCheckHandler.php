@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Semitexa\Core\Server;
 
 use Swoole\Http\Request as SwooleRequest;
+use Semitexa\Core\Http\HttpStatus;
 use Swoole\Http\Response as SwooleResponse;
 
 readonly class HealthCheckHandler
@@ -15,7 +16,7 @@ readonly class HealthCheckHandler
             return false;
         }
 
-        $response->status(200);
+        $response->status(HttpStatus::Ok->value);
         $response->header('Content-Type', 'application/json');
         $response->end(json_encode([
             'status' => 'ok',

@@ -29,6 +29,7 @@ enum HttpStatus: int
     case NotAcceptable       = 406;
     case Conflict            = 409;
     case Gone                = 410;
+    case UnsupportedMediaType = 415;
     case UnprocessableEntity = 422;
     case TooManyRequests     = 429;
 
@@ -60,6 +61,7 @@ enum HttpStatus: int
             self::NotAcceptable       => 'Not Acceptable',
             self::Conflict            => 'Conflict',
             self::Gone                => 'Gone',
+            self::UnsupportedMediaType => 'Unsupported Media Type',
             self::UnprocessableEntity => 'Unprocessable Entity',
             self::TooManyRequests     => 'Too Many Requests',
             self::InternalServerError => 'Internal Server Error',

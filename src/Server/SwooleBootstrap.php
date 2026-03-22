@@ -8,6 +8,7 @@ use Semitexa\Core\Application;
 use Semitexa\Core\Container\ContainerFactory;
 use Semitexa\Core\Environment;
 use Semitexa\Core\ErrorHandler;
+use Semitexa\Core\Http\HttpStatus;
 use Semitexa\Core\Http\SwooleResponseEmitter;
 use Semitexa\Core\Request;
 use Semitexa\Core\Session\SwooleSessionTableHolder;
@@ -144,7 +145,7 @@ class SwooleBootstrap
                     return;
                 }
                 try {
-                    @$response->status(500);
+                    @$response->status(HttpStatus::InternalServerError->value);
                     @$response->header('Content-Type', 'text/plain');
                     @$response->end('Internal Server Error');
                     $sent = true;
@@ -251,7 +252,7 @@ class SwooleBootstrap
 
     private static function handleError(\Throwable $e, SwooleResponse $response, Environment $env): void
     {
-        $response->status(500);
+        $response->status(HttpStatus::InternalServerError->value);
         $response->header('Content-Type', 'application/json');
         $payload = ['error' => 'Internal Server Error'];
         if ($env->isDebug()) {

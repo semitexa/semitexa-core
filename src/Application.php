@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Semitexa\Core;
 
 use Semitexa\Auth\AuthBootstrapper;
+use Semitexa\Core\Http\HttpStatus;
 use Semitexa\Core\Http\RouteType;
 use Semitexa\Core\Pipeline\RouteExecutor;
 use Semitexa\Core\Discovery\AttributeDiscovery;
@@ -282,7 +283,7 @@ class Application
     
     private function detectRuntimeMode(Request $request): string
     {
-            return 'swoole';
+        return 'swoole';
     }
     
     private function notFound(Request $request): Response
@@ -410,7 +411,7 @@ class Application
             if ($qs !== '') {
                 $target .= '?' . $qs;
             }
-            return new Response('', 301, ['Location' => $target]);
+            return new Response('', HttpStatus::MovedPermanently->value, ['Location' => $target]);
         }
 
         // Store stripped path for routing

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Semitexa\Core\Server;
 
 use Semitexa\Core\Environment;
+use Semitexa\Core\Http\HttpStatus;
 use Swoole\Http\Request as SwooleRequest;
 use Swoole\Http\Response as SwooleResponse;
 
@@ -37,7 +38,7 @@ readonly class CorsHandler
             $response->header('Access-Control-Allow-Methods', $this->env->corsAllowMethods);
             $response->header('Access-Control-Allow-Headers', $this->env->corsAllowHeaders);
             $response->header('Access-Control-Max-Age', '7200');
-            $response->status(204);
+            $response->status(HttpStatus::NoContent->value);
             $response->end();
             return true;
         }

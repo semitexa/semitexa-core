@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Semitexa\Core\Http;
 
 use Semitexa\Core\Request;
+use Semitexa\Core\Http\HttpStatus;
 use Semitexa\Core\Response;
 
 class ErrorRenderer
@@ -28,7 +29,7 @@ class ErrorRenderer
                 . '<h1>Internal Server Error</h1>'
                 . $detail
                 . '</div></body></html>';
-            return new Response($html, 500, ['Content-Type' => 'text/html; charset=utf-8']);
+            return new Response($html, HttpStatus::InternalServerError->value, ['Content-Type' => 'text/html; charset=utf-8']);
         }
 
         $payload = ['error' => 'Internal Server Error'];
@@ -36,6 +37,6 @@ class ErrorRenderer
             $payload['message'] = $e->getMessage();
             $payload['trace'] = $e->getTraceAsString();
         }
-        return Response::json($payload, 500);
+        return Response::json($payload, HttpStatus::InternalServerError->value);
     }
 }
