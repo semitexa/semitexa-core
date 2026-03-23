@@ -35,6 +35,9 @@ Exact versions are in `composer.lock`. Do not assume Laravel, Illuminate, or Ker
 
 - **Modules:** only in `src/modules/`; standard layout: `Application/Payload/`, `Application/Resource/`, `Application/Handler/PayloadHandler/`, `Application/View/templates/`.
 - **Routes:** only via modules (Request + Handler with attributes). Do not add routes in project `src/` (App\ is not discovered).
+- **Generators first:** before hand-authoring new `Payload` / `Handler` / `Response` / page scaffolding, check whether a Semitexa generator exists via `bin/semitexa ai:capabilities --json`.
+- **Use command-first flow:** if capability discovery shows a matching generator, prefer the generator over writing repetitive boilerplate manually.
+- **Use follow-up hints:** after generator execution, prefer machine-readable follow-up output such as `--llm-hints` to continue only the unresolved domain logic.
 - **Payloads:** after adding or changing Payload classes (or `#[AsPayloadPart]` traits), do **not** treat `registry:sync` as a required manual step. Use registry commands only for maintenance/debug flows documented by the framework.
 - **Module autoload:** do not add per-module PSR-4 entries to project root `composer.json`; the framework autoloads from `src/modules/` at runtime.
 - **Contracts/DI:** before changing a contract or adding an override, run `bin/semitexa contracts:list` or `contracts:list --json` to see current implementations and active binding.
@@ -73,10 +76,22 @@ These commands produce **stable, parseable output** — use them instead of scra
 
 | Command | Output | Use when |
 |---------|--------|----------|
+| `bin/semitexa ai:capabilities --json` | JSON: machine-readable command catalog with `use_when`, `avoid_when`, inputs, outputs, and follow-up support | Run early when the task may match a built-in generator or other AI-relevant command. Prefer this before writing boilerplate manually. |
 | `bin/semitexa contracts:list --json` | JSON: `contracts[]` with `contract`, `active`, `implementations` | Debugging DI, checking bindings before/after changing contracts or modules. See vendor/semitexa/core/docs/SERVICE_CONTRACTS.md. |
 | `bin/semitexa registry:sync` | Runs available registry maintenance tasks | Maintenance/debug command. Do not treat it as a required manual step after ordinary payload changes unless a specific package doc tells you to. |
 
 (More commands may be added here with `--json` or similar; check `bin/semitexa list` and framework docs.)
+
+## Recommended AI workflow
+
+When a task sounds like "add a page", "create a payload", "add a response DTO", or other canonical Semitexa scaffolding:
+
+1. Run `bin/semitexa ai:capabilities --json`.
+2. If a matching generator exists, use the generator first instead of writing structural boilerplate by hand.
+3. Prefer `--dry-run` if overwrite risk exists.
+4. After generation, use `--llm-hints` when available to continue only the remaining domain-specific implementation.
+
+Do not default to manual scaffolding when the framework can generate the deterministic structure safely.
 
 ## Debugging: service contracts (for AI agents and developers)
 

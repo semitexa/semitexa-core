@@ -35,5 +35,9 @@
     ],
     "extra": {
         "class": "Semitexa\\Core\\Composer\\SemitexaPlugin"
-    }
+    },
+    "keywords": [
+        "semitexa",
+        "core"
+    ]
 }

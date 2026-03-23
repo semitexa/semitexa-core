@@ -46,7 +46,8 @@ class ServerStartCommand extends BaseCommand
         $useRabbitMq = $this->shouldUseRabbitMqCompose($projectRoot);
         $useMysql = $this->shouldUseMysqlCompose($projectRoot);
         $useRedis = $this->shouldUseRedisCompose($projectRoot);
-        $composeArgs = $this->getComposeBaseArgs($projectRoot, $useRabbitMq, $useMysql, $useRedis);
+        $useOllama = $this->shouldUseOllamaCompose($projectRoot);
+        $composeArgs = $this->getComposeBaseArgs($projectRoot, $useRabbitMq, $useMysql, $useRedis, $useOllama);
 
         $io->section('Starting containers...');
 
@@ -59,6 +60,9 @@ class ServerStartCommand extends BaseCommand
         }
         if ($useRedis) {
             $overlays[] = 'docker-compose.redis.yml (REDIS_HOST set)';
+        }
+        if ($useOllama) {
+            $overlays[] = 'docker-compose.ollama.yml (LLM_PROVIDER=ollama)';
         }
         if ($overlays !== []) {
             $io->text('Using docker-compose.yml + ' . implode(' + ', $overlays) . '.');
@@ -98,6 +102,7 @@ class ServerStartCommand extends BaseCommand
         $this->reportRabbitMqStatus($io, $projectRoot, $eventsAsync, $useRabbitMq, $composeArgs);
         $this->reportMysqlStatus($io, $projectRoot, $useMysql, $composeArgs);
         $this->reportRedisStatus($io, $projectRoot, $useRedis, $composeArgs);
+        $this->reportOllamaStatus($io, $projectRoot, $useOllama, $composeArgs);
 
         return Command::SUCCESS;
     }
@@ -142,10 +147,23 @@ class ServerStartCommand extends BaseCommand
         return $content !== false && (bool) preg_match('/^\s*REDIS_HOST\s*=\s*\S+/m', $content);
     }
 
+    private function shouldUseOllamaCompose(string $projectRoot): bool
+    {
+        if (!file_exists($projectRoot . '/docker-compose.ollama.yml')) {
+            return false;
+        }
+        $envFile = $projectRoot . '/.env';
+        if (!file_exists($envFile)) {
+            return false;
+        }
+        $content = file_get_contents($envFile);
+        return $content !== false && (bool) preg_match('/^\s*LLM_PROVIDER\s*=\s*ollama\s*$/mi', $content);
+    }
+
     /**
      * @return list<string>
      */
-    private function getComposeBaseArgs(string $projectRoot, bool $useRabbitMq, bool $useMysql = false, bool $useRedis = false): array
+    private function getComposeBaseArgs(string $projectRoot, bool $useRabbitMq, bool $useMysql = false, bool $useRedis = false, bool $useOllama = false): array
     {
         $overlays = [];
         if ($useRabbitMq && file_exists($projectRoot . '/docker-compose.rabbitmq.yml')) {
@@ -156,6 +174,9 @@ class ServerStartCommand extends BaseCommand
         }
         if ($useRedis && file_exists($projectRoot . '/docker-compose.redis.yml')) {
             $overlays[] = 'docker-compose.redis.yml';
+        }
+        if ($useOllama && file_exists($projectRoot . '/docker-compose.ollama.yml')) {
+            $overlays[] = 'docker-compose.ollama.yml';
         }
         if ($overlays === []) {
             return [];
@@ -304,6 +325,52 @@ class ServerStartCommand extends BaseCommand
             $io->warning([
                 'Redis: not reachable after ' . $maxAttempts . ' attempts (container may still be starting).',
                 'Try again in a few seconds.',
+            ]);
+        }
+    }
+
+    /**
+     * @param list<string> $composeArgs
+     */
+    private function reportOllamaStatus(SymfonyStyle $io, string $projectRoot, bool $useOllamaCompose, array $composeArgs): void
+    {
+        if (!$useOllamaCompose) {
+            return;
+        }
+
+        $cmd = array_merge(
+            ['docker', 'compose'],
+            $composeArgs,
+            ['exec', '-T', 'app',
+            'php', '-r',
+            '$h = "ollama"; $p = 11434; $s = @fsockopen($h, $p, $err, $errstr, 3); if ($s) { fclose($s); exit(0); } exit(1);',
+            ]
+        );
+        $maxAttempts = 5;
+        $delaySeconds = 3;
+        $reachable = false;
+
+        sleep(3);
+
+        for ($attempt = 1; $attempt <= $maxAttempts; $attempt++) {
+            if ($attempt > 1) {
+                sleep($delaySeconds);
+            }
+            $check = new Process($cmd, $projectRoot);
+            $check->setTimeout(8);
+            $check->run();
+            if ($check->isSuccessful()) {
+                $reachable = true;
+                break;
+            }
+        }
+
+        if ($reachable) {
+            $io->success('Ollama: reachable. Run `docker compose exec ollama ollama pull gemma3:4b` to pull a model if you have not already.');
+        } else {
+            $io->warning([
+                'Ollama: not reachable after ' . $maxAttempts . ' attempts (container may still be starting).',
+                'Try again in a few seconds. Then pull a model: docker compose exec ollama ollama pull gemma3:4b',
             ]);
         }
     }

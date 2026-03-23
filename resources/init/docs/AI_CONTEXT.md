@@ -26,6 +26,7 @@ Project-specific guidance lives in `docs/`. Detailed framework reference stays i
 ## 🛠 Common Tasks
 
 ### Adding a New Page/Endpoint
+0.  **Check generators first**: before creating `Payload`, `Handler`, `Response`, or template scaffolding manually, run `bin/semitexa ai:capabilities --json`. If a matching generator exists, prefer the generator and then use `--llm-hints` for the remaining domain logic.
 1.  **Create Module**: `src/modules/MyFeature/` + `composer.json` (`type: semitexa-module`).
 2.  **Request DTO**: Create `Application/Payload/Request/MyPagePayload.php` with `#[AsPayload(path, methods, responseWith)]`. See **docs/MODULE_STRUCTURE.md** (Payload/Request, Session, Event; Handlers by type).
 3.  **Handler**: Create `Application/Handler/PayloadHandler/MyPageHandler.php` with `#[AsPayloadHandler(payload: ..., resource: ...)]`.
@@ -37,6 +38,7 @@ Project-specific guidance lives in `docs/`. Detailed framework reference stays i
 3.  Inject: In consumers use **property injection** — `#[InjectAsReadonly]`, `#[InjectAsMutable]`, or `#[InjectAsFactory]` on protected properties. No constructor injection. See **vendor/semitexa/core/docs/SERVICE_CONTRACTS.md** and **vendor/semitexa/core/src/Container/README.md**.
 
 ## 🔍 Discovery
+- **Capabilities**: run `bin/semitexa ai:capabilities --json` early when the task may match built-in Semitexa generators. Use this before writing canonical scaffolding manually.
 - **Routes**: Built from `src/registry/Payloads/` (generated); module request DTOs live in `Application/Payload/Request/`. Session/Event DTOs in `Payload/Session/`, `Payload/Event/`. See **docs/MODULE_STRUCTURE.md**.
 - **Modules**: Discovered via `composer.json` in `src/modules/*` and `packages/*` (or vendor).
 

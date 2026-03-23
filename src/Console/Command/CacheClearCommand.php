@@ -5,6 +5,9 @@ declare(strict_types=1);
 namespace Semitexa\Core\Console\Command;
 
 use Semitexa\Core\Attributes\AsCommand;
+use Semitexa\Llm\Attributes\AsAiSkill;
+use Semitexa\Llm\Policy\AiConfirmationMode;
+use Semitexa\Llm\Policy\AiRiskLevel;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputOption;
@@ -18,6 +21,17 @@ use Symfony\Component\Process\Process;
  * When cache was created by Swoole (e.g. in Docker as root), run with --via-docker so the command runs inside the container and can delete the files.
  */
 #[AsCommand(name: 'cache:clear', description: 'Clear application cache (e.g. var/cache/twig). Use after template changes or when cache is stale.')]
+#[AsAiSkill(
+    allowed: true,
+    summary: 'Clear application cache after template or configuration changes.',
+    useWhen: 'User asks to clear cache, refresh templates, or fix stale runtime state.',
+    avoidWhen: 'User asks to restart services, rebuild containers, or reset Docker.',
+    riskLevel: AiRiskLevel::Medium,
+    confirmation: AiConfirmationMode::Always,
+    supportsDryRun: false,
+    argumentPolicy: 'allowlisted',
+    exposeArguments: ['twig'],
+)]
 class CacheClearCommand extends BaseCommand
 {
     private const CACHE_DIRS = ['twig'];

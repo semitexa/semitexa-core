@@ -6,6 +6,9 @@ namespace Semitexa\Core\Console\Command;
 
 use Semitexa\Core\Attributes\AsCommand;
 use Semitexa\Core\Container\ServiceContractRegistry;
+use Semitexa\Llm\Attributes\AsAiSkill;
+use Semitexa\Llm\Policy\AiConfirmationMode;
+use Semitexa\Llm\Policy\AiRiskLevel;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputOption;
@@ -17,6 +20,17 @@ use Symfony\Component\Console\Style\SymfonyStyle;
  * Helps developers and AI agents see contract → implementation binding and debug DI.
  */
 #[AsCommand(name: 'contracts:list', description: 'List service contracts (interfaces) and their active implementation. Use when debugging which class is bound to an interface.')]
+#[AsAiSkill(
+    allowed: true,
+    summary: 'List registered service contracts and their active implementations.',
+    useWhen: 'User asks to inspect DI bindings, debug interface resolution, or see which class implements an interface.',
+    avoidWhen: 'User asks to modify contracts or change DI configuration.',
+    riskLevel: AiRiskLevel::Low,
+    confirmation: AiConfirmationMode::Never,
+    supportsDryRun: false,
+    argumentPolicy: 'allowlisted',
+    exposeArguments: ['json'],
+)]
 class ContractsListCommand extends BaseCommand
 {
     protected function configure(): void

@@ -10,12 +10,17 @@ use Semitexa\Core\Http\RequestDtoHydrator;
 use Semitexa\Core\Http\PayloadValidator;
 use Semitexa\Core\Http\Response\GenericResponse;
 use Semitexa\Core\Discovery\AttributeDiscovery;
+use Semitexa\Core\Discovery\DefaultRouteMetadataResolver;
+use Semitexa\Core\Discovery\ResolvedRouteMetadata;
 use Semitexa\Core\Http\PayloadDtoFactory;
 use Semitexa\Core\Http\Response\ResponseFormat;
 use Semitexa\Core\Http\ContentNegotiator;
 use Semitexa\Core\Http\HttpStatus;
 use Semitexa\Core\Http\Exception\NegotiationFailedException;
 use Semitexa\Core\Exception\DomainException;
+use Semitexa\Core\Contract\ExceptionResponseMapperInterface;
+use Semitexa\Core\Contract\RouteResponseDecoratorInterface;
+use Semitexa\Core\Contract\RouteMetadataResolverInterface;
 use Psr\Container\ContainerInterface;
 use Semitexa\Core\Container\RequestScopedContainer;
 
@@ -33,26 +38,27 @@ class RouteExecutor
      */
     public function execute(array $route, Request $request): Response
     {
-        $exceptionMapper = new ExceptionMapper();
+        $metadata = $this->resolveRouteMetadata($route);
+        $exceptionMapper = $this->resolveExceptionMapper();
 
         try {
             // 0. Reject unsupported Content-Type early
             $consumesResult = ContentNegotiator::checkConsumes(
-                $route['consumes'] ?? null,
+                $metadata->consumes,
                 $request
             );
             if ($consumesResult !== true) {
-                return Response::json([
+                return $this->decorateResponse(Response::json([
                     'error' => 'Unsupported Media Type',
                     'message' => "Content-Type '{$consumesResult}' is not supported.",
-                    'supported' => $route['consumes'],
-                ], HttpStatus::UnsupportedMediaType->value);
+                    'supported' => $metadata->consumes,
+                ], HttpStatus::UnsupportedMediaType->value), $request, $metadata);
             }
 
             // 1. Hydrate and Validate
             [$reqDto, $validationResponse] = $this->hydrateRequest($route, $request);
             if ($validationResponse) {
-                return $validationResponse;
+                return $this->decorateResponse($validationResponse, $request, $metadata);
             }
 
             // 2. Resolve Response DTO
@@ -65,6 +71,7 @@ class RouteExecutor
                 request: $request,
                 resourceDto: $resDto,
                 authBootstrapper: $this->authBootstrapper,
+                resolvedMetadata: $metadata,
             );
 
             // 4. Execute Pipeline
@@ -76,17 +83,58 @@ class RouteExecutor
             $resDto = $this->renderResponse($resDto, $reqDto, $request, $route);
 
             // 6. Adapt to Core Response
-            return $this->adaptResponse($resDto);
+            return $this->decorateResponse($this->adaptResponse($resDto), $request, $metadata);
 
         } catch (\Semitexa\Core\Exception\NotFoundException $e) {
             // Let NotFoundException bubble up so Application::handleRouteException()
             // can dispatch the custom error.404 route when registered.
             throw $e;
         } catch (DomainException $e) {
-            return $exceptionMapper->map($e, $request, $route);
+            return $this->decorateResponse($exceptionMapper->map($e, $request, $metadata), $request, $metadata);
         } catch (\Throwable $e) {
-            return $exceptionMapper->map($e, $request, $route);
+            return $this->decorateResponse($exceptionMapper->map($e, $request, $metadata), $request, $metadata);
         }
+    }
+
+    /**
+     * Resolve route metadata through the registered RouteMetadataResolverInterface.
+     * Falls back to the DefaultRouteMetadataResolver when the container has no binding.
+     */
+    private function resolveRouteMetadata(array $route): ResolvedRouteMetadata
+    {
+        if ($this->container->has(RouteMetadataResolverInterface::class)) {
+            /** @var RouteMetadataResolverInterface $resolver */
+            $resolver = $this->container->get(RouteMetadataResolverInterface::class);
+            return $resolver->resolve($route);
+        }
+
+        return (new DefaultRouteMetadataResolver())->resolve($route);
+    }
+
+    /**
+     * Resolve the exception mapper through the container.
+     * Falls back to a bare ExceptionMapper when the container has no binding.
+     */
+    private function resolveExceptionMapper(): ExceptionResponseMapperInterface
+    {
+        if ($this->container->has(ExceptionResponseMapperInterface::class)) {
+            /** @var ExceptionResponseMapperInterface $mapper */
+            $mapper = $this->container->get(ExceptionResponseMapperInterface::class);
+            return $mapper;
+        }
+
+        return new ExceptionMapper();
+    }
+
+    private function decorateResponse(Response $response, Request $request, ResolvedRouteMetadata $metadata): Response
+    {
+        if ($this->container->has(RouteResponseDecoratorInterface::class)) {
+            /** @var RouteResponseDecoratorInterface $decorator */
+            $decorator = $this->container->get(RouteResponseDecoratorInterface::class);
+            return $decorator->decorate($response, $request, $metadata);
+        }
+
+        return (new DefaultRouteResponseDecorator())->decorate($response, $request, $metadata);
     }
 
     /**

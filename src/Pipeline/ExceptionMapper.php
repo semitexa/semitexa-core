@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Pipeline;
 
+use Semitexa\Core\Attributes\SatisfiesServiceContract;
+use Semitexa\Core\Contract\ExceptionResponseMapperInterface;
+use Semitexa\Core\Discovery\ResolvedRouteMetadata;
 use Semitexa\Core\Exception\DomainException;
 use Semitexa\Core\Exception\RateLimitException;
 use Semitexa\Core\Http\ContentNegotiator;
@@ -14,22 +17,27 @@ use Semitexa\Core\Response;
 /**
  * Maps domain exceptions to content-negotiated HTTP error responses.
  * Stateless — safe across Swoole coroutines.
+ *
+ * This is the Core default implementation of ExceptionResponseMapperInterface.
+ * Packages such as semitexa-api may override the binding to produce machine-facing
+ * error envelopes for routes that carry the 'external_api' extension flag.
  */
-final class ExceptionMapper
+#[SatisfiesServiceContract(of: ExceptionResponseMapperInterface::class)]
+final class ExceptionMapper implements ExceptionResponseMapperInterface
 {
     /**
      * Convert a caught exception into an error Response.
      */
-    public function map(\Throwable $e, Request $request, array $route): Response
+    public function map(\Throwable $e, Request $request, ResolvedRouteMetadata $metadata): Response
     {
         if ($e instanceof DomainException) {
-            return $this->mapDomainException($e, $request, $route);
+            return $this->mapDomainException($e, $request, $metadata);
         }
 
         return $this->mapUnknownException($e);
     }
 
-    private function mapDomainException(DomainException $e, Request $request, array $route): Response
+    private function mapDomainException(DomainException $e, Request $request, ResolvedRouteMetadata $metadata): Response
     {
         $status = $e->getStatusCode();
         $body = [
@@ -38,7 +46,7 @@ final class ExceptionMapper
             'context' => $e->getErrorContext(),
         ];
 
-        $format = $this->negotiateErrorFormat($request, $route);
+        $format = $this->negotiateErrorFormat($request, $metadata->produces);
 
         $response = match ($format) {
             'json' => Response::json($body, $status->value),
@@ -61,14 +69,10 @@ final class ExceptionMapper
         throw $e;
     }
 
-    private function negotiateErrorFormat(Request $request, array $route): string
+    private function negotiateErrorFormat(Request $request, ?array $produces): string
     {
         try {
-            return ContentNegotiator::negotiateResponseFormat(
-                $route['produces'] ?? null,
-                $request,
-                'json',
-            );
+            return ContentNegotiator::negotiateResponseFormat($produces, $request, 'json');
         } catch (\Throwable) {
             return 'json';
         }

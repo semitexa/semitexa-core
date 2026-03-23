@@ -13,7 +13,7 @@ use Attribute;
  * for the same interface, the one from the module that "extends" the other wins
  * (child module has higher priority).
  */
-#[Attribute(Attribute::TARGET_CLASS)]
+#[Attribute(Attribute::TARGET_CLASS | Attribute::IS_REPEATABLE)]
 final class SatisfiesServiceContract
 {
     public function __construct(
