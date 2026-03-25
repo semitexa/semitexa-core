@@ -1,32 +1,28 @@
-# Semitexa Core
+# semitexa/core
 
-> **Philosophy & ideology** — [Why Semitexa: vision and principles](../semitexa-docs/README.md). The detailed, technical documentation for this package is below.
+Framework runtime: request/response lifecycle, attribute-driven discovery, DI container, CLI tooling, and Swoole integration.
 
-Core framework functionality for Semitexa: request/response handling, attributes, discovery, CLI, and Swoole integration.
+## Purpose
 
-## Installation
+The foundation of every Semitexa application. Manages the full request lifecycle — from route discovery via PHP 8.4 attributes through handler execution to response rendering. Provides the DI container with two-tier scoping (worker-readonly + request-mutable), the CLI via `bin/semitexa`, and the Composer plugin for classmap-based discovery.
 
-Usually included when you create or install a Semitexa application:
+## Role in Semitexa
 
-```bash
-composer require semitexa/ultimate
-```
+Root dependency for all Semitexa packages. Every module, platform component, and library builds on Core's attribute discovery, container, and pipeline.
 
-## What's inside
+## Key Features
 
-- **Request / Response / Handler** — Attributes `#[AsPayload]`, `#[AsPayloadHandler]`, response DTOs, discovery, and routing
-- **CLI** — `bin/semitexa` with `init`, `server:start`, `server:stop`, `server:restart`, and code-generation commands
-- **Container** — PSR-style DI; request-scoped container for Swoole
-- **Docs** — In this package: [docs/ADDING_ROUTES.md](docs/ADDING_ROUTES.md), [docs/RUNNING.md](docs/RUNNING.md), [docs/attributes/README.md](docs/attributes/README.md)
+- `#[AsPayload]` / `#[AsPayloadHandler]` attribute-driven routing
+- `AttributeDiscovery` and `ClassDiscovery` via Composer classmap
+- Two-tier DI: `SemitexaContainer` (worker-scoped readonly) + `RequestScopedContainer` (per-request mutable)
+- `RouteExecutor` pipeline with exception mapping and response decoration
+- `ExceptionResponseMapperInterface` / `RouteMetadataResolverInterface` / `RouteInspectionRegistryInterface` seams
+- `HttpStatus` enum replacing magic integers
+- `EventDispatcher` with sync/defer/queued modes
+- Redis and SwooleTable session handlers
+- `bin/semitexa` CLI (server:start, db:migrate, code generation)
+- Composer plugin for framework integration
 
-## Documentation
+## Notes
 
-| Topic | File |
-|-------|------|
-| Adding pages and routes (modules) | [docs/ADDING_ROUTES.md](docs/ADDING_ROUTES.md) |
-| Running the app (Docker) | [docs/RUNNING.md](docs/RUNNING.md) |
-| Sessions and cookies | [docs/SESSIONS_AND_COOKIES.md](docs/SESSIONS_AND_COOKIES.md) |
-| Attributes (AsPayload, AsPayloadHandler, legacy aliases, etc.) | [docs/attributes/README.md](docs/attributes/README.md) |
-| Project scaffold templates (AI_ENTRY, docs/AI_CONTEXT, etc.) | [docs/scaffold/README.md](docs/scaffold/README.md) |
-
-For the full framework guide and package map, see the **semitexa/docs** package (e.g. `vendor/semitexa/docs/README.md` when installed).
+Core is a Composer plugin (`type: composer-plugin`). It installs framework scaffolding and provides classmap-based discovery. The two-tier container design is essential for Swoole: readonly bindings survive across requests, mutable bindings are cloned per request.
