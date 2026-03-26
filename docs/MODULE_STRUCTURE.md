@@ -26,6 +26,7 @@ Request DTOs can declare pipeline requirements: `#[RequiresAuth]`, `#[RequiresAb
 |-----------|---------|-----------|
 | **PayloadHandler** | HTTP handlers (payload → resource) | `#[AsPayloadHandler(payload: ..., resource: ...)]` |
 | **System** | Pipeline listeners (Auth/Access phases) | `#[AsPipelineListener(phase: ..., priority: ...)]` |
+| **Server** | Swoole server lifecycle hooks including pre-fork bootstrap | `#[AsServerLifecycleListener(phase: ..., priority: ...)]` |
 | **DomainListener** | Domain event listeners (sync/async/queued) | `#[AsEventListener(event: ..., execution: ...)]` |
 
 ---
@@ -42,6 +43,7 @@ Application/
 │   ├── PayloadHandler/   # HTTP handlers
 │   ├── System/           # Pipeline listeners
 │   └── DomainListener/   # Domain event listeners
+├── Server/               # Swoole server lifecycle listeners
 ├── Resource/             # Response DTOs
 ├── View/templates/
 └── Service/              # optional

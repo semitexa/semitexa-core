@@ -40,7 +40,6 @@ class AsPayload
         public ?string $base = null,
         /** Class name of the Request this one overrides (strict chain: only current head can be overridden) */
         public ?string $overrides = null,
-        public ?string $responseWith = null,
         public ?string $path = null,
         /** @var list<string>|null $methods */
         public ?array $methods = null,
@@ -55,12 +54,18 @@ class AsPayload
         public ?array $tags = null,
         public ?bool $public = null,
         public string $protocol = 'http',
+        public ?string $responseWith = null,
         /** @var list<string>|null Request Content-Types this endpoint accepts. null = all. */
         public ?array $consumes = null,
+        /** @var list<string>|null Response Content-Types this endpoint can produce. null = all. */
+        public ?array $produces = null,
     ) {
         $this->doc = $doc;
         if ($this->consumes !== null) {
             $this->consumes = array_map('strtolower', $this->consumes);
+        }
+        if ($this->produces !== null) {
+            $this->produces = array_map('strtolower', $this->produces);
         }
     }
 }

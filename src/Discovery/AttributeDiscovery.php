@@ -12,7 +12,6 @@ use Semitexa\Core\Attributes\AsResourcePart;
 use Semitexa\Core\Config\EnvValueResolver;
 use Semitexa\Core\Environment;
 use Semitexa\Core\ModuleRegistry;
-use Semitexa\Core\Discovery\ClassDiscovery;
 use Semitexa\Core\Util\ProjectRoot;
 use Semitexa\Core\Queue\HandlerExecution;
 use Semitexa\Core\Contract\TypedHandlerInterface;
@@ -176,7 +175,6 @@ class AttributeDiscovery
     
     /**
      * Enrich route with handlers and response class.
-     * Prefer handlers matched by (payload, resource); fallback to legacy handlers by payload only.
      */
     private static function enrichRoute(array $route): array
     {
@@ -314,6 +312,7 @@ class AttributeDiscovery
                         'base' => $attr->base ? ltrim($attr->base, '\\') : null,
                         'overrides' => $attr->overrides ? ltrim($attr->overrides, '\\') : null,
                         'consumes' => $attr->consumes,
+                        'produces' => $attr->produces,
                     ],
                 ];
                 $requestMeta[$className] = $meta;
@@ -375,13 +374,15 @@ class AttributeDiscovery
                 'handlers' => [],
             ];
 
-            // Resolve produces from the AsResource on the response class
-            $routeProduces = null;
-            $responseClass = $resolved['responseWith'] ?? null;
-            if ($responseClass !== null) {
-                $resolvedResp = self::getResolvedResponseAttributes($responseClass);
-                if ($resolvedResp !== null && isset($resolvedResp['produces'])) {
-                    $routeProduces = $resolvedResp['produces'];
+            // Resolve produces: payload-level takes precedence over response class AsResource
+            $routeProduces = $resolved['produces'] ?? null;
+            if ($routeProduces === null) {
+                $responseClass = $resolved['responseWith'] ?? null;
+                if ($responseClass !== null) {
+                    $resolvedResp = self::getResolvedResponseAttributes($responseClass);
+                    if ($resolvedResp !== null && isset($resolvedResp['produces'])) {
+                        $routeProduces = $resolvedResp['produces'];
+                    }
                 }
             }
 
@@ -657,7 +658,7 @@ class AttributeDiscovery
     private static function mergeRequestAttributes(array $base, array $override): array
     {
         $result = $base;
-        foreach (['path','methods','name','requirements','defaults','options','tags','public','responseWith','consumes'] as $key) {
+        foreach (['path','methods','name','requirements','defaults','options','tags','public','responseWith','consumes','produces'] as $key) {
             if ($override[$key] !== null) {
                 $result[$key] = $override[$key];
             }
@@ -681,6 +682,7 @@ class AttributeDiscovery
             'public' => $attr['public'] ?? true,
             'responseWith' => $attr['responseWith'],
             'consumes' => $attr['consumes'] ?? null,
+            'produces' => $attr['produces'] ?? null,
         ];
     }
 
@@ -950,77 +952,6 @@ class AttributeDiscovery
         return $pos === false ? $class : substr($class, $pos + 1);
     }
     
-    /**
-     * Scan all PHP files in discovered modules (legacy method)
-     */
-    private static function scanAllAttributes(): void
-    {
-        $modules = ModuleRegistry::getModules();
-        
-        foreach ($modules as $module) {
-            
-            $files = self::getAllPhpFiles($module['path']);
-            
-            // Legacy scanAllAttributes method is no longer used
-            // All discovery is done via ClassDiscovery in scanAttributesIntelligently()
-        }
-    }
-    
-    /**
-     * Get all PHP files recursively
-     */
-    private static function getAllPhpFiles(string $directory): array
-    {
-        $files = [];
-        $iterator = new \RecursiveIteratorIterator(
-            new \RecursiveDirectoryIterator($directory)
-        );
-        
-        foreach ($iterator as $file) {
-            if ($file->isFile() && $file->getExtension() === 'php') {
-                $files[] = $file->getPathname();
-            }
-        }
-        
-        return $files;
-    }
-    
-    /**
-     * Load class from file
-     */
-    private static function loadClassFromFile(string $file): ?ReflectionClass
-    {
-        // Skip vendor files
-        if (strpos($file, '/vendor/') !== false) {
-            return null;
-        }
-        
-        // Extract namespace and class name from file
-        $content = file_get_contents($file);
-        
-        if (!preg_match('/namespace\s+([^;]+);/', $content, $namespaceMatches)) {
-            return null;
-        }
-        
-        if (!preg_match('/class\s+(\w+)/', $content, $classMatches)) {
-            return null;
-        }
-        
-        $fullClassName = $namespaceMatches[1] . '\\' . $classMatches[1];
-        
-        // Load the file if class doesn't exist
-        if (!class_exists($fullClassName)) {
-            require_once $file;
-        }
-        
-        // Check if class exists after loading
-        if (!class_exists($fullClassName)) {
-            return null;
-        }
-        
-        return new ReflectionClass($fullClassName);
-    }
-
     /**
      * Discover traits marked with #[AsPayloadPart] from active modules.
      */

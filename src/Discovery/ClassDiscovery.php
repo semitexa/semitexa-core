@@ -65,7 +65,16 @@ class ClassDiscovery
             }
 
             if (!class_exists($className, true) && !interface_exists($className, true) && !trait_exists($className, true)) {
-                continue;
+                // class_exists with autoload failed — the class may have been found via
+                // PSR-4 directory scan but is absent from Composer's generated classmap.
+                // Load it directly with require_once (idempotent: won't double-include).
+                $filePath = self::$classMap[$className] ?? null;
+                if ($filePath !== null && is_file($filePath)) {
+                    (static function (string $f): void { require_once $f; })($filePath);
+                }
+                if (!class_exists($className, false) && !interface_exists($className, false) && !trait_exists($className, false)) {
+                    continue;
+                }
             }
 
             try {

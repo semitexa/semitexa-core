@@ -236,10 +236,10 @@ class ModuleRegistry
      */
     private static function registerModule(string $path, string $name, string $type, string $namespace): void
     {
-        // Filter by composer "type": only accept semitexa-module
+        // Local modules (src/modules/) are always accepted; vendor/package modules
+        // must declare "type": "semitexa-module" or "semitexa-theme" in composer.json.
         $composerType = self::readComposerType($path);
-        if (!in_array($composerType, ['semitexa-module', 'semitexa-theme'], true)) {
-            // Skip non-semitexa modules/packages
+        if ($type !== 'local' && !in_array($composerType, ['semitexa-module', 'semitexa-theme'], true)) {
             return;
         }
 
@@ -255,9 +255,10 @@ class ModuleRegistry
         $aliases = [];
         $aliases[] = $name;
         $friendly = $name;
-        foreach (["semitexa-module-", "module-"] as $prefix) {
+        foreach (["semitexa-module-", "module-", "semitexa-"] as $prefix) {
             if (str_starts_with($friendly, $prefix)) {
                 $friendly = substr($friendly, strlen($prefix));
+                break;
             }
         }
         if ($friendly !== $name) {
@@ -422,16 +423,31 @@ class ModuleRegistry
             return $modules;
         }
 
-        $vendorDirs = glob(rtrim($root, '/') . '/*', GLOB_ONLYDIR);
-        foreach ($vendorDirs as $vendorDir) {
-            $packageDirs = glob($vendorDir . '/*', GLOB_ONLYDIR);
-            foreach ($packageDirs as $dir) {
+        $dirs = glob(rtrim($root, '/') . '/*', GLOB_ONLYDIR);
+        foreach ($dirs as $dir) {
+            // Flat layout (packages/semitexa-demo/composer.json)
+            if (is_file($dir . '/composer.json')) {
                 $packageName = basename($dir);
                 $namespace = self::inferNamespaceFromComposer($dir)
-                    ?? self::buildNamespaceFromVendor(basename($vendorDir), $packageName);
+                    ?? self::buildNamespaceFromVendor('', $packageName);
 
                 $modules[] = [
                     'path' => $dir,
+                    'name' => $packageName,
+                    'namespace' => $namespace
+                ];
+                continue;
+            }
+
+            // Nested vendor layout (packages/vendor/package/composer.json)
+            $packageDirs = glob($dir . '/*', GLOB_ONLYDIR);
+            foreach ($packageDirs as $subDir) {
+                $packageName = basename($subDir);
+                $namespace = self::inferNamespaceFromComposer($subDir)
+                    ?? self::buildNamespaceFromVendor(basename($dir), $packageName);
+
+                $modules[] = [
+                    'path' => $subDir,
                     'name' => $packageName,
                     'namespace' => $namespace
                 ];
@@ -468,8 +484,11 @@ class ModuleRegistry
 
     private static function buildNamespaceFromVendor(string $vendor, string $package): string
     {
-        return Str::toStudly($vendor) . '\\' . Str::toStudly($package);
-    }
+        $packageNamespace = Str::toStudly($package);
+        if ($vendor === '') {
+            return $packageNamespace;
+        }
 
-    
+        return Str::toStudly($vendor) . '\\' . $packageNamespace;
+    }
 }

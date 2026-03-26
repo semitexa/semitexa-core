@@ -5,7 +5,7 @@ Semitexa uses a **custom DI container** (no PHP-DI). It is built once per worker
 ## Who gets into the container
 
 - **Service contracts:** types registered via **#[AsServiceContract(of: SomeInterface::class)]** on implementation classes. The container discovers them through `ServiceContractRegistry` (same as `bin/semitexa contracts:list`).
-- **Handlers:** are **not** service contracts. They are discovered via **#[AsPayloadHandler(payload: ..., resource: ...)]** and registered automatically so the kernel can resolve them by concrete class when handling a route. Implement `HandlerInterface`; do not use `AsServiceContract` on handlers.
+- **Handlers:** are **not** service contracts. They are discovered via **#[AsPayloadHandler(payload: ..., resource: ...)]** and registered automatically so the kernel can resolve them by concrete class when handling a route. Implement `TypedHandlerInterface`; do not use `AsServiceContract` on handlers.
 - **Event listeners:** implement `EventListenerInterface` and use `#[AsServiceContract(of: EventListenerInterface::class)]`.
 - **Other services:** define an interface and put `#[AsServiceContract(of: ThatInterface::class)]` on the implementation(s). Classes in `Semitexa\Core\` are treated as module `Core`.
 
@@ -28,7 +28,7 @@ Example (handler; no AsServiceContract):
 
 ```php
 #[AsPayloadHandler(payload: MyPayload::class, resource: MyResource::class)]
-final class MyHandler implements HandlerInterface
+final class MyHandler implements TypedHandlerInterface
 {
     #[InjectAsReadonly]
     protected LoggerInterface $logger;
@@ -44,7 +44,7 @@ final class MyHandler implements HandlerInterface
     protected SessionInterface $session;
     protected CookieJarInterface $cookies;
 
-    public function handle(PayloadInterface $payload, ResourceInterface $resource): ResourceInterface
+    public function handle(MyPayload $payload, MyResource $resource): MyResource
     {
         // ...
     }

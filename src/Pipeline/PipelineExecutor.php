@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Semitexa\Core\Pipeline;
 
 use Psr\Container\ContainerInterface;
-use Semitexa\Core\Contract\HandlerInterface;
 use Semitexa\Core\Contract\TypedHandlerInterface;
 use Semitexa\Core\Event\EventDispatcherInterface;
 use Semitexa\Core\Response;
@@ -59,8 +58,8 @@ final class PipelineExecutor
 
     /**
      * Bridge: dispatches to the appropriate handler contract.
-     * - TypedHandlerInterface: invoke via reflection cache (concrete types, no instanceof in handler)
-     * - HandlerInterface (legacy): handle($req, $res): $res
+     * TypedHandlerInterface handlers are invoked via reflection cache
+     * with concrete payload/resource types.
      * - PipelineListenerInterface: handle($context)
      */
     private function invokeListener(object $instance, RequestPipelineContext $context): void
@@ -96,14 +95,6 @@ final class PipelineExecutor
             }
 
             $context->resourceDto = $result;
-            return;
-        }
-
-        if ($instance instanceof HandlerInterface) {
-            $context->resourceDto = $instance->handle(
-                $context->requestDto,
-                $context->resourceDto,
-            );
             return;
         }
 

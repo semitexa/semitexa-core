@@ -477,6 +477,23 @@ final class SemitexaContainer implements ContainerInterface
                     $dep[$c][] = $target;
                 }
             }
+            // Also include constructor-param dependencies so they are built first
+            try {
+                $ctor = (new \ReflectionClass($c))->getConstructor();
+                if ($ctor !== null) {
+                    foreach ($ctor->getParameters() as $param) {
+                        $type = $param->getType();
+                        if ($type instanceof \ReflectionNamedType && !$type->isBuiltin()) {
+                            $target = $this->resolveToClass($type->getName());
+                            if ($target !== null && in_array($target, $classes, true)) {
+                                $dep[$c][] = $target;
+                            }
+                        }
+                    }
+                }
+            } catch (\Throwable) {
+                // ignore reflection errors
+            }
         }
         $out = [];
         $visited = [];

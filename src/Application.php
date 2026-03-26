@@ -149,12 +149,9 @@ class Application
                     if ($route) {
                         $response = $this->handleRoute($route, $request);
                     } else {
-                        $response = $this->helloWorld($request);
+                        $response = $this->getNotFoundResponse($request);
                     }
                 } else {
-                    if ($routingPath === '/sse' && $request->getMethod() === 'GET') {
-                        // SSE support requires semitexa/ssr package
-                    }
                     $response = $this->getNotFoundResponse($request);
                 }
             }
@@ -181,33 +178,11 @@ class Application
                     return $executor->execute($route, $request);
                 }
 
-                if ($type === RouteType::Legacy->value || ($route['class'] ?? null && $route['method'] ?? null)) {
-                    return $this->handleLegacyRoute($route);
-                }
-
                 throw new \RuntimeException('Unknown route type: ' . ($type ?? 'undefined'));
             } catch (\Throwable $e) {
                 return $this->handleRouteException($e, $route, $request);
             }
         });
-    }
-
-
-    /**
-     * @param array{class: string, method: string, name?: string} $route
-     */
-    private function handleLegacyRoute(array $route): Response
-    {
-        /** @var object $controller */
-        $controller = new $route['class']();
-        $method = $route['method'];
-        if ($method === '__invoke' && is_callable($controller)) {
-            return $controller();
-        }
-        if (is_callable([$controller, $method])) {
-            return $controller->$method();
-        }
-        throw new \RuntimeException("Controller method {$route['class']}::{$method} is not callable");
     }
 
     /**
@@ -262,31 +237,10 @@ class Application
         if ($route404 !== null) {
             return $this->handleRoute($route404, $request);
         }
-        return $this->notFound($request);
+        return $this->notFound();
     }
     
-    private function helloWorld(Request $request): Response
-    {
-        return Response::json([
-            'message' => 'Hello World from Semitexa!',
-            'framework' => $this->environment->get('APP_NAME', 'Semitexa'),
-            'mode' => $this->detectRuntimeMode($request),
-            'environment' => $this->environment->get('APP_ENV', 'prod'),
-            'debug' => $this->environment->isDebug(),
-            'method' => $request->getMethod(),
-            'path' => $request->getPath(),
-            'swoole_server' => $request->getServer('SWOOLE_SERVER', 'not-set'),
-            'server_software' => $request->getServer('SERVER_SOFTWARE', 'not-set'),
-            'timestamp' => date('Y-m-d H:i:s')
-        ]);
-    }
-    
-    private function detectRuntimeMode(Request $request): string
-    {
-        return 'swoole';
-    }
-    
-    private function notFound(Request $request): Response
+    private function notFound(): Response
     {
         return Response::notFound('The requested resource was not found');
     }
