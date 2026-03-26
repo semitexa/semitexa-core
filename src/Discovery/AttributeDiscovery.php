@@ -12,7 +12,6 @@ use Semitexa\Core\Attributes\AsResourcePart;
 use Semitexa\Core\Config\EnvValueResolver;
 use Semitexa\Core\Environment;
 use Semitexa\Core\ModuleRegistry;
-use Semitexa\Core\Discovery\ClassDiscovery;
 use Semitexa\Core\Util\ProjectRoot;
 use Semitexa\Core\Queue\HandlerExecution;
 use Semitexa\Core\Contract\TypedHandlerInterface;

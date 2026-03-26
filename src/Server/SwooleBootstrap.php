@@ -96,7 +96,7 @@ class SwooleBootstrap
                 environment: Environment::create(),
                 bootstrapState: $bootstrapState,
             );
-            (new ServerLifecycleInvoker())->invokePhase(ServerLifecyclePhase::WorkerStop, $context, true);
+            new ServerLifecycleInvoker()->invokePhase(ServerLifecyclePhase::WorkerStop, $context, true);
         });
 
         $server->on(SwooleEvent::WorkerError->value, function (Server $server, int $workerId, int $workerPid, int $exitCode, int $signal) use ($bootstrapState) {
@@ -110,7 +110,7 @@ class SwooleBootstrap
                 exitCode: $exitCode,
                 signal: $signal,
             );
-            (new ServerLifecycleInvoker())->invokePhase(ServerLifecyclePhase::WorkerError, $context, false);
+            new ServerLifecycleInvoker()->invokePhase(ServerLifecyclePhase::WorkerError, $context, false);
         });
 
         $server->on(SwooleEvent::Start->value, function (Server $server) use ($bootstrapState) {
@@ -120,7 +120,7 @@ class SwooleBootstrap
                 environment: Environment::create(),
                 bootstrapState: $bootstrapState,
             );
-            (new ServerLifecycleInvoker())->invokePhase(ServerLifecyclePhase::Start, $context, false);
+            new ServerLifecycleInvoker()->invokePhase(ServerLifecyclePhase::Start, $context, false);
         });
 
         $server->on(SwooleEvent::Shutdown->value, function (Server $server) use ($bootstrapState) {
@@ -130,7 +130,7 @@ class SwooleBootstrap
                 environment: Environment::create(),
                 bootstrapState: $bootstrapState,
             );
-            (new ServerLifecycleInvoker())->invokePhase(ServerLifecyclePhase::Shutdown, $context, false);
+            new ServerLifecycleInvoker()->invokePhase(ServerLifecyclePhase::Shutdown, $context, false);
         });
 
         $emitter = new SwooleResponseEmitter();
