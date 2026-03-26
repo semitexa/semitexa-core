@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Server;
 
+use JsonException;
 use Semitexa\Core\Application;
 use Semitexa\Core\Container\ContainerFactory;
 use Semitexa\Core\Environment;
@@ -11,14 +12,18 @@ use Semitexa\Core\ErrorHandler;
 use Semitexa\Core\Http\HttpStatus;
 use Semitexa\Core\Http\SwooleResponseEmitter;
 use Semitexa\Core\Request;
+use Semitexa\Core\Server\Lifecycle\ServerLifecycleContext;
+use Semitexa\Core\Server\Lifecycle\ServerBootstrapState;
+use Semitexa\Core\Server\Lifecycle\ServerLifecycleInvoker;
+use Semitexa\Core\Server\Lifecycle\ServerLifecyclePhase;
 use Semitexa\Core\Session\SwooleSessionTableHolder;
-use Semitexa\Ssr\Asset\ModuleAssetRegistry;
 use Semitexa\Ssr\Asset\StaticAssetHandler;
 use Swoole\Coroutine;
 use Swoole\Http\Request as SwooleRequest;
 use Swoole\Http\Response as SwooleResponse;
 use Swoole\Http\Server;
 use Swoole\Table;
+use Throwable;
 
 class SwooleBootstrap
 {
@@ -27,10 +32,7 @@ class SwooleBootstrap
     /** Swoole Table: integer column size in bytes (32-bit). */
     private const TABLE_COLUMN_INT_SIZE = 4;
 
-    /** Swoole Table: max string length for session_id column (session identifiers). */
-    private const TABLE_COLUMN_SESSION_ID_MAX_LENGTH = 128;
-
-    /** @return array{0: SwooleRequest, 1: SwooleResponse, 2: Server, 3: Table, 4: Table, 5: Table|null}|null */
+    /** @return array{0: SwooleRequest, 1: SwooleResponse, 2: Server}|null */
     public static function getCurrentSwooleRequestResponse(): ?array
     {
         if (Coroutine::getCid() < 0) {
@@ -42,8 +44,6 @@ class SwooleBootstrap
     public static function run(): void
     {
         self::verifyRequirements();
-
-        define('SEMITEXA_SWOOLE', true);
 
         $env = Environment::create();
         ErrorHandler::configure($env);
@@ -59,87 +59,83 @@ class SwooleBootstrap
         $sessionTable->create();
         SwooleSessionTableHolder::setTable($sessionTable);
 
-        // SSE cross-worker routing table (session_id -> worker_id)
-        $sessionWorkerTable = new Table($env->swooleSseWorkerTableSize);
-        $sessionWorkerTable->column('worker_id', Table::TYPE_INT, self::TABLE_COLUMN_INT_SIZE);
-        $sessionWorkerTable->create();
-
-        $deliverTable = new Table($env->swooleSseDeliverTableSize);
-        $deliverTable->column('session_id', Table::TYPE_STRING, self::TABLE_COLUMN_SESSION_ID_MAX_LENGTH);
-        $deliverTable->column('worker_id', Table::TYPE_INT, self::TABLE_COLUMN_INT_SIZE);
-        $deliverTable->column('payload', Table::TYPE_STRING, $env->swooleSsePayloadMaxBytes);
-        $deliverTable->create();
-
-        $pendingDeliverTable = new Table($env->swooleSseDeliverTableSize);
-        $pendingDeliverTable->column('session_id', Table::TYPE_STRING, self::TABLE_COLUMN_SESSION_ID_MAX_LENGTH);
-        $pendingDeliverTable->column('payload', Table::TYPE_STRING, $env->swooleSsePayloadMaxBytes);
-        $pendingDeliverTable->create();
-
-        // Isomorphic SSR deferred-request registry. Newer SSR builds support a pre-fork
-        // shared table; older released builds only expose initialize() and create the
-        // table per worker. Keep startup backward-compatible with both APIs.
-        $deferredRequestTable = null;
-        if (class_exists(\Semitexa\Ssr\Isomorphic\DeferredRequestRegistry::class)) {
-            $isomorphicConfig = \Semitexa\Ssr\Configuration\IsomorphicConfig::fromEnvironment();
-            if ($isomorphicConfig->enabled && method_exists(\Semitexa\Ssr\Isomorphic\DeferredRequestRegistry::class, 'createSharedTable')) {
-                $deferredRequestTable = \Semitexa\Ssr\Isomorphic\DeferredRequestRegistry::createSharedTable($isomorphicConfig);
-            }
-        }
-
         $corsHandler = new CorsHandler($env);
         $healthHandler = new HealthCheckHandler();
         $staticAssetHandler = new StaticAssetHandler();
+        $bootstrapState = new ServerBootstrapState();
+        $bootstrapContext = new ServerLifecycleContext(
+            server: $server,
+            workerId: null,
+            environment: $env,
+            bootstrapState: $bootstrapState,
+        );
+        (new ServerLifecycleInvoker())->invokePhase(ServerLifecyclePhase::PreStart, $bootstrapContext, false);
 
-        $server->on('WorkerStart', function (Server $server, int $workerId) use ($sessionWorkerTable, $deliverTable, $pendingDeliverTable, $deferredRequestTable) {
-            self::refreshComposerClassMap();
+        $server->on(SwooleEvent::WorkerStart->value, function (Server $server, int $workerId) use ($bootstrapState) {
+            self::syncInheritedComposerAutoloader();
             Environment::syncEnvFromFiles();
+            $workerEnv = Environment::create();
+            $context = new ServerLifecycleContext(
+                server: $server,
+                workerId: $workerId,
+                environment: $workerEnv,
+                bootstrapState: $bootstrapState,
+            );
+            $invoker = new ServerLifecycleInvoker();
+            $invoker->invokePhase(ServerLifecyclePhase::WorkerStartBeforeContainer, $context, false);
             ContainerFactory::create();
-            ModuleAssetRegistry::initialize();
-            if (class_exists(\Semitexa\Ssr\Asset\AssetCollector::class)) {
-                \Semitexa\Ssr\Asset\AssetCollector::boot();
-            }
-            if (class_exists(\Semitexa\Ssr\Async\AsyncResourceSseServer::class)) {
-                \Semitexa\Ssr\Async\AsyncResourceSseServer::setServer($server);
-                \Semitexa\Ssr\Async\AsyncResourceSseServer::setTables($sessionWorkerTable, $deliverTable, $pendingDeliverTable);
-            }
-            // Inject the shared table when the SSR package supports it, otherwise fall
-            // back to the legacy initialize()-only path to avoid startup fatals.
-            if (
-                $deferredRequestTable !== null
-                && class_exists(\Semitexa\Ssr\Isomorphic\DeferredRequestRegistry::class)
-                && method_exists(\Semitexa\Ssr\Isomorphic\DeferredRequestRegistry::class, 'setTable')
-            ) {
-                \Semitexa\Ssr\Isomorphic\DeferredRequestRegistry::setTable($deferredRequestTable);
-            }
-            if (class_exists(\Semitexa\Ssr\Isomorphic\DeferredRequestRegistry::class)) {
-                \Semitexa\Ssr\Isomorphic\DeferredRequestRegistry::initialize();
-            }
-            // Register the 'ssr' asset alias and publish template files in every worker
-            // so StaticAssetHandler can serve /assets/ssr/tpl/*.twig from any worker.
-            if (class_exists(\Semitexa\Ssr\Isomorphic\DeferredTemplateRegistry::class)) {
-                \Semitexa\Ssr\Isomorphic\DeferredTemplateRegistry::initialize();
-            }
+            $invoker->invokePhase(ServerLifecyclePhase::WorkerStartAfterContainer, $context, true);
+            $invoker->invokePhase(ServerLifecyclePhase::WorkerStartAfterServerBindings, $context, true);
+            $invoker->invokePhase(ServerLifecyclePhase::WorkerStartFinalize, $context, true);
         });
 
-        $server->on('WorkerStop', function (Server $server, int $workerId) {
-            // future: close DB pools, flush logs
+        $server->on(SwooleEvent::WorkerStop->value, function (Server $server, int $workerId) use ($bootstrapState) {
+            $context = new ServerLifecycleContext(
+                server: $server,
+                workerId: $workerId,
+                environment: Environment::create(),
+                bootstrapState: $bootstrapState,
+            );
+            (new ServerLifecycleInvoker())->invokePhase(ServerLifecyclePhase::WorkerStop, $context, true);
         });
 
-        $server->on('WorkerError', function (Server $server, int $workerId, int $workerPid, int $exitCode, int $signal) {
-            error_log("[Semitexa] Worker #{$workerId} (PID:{$workerPid}) error: exit={$exitCode} signal={$signal}");
+        $server->on(SwooleEvent::WorkerError->value, function (Server $server, int $workerId, int $workerPid, int $exitCode, int $signal) use ($bootstrapState) {
+            ServerLifecycleFallbackLogger::logWorkerError($workerId, $workerPid, $exitCode, $signal);
+            $context = new ServerLifecycleContext(
+                server: $server,
+                workerId: $workerId,
+                environment: Environment::create(),
+                bootstrapState: $bootstrapState,
+                workerPid: $workerPid,
+                exitCode: $exitCode,
+                signal: $signal,
+            );
+            (new ServerLifecycleInvoker())->invokePhase(ServerLifecyclePhase::WorkerError, $context, false);
         });
 
-        $server->on('Start', function (Server $server) {
-            // pid_file is written automatically via server option
+        $server->on(SwooleEvent::Start->value, function (Server $server) use ($bootstrapState) {
+            $context = new ServerLifecycleContext(
+                server: $server,
+                workerId: null,
+                environment: Environment::create(),
+                bootstrapState: $bootstrapState,
+            );
+            (new ServerLifecycleInvoker())->invokePhase(ServerLifecyclePhase::Start, $context, false);
         });
 
-        $server->on('Shutdown', function (Server $server) {
-            // future: cleanup
+        $server->on(SwooleEvent::Shutdown->value, function (Server $server) use ($bootstrapState) {
+            $context = new ServerLifecycleContext(
+                server: $server,
+                workerId: null,
+                environment: Environment::create(),
+                bootstrapState: $bootstrapState,
+            );
+            (new ServerLifecycleInvoker())->invokePhase(ServerLifecyclePhase::Shutdown, $context, false);
         });
 
         $emitter = new SwooleResponseEmitter();
 
-        $server->on('request', function (SwooleRequest $request, SwooleResponse $response) use ($emitter, $corsHandler, $healthHandler, $staticAssetHandler, $server, $sessionWorkerTable, $deliverTable, $pendingDeliverTable) {
+        $server->on(SwooleEvent::Request->value, function (SwooleRequest $request, SwooleResponse $response) use ($emitter, $corsHandler, $healthHandler, $staticAssetHandler, $server) {
             $sent = false;
             $ensureResponseSent = function () use ($response, &$sent): void {
                 if ($sent) {
@@ -166,7 +162,7 @@ class SwooleBootstrap
                 return;
             }
 
-            Coroutine::getContext()[self::COROUTINE_CONTEXT_KEY] = [$request, $response, $server, $sessionWorkerTable, $deliverTable, $pendingDeliverTable];
+            Coroutine::getContext()[self::COROUTINE_CONTEXT_KEY] = [$request, $response, $server];
             $app = null;
 
             try {
@@ -186,9 +182,7 @@ class SwooleBootstrap
                 }
             } finally {
                 unset(Coroutine::getContext()[self::COROUTINE_CONTEXT_KEY]);
-                if ($app !== null) {
-                    $app->requestScopedContainer->reset();
-                }
+                $app?->requestScopedContainer->reset();
                 if (class_exists(\Semitexa\Ssr\Asset\AssetCollectorStore::class)) {
                     \Semitexa\Ssr\Asset\AssetCollectorStore::reset();
                 }
@@ -198,17 +192,18 @@ class SwooleBootstrap
             }
         });
 
-        self::printBanner($env, $config);
         $server->start();
     }
 
     /**
-     * Re-read the Composer classmap from disk and add any new entries to the registered ClassLoader.
-     * Needed in graceful-reload scenarios: the master process loaded an older classmap, and forked
-     * workers inherit the stale autoloader. Calling this at WorkerStart ensures newly-installed
-     * packages are auto-loadable without a full server restart.
+     * Sync the inherited Composer ClassLoader with the latest files from vendor/composer.
+     *
+     * `server:reload` runs `composer dump-autoload` before sending SIGUSR1 to the Swoole master.
+     * The master process itself is not restarted, so newly-forked workers can inherit an older
+     * in-memory autoloader. Refreshing it at WorkerStart keeps graceful reloads consistent with
+     * the freshly-written autoload files on disk.
      */
-    private static function refreshComposerClassMap(): void
+    private static function syncInheritedComposerAutoloader(): void
     {
         $composerDir = \Semitexa\Core\Util\ProjectRoot::get() . '/vendor/composer';
         $classMapFile = $composerDir . '/autoload_classmap.php';
@@ -251,6 +246,9 @@ class SwooleBootstrap
         }
     }
 
+    /**
+     * @throws JsonException
+     */
     private static function handleError(\Throwable $e, SwooleResponse $response, Environment $env): void
     {
         $response->status(HttpStatus::InternalServerError->value);
@@ -261,20 +259,9 @@ class SwooleBootstrap
             $payload['file'] = $e->getFile() . ':' . $e->getLine();
             $payload['trace'] = $e->getTraceAsString();
         }
-        $response->end(json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR));
-    }
 
-    private static function printBanner(Environment $env, ServerConfigurator $config): void
-    {
-        $debug = $env->isDebug() ? ' [DEBUG]' : '';
-        echo "\n";
-        echo "  Semitexa Server{$debug}\n";
-        echo "  ─────────────────────────────\n";
-        echo "  URL:       http://{$config->getHost()}:{$config->getPort()}\n";
-        echo "  Env:       {$env->appEnv}\n";
-        echo "  Workers:   {$env->swooleWorkerNum}\n";
-        echo "  PHP:       " . PHP_VERSION . "\n";
-        echo "  Swoole:    " . swoole_version() . "\n";
-        echo "\n";
+        $response->end(
+            json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR)
+        );
     }
 }

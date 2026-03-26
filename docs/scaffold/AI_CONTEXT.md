@@ -1,6 +1,6 @@
 # AI Context & Rules (scaffold template)
 
-This is a **reference copy** of the template used to generate **docs/AI_CONTEXT.md** in the project root when you run `bin/semitexa init` or `bin/semitexa init --only-docs --force`. The canonical template lives in [resources/init/docs/AI_CONTEXT.md](../../resources/init/docs/AI_CONTEXT.md).
+This is a **reference copy** of the template used to generate **docs/AI_CONTEXT.md** in the project root when you run `bin/semitexa init` or `bin/semitexa init --only-docs --force`. The canonical scaffold asset now lives in **semitexa/ultimate** at [../../../semitexa-ultimate/docs/AI_CONTEXT.md](../../../semitexa-ultimate/docs/AI_CONTEXT.md).
 
 ---
 

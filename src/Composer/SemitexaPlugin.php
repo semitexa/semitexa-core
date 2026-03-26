@@ -14,8 +14,10 @@ use Symfony\Component\Process\Process;
 
 /**
  * Composer plugin: after install/update, if semitexa/core is installed:
- * - New project (missing server.php, AI_ENTRY.md, README.md, or docker-compose.yml): runs full "semitexa init".
- * - Existing project: runs "semitexa init --only-docs --force" to sync docs and scaffold (AI_ENTRY, README, server.php, .env.example, Dockerfile, docker-compose.yml, phpunit.xml.dist, bin/semitexa, .gitignore). .env is never touched. AI_NOTES.md is never overwritten.
+ * - For semitexa/ultimate projects, keep the project scaffold in sync through the
+ *   `semitexa init` command provided by semitexa/ultimate.
+ * - For non-ultimate projects, skip scaffold sync because the canonical assets
+ *   now live in semitexa/ultimate.
  */
 final class SemitexaPlugin implements PluginInterface, EventSubscriberInterface
 {
@@ -54,6 +56,13 @@ final class SemitexaPlugin implements PluginInterface, EventSubscriberInterface
             return;
         }
 
+        $ultimate = $repo->findPackage('semitexa/ultimate', '*');
+        $rootPackage = $this->composer->getPackage();
+        $isUltimateRoot = $rootPackage->getName() === 'semitexa/ultimate';
+        if ($ultimate === null && !$isUltimateRoot) {
+            return;
+        }
+
         $config = $this->composer->getConfig();
         $vendorDir = $config->get('vendor-dir');
         $root = \dirname($vendorDir);
@@ -85,7 +94,7 @@ final class SemitexaPlugin implements PluginInterface, EventSubscriberInterface
             return;
         }
 
-        // Existing project: refresh docs + scaffold (Dockerfile, docker-compose, phpunit, bin/semitexa, etc.); never touch .env
+        // Existing project: refresh docs + scaffold (Dockerfile, docker-compose, phpunit, bin/semitexa, public/.htaccess, etc.); never touch .env
         $this->io->write('<info>Semitexa: syncing docs and scaffold (semitexa init --only-docs)...</info>');
         $process = new Process([$php, $bin, 'init', '--only-docs', '--force'], $root);
         $process->setTimeout(30);
