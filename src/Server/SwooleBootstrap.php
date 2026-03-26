@@ -91,6 +91,7 @@ class SwooleBootstrap
         $staticAssetHandler = new StaticAssetHandler();
 
         $server->on('WorkerStart', function (Server $server, int $workerId) use ($sessionWorkerTable, $deliverTable, $pendingDeliverTable, $deferredRequestTable) {
+            self::refreshComposerClassMap();
             Environment::syncEnvFromFiles();
             ContainerFactory::create();
             ModuleAssetRegistry::initialize();

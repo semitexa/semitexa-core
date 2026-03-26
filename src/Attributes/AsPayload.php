@@ -57,10 +57,15 @@ class AsPayload
         public string $protocol = 'http',
         /** @var list<string>|null Request Content-Types this endpoint accepts. null = all. */
         public ?array $consumes = null,
+        /** @var list<string>|null Response Content-Types this endpoint can produce. null = all. */
+        public ?array $produces = null,
     ) {
         $this->doc = $doc;
         if ($this->consumes !== null) {
             $this->consumes = array_map('strtolower', $this->consumes);
+        }
+        if ($this->produces !== null) {
+            $this->produces = array_map('strtolower', $this->produces);
         }
     }
 }

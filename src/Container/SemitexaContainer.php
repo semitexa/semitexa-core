@@ -477,6 +477,23 @@ final class SemitexaContainer implements ContainerInterface
                     $dep[$c][] = $target;
                 }
             }
+            // Also include constructor-param dependencies so they are built first
+            try {
+                $ctor = (new \ReflectionClass($c))->getConstructor();
+                if ($ctor !== null) {
+                    foreach ($ctor->getParameters() as $param) {
+                        $type = $param->getType();
+                        if ($type instanceof \ReflectionNamedType && !$type->isBuiltin()) {
+                            $target = $this->resolveToClass($type->getName());
+                            if ($target !== null && in_array($target, $classes, true)) {
+                                $dep[$c][] = $target;
+                            }
+                        }
+                    }
+                }
+            } catch (\Throwable) {
+                // ignore reflection errors
+            }
         }
         $out = [];
         $visited = [];
@@ -545,6 +562,17 @@ final class SemitexaContainer implements ContainerInterface
                     if ($inst !== null) {
                         $args[] = $inst;
                         continue;
+                    }
+                    if (!$param->isDefaultValueAvailable() && !$param->allowsNull()) {
+                        // Registered interface/class not yet built — build it lazily now.
+                        $targetClass = $this->idToClass[$name] ?? (class_exists($name, false) && !interface_exists($name, false) ? $name : null);
+                        if ($targetClass !== null) {
+                            $inst = $this->createInstance($targetClass, $contractDetails, $readonly);
+                            $this->readonlyInstances[$targetClass] = $inst;
+                            $this->readonlyInstances[$name] = $inst;
+                            $args[] = $inst;
+                            continue;
+                        }
                     }
                 }
                 if ($param->isDefaultValueAvailable()) {

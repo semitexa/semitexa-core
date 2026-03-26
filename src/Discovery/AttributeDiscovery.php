@@ -314,6 +314,7 @@ class AttributeDiscovery
                         'base' => $attr->base ? ltrim($attr->base, '\\') : null,
                         'overrides' => $attr->overrides ? ltrim($attr->overrides, '\\') : null,
                         'consumes' => $attr->consumes,
+                        'produces' => $attr->produces,
                     ],
                 ];
                 $requestMeta[$className] = $meta;
@@ -375,13 +376,15 @@ class AttributeDiscovery
                 'handlers' => [],
             ];
 
-            // Resolve produces from the AsResource on the response class
-            $routeProduces = null;
-            $responseClass = $resolved['responseWith'] ?? null;
-            if ($responseClass !== null) {
-                $resolvedResp = self::getResolvedResponseAttributes($responseClass);
-                if ($resolvedResp !== null && isset($resolvedResp['produces'])) {
-                    $routeProduces = $resolvedResp['produces'];
+            // Resolve produces: payload-level takes precedence over response class AsResource
+            $routeProduces = $resolved['produces'] ?? null;
+            if ($routeProduces === null) {
+                $responseClass = $resolved['responseWith'] ?? null;
+                if ($responseClass !== null) {
+                    $resolvedResp = self::getResolvedResponseAttributes($responseClass);
+                    if ($resolvedResp !== null && isset($resolvedResp['produces'])) {
+                        $routeProduces = $resolvedResp['produces'];
+                    }
                 }
             }
 
@@ -657,7 +660,7 @@ class AttributeDiscovery
     private static function mergeRequestAttributes(array $base, array $override): array
     {
         $result = $base;
-        foreach (['path','methods','name','requirements','defaults','options','tags','public','responseWith','consumes'] as $key) {
+        foreach (['path','methods','name','requirements','defaults','options','tags','public','responseWith','consumes','produces'] as $key) {
             if ($override[$key] !== null) {
                 $result[$key] = $override[$key];
             }
@@ -681,6 +684,7 @@ class AttributeDiscovery
             'public' => $attr['public'] ?? true,
             'responseWith' => $attr['responseWith'],
             'consumes' => $attr['consumes'] ?? null,
+            'produces' => $attr['produces'] ?? null,
         ];
     }
 
