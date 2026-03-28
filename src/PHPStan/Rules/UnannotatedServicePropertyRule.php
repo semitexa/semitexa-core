@@ -46,6 +46,7 @@ final class UnannotatedServicePropertyRule implements Rule
 
     private const CONTAINER_MANAGED_ATTRIBUTES = [
         'Semitexa\\Core\\Attributes\\AsService',
+        'Semitexa\\Orm\\Attribute\\AsRepository',
         'Semitexa\\Core\\Attributes\\AsPayloadHandler',
         'Semitexa\\Core\\Attributes\\AsEventListener',
         'Semitexa\\Core\\Attributes\\AsPipelineListener',

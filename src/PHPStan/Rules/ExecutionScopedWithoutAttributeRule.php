@@ -36,6 +36,7 @@ final class ExecutionScopedWithoutAttributeRule implements Rule
 
     private const CONTAINER_MANAGED_ATTRIBUTES = [
         'Semitexa\\Core\\Attributes\\AsService',
+        'Semitexa\\Orm\\Attribute\\AsRepository',
         'Semitexa\\Core\\Attributes\\SatisfiesServiceContract',
         'Semitexa\\Core\\Attributes\\SatisfiesRepositoryContract',
     ];

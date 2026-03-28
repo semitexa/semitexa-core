@@ -33,6 +33,7 @@ final class LintScopingCommand extends BaseCommand
 
     private const CONTAINER_MANAGED_ATTRIBUTES = [
         AsService::class,
+        'Semitexa\\Orm\\Attribute\\AsRepository',
         SatisfiesServiceContract::class,
         SatisfiesRepositoryContract::class,
     ];

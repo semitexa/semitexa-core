@@ -30,6 +30,7 @@ final class LintDiCommand extends BaseCommand
 {
     private const CONTAINER_MANAGED_ATTRIBUTES = [
         AsService::class,
+        'Semitexa\\Orm\\Attribute\\AsRepository',
         AsPayloadHandler::class,
         AsEventListener::class,
         AsPipelineListener::class,

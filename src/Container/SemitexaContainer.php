@@ -241,6 +241,11 @@ final class SemitexaContainer implements ContainerInterface
         foreach (ClassDiscovery::findClassesWithAttribute(AsService::class) as $serviceClass) {
             $this->idToClass[$serviceClass] = $serviceClass;
         }
+        if (class_exists(\Semitexa\Orm\Discovery\RepositoryDiscovery::class)) {
+            foreach (\Semitexa\Orm\Discovery\RepositoryDiscovery::discoverRepositoryClasses() as $repositoryClass) {
+                $this->idToClass[$repositoryClass] = $repositoryClass;
+            }
+        }
         // Auth handlers need execution-scoped injection
         if (class_exists(\Semitexa\Auth\Attribute\AsAuthHandler::class)) {
             foreach (ClassDiscovery::findClassesWithAttribute(\Semitexa\Auth\Attribute\AsAuthHandler::class) as $handlerClass) {

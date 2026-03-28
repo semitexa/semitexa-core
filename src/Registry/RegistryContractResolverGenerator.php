@@ -270,7 +270,10 @@ namespace App\Registry\Contracts;
 
 /**
  * AUTO-GENERATED. Regenerate via: bin/semitexa registry:sync:contracts
- * Resolver for {$interface}. Edit getContract() to choose implementation.
+ * Resolver for {$interface}.
+ *
+ * By default, the active implementation is selected automatically by module 'extends' priority.
+ * Override getContract() only if you need to resolve a conflict between competing modules manually.
  */
 final class {$resolverShortName}
 {
