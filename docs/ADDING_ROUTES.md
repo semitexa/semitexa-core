@@ -105,6 +105,8 @@ The step-by-step example above uses `Response::json([...])` — suitable for API
 
 **Detailed docs:** in the **semitexa/docs** package — sections on Request/Response/Handler and Twig/templates. When installed: `vendor/semitexa/docs/AI_REFERENCE.md`, `vendor/semitexa/docs/guides/CONVENTIONS.md`, `vendor/semitexa/docs/guides/EXAMPLES.md`. Do not put raw HTML in the Handler and do not create a custom renderer — use Response DTO + core-frontend.
 
+If you need the public URL shape to be editable per environment without changing PHP code, see [PAYLOAD_ENV_ROUTE_OVERRIDES.md](PAYLOAD_ENV_ROUTE_OVERRIDES.md). `#[AsPayload(path: 'env::VAR::/fallback')]` is the canonical pattern.
+
 ---
 
 ## Where to put Request/Handler

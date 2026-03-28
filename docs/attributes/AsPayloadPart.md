@@ -2,65 +2,100 @@
 
 ## Description
 
-`#[AsPayloadPart]` marks a **trait** as an extension part of a payload (request) DTO.  
-Modules can provide such traits; the code generator merges them into the final request class when you run:
+`#[AsPayloadPart]` marks a **trait** as an additive extension of an existing payload DTO.
 
-```bash
-bin/semitexa request:generate <RequestShortName>
-# or
-bin/semitexa request:generate --all
-```
+Another module can target a base `#[AsPayload(...)]` class and contribute extra typed setters, getters, and transport-boundary logic without reopening or forking the original payload class.
 
-The generated wrapper class lives in the module’s `Application/Payload/` and `use`s the base request plus all traits that target it.
+At runtime, Semitexa discovers all matching payload-part traits and composes a wrapper class that:
+
+- extends the base payload
+- uses all discovered traits targeting that payload
+- is cached per worker by `PayloadDtoFactory`
+
+The handler still receives one payload object. The transport boundary stays singular even when multiple modules extend it.
 
 ## Usage
 
-1. **Base request** (any module or vendor) with `#[AsPayload(...)]`:
-   ```php
-   #[AsPayload(path: '/features/json', methods: ['GET'])]
-   final class FeaturesJsonRequest implements PayloadInterface {}
-   ```
+1. **Base payload** in one module:
 
-2. **Trait** in any module (e.g. `Semitexa\Modules\FeatureShowcase\Application\Payload\...`) with `#[AsPayloadPart(base: ...)]`:
-   ```php
-   use Semitexa\Core\Attributes\AsPayloadPart;
+```php
+#[AsPayload(path: '/search', methods: ['GET'])]
+final class SearchPayload
+{
+    protected string $query = '';
 
-   #[AsPayloadPart(base: \Semitexa\Modules\Website\Application\Payload\FeaturesJsonPayload::class)]
-   trait FeaturesJsonRequestTracking
-   {
-       public string $trackingId = '';
-   }
-   ```
+    public function getQuery(): string
+    {
+        return $this->query;
+    }
 
-3. **Regenerate** the request wrapper so it uses the trait:
-   ```bash
-   bin/semitexa request:generate FeaturesJsonRequest
-   ```
+    public function setQuery(string $query): void
+    {
+        $this->query = trim($query);
+    }
+}
+```
 
-The generated file will be in `src/modules/<Module>/Application/Payload/<Request>.php` with namespace `Semitexa\Modules\<Module>\Application\Payload` and will contain `use ... FeaturesJsonRequestTracking;` in the class body.
+2. **Trait** in another module:
+
+```php
+use Semitexa\Core\Attributes\AsPayloadPart;
+
+#[AsPayloadPart(base: SearchPayload::class)]
+trait SearchTrackingPart
+{
+    protected ?string $campaign = null;
+
+    public function getCampaign(): ?string
+    {
+        return $this->campaign;
+    }
+
+    public function setCampaign(?string $campaign): void
+    {
+        $campaign = $campaign !== null ? trim($campaign) : null;
+        $this->campaign = $campaign !== '' ? $campaign : null;
+    }
+}
+```
+
+3. **Handler** receives the composed payload transparently:
+
+```php
+final class SearchHandler implements TypedHandlerInterface
+{
+    public function handle(SearchPayload $payload, SearchPageResource $resource): SearchPageResource
+    {
+        return $resource
+            ->withQuery($payload->getQuery())
+            ->withCampaign($payload->getCampaign());
+    }
+}
+```
 
 ## Parameters
 
 ### Required
 
-- `base` (string) – Fully-qualified class name of the payload/request this part extends.
+- `base` (string) – Fully-qualified class name of the payload this trait extends.
 
 ### Optional
 
-- `doc` (string|null) – Path to this doc file (relative to project root).
-
-## Where to put traits
-
-- **Any module** under `src/modules/<Name>/` with namespace `Semitexa\Modules\<Name>\...` (so the autoloader discovers them).
-- Traits **must** be **traits**; classes with `#[AsPayloadPart]` are ignored by the generator.
+- `doc` (string|null) – Path to this documentation file.
 
 ## Requirements
 
-1. The target class must be a **trait**.
-2. `base` must be the exact FQN of an existing `#[AsPayload]` request class.
-3. After adding or changing `#[AsPayloadPart]` traits, run `bin/semitexa request:generate <Request>` (or `--all`) to regenerate the wrapper.
+1. The target must be a **trait**.
+2. `base` must point to an existing payload class.
+3. The trait must be autoload-discoverable by the active application.
+
+## Notes
+
+- `#[AsPayloadPart]` is about **modular transport-boundary extension**, not inheritance hacks.
+- This is especially useful when one module owns the route, but another module must add request concerns such as tracking, preview flags, tenant hints, or feature toggles.
+- Composition happens at runtime through `PayloadDtoFactory`; there is no separate payload code-generation step.
 
 ## Related
 
-- [AsPayload](AsPayload.md) – Base request DTO (alias/evolution of AsRequest).
-- [ADDING_ROUTES.md](../ADDING_ROUTES.md) – New routes only in modules.
+- [AsPayload](AsPayload.md) – Base payload DTO
+- [ADDING_ROUTES.md](../ADDING_ROUTES.md) – Route discovery and payload registration

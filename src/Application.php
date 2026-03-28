@@ -106,7 +106,7 @@ class Application
                 'path' => $request->getPath(),
                 'method' => $request->getMethod(),
             ], $runId);
-        
+
             // Resolve tenant context via tenancy module (coroutine-safe, event-driven)
             if ($this->tenancy !== null && $this->tenancy->isEnabled()) {
                 $tenantResponse = $this->tenancy->getHandler()->handle($request);

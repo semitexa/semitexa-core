@@ -12,6 +12,7 @@ use Semitexa\Core\Http\Response\GenericResponse;
 use Semitexa\Core\Discovery\AttributeDiscovery;
 use Semitexa\Core\Discovery\DefaultRouteMetadataResolver;
 use Semitexa\Core\Discovery\ResolvedRouteMetadata;
+use Semitexa\Core\Http\ContentType;
 use Semitexa\Core\Http\PayloadDtoFactory;
 use Semitexa\Core\Http\Response\ResponseFormat;
 use Semitexa\Core\Http\ContentNegotiator;
@@ -229,6 +230,13 @@ class RouteExecutor
         /** @var ResponseFormat|null $format */
         $format = method_exists($resDto, 'getRenderFormat') ? $resDto->getRenderFormat() : null;
 
+        if ($handle) {
+            $context = $this->withPageDocumentContext($context, $request, $route);
+            if (method_exists($resDto, 'setRenderContext')) {
+                $resDto->setRenderContext($context);
+            }
+        }
+
         // No render handle: render as JSON if context is set, otherwise return as-is
         if (!$handle) {
             if ($context !== []) {
@@ -241,9 +249,13 @@ class RouteExecutor
         }
         $rendererClass = method_exists($resDto, 'getRendererClass') ? $resDto->getRendererClass() : null;
 
+        if ($handle && $this->wantsPageDocumentJson($request)) {
+            $format = ResponseFormat::Json;
+        }
+
         // Negotiate format when produces is set on the route and we have a render handle
         $produces = $route['produces'] ?? null;
-        if ($handle && $produces !== null && $produces !== []) {
+        if ($handle && !$this->wantsPageDocumentJson($request) && $produces !== null && $produces !== []) {
             try {
                 $defaultKey = $format !== null ? self::formatEnumToKey($format) : 'json';
                 $negotiatedKey = ContentNegotiator::negotiateResponseFormat($produces, $request, $defaultKey);
@@ -262,12 +274,26 @@ class RouteExecutor
         }
 
         return match ($format) {
-            ResponseFormat::Json   => $this->renderJson($resDto, $context),
+            ResponseFormat::Json   => $this->renderJsonResponse($resDto, $request, $route, $handle, $context),
             ResponseFormat::Layout => $this->renderLayout($resDto, $reqDto, $handle, $context, $rendererClass),
             ResponseFormat::Xml    => $this->renderXml($resDto, $context),
             ResponseFormat::Text   => $this->renderText($resDto, $context),
             ResponseFormat::Raw    => $resDto,
         };
+    }
+
+    private function renderJsonResponse(
+        object $resDto,
+        Request $request,
+        array $route,
+        ?string $handle,
+        array $context,
+    ): object {
+        if ($handle && $this->wantsPageDocumentJson($request) && class_exists(\Semitexa\Ssr\Page\PageDocumentProjector::class)) {
+            $context = \Semitexa\Ssr\Page\PageDocumentProjector::project($resDto, $request, $handle, $context, $route);
+        }
+
+        return $this->renderJson($resDto, $context);
     }
 
     private function renderJson(object $resDto, array $context): object
@@ -292,6 +318,9 @@ class RouteExecutor
         if ($existingContent === '' && method_exists($resDto, 'getDeclaredTemplate')) {
             $declaredTemplate = $resDto->getDeclaredTemplate();
             if ($declaredTemplate !== null && $declaredTemplate !== '' && method_exists($resDto, 'renderTemplate')) {
+                if (method_exists($resDto, 'setRenderContext')) {
+                    $resDto->setRenderContext($context);
+                }
                 $resDto->renderTemplate($declaredTemplate);
                 if (method_exists($resDto, 'getContent')) {
                     $existingContent = $resDto->getContent();
@@ -398,6 +427,74 @@ class RouteExecutor
             'txt'  => ResponseFormat::Text,
             default => ResponseFormat::Json,
         };
+    }
+
+    /**
+     * @param array<string,mixed> $context
+     * @return array<string,mixed>
+     */
+    private function withPageDocumentContext(array $context, Request $request, array $route): array
+    {
+        $htmlQuery = $request->query;
+        unset($htmlQuery['_format'], $htmlQuery['_slot'], $htmlQuery['_expand']);
+
+        $jsonQuery = $request->query;
+        unset($jsonQuery['_slot'], $jsonQuery['_expand']);
+        $jsonQuery['_format'] = 'json';
+
+        $path = $request->getPath();
+        $context['__page_document_html_iri'] = $htmlQuery === [] ? $path : $path . '?' . http_build_query($htmlQuery);
+        $context['__page_document_json_iri'] = $path . '?' . http_build_query($jsonQuery);
+        $context['__page_alternates'] = $this->buildPageAlternates($route, $path, $request->query);
+
+        return $context;
+    }
+
+    /**
+     * @param array<string,mixed> $route
+     * @param array<string,mixed> $query
+     * @return list<array{type:string,href:string}>
+     */
+    private function buildPageAlternates(array $route, string $path, array $query): array
+    {
+        $produces = $route['produces'] ?? null;
+        if (!is_array($produces) || $produces === []) {
+            return [];
+        }
+
+        $alternates = [];
+        foreach ($produces as $mime) {
+            if (!is_string($mime) || $mime === '') {
+                continue;
+            }
+
+            $normalizedMime = strtolower(trim($mime));
+            $formatKey = ContentType::toFormatKey($normalizedMime);
+            if ($formatKey === null || $formatKey === 'html') {
+                continue;
+            }
+
+            $alternateQuery = $query;
+            unset($alternateQuery['_slot'], $alternateQuery['_expand']);
+            $alternateQuery['_format'] = $formatKey;
+            $href = $path . '?' . http_build_query($alternateQuery);
+
+            $alternates[$normalizedMime] = [
+                'type' => $normalizedMime,
+                'href' => $href,
+            ];
+        }
+
+        return array_values($alternates);
+    }
+
+    private function wantsPageDocumentJson(Request $request): bool
+    {
+        if ($request->getQuery('_format') === 'json') {
+            return true;
+        }
+
+        return str_contains(strtolower($request->getHeader('Accept') ?? ''), 'application/json');
     }
 
     private function adaptResponse(object $resDto): Response
