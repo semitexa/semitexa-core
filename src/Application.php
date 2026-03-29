@@ -106,7 +106,7 @@ class Application
                 'path' => $request->getPath(),
                 'method' => $request->getMethod(),
             ], $runId);
-        
+
             // Resolve tenant context via tenancy module (coroutine-safe, event-driven)
             if ($this->tenancy !== null && $this->tenancy->isEnabled()) {
                 $tenantResponse = $this->tenancy->getHandler()->handle($request);
@@ -118,14 +118,13 @@ class Application
             // Session and cookies (request-scoped; handlers inject SessionInterface / CookieJarInterface)
             $this->initSessionAndCookies($request);
 
-            // Locale resolution (Tenant → Locale order; locale can use request path/header)
+            // Locale resolution (Tenant -> Locale order; locale can use request path/header)
             $localeRedirect = $this->resolveLocaleAndUpdateContainer($request);
             if ($localeRedirect !== null) {
                 return $this->finalizeSessionAndCookies($request, $localeRedirect);
             }
 
-            // Initialize attribute discovery
-            AttributeDiscovery::initialize();
+            // NO AttributeDiscovery::initialize() here — already done in build()
 
             // Try to find route using AttributeDiscovery
             $routingPath = $this->getRoutingPath($request);
@@ -137,7 +136,7 @@ class Application
                 'duration_ms' => round((microtime(true) - $segmentStart) * 1000, 2),
             ], $runId);
             $segmentStart = microtime(true);
-        
+
             // Route found or not - no debug output needed
             $response = null;
             if ($route) {
@@ -159,7 +158,7 @@ class Application
             return $this->finalizeSessionAndCookies($request, $response);
         });
     }
-    
+
     /**
      * @param array{type?: string, class?: string, handlers?: list<array{class?: string, execution?: string}>, responseClass?: string, method?: string, name?: string} $route
      */
@@ -168,11 +167,11 @@ class Application
         return self::measure('Application::handleRoute', function() use ($route, $request) {
             try {
                 $type = $route['type'] ?? null;
-                
+
                 if ($type === RouteType::HttpRequest->value) {
                     $executor = new RouteExecutor(
-                        $this->requestScopedContainer, 
-                        $this->container, 
+                        $this->requestScopedContainer,
+                        $this->container,
                         $this->authBootstrapper
                     );
                     return $executor->execute($route, $request);
@@ -239,7 +238,7 @@ class Application
         }
         return $this->notFound();
     }
-    
+
     private function notFound(): Response
     {
         return Response::notFound('The requested resource was not found');
@@ -332,7 +331,7 @@ class Application
 
     /**
      * Resolve locale from request and set LocaleContextInterface in container.
-     * Called after initSessionAndCookies so order is Tenant → Locale.
+     * Called after initSessionAndCookies so order is Tenant -> Locale.
      */
     private function resolveLocaleAndUpdateContainer(Request $request): ?Response
     {
@@ -352,7 +351,7 @@ class Application
         LocaleContextStore::setUrlPrefixEnabled($config->urlPrefixEnabled);
         LocaleContextStore::setDefaultLocale($config->defaultLocale);
 
-        // 301 redirect: /{defaultLocale}/path → /path (GET/HEAD only)
+        // 301 redirect: /{defaultLocale}/path -> /path (GET/HEAD only)
         if ($resolution !== null
             && $resolution->hadPathPrefix
             && $resolution->locale === $config->defaultLocale
@@ -387,7 +386,7 @@ class Application
 
     /**
      * Initialize request-scoped context interfaces (Tenant, Auth, Locale).
-     * These are set into RequestScopedContainer for injection into handlers.
+     * These are set into RequestScopedContainer for injection into handlers via #[InjectAsMutable].
      * When tenancy is enabled, resolved context from CoroutineContextStore is used
      * and synced to TenantContext::set() so ORM and TenantContextInterface::get() see it.
      */

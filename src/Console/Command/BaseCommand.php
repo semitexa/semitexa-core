@@ -13,6 +13,8 @@ use Symfony\Component\Console\Style\SymfonyStyle;
  */
 abstract class BaseCommand extends Command
 {
+    private const AUTOLOAD_REBUILT_FLAG = 'SEMITEXA_AUTOLOAD_REBUILT';
+
     protected function getProjectRoot(): string
     {
         return ProjectRoot::get();
@@ -24,6 +26,11 @@ abstract class BaseCommand extends Command
      */
     protected function rebuildAutoload(SymfonyStyle $io): bool
     {
+        if (getenv(self::AUTOLOAD_REBUILT_FLAG) === '1') {
+            $io->text('Autoload classmap already rebuilt during CLI bootstrap.');
+            return true;
+        }
+
         $root = $this->getProjectRoot();
 
         // Prefer system composer if available
@@ -46,8 +53,8 @@ abstract class BaseCommand extends Command
             return false;
         }
 
+        putenv(self::AUTOLOAD_REBUILT_FLAG . '=1');
         $io->text('Autoload classmap rebuilt.');
         return true;
     }
 }
-

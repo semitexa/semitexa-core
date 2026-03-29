@@ -7,15 +7,15 @@ This directory contains documentation for all attributes used in the Semitexa fr
 Attributes can optionally reference a documentation file via the `doc` parameter:
 
 ```php
-#[AsRequest(
-    doc: 'docs/attributes/AsRequest.md',  // optional: link to doc (relative to project root)
+#[AsPayload(
+    doc: 'packages/semitexa-core/docs/attributes/AsPayload.md',
     path: '/api/users',
     methods: ['GET']
 )]
-class UserListRequest implements PayloadInterface {}
+final class UserListPayload {}
 ```
 
-When framework docs live in `packages/semitexa/`, use a path relative to the **application** root (e.g. `packages/semitexa/core/docs/attributes/AsRequest.md`).
+When framework docs live in `packages/`, use a path relative to the application root (for example `packages/semitexa-core/docs/attributes/AsPayload.md`).
 
 ## Available attributes
 
@@ -23,10 +23,10 @@ Request/Handler classes must be in **modules** (`src/modules/`, `packages/`, or 
 
 ### Core Attributes
 
-- [AsRequest](AsRequest.md) - HTTP Request DTO
-- [AsRequestHandler](AsRequestHandler.md) - HTTP Request Handler
-- [AsResponse](AsResponse.md) - HTTP Response DTO
-- [AsPayloadPart](AsPayloadPart.md) - Payload/Request extension trait (codegen merges into wrapper)
+- [AsPayload](AsPayload.md) - HTTP request DTO and route contract
+- [AsRequest](AsRequest.md) - Legacy request-attribute documentation kept for older naming references
+- [AsRequestHandler](AsRequestHandler.md) - HTTP request handler / payload handler
+- [AsPayloadPart](AsPayloadPart.md) - Payload/Request extension trait (runtime-composed into the payload wrapper)
 
 ### ORM Attributes
 

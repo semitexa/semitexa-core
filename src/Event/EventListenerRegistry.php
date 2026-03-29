@@ -109,12 +109,9 @@ final class EventListenerRegistry
         );
     }
 
-    /** Execution from listener attribute; default Sync when not set */
-    private static function resolveExecution(EventExecution|string|null $listenerOverride): EventExecution
+    /** Execution is required on the attribute and already validated there. */
+    private static function resolveExecution(EventExecution $listenerExecution): EventExecution
     {
-        if ($listenerOverride !== null && $listenerOverride !== '') {
-            return EventExecution::normalize($listenerOverride);
-        }
-        return EventExecution::Sync;
+        return $listenerExecution;
     }
 }

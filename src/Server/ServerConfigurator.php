@@ -21,6 +21,12 @@ readonly class ServerConfigurator
             'log_file'         => $this->env->swooleLogFile,
             'log_level'        => $this->env->swooleLogLevel,
             'pid_file'         => $this->getPidFilePath(),
+            // Async reload: workers get max_wait_time seconds to finish active coroutines,
+            // then the manager force-kills any that haven't exited yet.
+            // Without this, workers with long-lived connections (SSE, long-poll) never exit
+            // during a graceful reload and keep serving stale code indefinitely.
+            'reload_async'     => true,
+            'max_wait_time'    => 3,
         ];
     }
 

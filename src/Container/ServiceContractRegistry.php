@@ -19,7 +19,7 @@ final class ServiceContractRegistry
 {
     /**
      * Single source of truth: per-interface implementations and active class.
-     * @var array<string, array{implementations: list<array{module: string, class: string}>, active: string}>
+     * @var array<string, array{implementations: list<array{module: string, class: string, factoryKey?: \BackedEnum|null}>, active: string}>
      */
     private array $contractDetails = [];
 
@@ -47,7 +47,7 @@ final class ServiceContractRegistry
      * Returns per-interface details: all implementations (module + class) and the active implementation.
      * Useful for debugging and for the contracts:list command.
      *
-     * @return array<string, array{implementations: list<array{module: string, class: string}>, active: string}>
+     * @return array<string, array{implementations: list<array{module: string, class: string, factoryKey?: \BackedEnum|null}>, active: string}>
      */
     public function getContractDetails(): array
     {
@@ -62,7 +62,7 @@ final class ServiceContractRegistry
             ClassDiscovery::findClassesWithAttribute(SatisfiesRepositoryContract::class)
         ));
 
-        /** @var array<string, array<int, array{module: string, impl: string}>> interface => list of {module, impl} */
+        /** @var array<string, array<int, array{module: string, impl: string, factoryKey?: \BackedEnum|null}>> interface => list of {module, impl, factoryKey} */
         $byInterface = [];
 
         foreach ($candidates as $implClass) {
@@ -97,7 +97,11 @@ final class ServiceContractRegistry
                     if (!interface_exists($interface) || !$ref->implementsInterface($interface)) {
                         continue;
                     }
-                    $byInterface[$interface][] = ['module' => $moduleName, 'impl' => $implClass];
+                    $entry = ['module' => $moduleName, 'impl' => $implClass];
+                    if ($attr instanceof SatisfiesServiceContract) {
+                        $entry['factoryKey'] = $attr->factoryKey;
+                    }
+                    $byInterface[$interface][] = $entry;
                 }
             } catch (\Throwable $e) {
                 if (Environment::getEnvValue('APP_DEBUG') === '1') {
@@ -125,7 +129,13 @@ final class ServiceContractRegistry
             if ($winner !== null) {
                 $this->contractDetails[$interface] = [
                     'implementations' => array_map(
-                        fn(array $item): array => ['module' => $item['module'], 'class' => $item['impl']],
+                        static function (array $item): array {
+                            $row = ['module' => $item['module'], 'class' => $item['impl']];
+                            if (array_key_exists('factoryKey', $item)) {
+                                $row['factoryKey'] = $item['factoryKey'];
+                            }
+                            return $row;
+                        },
                         $candidatesList
                     ),
                     'active' => $winner,

@@ -34,4 +34,16 @@ enum EventExecution: string
             default => self::Sync,
         };
     }
+
+    public static function fromAttributeValue(string $value): self
+    {
+        $normalized = strtolower(trim($value));
+
+        return match ($normalized) {
+            'sync' => self::Sync,
+            'async', 'defer', 'swoole' => self::Async,
+            'queued', 'queue' => self::Queued,
+            default => throw new \InvalidArgumentException("Unknown event execution mode: {$value}"),
+        };
+    }
 }

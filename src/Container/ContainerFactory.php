@@ -7,18 +7,25 @@ namespace Semitexa\Core\Container;
 use Psr\Container\ContainerInterface;
 
 /**
+ * @internal Bootstrap-only. Application code uses #[InjectAs*] property injection.
+ *
  * Factory for creating the Semitexa DI container.
- * Build once per worker; RequestScopedContainer sets RequestContext per request.
+ * Build once per worker; RequestScopedContainer sets ExecutionContext per request.
+ *
+ * ContainerFactory::get() is an @internal runtime hook for Semitexa core and
+ * low-level framework plumbing. RequestScopedContainer is created via
+ * createRequestScoped() and sets ExecutionContext per request. These APIs are
+ * forbidden in application modules, feature code, handlers, services, listeners,
+ * repositories, and package-level business logic.
  */
 class ContainerFactory
 {
     private static ?SemitexaContainer $container = null;
-    private static ?RequestScopedContainer $requestScopedContainerInstance = null;
 
     /**
      * Create and build the container (call once per worker).
      */
-    public static function create(): ContainerInterface
+    public static function create(): SemitexaContainer
     {
         if (self::$container === null) {
             $container = new SemitexaContainer();
@@ -31,13 +38,13 @@ class ContainerFactory
 
     /**
      * Register bootstrap entries before build() so that contract implementations (e.g. AsyncJsonLogger)
-     * can depend on them (Environment) in the constructor.
+     * can depend on them (Environment) via #[InjectAsReadonly].
      */
     private static function registerBootstrapEntries(SemitexaContainer $container): void
     {
         $container->set(\Semitexa\Core\Environment::class, \Semitexa\Core\Environment::create());
         $container->set(\Psr\Container\ContainerInterface::class, $container);
-        
+
         $root = \Semitexa\Core\Util\ProjectRoot::get();
         $container->set(\Semitexa\Core\ProjectContext::class, new \Semitexa\Core\ProjectContext(
             rootPath: $root,
@@ -59,23 +66,12 @@ class ContainerFactory
     }
 
     /**
-     * Get the singleton container instance.
+     * @internal Runtime hook for Semitexa core plumbing only.
+     * Application code must use #[InjectAs*] property injection.
      */
-    public static function get(): ContainerInterface
+    public static function get(): SemitexaContainer
     {
         return self::create();
-    }
-
-    /**
-     * Get request-scoped container wrapper (singleton per worker).
-     * Application sets Session/Cookie/Request and RequestContext here; handlers are resolved via container with context.
-     */
-    public static function getRequestScoped(): RequestScopedContainer
-    {
-        if (self::$requestScopedContainerInstance === null) {
-            self::$requestScopedContainerInstance = new RequestScopedContainer(self::create());
-        }
-        return self::$requestScopedContainerInstance;
     }
 
     /**

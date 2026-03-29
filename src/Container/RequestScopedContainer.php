@@ -4,20 +4,18 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Container;
 
+use Semitexa\Core\Auth\AuthContextInterface;
 use Semitexa\Core\Cookie\CookieJarInterface;
+use Semitexa\Core\Locale\LocaleContextInterface;
 use Semitexa\Core\Request;
 use Semitexa\Core\Session\SessionInterface;
 use Semitexa\Core\Tenant\TenantContextInterface;
-use Semitexa\Core\Auth\AuthContextInterface;
-use Semitexa\Core\Auth\GuestAuthContext;
-use Semitexa\Core\Locale\LocaleContextInterface;
-use Semitexa\Core\Locale\DefaultLocaleContext;
 use Psr\Container\ContainerInterface;
 
 /**
  * Wrapper for request-scoped values (Session, Cookie, Request) and handler resolution.
- * Application sets Session/Cookie/Request per request; then RequestContext is applied to the
- * Semitexa container so mutable services get them injected after clone.
+ * Application sets Session/Cookie/Request per request; then ExecutionContext is applied to the
+ * Semitexa container so execution-scoped services get them injected after clone.
  */
 class RequestScopedContainer implements ContainerInterface
 {
@@ -30,16 +28,16 @@ class RequestScopedContainer implements ContainerInterface
     }
 
     /**
-     * Set a request-scoped instance (Session, CookieJar, Request).
-     * When all three are set, RequestContext is passed to SemitexaContainer for mutable get().
+     * Set a request-scoped instance (Session, CookieJar, Request, context interfaces).
+     * When all three HTTP values are set, ExecutionContext is passed to SemitexaContainer.
      */
     public function set(string $id, object $instance): void
     {
         $this->requestScopedCache[$id] = $instance;
-        $this->updateRequestContext();
+        $this->updateExecutionContext();
     }
 
-    private function updateRequestContext(): void
+    private function updateExecutionContext(): void
     {
         if (!$this->container instanceof SemitexaContainer) {
             return;
@@ -50,21 +48,16 @@ class RequestScopedContainer implements ContainerInterface
         $tenantContext = $this->requestScopedCache[TenantContextInterface::class] ?? null;
         $authContext = $this->requestScopedCache[AuthContextInterface::class] ?? null;
         $localeContext = $this->requestScopedCache[LocaleContextInterface::class] ?? null;
-        
+
         if ($request instanceof Request && $session instanceof SessionInterface && $cookieJar instanceof CookieJarInterface) {
-            $this->container->setRequestContext(new RequestContext($request, $session, $cookieJar));
-        }
-        
-        if ($tenantContext instanceof TenantContextInterface) {
-            $this->container->setTenantContext($tenantContext);
-        }
-        
-        if ($authContext instanceof AuthContextInterface) {
-            $this->container->setAuthContext($authContext);
-        }
-        
-        if ($localeContext instanceof LocaleContextInterface) {
-            $this->container->setLocaleContext($localeContext);
+            $this->container->setExecutionContext(new ExecutionContext(
+                request: $request,
+                session: $session,
+                cookieJar: $cookieJar,
+                tenantContext: $tenantContext instanceof TenantContextInterface ? $tenantContext : null,
+                authContext: $authContext instanceof AuthContextInterface ? $authContext : null,
+                localeContext: $localeContext instanceof LocaleContextInterface ? $localeContext : null,
+            ));
         }
     }
 
@@ -85,7 +78,7 @@ class RequestScopedContainer implements ContainerInterface
 
     /**
      * Get a service. Session/Cookie/Request must be set first by Application.
-     * Handlers and other mutable services are resolved from SemitexaContainer (clone + RequestContext).
+     * Handlers and other execution-scoped services are resolved from SemitexaContainer (clone + ExecutionContext).
      */
     public function get(string $id): mixed
     {

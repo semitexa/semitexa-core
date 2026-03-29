@@ -7,12 +7,14 @@ namespace Semitexa\Core\Attributes;
 use Attribute;
 
 /**
- * Explicitly marks a class as request-scoped (mutable).
- * The container will clone a prototype of this class per request
- * and inject RequestContext (Request, Session, CookieJar, etc.).
+ * @deprecated Use #[ExecutionScoped] instead. This attribute is scheduled for removal.
  *
- * Use when the class needs request-scoped state but its name
- * does not contain 'Handler' or 'Listener'.
+ * Legacy alias for the same execution-scoped lifecycle now expressed by #[ExecutionScoped].
+ *
+ * Previously marked a class as request-scoped (mutable). The container clones a
+ * prototype of this class per execution and injects execution-context values.
+ *
+ * Migration: Replace #[AsMutable] with #[ExecutionScoped] on the class.
  */
 #[Attribute(Attribute::TARGET_CLASS)]
 final class AsMutable

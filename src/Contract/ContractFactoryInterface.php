@@ -16,14 +16,14 @@ namespace Semitexa\Core\Contract;
  * interface FactoryItemListProviderInterface extends ContractFactoryInterface
  * {
  *     public function getDefault(): ItemListProviderInterface;
- *     public function get(string $key): ItemListProviderInterface;
- *     public function keys(): array; // @return list<string>
+ *     public function get(ItemListProviderKind $key): ItemListProviderInterface;
+ *     public function keys(): array; // @return list<\BackedEnum>
  * }
  * </code>
  *
- * Keys are composite: "Module::ShortClassName" (e.g. "Website::WebsiteItemListProvider").
- * Lookup in get($key) is case-insensitive (e.g. "website::websiteitemlistprovider" is the same).
- * Use getDefault() for the active implementation (by module extends order), or get($key) for a specific one.
+ * Factory selection is enum-keyed and closed-world. The backed enum defines the complete
+ * set of legal implementations. Use getDefault() for the active implementation (by module
+ * extends order), or get($key) for a specific implementation.
  */
 interface ContractFactoryInterface
 {
@@ -33,16 +33,16 @@ interface ContractFactoryInterface
     public function getDefault(): object;
 
     /**
-     * Get implementation by key (module name).
+     * Get implementation by enum key.
      *
      * @throws \InvalidArgumentException when key is unknown
      */
-    public function get(string $key): object;
+    public function get(\BackedEnum $key): object;
 
     /**
-     * Available keys (module names that provide an implementation).
+     * Available enum cases for this factory.
      *
-     * @return list<string>
+     * @return list<\BackedEnum>
      */
     public function keys(): array;
 }

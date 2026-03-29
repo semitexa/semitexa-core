@@ -7,6 +7,10 @@ declare(strict_types=1);
  * Semitexa CLI entry point (shipped with semitexa/core).
  * When installed via Composer, this is linked as vendor/bin/semitexa.
  */
+if (in_array($argv[1] ?? '', ['server:start', 'server:restart', 'server:reload'], true)) {
+    semitexaPrebuildAutoload();
+}
+
 $dir = __DIR__;
 $autoload = null;
 for ($i = 0; $i < 5; $i++) {
@@ -29,6 +33,105 @@ require_once $autoload;
 use Semitexa\Core\Discovery\AttributeDiscovery;
 use Semitexa\Core\Console\Application;
 
+if (semitexaIsLifecycleCommand($argv[1] ?? '')) {
+    exit(semitexaRunLifecycleCommand($argv));
+}
+
 AttributeDiscovery::initialize();
 $application = new Application();
 $application->run();
+
+function semitexaPrebuildAutoload(): void
+{
+    $projectRoot = semitexaFindProjectRoot(__DIR__);
+    if ($projectRoot === null) {
+        return;
+    }
+
+    $composer = semitexaResolveComposer($projectRoot);
+    if ($composer === null) {
+        return;
+    }
+
+    $command = $composer . ' dump-autoload --working-dir=' . escapeshellarg($projectRoot) . ' 2>&1';
+    $output = [];
+    $code = 0;
+    exec($command, $output, $code);
+
+    if ($code === 0) {
+        putenv('SEMITEXA_AUTOLOAD_REBUILT=1');
+        return;
+    }
+
+    fwrite(STDERR, "[Semitexa] Warning: composer dump-autoload failed before CLI bootstrap:\n" . implode("\n", $output) . "\n");
+}
+
+function semitexaIsLifecycleCommand(string $command): bool
+{
+    return in_array($command, [
+        'server:start',
+        'server:restart',
+        'server:reload',
+        'server:stop',
+    ], true);
+}
+
+/**
+ * @param array<int, string> $argv
+ */
+function semitexaRunLifecycleCommand(array $argv): int
+{
+    $map = [
+        'server:start' => \Semitexa\Core\Console\Command\ServerStartCommand::class,
+        'server:restart' => \Semitexa\Core\Console\Command\ServerRestartCommand::class,
+        'server:reload' => \Semitexa\Core\Console\Command\ServerReloadCommand::class,
+        'server:stop' => \Semitexa\Core\Console\Command\ServerStopCommand::class,
+    ];
+
+    $commandName = $argv[1] ?? '';
+    $class = $map[$commandName] ?? null;
+    if ($class === null) {
+        return 1;
+    }
+
+    $app = new \Symfony\Component\Console\Application('Semitexa', '1.1.31');
+    $app->setAutoExit(false);
+    $app->add(new $class());
+
+    return $app->run(
+        new \Symfony\Component\Console\Input\ArgvInput($argv),
+        new \Symfony\Component\Console\Output\ConsoleOutput(),
+    );
+}
+
+function semitexaFindProjectRoot(string $start): ?string
+{
+    $dir = $start;
+    for ($i = 0; $i < 6; $i++) {
+        if (is_file($dir . '/composer.json') && is_dir($dir . '/vendor')) {
+            return $dir;
+        }
+        $parent = dirname($dir);
+        if ($parent === $dir || $parent === '') {
+            break;
+        }
+        $dir = $parent;
+    }
+
+    return null;
+}
+
+function semitexaResolveComposer(string $projectRoot): ?string
+{
+    $systemComposer = trim((string) shell_exec('which composer 2>/dev/null'));
+    if ($systemComposer !== '') {
+        return escapeshellarg($systemComposer);
+    }
+
+    $localComposer = $projectRoot . '/vendor/bin/composer';
+    if (is_file($localComposer)) {
+        return PHP_BINARY . ' ' . escapeshellarg($localComposer);
+    }
+
+    return null;
+}

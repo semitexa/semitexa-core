@@ -4,37 +4,55 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Container;
 
+use Semitexa\Core\Attributes\AsEventListener;
+use Semitexa\Core\Attributes\AsPipelineListener;
 use Semitexa\Core\Attributes\AsService;
+use Semitexa\Core\Attributes\Config;
+use Semitexa\Core\Attributes\ExecutionScoped;
 use Semitexa\Core\Attributes\InjectAsFactory;
 use Semitexa\Core\Attributes\InjectAsMutable;
 use Semitexa\Core\Attributes\InjectAsReadonly;
+use Semitexa\Core\Auth\AuthContextInterface;
+use Semitexa\Core\Container\Exception\CircularDependencyException;
+use Semitexa\Core\Container\Exception\ContainerBuildException;
+use Semitexa\Core\Container\Exception\ContainerSealedException;
+use Semitexa\Core\Container\Exception\InjectionException;
+use Semitexa\Core\Cookie\CookieJarInterface;
 use Semitexa\Core\Discovery\AttributeDiscovery;
 use Semitexa\Core\Discovery\ClassDiscovery;
+use Semitexa\Core\Environment;
+use Semitexa\Core\Locale\LocaleContextInterface;
 use Semitexa\Core\Pipeline\AuthCheck;
 use Semitexa\Core\Pipeline\HandleRequest;
 use Semitexa\Core\Pipeline\PipelineListenerRegistry;
 use Semitexa\Core\Registry\RegistryContractResolverGenerator;
 use Semitexa\Core\Request;
-use Semitexa\Core\Environment;
+use Semitexa\Core\Session\SessionInterface;
 use Semitexa\Core\Tenant\TenantContextInterface;
-use Semitexa\Core\Auth\AuthContextInterface;
-use Semitexa\Core\Locale\LocaleContextInterface;
 use Psr\Container\ContainerInterface;
 use ReflectionClass;
 use ReflectionNamedType;
 
 /**
  * Custom DI container: build once per worker, get() for readonly returns shared instance,
- * for mutable returns clone(prototype) with RequestContext injected.
- * Only AsServiceContract types (from ServiceContractRegistry); injection only via protected fields with InjectAs*.
+ * for execution-scoped returns clone(prototype) with execution context injected.
+ *
+ * Four property attributes are the only value channels for container-managed framework objects:
+ * - #[InjectAsReadonly] — worker-scoped service
+ * - #[InjectAsMutable] — execution-scoped service or context
+ * - #[InjectAsFactory] — multi-implementation factory
+ * - #[Config] — scalar configuration value
+ *
+ * Constructors with parameters are forbidden on container-managed framework objects.
+ * Container is sealed after boot — set() throws ContainerSealedException.
  */
 final class SemitexaContainer implements ContainerInterface
 {
     /** @var array<string, object> id (class/interface) => shared instance (readonly) */
     private array $readonlyInstances = [];
 
-    /** @var array<string, object> class => prototype instance (mutable) */
-    private array $mutablePrototypes = [];
+    /** @var array<string, object> class => prototype instance (execution-scoped) */
+    private array $executionScopedPrototypes = [];
 
     /** @var array<string, object> factory interface => ContractFactory instance */
     private array $factories = [];
@@ -42,8 +60,8 @@ final class SemitexaContainer implements ContainerInterface
     /** @var array<string, string> id => concrete class (for interfaces, resolved from registry/resolver) */
     private array $idToClass = [];
 
-    /** @var array<string, true> classes that are ever requested as mutable */
-    private array $mutableClasses = [];
+    /** @var array<string, true> classes that are execution-scoped */
+    private array $executionScopedClasses = [];
 
     /** @var array<string, string> interface => resolver class (when resolver exists) */
     private array $interfaceToResolver = [];
@@ -51,37 +69,61 @@ final class SemitexaContainer implements ContainerInterface
     /** @var array<string, array<string, array{kind: string, type: string}>> */
     private array $injections = [];
 
-    private ?RequestContext $requestContext = null;
-    private ?TenantContextInterface $tenantContext = null;
-    private ?AuthContextInterface $authContext = null;
-    private ?LocaleContextInterface $localeContext = null;
+    /** @var array<string, object> type => execution context value (Request, Session, etc.) */
+    private array $executionContextValues = [];
 
-    public function setRequestContext(RequestContext $context): void
-    {
-        $this->requestContext = $context;
-    }
+    /** @var bool Whether the container is sealed (after BootPhase::Ready) */
+    private bool $sealed = false;
 
-    public function setTenantContext(TenantContextInterface $context): void
-    {
-        $this->tenantContext = $context;
-    }
+    /** @var list<string> Known execution context types, resolved at execution time not boot time */
+    private const EXECUTION_CONTEXT_TYPES = [
+        Request::class,
+        SessionInterface::class,
+        CookieJarInterface::class,
+        TenantContextInterface::class,
+        AuthContextInterface::class,
+        LocaleContextInterface::class,
+    ];
 
-    public function setAuthContext(AuthContextInterface $context): void
+    /**
+     * Set execution-scoped context values. Called once per execution before handler resolution.
+     * These are resolved by #[InjectAsMutable] during clone-time injection.
+     */
+    public function setExecutionContext(ExecutionContext $context): void
     {
-        $this->authContext = $context;
-    }
-
-    public function setLocaleContext(LocaleContextInterface $context): void
-    {
-        $this->localeContext = $context;
+        $this->executionContextValues = [];
+        if ($context->request !== null) {
+            $this->executionContextValues[Request::class] = $context->request;
+        }
+        if ($context->session !== null) {
+            $this->executionContextValues[SessionInterface::class] = $context->session;
+        }
+        if ($context->cookieJar !== null) {
+            $this->executionContextValues[CookieJarInterface::class] = $context->cookieJar;
+        }
+        if ($context->tenantContext !== null) {
+            $this->executionContextValues[TenantContextInterface::class] = $context->tenantContext;
+        }
+        if ($context->authContext !== null) {
+            $this->executionContextValues[AuthContextInterface::class] = $context->authContext;
+        }
+        if ($context->localeContext !== null) {
+            $this->executionContextValues[LocaleContextInterface::class] = $context->localeContext;
+        }
     }
 
     /**
      * Register a pre-built instance (e.g. Environment, Logger) as readonly.
-     * Call after build() for bootstrap entries that are not discovered via AsServiceContract.
+     * Only allowed during build phase. After BootPhase::Ready, throws ContainerSealedException.
      */
     public function set(string $id, object $instance): void
     {
+        if ($this->sealed) {
+            throw new ContainerSealedException(
+                "Cannot modify container after boot. All registrations must happen during build(). "
+                . "Attempted to set: {$id}"
+            );
+        }
         $this->readonlyInstances[$id] = $instance;
     }
 
@@ -93,29 +135,31 @@ final class SemitexaContainer implements ContainerInterface
         if (isset($this->factories[$id])) {
             return $this->factories[$id];
         }
+
+        $class = $this->idToClass[$id] ?? null;
+        if ($class !== null && isset($this->executionScopedPrototypes[$class])) {
+            $clone = clone $this->executionScopedPrototypes[$class];
+            $this->injectMutableProperties($clone, $class);
+            return $clone;
+        }
+
+        // Interface -> resolver -> active contract
         $resolverClass = $this->interfaceToResolver[$id] ?? null;
         if ($resolverClass !== null) {
             $resolver = $this->readonlyInstances[$resolverClass] ?? null;
             if ($resolver !== null && method_exists($resolver, 'getContract')) {
                 $active = $resolver->getContract();
                 $activeClass = $active::class;
-                if (isset($this->mutablePrototypes[$activeClass])) {
+                if (isset($this->executionScopedPrototypes[$activeClass])) {
                     $clone = clone $active;
-                    $this->injectRequestContextInto($clone);
-                    $this->injectFactoriesIntoInstance($clone, $activeClass);
+                    $this->injectMutableProperties($clone, $activeClass);
                     return $clone;
                 }
                 return $active;
             }
         }
-        $class = $this->idToClass[$id] ?? null;
-        if ($class !== null && isset($this->mutablePrototypes[$class])) {
-            $clone = clone $this->mutablePrototypes[$class];
-            $this->injectRequestContextInto($clone);
-            $this->injectFactoriesIntoInstance($clone, $class);
-            return $clone;
-        }
-        throw new NotFoundException('Container: unknown or not registered service: ' . $id);
+
+        throw new NotFoundException('Container: unknown service: ' . $id);
     }
 
     public function has(string $id): bool
@@ -128,7 +172,9 @@ final class SemitexaContainer implements ContainerInterface
 
     /**
      * Auto-wire and create a class instance that is not pre-registered in the container.
-     * Constructor dependencies are resolved from readonly/mutable pools.
+     * Constructor dependencies are resolved from readonly/execution-scoped pools.
+     *
+     * @internal Used only for non-container-managed classes (e.g. Symfony Console commands).
      */
     public function resolve(string $class): object
     {
@@ -140,7 +186,6 @@ final class SemitexaContainer implements ContainerInterface
                 $type = $param->getType();
                 if ($type instanceof ReflectionNamedType && !$type->isBuiltin()) {
                     $name = $type->getName();
-                    // Try existing container resolution (handles interfaces, readonly, mutable)
                     if ($this->has($name)) {
                         $args[] = $this->get($name);
                         continue;
@@ -161,12 +206,18 @@ final class SemitexaContainer implements ContainerInterface
      */
     public function build(): void
     {
+        // === BootPhase::ClassmapLoad ===
         ClassDiscovery::initialize();
+
+        // === BootPhase::ModuleDiscovery ===
+        \Semitexa\Core\ModuleRegistry::initialize();
+
+        // === BootPhase::AttributeScan ===
         AttributeDiscovery::initialize();
+
+        // === BootPhase::ContractResolution ===
         $registry = new ServiceContractRegistry();
         $contractDetails = $registry->getContractDetails();
-
-        // id => concrete class: from ServiceContractRegistry (AsServiceContract implementations)
         foreach ($contractDetails as $interface => $data) {
             $active = $data['active'] ?? null;
             foreach ($data['implementations'] ?? [] as $impl) {
@@ -183,171 +234,113 @@ final class SemitexaContainer implements ContainerInterface
             }
         }
 
-        // Handlers are not service contracts; register them so get($handlerClass) can resolve (mutable, per request).
+        // === BootPhase::ServiceRegistration ===
         foreach (AttributeDiscovery::getDiscoveredPayloadHandlerClassNames() as $handlerClass) {
             $this->idToClass[$handlerClass] = $handlerClass;
         }
-
-        // Plain singleton services marked with #[AsService] — readonly, shared per worker.
         foreach (ClassDiscovery::findClassesWithAttribute(AsService::class) as $serviceClass) {
             $this->idToClass[$serviceClass] = $serviceClass;
         }
-
-        // Auth handlers (e.g. SessionAuthHandler) need request-scoped injection; register so they are mutable.
+        if (class_exists(\Semitexa\Orm\Discovery\RepositoryDiscovery::class)) {
+            foreach (\Semitexa\Orm\Discovery\RepositoryDiscovery::discoverRepositoryClasses() as $repositoryClass) {
+                $this->idToClass[$repositoryClass] = $repositoryClass;
+            }
+        }
+        // Auth handlers need execution-scoped injection
         if (class_exists(\Semitexa\Auth\Attribute\AsAuthHandler::class)) {
-            foreach (\Semitexa\Core\Discovery\ClassDiscovery::findClassesWithAttribute(\Semitexa\Auth\Attribute\AsAuthHandler::class) as $handlerClass) {
+            foreach (ClassDiscovery::findClassesWithAttribute(\Semitexa\Auth\Attribute\AsAuthHandler::class) as $handlerClass) {
                 $this->idToClass[$handlerClass] = $handlerClass;
             }
         }
-
-        // Pipeline listeners are resolved per request; register so they are mutable.
+        // Pipeline listeners are resolved per execution
         foreach ([AuthCheck::class, HandleRequest::class] as $phaseClass) {
             foreach (PipelineListenerRegistry::getListeners($phaseClass) as $meta) {
                 $this->idToClass[$meta['class']] = $meta['class'];
             }
         }
 
+        // === BootPhase::ScopeDetection ===
+        $this->collectExecutionScopedClasses();
 
-        // Mark mutable classes (any injection of type T as InjectAsMutable)
-        $this->collectMutableClasses();
-
-        // Build injection metadata for all concrete service classes
+        // === BootPhase::InjectionAnalysis ===
         $this->collectInjections();
 
-        // Detect mutable-only cycles
-        $this->assertNoMutableCycles();
+        // === BootPhase::CycleDetection ===
+        $this->assertNoCycles();
 
-        // Build readonly graph (shared instances; skip resolvers and mutable-only classes)
-        $this->buildReadonlyGraph($registry, $contractDetails);
+        // === BootPhase::ReadonlyBuild ===
+        $this->buildReadonlyGraph();
 
-        // Build mutable prototypes
-        $this->buildMutablePrototypes($registry, $contractDetails);
+        // === BootPhase::ExecutionScopedBuild ===
+        $this->buildExecutionScopedPrototypes();
 
-        // Build resolvers (depend on implementations from both graphs)
+        // === BootPhase::ResolverBuild ===
         $this->buildResolvers($contractDetails);
 
-        // Build Factory* bindings (generic ContractFactory per factory interface)
+        // === BootPhase::FactoryBuild ===
         $this->buildFactories($registry, $contractDetails);
 
-        // Inject factory instances into mutable prototypes that have InjectAsFactory
+        // Inject factory instances into execution-scoped prototypes that have InjectAsFactory
         $this->injectFactoriesIntoPrototypes();
+
+        // === BootPhase::Validation ===
+        $this->validateAllBindings();
+
+        // === BootPhase::Ready ===
+        $this->sealed = true;
     }
 
-    private function injectFactoriesIntoPrototypes(): void
+    /**
+     * Collect execution-scoped classes by explicit #[ExecutionScoped] attribute
+     * and implied by handler/listener attributes. No name-string fallback.
+     */
+    private function collectExecutionScopedClasses(): void
     {
-        foreach ($this->mutablePrototypes as $class => $instance) {
-            $injections = $this->injections[$class] ?? $this->getInjectionsForClass($class);
-            foreach ($injections as $propName => $info) {
-                if (($info['kind'] ?? '') !== 'factory') {
-                    continue;
-                }
-                $factory = $this->factories[$info['type']] ?? null;
-                if ($factory === null) {
-                    continue;
-                }
-                try {
-                    $prop = (new \ReflectionClass($instance))->getProperty($propName);
-                    $prop->setAccessible(true);
-                    $prop->setValue($instance, $factory);
-                } catch (\Throwable $e) {
-                    if (Environment::getEnvValue('APP_DEBUG') === '1') {
-                        error_log("[Semitexa] SemitexaContainer::injectFactoriesIntoPrototypes failed for {$class}::\${$propName}: " . $e->getMessage());
-                    }
-                }
-            }
-        }
-    }
-
-    private function getResolverClassForContract(string $interface): ?string
-    {
-        if (!interface_exists($interface)) {
-            return null;
-        }
-        $short = (new ReflectionClass($interface))->getShortName();
-        $resolverShort = preg_replace('/Interface$/', 'Resolver', $short);
-        if ($resolverShort === $short) {
-            $resolverShort = $short . 'Resolver';
-        }
-        return 'App\\Registry\\Contracts\\' . $resolverShort;
-    }
-
-    private function collectMutableClasses(): void
-    {
-        foreach (array_keys($this->idToClass) as $id) {
-            $class = $this->resolveToClass($id);
-            if ($class === null) {
-                continue;
-            }
-            foreach ($this->getInjectionsForClass($class) as $prop => $info) {
-                if ($info['kind'] === 'mutable') {
-                    $target = $info['type'];
-                    $concrete = $this->resolveToClass($target);
-                    if ($concrete !== null) {
-                        $this->mutableClasses[$concrete] = true;
-                    }
-                }
-            }
-        }
-        // Classes that are get()ed directly (e.g. handlers, pipeline listeners) should be mutable so we clone per request.
+        // Explicit #[ExecutionScoped] attribute
         foreach ($this->idToClass as $id => $class) {
             if (interface_exists($id)) {
                 continue;
             }
-            // Explicit opt-in via attribute takes priority
-            $ref = new \ReflectionClass($class);
-            if ($ref->getAttributes(\Semitexa\Core\Attributes\AsMutable::class) !== []) {
-                $this->mutableClasses[$class] = true;
+            try {
+                $ref = new ReflectionClass($class);
+            } catch (\Throwable) {
                 continue;
             }
-            // Fallback: legacy string matching (backward compatible)
-            if (str_contains($class, 'Handler') || str_contains($class, 'Listener')) {
-                $this->mutableClasses[$class] = true;
+            if ($ref->getAttributes(ExecutionScoped::class) !== []) {
+                $this->executionScopedClasses[$class] = true;
+            }
+        }
+
+        // Implied by #[AsPayloadHandler]
+        foreach (AttributeDiscovery::getDiscoveredPayloadHandlerClassNames() as $handlerClass) {
+            $this->executionScopedClasses[$handlerClass] = true;
+        }
+
+        // Implied by #[AsEventListener]
+        foreach (ClassDiscovery::findClassesWithAttribute(AsEventListener::class) as $listenerClass) {
+            $this->executionScopedClasses[$listenerClass] = true;
+        }
+
+        // Implied by #[AsPipelineListener]
+        foreach (ClassDiscovery::findClassesWithAttribute(AsPipelineListener::class) as $listenerClass) {
+            $this->executionScopedClasses[$listenerClass] = true;
+        }
+
+        // Auth handlers are execution-scoped
+        if (class_exists(\Semitexa\Auth\Attribute\AsAuthHandler::class)) {
+            foreach (ClassDiscovery::findClassesWithAttribute(\Semitexa\Auth\Attribute\AsAuthHandler::class) as $handlerClass) {
+                $this->executionScopedClasses[$handlerClass] = true;
             }
         }
     }
 
-    private function resolveToClass(string $id): ?string
-    {
-        if (isset($this->idToClass[$id])) {
-            return $this->idToClass[$id];
-        }
-        if (class_exists($id) && !interface_exists($id)) {
-            return $id;
-        }
-        return null;
-    }
-
-    /** @return array<string, array{kind: string, type: string}> */
-    private function getInjectionsForClass(string $class): array
-    {
-        $out = [];
-        try {
-            $ref = new ReflectionClass($class);
-            foreach ($ref->getProperties() as $prop) {
-                if (!$prop->isProtected()) {
-                    continue;
-                }
-                $type = $prop->getType();
-                if (!$type instanceof ReflectionNamedType || $type->isBuiltin()) {
-                    continue;
-                }
-                $typeName = $type->getName();
-                if ($prop->getAttributes(InjectAsReadonly::class) !== []) {
-                    $out[$prop->getName()] = ['kind' => 'readonly', 'type' => $typeName];
-                } elseif ($prop->getAttributes(InjectAsMutable::class) !== []) {
-                    $out[$prop->getName()] = ['kind' => 'mutable', 'type' => $typeName];
-                } elseif ($prop->getAttributes(InjectAsFactory::class) !== []) {
-                    $out[$prop->getName()] = ['kind' => 'factory', 'type' => $typeName];
-                }
-            }
-        } catch (\Throwable $e) {
-            if (Environment::getEnvValue('APP_DEBUG') === '1') {
-                error_log("[Semitexa] SemitexaContainer::getInjectionsForClass({$class}) reflection failed: " . $e->getMessage());
-            }
-        }
-        return $out;
-    }
-
+    /**
+     * Collect injection metadata for all registered classes.
+     * Validates:
+     * - Visibility: only protected allowed
+     * - Type boundary: #[InjectAs*] on class/interface types only, #[Config] on scalars only
+     * - No #[InjectAs*] or #[Config] inside traits
+     */
     private function collectInjections(): void
     {
         $seen = [];
@@ -356,53 +349,237 @@ final class SemitexaContainer implements ContainerInterface
                 $seen[$class] = true;
             }
         }
-        foreach (array_keys($this->mutableClasses) as $class) {
+        foreach (array_keys($this->executionScopedClasses) as $class) {
             $seen[$class] = true;
         }
+
         foreach (array_keys($seen) as $class) {
-            $this->injections[$class] = $this->getInjectionsForClass($class);
+            $this->injections[$class] = $this->buildInjectionsForClass($class);
         }
     }
 
-    private function assertNoMutableCycles(): void
+    /**
+     * Build injection metadata for a single class with strict validation.
+     *
+     * @return array<string, array{kind: string, type: string}>
+     */
+    private function buildInjectionsForClass(string $class): array
     {
-        foreach (array_keys($this->mutableClasses) as $class) {
-            $this->visitMutable($class, [], []);
+        $out = [];
+        try {
+            $ref = new ReflectionClass($class);
+        } catch (\Throwable) {
+            return [];
         }
-    }
 
-    /** @param array<string> $path */
-    private function visitMutable(string $class, array $path, array $visited): void
-    {
-        if (isset($visited[$class])) {
-            return;
-        }
-        $visited[$class] = true;
-        $path[] = $class;
-        $injections = $this->getInjectionsForClass($class);
-        foreach ($injections as $info) {
-            if (($info['kind'] ?? '') !== 'mutable') {
+        foreach ($ref->getProperties() as $prop) {
+            $injectAttrs = [
+                ...array_map(fn($a) => ['attr' => $a, 'kind' => 'readonly'],
+                    $prop->getAttributes(InjectAsReadonly::class)),
+                ...array_map(fn($a) => ['attr' => $a, 'kind' => 'mutable'],
+                    $prop->getAttributes(InjectAsMutable::class)),
+                ...array_map(fn($a) => ['attr' => $a, 'kind' => 'factory'],
+                    $prop->getAttributes(InjectAsFactory::class)),
+            ];
+
+            $configAttrs = $prop->getAttributes(Config::class);
+
+            if (empty($injectAttrs) && empty($configAttrs)) {
                 continue;
             }
-            $targetClass = $this->resolveToClass($info['type']);
-            if ($targetClass === null || !isset($this->mutableClasses[$targetClass])) {
-                continue;
-            }
-            if (in_array($targetClass, $path, true)) {
-                throw new \RuntimeException(
-                    'DI: mutable cycle detected: ' . implode(' -> ', $path) . ' -> ' . $targetClass
+
+            if (count($injectAttrs) > 1) {
+                $kinds = implode(', ', array_map(static fn(array $attr): string => $attr['kind'], $injectAttrs));
+                throw new InjectionException(
+                    targetClass: $class,
+                    propertyName: $prop->getName(),
+                    propertyType: (string) $prop->getType(),
+                    injectionKind: $injectAttrs[0]['kind'],
+                    message: "Property {$class}::\${$prop->getName()} declares multiple #[InjectAs*] attributes ({$kinds}). "
+                        . 'Choose exactly one injection mode.',
                 );
             }
-            $this->visitMutable($targetClass, $path, $visited);
+
+            if (!empty($injectAttrs) && !empty($configAttrs)) {
+                throw new InjectionException(
+                    targetClass: $class,
+                    propertyName: $prop->getName(),
+                    propertyType: (string) $prop->getType(),
+                    injectionKind: $injectAttrs[0]['kind'],
+                    message: "Property {$class}::\${$prop->getName()} cannot combine #[Config] with #[InjectAs*]. "
+                        . 'Choose configuration injection or service injection, but not both.',
+                );
+            }
+
+            // Validate: no #[InjectAs*] or #[Config] inside traits
+            $declaringTrait = $this->findDeclaringTraitForProperty($ref, $prop->getName());
+            if ($declaringTrait !== null) {
+                $attrName = !empty($injectAttrs) ? '#[InjectAs*]' : '#[Config]';
+                throw new InjectionException(
+                    targetClass: $class,
+                    propertyName: $prop->getName(),
+                    propertyType: (string) $prop->getType(),
+                    injectionKind: !empty($injectAttrs) ? $injectAttrs[0]['kind'] : 'config',
+                    message: "{$attrName} is forbidden inside traits. Property {$declaringTrait}::\${$prop->getName()} "
+                        . "must be moved to the consuming class {$class}.",
+                );
+            }
+
+            // Validate visibility: protected is the only allowed visibility
+            if (!$prop->isProtected()) {
+                $visibility = $prop->isPrivate() ? 'private' : 'public';
+                $attrKind = !empty($injectAttrs) ? $injectAttrs[0]['kind'] : 'config';
+                throw new InjectionException(
+                    targetClass: $class,
+                    propertyName: $prop->getName(),
+                    propertyType: (string) $prop->getType(),
+                    injectionKind: $attrKind,
+                    message: "Cannot inject into {$visibility} property {$class}::\${$prop->getName()}. "
+                        . "Injected properties must be protected. No exceptions.",
+                );
+            }
+
+            // Handle #[Config] properties — skip for injection metadata (handled separately)
+            if (!empty($configAttrs)) {
+                // #[Config] validation happens in injectConfigProperties during createInstance
+                continue;
+            }
+
+            // Validate type for #[InjectAs*]: must be class or interface type
+            $type = $prop->getType();
+            if (!$type instanceof ReflectionNamedType || $type->isBuiltin()) {
+                throw new InjectionException(
+                    targetClass: $class,
+                    propertyName: $prop->getName(),
+                    propertyType: (string) $type,
+                    injectionKind: $injectAttrs[0]['kind'],
+                    message: "Injected property {$class}::\${$prop->getName()} must have "
+                        . "a class or interface type, got: {$type}. "
+                        . "For scalar configuration values, use #[Config] instead.",
+                );
+            }
+
+            $out[$prop->getName()] = [
+                'kind' => $injectAttrs[0]['kind'],
+                'type' => $type->getName(),
+            ];
+        }
+
+        return $out;
+    }
+
+    /**
+     * @param ReflectionClass<object> $class
+     */
+    private function findDeclaringTraitForProperty(ReflectionClass $class, string $propertyName): ?string
+    {
+        foreach ($class->getTraits() as $trait) {
+            if ($trait->hasProperty($propertyName)) {
+                return $trait->getName();
+            }
+
+            $nested = $this->findDeclaringTraitForProperty($trait, $propertyName);
+            if ($nested !== null) {
+                return $nested;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Assert no circular dependencies in the full dependency graph (both readonly and execution-scoped).
+     * Uses topological sort with cycle detection. Throws CircularDependencyException with full chain.
+     */
+    private function assertNoCycles(): void
+    {
+        // Build adjacency list from injection metadata
+        $allClasses = array_unique(array_merge(
+            array_values(array_filter($this->idToClass, fn($id) => !interface_exists($id), ARRAY_FILTER_USE_KEY)),
+            array_keys($this->executionScopedClasses),
+        ));
+
+        $adjacency = [];
+        foreach ($allClasses as $class) {
+            $adjacency[$class] = [];
+            $injections = $this->injections[$class] ?? [];
+            foreach ($injections as $info) {
+                if ($info['kind'] === 'factory') {
+                    continue; // Factories don't participate in cycle detection
+                }
+                $target = $this->resolveToClass($info['type']);
+                if ($target !== null && $target !== $class) {
+                    $adjacency[$class][] = $target;
+                }
+            }
+        }
+
+        // DFS-based cycle detection
+        $white = []; // unvisited
+        $gray = [];  // in current path
+        $black = []; // fully processed
+
+        foreach (array_keys($adjacency) as $node) {
+            $white[$node] = true;
+        }
+
+        foreach (array_keys($adjacency) as $node) {
+            if (isset($white[$node])) {
+                $this->dfsDetectCycle($node, $adjacency, $white, $gray, $black, []);
+            }
         }
     }
 
-    /** @param array<string, array{implementations: list<array{module: string, class: string}>, active: string}> $contractDetails */
-    private function buildReadonlyGraph(ServiceContractRegistry $registry, array $contractDetails): void
+    /**
+     * @param array<string, list<string>> $adjacency
+     * @param array<string, true> $white
+     * @param array<string, true> $gray
+     * @param array<string, true> $black
+     * @param list<string> $path
+     */
+    private function dfsDetectCycle(
+        string $node,
+        array $adjacency,
+        array &$white,
+        array &$gray,
+        array &$black,
+        array $path,
+    ): void {
+        unset($white[$node]);
+        $gray[$node] = true;
+        $path[] = $node;
+
+        foreach ($adjacency[$node] ?? [] as $neighbor) {
+            if (isset($black[$neighbor])) {
+                continue;
+            }
+            if (isset($gray[$neighbor])) {
+                // Found a cycle — extract the cycle path
+                $cycleStart = array_search($neighbor, $path, true);
+                if ($cycleStart === false) {
+                    throw new \LogicException("Cycle detection invariant violated: {$neighbor} is gray but missing from path.");
+                }
+                $chain = array_slice($path, $cycleStart);
+                $chain[] = $neighbor;
+                throw new CircularDependencyException(
+                    chain: $chain,
+                    message: 'Circular dependency detected: ' . implode(' -> ', $chain),
+                );
+            }
+            if (isset($white[$neighbor])) {
+                $this->dfsDetectCycle($neighbor, $adjacency, $white, $gray, $black, $path);
+            }
+        }
+
+        unset($gray[$node]);
+        $black[$node] = true;
+    }
+
+    private function buildReadonlyGraph(): void
     {
         $readonlyClasses = [];
         foreach ($this->idToClass as $id => $class) {
-            if (isset($this->mutableClasses[$class])) {
+            if (isset($this->executionScopedClasses[$class])) {
                 continue;
             }
             if (interface_exists($id)) {
@@ -413,9 +590,9 @@ final class SemitexaContainer implements ContainerInterface
             }
             $readonlyClasses[$class] = true;
         }
-        $order = $this->topologicalOrder(array_keys($readonlyClasses), 'readonly');
+        $order = $this->topologicalOrder(array_keys($readonlyClasses));
         foreach ($order as $class) {
-            $instance = $this->createInstance($class, $contractDetails, true);
+            $instance = $this->createInstance($class);
             $this->readonlyInstances[$class] = $instance;
             foreach ($this->idToClass as $id => $c) {
                 if ($c === $class && $id !== $class) {
@@ -443,13 +620,12 @@ final class SemitexaContainer implements ContainerInterface
         }
     }
 
-    /** @param array<string, array{implementations: list<array{module: string, class: string}>, active: string}> $contractDetails */
-    private function buildMutablePrototypes(ServiceContractRegistry $registry, array $contractDetails): void
+    private function buildExecutionScopedPrototypes(): void
     {
-        $order = $this->topologicalOrder(array_keys($this->mutableClasses), 'mutable');
+        $order = $this->topologicalOrder(array_keys($this->executionScopedClasses));
         foreach ($order as $class) {
-            $prototype = $this->createInstance($class, $contractDetails, false);
-            $this->mutablePrototypes[$class] = $prototype;
+            $prototype = $this->createInstance($class);
+            $this->executionScopedPrototypes[$class] = $prototype;
             $this->idToClass[$class] = $class;
             foreach ($this->idToClass as $id => $c) {
                 if ($c === $class && $id !== $class) {
@@ -460,15 +636,408 @@ final class SemitexaContainer implements ContainerInterface
     }
 
     /**
+     * Create instance of a container-managed framework object.
+     *
+     * Uses newInstanceWithoutConstructor(). Constructors with parameters are forbidden.
+     * Dependencies must use #[InjectAs*] and #[Config] property attributes.
+     */
+    private function createInstance(string $class): object
+    {
+        $ref = new ReflectionClass($class);
+
+        $ctor = $ref->getConstructor();
+        if ($ctor !== null && $ctor->getNumberOfParameters() > 0) {
+            throw new InjectionException(
+                targetClass: $class,
+                propertyName: '__construct',
+                propertyType: 'constructor',
+                injectionKind: 'constructor',
+                message: "Container-managed framework object {$class} must not have constructor parameters. "
+                    . "Use #[InjectAsReadonly], #[InjectAsMutable], #[InjectAsFactory], or #[Config] properties instead.",
+            );
+        }
+
+        try {
+            $instance = $ref->newInstanceWithoutConstructor();
+        } catch (\Throwable $e) {
+            throw new \RuntimeException("Container: cannot instantiate {$class}: " . $e->getMessage(), 0, $e);
+        }
+
+        $this->injectConfigProperties($instance, $class, $ref);
+        $this->injectPropertiesInto($instance, $class);
+        return $instance;
+    }
+
+    /**
+     * Resolve constructor params from container and create instance; then set InjectAs* properties.
+     * Used for resolver classes (generated registry resolvers) that have constructor dependencies.
+     *
+     * @internal Resolvers are the only exception to the no-constructor rule — they are generated
+     * classes that bridge the registry pattern and need constructor injection.
+     */
+    private function createInstanceWithConstructor(string $class): object
+    {
+        $ref = new ReflectionClass($class);
+        $ctor = $ref->getConstructor();
+        $args = [];
+        if ($ctor !== null) {
+            foreach ($ctor->getParameters() as $param) {
+                $type = $param->getType();
+                if (!$type instanceof ReflectionNamedType || $type->isBuiltin()) {
+                    if ($param->isDefaultValueAvailable()) {
+                        $args[] = $param->getDefaultValue();
+                        continue;
+                    }
+                    throw new \RuntimeException("Container: cannot resolve constructor param \${$param->getName()} for {$class}");
+                }
+                $name = $type->getName();
+                $inst = $this->readonlyInstances[$name] ?? $this->readonlyInstances[$this->idToClass[$name] ?? ''] ?? null
+                    ?? $this->executionScopedPrototypes[$name] ?? $this->executionScopedPrototypes[$this->idToClass[$name] ?? ''] ?? null;
+                if ($inst === null) {
+                    if ($param->isDefaultValueAvailable()) {
+                        $args[] = $param->getDefaultValue();
+                        continue;
+                    }
+                    throw new \RuntimeException("Container: missing dependency for {$class}::__construct(\${$param->getName()}: {$name})");
+                }
+                $args[] = $inst;
+            }
+        }
+        $instance = $args !== [] ? $ref->newInstanceArgs($args) : $ref->newInstance();
+        $this->injectPropertiesInto($instance, $class);
+        return $instance;
+    }
+
+    /**
+     * Inject #[Config] properties from environment variables or defaults.
+     */
+    private function injectConfigProperties(object $instance, string $class, ReflectionClass $ref): void
+    {
+        foreach ($ref->getProperties() as $prop) {
+            $configAttrs = $prop->getAttributes(Config::class);
+            if (empty($configAttrs)) {
+                continue;
+            }
+
+            // Visibility already validated in collectInjections, but validate here too
+            // for classes not yet collected (e.g. during prototype building)
+            if (!$prop->isProtected()) {
+                $visibility = $prop->isPrivate() ? 'private' : 'public';
+                throw new InjectionException(
+                    targetClass: $class,
+                    propertyName: $prop->getName(),
+                    propertyType: (string) $prop->getType(),
+                    injectionKind: 'config',
+                    message: "Cannot inject config into {$visibility} property {$class}::\${$prop->getName()}. "
+                        . "Config properties must be protected.",
+                );
+            }
+
+            $type = $prop->getType();
+            if (!$type instanceof ReflectionNamedType) {
+                throw new InjectionException(
+                    targetClass: $class,
+                    propertyName: $prop->getName(),
+                    propertyType: (string) $type,
+                    injectionKind: 'config',
+                    message: "#[Config] property {$class}::\${$prop->getName()} must have a named scalar type "
+                        . "(int, float, string, bool, or a backed enum), got: {$type}.",
+                );
+            }
+
+            $typeName = $type->getName();
+
+            // Arrays are forbidden
+            if ($typeName === 'array') {
+                throw new InjectionException(
+                    targetClass: $class,
+                    propertyName: $prop->getName(),
+                    propertyType: 'array',
+                    injectionKind: 'config',
+                    message: "#[Config] property {$class}::\${$prop->getName()} must not be typed as array. "
+                        . "Arrays have no schema and cannot be validated at boot. "
+                        . "Use a typed DTO or collection object injected via #[InjectAsReadonly] instead.",
+                );
+            }
+
+            // Must be a scalar builtin or a backed enum
+            if ($type->isBuiltin() && !in_array($typeName, ['int', 'float', 'string', 'bool'], true)) {
+                throw new InjectionException(
+                    targetClass: $class,
+                    propertyName: $prop->getName(),
+                    propertyType: $typeName,
+                    injectionKind: 'config',
+                    message: "#[Config] property {$class}::\${$prop->getName()} has unsupported type: {$typeName}. "
+                        . "Allowed types: int, float, string, bool, or a backed enum.",
+                );
+            }
+
+            if (!$type->isBuiltin()) {
+                // Non-builtin: must be a backed enum
+                if (!class_exists($typeName) && !interface_exists($typeName)) {
+                    throw new InjectionException(
+                        targetClass: $class,
+                        propertyName: $prop->getName(),
+                        propertyType: $typeName,
+                        injectionKind: 'config',
+                        message: "#[Config] property {$class}::\${$prop->getName()} has unresolvable type: {$typeName}.",
+                    );
+                }
+                $ref2 = new ReflectionClass($typeName);
+                if (!$ref2->isEnum() || !$ref2->implementsInterface(\BackedEnum::class)) {
+                    throw new InjectionException(
+                        targetClass: $class,
+                        propertyName: $prop->getName(),
+                        propertyType: $typeName,
+                        injectionKind: 'config',
+                        message: "#[Config] property {$class}::\${$prop->getName()} has class type: {$typeName}. "
+                            . "#[Config] only supports int, float, string, bool, and backed enums. "
+                            . "For service dependencies, use #[InjectAsReadonly] instead.",
+                    );
+                }
+            }
+
+            /** @var Config $config */
+            $config = $configAttrs[0]->newInstance();
+            $value = $config->env !== null
+                ? $this->resolveEnvValue($config->env, $config->default, $typeName)
+                : $config->default;
+
+            $prop->setAccessible(true);
+            $prop->setValue($instance, $value);
+        }
+    }
+
+    /**
+     * Resolve an environment variable value, casting to the target type.
+     */
+    private function resolveEnvValue(string $envKey, int|float|string|bool|null $default, string $targetType): int|float|string|bool|null
+    {
+        $raw = Environment::getEnvValue($envKey);
+        if ($raw === null) {
+            return $default;
+        }
+
+        return match ($targetType) {
+            'int' => (int) $raw,
+            'float' => (float) $raw,
+            'string' => $raw,
+            'bool' => filter_var($raw, FILTER_VALIDATE_BOOLEAN),
+            default => $this->resolveEnvBackedEnum($raw, $targetType, $default),
+        };
+    }
+
+    private function resolveEnvBackedEnum(string $raw, string $enumClass, mixed $default): mixed
+    {
+        if (!enum_exists($enumClass) || !is_subclass_of($enumClass, \BackedEnum::class)) {
+            return $default;
+        }
+        return $enumClass::tryFrom($raw) ?? $default;
+    }
+
+    /**
+     * Inject #[InjectAs*] properties with strict failure.
+     * Every annotated property must resolve. No silent skip.
+     */
+    private function injectPropertiesInto(object $instance, string $class): void
+    {
+        $ref = new ReflectionClass($instance);
+        $injections = $this->injections[$class] ?? [];
+
+        foreach ($injections as $propName => $info) {
+            $prop = $ref->getProperty($propName);
+            $prop->setAccessible(true);
+            $kind = $info['kind'];
+            $typeName = $info['type'];
+
+            $resolved = $this->resolveForInjection($kind, $typeName);
+
+            if ($resolved !== null) {
+                $prop->setValue($instance, $resolved);
+                continue;
+            }
+
+            // For mutable properties that are execution-context types, skip during boot —
+            // they will be resolved at execution time via injectMutableProperties()
+            if ($kind === 'mutable' && $this->isExecutionContextType($typeName)) {
+                continue;
+            }
+
+            // For mutable properties in execution-scoped classes, the prototype may not
+            // need the value at build time — it will be injected after clone
+            if ($kind === 'mutable' && isset($this->executionScopedClasses[$class])) {
+                continue;
+            }
+
+            throw new InjectionException(
+                targetClass: $class,
+                propertyName: $propName,
+                propertyType: $typeName,
+                injectionKind: $kind,
+                message: "Cannot inject {$class}::\${$propName} (type: {$typeName}, "
+                    . "kind: {$kind}). No binding found.",
+            );
+        }
+    }
+
+    /**
+     * Re-inject all #[InjectAsMutable] properties from the current execution context
+     * and execution-scoped service pool. Called on each clone at execution time.
+     */
+    private function injectMutableProperties(object $instance, string $class): void
+    {
+        $injections = $this->injections[$class] ?? [];
+        $ref = new ReflectionClass($instance);
+
+        foreach ($injections as $propName => $info) {
+            if ($info['kind'] !== 'mutable') {
+                continue;
+            }
+
+            $typeName = $info['type'];
+
+            // Try execution context first (Request, Session, etc.)
+            if (isset($this->executionContextValues[$typeName])) {
+                $prop = $ref->getProperty($propName);
+                $prop->setAccessible(true);
+                $prop->setValue($instance, $this->executionContextValues[$typeName]);
+                continue;
+            }
+
+            // Try execution-scoped prototypes (clone them)
+            $protoClass = $this->idToClass[$typeName] ?? $typeName;
+            $proto = $this->executionScopedPrototypes[$protoClass]
+                ?? $this->executionScopedPrototypes[$typeName]
+                ?? null;
+            if ($proto !== null) {
+                $prop = $ref->getProperty($propName);
+                $prop->setAccessible(true);
+                $prop->setValue($instance, clone $proto);
+                continue;
+            }
+
+            throw new InjectionException(
+                targetClass: $class,
+                propertyName: $propName,
+                propertyType: $typeName,
+                injectionKind: 'mutable',
+                message: "Cannot inject {$class}::\${$propName} (type: {$typeName}) "
+                    . "at execution time. No execution context value or prototype found.",
+            );
+        }
+
+        // Also inject factories into cloned instances
+        foreach ($injections as $propName => $info) {
+            if ($info['kind'] !== 'factory') {
+                continue;
+            }
+            $factory = $this->factories[$info['type']] ?? null;
+            if ($factory !== null) {
+                $prop = $ref->getProperty($propName);
+                $prop->setAccessible(true);
+                $prop->setValue($instance, $factory);
+            }
+        }
+    }
+
+    private function resolveForInjection(string $kind, string $typeName): ?object
+    {
+        return match ($kind) {
+            'factory' => $this->factories[$typeName] ?? null,
+            'readonly' => $this->readonlyInstances[$typeName]
+                ?? $this->readonlyInstances[$this->idToClass[$typeName] ?? '']
+                ?? null,
+            'mutable' => $this->executionScopedPrototypes[$typeName]
+                ?? $this->executionScopedPrototypes[$this->idToClass[$typeName] ?? '']
+                ?? $this->executionContextValues[$typeName]
+                ?? null,
+            default => throw new \InvalidArgumentException("Unknown injection kind in resolveForInjection(): {$kind}"),
+        };
+    }
+
+    /**
+     * Validate all bindings at boot time. Every annotated property must be resolvable.
+     */
+    private function validateAllBindings(): void
+    {
+        foreach ($this->injections as $class => $properties) {
+            foreach ($properties as $propName => $info) {
+                $kind = $info['kind'];
+                $typeName = $info['type'];
+
+                $resolved = $this->resolveForInjection($kind, $typeName);
+
+                if ($resolved !== null) {
+                    continue;
+                }
+
+                // Execution-context types are resolved per execution, not at boot
+                if ($kind === 'mutable' && $this->isExecutionContextType($typeName)) {
+                    continue;
+                }
+
+                // Mutable properties in execution-scoped classes may reference
+                // execution-context values or other execution-scoped prototypes
+                if ($kind === 'mutable' && isset($this->executionScopedClasses[$class])) {
+                    // Check if it's an execution-scoped prototype type
+                    $protoClass = $this->idToClass[$typeName] ?? $typeName;
+                    if (isset($this->executionScopedPrototypes[$protoClass]) || isset($this->executionScopedPrototypes[$typeName])) {
+                        continue;
+                    }
+                }
+
+                throw new InjectionException(
+                    targetClass: $class,
+                    propertyName: $propName,
+                    propertyType: $typeName,
+                    injectionKind: $kind,
+                    message: "Boot validation failed: {$class}::\${$propName} "
+                        . "(type: {$typeName}, kind: {$kind}) has no binding.",
+                );
+            }
+        }
+    }
+
+    private function isExecutionContextType(string $typeName): bool
+    {
+        return in_array($typeName, self::EXECUTION_CONTEXT_TYPES, true);
+    }
+
+    private function resolveToClass(string $id): ?string
+    {
+        if (isset($this->idToClass[$id])) {
+            return $this->idToClass[$id];
+        }
+        if (class_exists($id) && !interface_exists($id)) {
+            return $id;
+        }
+        return null;
+    }
+
+    private function getResolverClassForContract(string $interface): ?string
+    {
+        if (!interface_exists($interface)) {
+            return null;
+        }
+        $short = (new ReflectionClass($interface))->getShortName();
+        $resolverShort = preg_replace('/Interface$/', 'Resolver', $short);
+        if ($resolverShort === $short) {
+            $resolverShort = $short . 'Resolver';
+        }
+        return 'App\\Registry\\Contracts\\' . $resolverShort;
+    }
+
+    /**
      * @param array<string> $classes
      * @return array<string>
      */
-    private function topologicalOrder(array $classes, string $graphKind): array
+    private function topologicalOrder(array $classes): array
     {
         $dep = [];
         foreach ($classes as $c) {
             $dep[$c] = [];
-            foreach ($this->getInjectionsForClass($c) as $info) {
+            $injections = $this->injections[$c] ?? [];
+            foreach ($injections as $info) {
                 if ($info['kind'] === 'factory') {
                     continue;
                 }
@@ -476,23 +1045,6 @@ final class SemitexaContainer implements ContainerInterface
                 if ($target !== null && in_array($target, $classes, true)) {
                     $dep[$c][] = $target;
                 }
-            }
-            // Also include constructor-param dependencies so they are built first
-            try {
-                $ctor = (new \ReflectionClass($c))->getConstructor();
-                if ($ctor !== null) {
-                    foreach ($ctor->getParameters() as $param) {
-                        $type = $param->getType();
-                        if ($type instanceof \ReflectionNamedType && !$type->isBuiltin()) {
-                            $target = $this->resolveToClass($type->getName());
-                            if ($target !== null && in_array($target, $classes, true)) {
-                                $dep[$c][] = $target;
-                            }
-                        }
-                    }
-                }
-            } catch (\Throwable) {
-                // ignore reflection errors
             }
         }
         $out = [];
@@ -515,114 +1067,21 @@ final class SemitexaContainer implements ContainerInterface
         return $out;
     }
 
-    /**
-     * Resolve constructor params from container and create instance; then set Inject* properties.
-     * Used for resolvers and any class that has constructor dependencies.
-     */
-    private function createInstanceWithConstructor(string $class): object
+    private function injectFactoriesIntoPrototypes(): void
     {
-        $ref = new ReflectionClass($class);
-        $ctor = $ref->getConstructor();
-        $args = [];
-        if ($ctor !== null) {
-            foreach ($ctor->getParameters() as $param) {
-                $type = $param->getType();
-                if (!$type instanceof ReflectionNamedType || $type->isBuiltin()) {
-                    throw new \RuntimeException("Container: cannot resolve constructor param \${$param->getName()} for {$class}");
-                }
-                $name = $type->getName();
-                $inst = $this->readonlyInstances[$name] ?? $this->readonlyInstances[$this->idToClass[$name] ?? ''] ?? null
-                    ?? $this->mutablePrototypes[$name] ?? $this->mutablePrototypes[$this->idToClass[$name] ?? ''] ?? null;
-                if ($inst === null) {
-                    throw new \RuntimeException("Container: missing dependency for {$class}::__construct(\${$param->getName()}: {$name})");
-                }
-                $args[] = $inst;
-            }
-        }
-        $instance = $args !== [] ? $ref->newInstanceArgs($args) : $ref->newInstance();
-        $this->injectPropertiesInto($instance, $class);
-        return $instance;
-    }
-
-    /**
-     * @param array<string, array{implementations: list<array{module: string, class: string}>, active: string}> $contractDetails
-     */
-    private function createInstance(string $class, array $contractDetails, bool $readonly): object
-    {
-        $ref = new ReflectionClass($class);
-        $ctor = $ref->getConstructor();
-        $args = [];
-        if ($ctor !== null) {
-            foreach ($ctor->getParameters() as $param) {
-                $type = $param->getType();
-                if ($type instanceof ReflectionNamedType && !$type->isBuiltin()) {
-                    $name = $type->getName();
-                    $inst = $this->readonlyInstances[$name] ?? $this->readonlyInstances[$this->idToClass[$name] ?? ''] ?? null
-                        ?? $this->mutablePrototypes[$name] ?? $this->mutablePrototypes[$this->idToClass[$name] ?? ''] ?? null;
-                    if ($inst !== null) {
-                        $args[] = $inst;
-                        continue;
-                    }
-                }
-                if ($param->isDefaultValueAvailable()) {
-                    $args[] = $param->getDefaultValue();
+        foreach ($this->executionScopedPrototypes as $class => $instance) {
+            $injections = $this->injections[$class] ?? [];
+            foreach ($injections as $propName => $info) {
+                if (($info['kind'] ?? '') !== 'factory') {
                     continue;
                 }
-                throw new \RuntimeException("Container: cannot resolve constructor param \${$param->getName()} for {$class}");
-            }
-        }
-        try {
-            $instance = $args !== [] ? $ref->newInstanceArgs($args) : $ref->newInstance();
-        } catch (\Throwable $e) {
-            throw new \RuntimeException("Container: cannot instantiate {$class}: " . $e->getMessage(), 0, $e);
-        }
-        $this->injectPropertiesInto($instance, $class);
-        return $instance;
-    }
-
-    private function injectPropertiesInto(object $instance, string $class): void
-    {
-        $ref = new ReflectionClass($instance);
-        $injections = $this->injections[$class] ?? $this->getInjectionsForClass($class);
-        foreach ($injections as $propName => $info) {
-            try {
-                $prop = $ref->getProperty($propName);
-            } catch (\Throwable $e) {
-                if (Environment::getEnvValue('APP_DEBUG') === '1') {
-                    error_log("[Semitexa] SemitexaContainer::injectPropertiesInto({$class}) property {$propName} not found: " . $e->getMessage());
+                $factory = $this->factories[$info['type']] ?? null;
+                if ($factory === null) {
+                    continue;
                 }
-                continue;
-            }
-            $prop->setAccessible(true);
-            $kind = $info['kind'];
-            $typeName = $info['type'];
-            if ($kind === 'factory') {
-                $factory = $this->factories[$typeName] ?? null;
-                if ($factory !== null) {
-                    $prop->setValue($instance, $factory);
-                }
-                continue;
-            }
-            // Allow pre-registered instances (e.g. interfaces set via set()) to be injected
-            // even when resolveToClass() would return null (interfaces not in idToClass).
-            if ($kind === 'readonly' && isset($this->readonlyInstances[$typeName])) {
-                $prop->setValue($instance, $this->readonlyInstances[$typeName]);
-                continue;
-            }
-            $targetClass = $this->resolveToClass($typeName);
-            if ($targetClass === null) {
-                continue;
-            }
-            if ($kind === 'readonly') {
-                $dep = $this->readonlyInstances[$typeName] ?? $this->readonlyInstances[$targetClass] ?? null;
-                if ($dep !== null) {
-                    $prop->setValue($instance, $dep);
-                }
-            } else {
-                $dep = $this->mutablePrototypes[$targetClass] ?? null;
-                if ($dep !== null) {
-                    $prop->setValue($instance, $dep);
-                }
+                $prop = (new ReflectionClass($instance))->getProperty($propName);
+                $prop->setAccessible(true);
+                $prop->setValue($instance, $factory);
             }
         }
     }
@@ -639,12 +1098,6 @@ final class SemitexaContainer implements ContainerInterface
             if ($factoryInterface === null || !interface_exists($factoryInterface)) {
                 continue;
             }
-            $generatedClass = RegistryContractResolverGenerator::getGeneratedFactoryClassForContract($baseInterface);
-            if (class_exists($generatedClass)) {
-                $instance = $this->createInstanceWithConstructor($generatedClass);
-                $this->factories[$factoryInterface] = $instance;
-                continue;
-            }
             $active = $data['active'];
             $defaultImpl = null;
             $resolverClass = $this->interfaceToResolver[$baseInterface] ?? null;
@@ -655,74 +1108,48 @@ final class SemitexaContainer implements ContainerInterface
                 }
             }
             if ($defaultImpl === null) {
-                $defaultImpl = $this->readonlyInstances[$active] ?? $this->mutablePrototypes[$active] ?? null;
+                $defaultImpl = $this->readonlyInstances[$active] ?? $this->executionScopedPrototypes[$active] ?? null;
             }
             if ($defaultImpl === null) {
                 continue;
             }
             $byKey = [];
+            $enumKeys = [];
+            $enumClass = null;
             foreach ($implementations as $impl) {
                 $implClass = $impl['class'];
-                $module = $impl['module'];
-                $shortName = (new ReflectionClass($implClass))->getShortName();
-                $key = $module . '::' . $shortName;
-                $inst = $this->readonlyInstances[$implClass] ?? $this->mutablePrototypes[$implClass] ?? null;
+                $factoryKey = $impl['factoryKey'] ?? null;
+                if (!$factoryKey instanceof \BackedEnum) {
+                    throw new ContainerBuildException(
+                        "Factory contract {$baseInterface} requires enum-backed factoryKey for every implementation. Missing on {$implClass}."
+                    );
+                }
+                $currentEnumClass = $factoryKey::class;
+                if ($enumClass === null) {
+                    $enumClass = $currentEnumClass;
+                } elseif ($enumClass !== $currentEnumClass) {
+                    throw new ContainerBuildException(
+                        "Factory contract {$baseInterface} mixes enum types {$enumClass} and {$currentEnumClass}."
+                    );
+                }
+                $key = (string) $factoryKey->value;
+                $inst = $this->readonlyInstances[$implClass] ?? $this->executionScopedPrototypes[$implClass] ?? null;
                 if ($inst !== null) {
                     $byKey[$key] = $inst;
+                    $enumKeys[$key] = $factoryKey;
                 }
             }
-            $this->factories[$factoryInterface] = new ContractFactory($defaultImpl, $byKey);
-        }
-    }
-
-    private function injectFactoriesIntoInstance(object $instance, string $class): void
-    {
-        $injections = $this->injections[$class] ?? $this->getInjectionsForClass($class);
-        foreach ($injections as $propName => $info) {
-            if (($info['kind'] ?? '') !== 'factory') {
-                continue;
+            if ($enumClass === null || !enum_exists($enumClass)) {
+                throw new ContainerBuildException("Factory contract {$baseInterface} has no enum key type.");
             }
-            $typeName = $info['type'] ?? '';
-            $factory = $this->factories[$typeName] ?? null;
-            if ($factory === null) {
-                continue;
+            foreach ($enumClass::cases() as $case) {
+                if (!isset($byKey[(string) $case->value])) {
+                    throw new ContainerBuildException(
+                        "Factory contract {$baseInterface} is missing implementation for {$enumClass}::{$case->name}."
+                    );
+                }
             }
-            $ref = new ReflectionClass($instance);
-            if (!$ref->hasProperty($propName)) {
-                continue;
-            }
-            $prop = $ref->getProperty($propName);
-            $prop->setAccessible(true);
-            $prop->setValue($instance, $factory);
-        }
-    }
-
-    private function injectRequestContextInto(object $instance): void
-    {
-        $ref = new ReflectionClass($instance);
-        foreach ($ref->getProperties() as $prop) {
-            if (!$prop->isProtected() && !$prop->isPublic()) {
-                continue;
-            }
-            $type = $prop->getType();
-            if (!$type instanceof ReflectionNamedType || $type->isBuiltin()) {
-                continue;
-            }
-            $name = $type->getName();
-            $prop->setAccessible(true);
-            if ($name === Request::class) {
-                $prop->setValue($instance, $this->requestContext?->request);
-            } elseif ($name === \Semitexa\Core\Session\SessionInterface::class) {
-                $prop->setValue($instance, $this->requestContext?->session);
-            } elseif ($name === \Semitexa\Core\Cookie\CookieJarInterface::class) {
-                $prop->setValue($instance, $this->requestContext?->cookieJar);
-            } elseif ($name === TenantContextInterface::class && $this->tenantContext !== null) {
-                $prop->setValue($instance, $this->tenantContext);
-            } elseif ($name === AuthContextInterface::class && $this->authContext !== null) {
-                $prop->setValue($instance, $this->authContext);
-            } elseif ($name === LocaleContextInterface::class && $this->localeContext !== null) {
-                $prop->setValue($instance, $this->localeContext);
-            }
+            $this->factories[$factoryInterface] = new ContractFactory($defaultImpl, $byKey, $enumKeys);
         }
     }
 }

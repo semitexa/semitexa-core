@@ -13,6 +13,7 @@ Root dependency for all Semitexa packages. Every module, platform component, and
 ## Key Features
 
 - `#[AsPayload]` / `#[AsPayloadHandler]` attribute-driven routing
+- route-level `produces` / `consumes` metadata for content negotiation
 - `AttributeDiscovery` and `ClassDiscovery` via Composer classmap
 - Two-tier DI: `SemitexaContainer` (worker-scoped readonly) + `RequestScopedContainer` (per-request mutable)
 - `RouteExecutor` pipeline with exception mapping and response decoration
