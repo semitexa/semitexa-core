@@ -181,7 +181,7 @@ namespace App\Registry\Contracts;
  */
 final class {$factoryShortName} implements {$factoryInterfaceTypeHint}
 {
-    /** @var array<string, {$baseInterfaceTypeHint}> */
+    /** @var array<int|string, {$baseInterfaceTypeHint}> */
     private array \$byKey;
 
     public function __construct(
@@ -197,20 +197,20 @@ final class {$factoryShortName} implements {$factoryInterfaceTypeHint}
         return \$this->resolver->getContract();
     }
 
-    public function get(\BackedEnum \$key): {$baseInterfaceTypeHint}
+    public function get({$enumTypeHint} \$key): {$baseInterfaceTypeHint}
     {
-        \$lookup = (string) \$key->value;
+        \$lookup = \$key->value;
         if (isset(\$this->byKey[\$lookup])) {
             return \$this->byKey[\$lookup];
         }
         throw new \InvalidArgumentException('Unknown implementation key: ' . \$key::class . '::' . \$key->name);
     }
 
-    /** @return list<\BackedEnum> */
+    /** @return list<{$enumTypeHint}> */
     public function keys(): array
     {
         return array_map(
-            static fn(string \$key): \BackedEnum => {$enumTypeHint}::from(\$key),
+            static fn(int|string \$key): {$enumTypeHint} => {$enumTypeHint}::from(\$key),
             array_keys(\$this->byKey),
         );
     }

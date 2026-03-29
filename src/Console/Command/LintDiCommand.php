@@ -104,7 +104,13 @@ final class LintDiCommand extends BaseCommand
                         if ($typeName === 'array') {
                             $errors[] = "{$class}::\${$prop->getName()}: #[Config] on array type is forbidden.";
                         } elseif (!$type->isBuiltin()) {
-                            $typeRef = new \ReflectionClass($typeName);
+                            try {
+                                $typeRef = new \ReflectionClass($typeName);
+                            } catch (\ReflectionException $e) {
+                                $errors[] = "{$class}::\${$prop->getName()}: #[Config] type {$typeName} could not be reflected.";
+                                continue;
+                            }
+
                             if (!$typeRef->isEnum() || !$typeRef->implementsInterface(\BackedEnum::class)) {
                                 $errors[] = "{$class}::\${$prop->getName()}: #[Config] on class type {$typeName}. Must be scalar or backed enum.";
                             }
