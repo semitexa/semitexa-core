@@ -134,11 +134,17 @@ class RegistryContractResolverGenerator
         $factoryShortName .= 'Factory';
         $outPath = $root . '/' . self::REGISTRY_CONTRACTS_DIR . '/' . $factoryShortName . '.php';
 
+        /** @var array<string, string> $imports */
         $imports = [];
+        /** @var array<string, string> $usedShortNames */
         $usedShortNames = [];
         $resolverTypeHint = self::addImport($resolverClass, $imports, $usedShortNames);
         $factoryInterfaceTypeHint = self::addImport($factoryInterface, $imports, $usedShortNames);
         $baseInterfaceTypeHint = self::addImport($baseInterface, $imports, $usedShortNames);
+        $enumTypeHint = self::resolveFactoryEnumTypeHint($factoryRef, $imports, $usedShortNames);
+        if ($enumTypeHint === null) {
+            return null;
+        }
 
         $params = ["        private {$resolverTypeHint} \$resolver,"];
         $paramNames = ['resolver'];
@@ -200,10 +206,13 @@ final class {$factoryShortName} implements {$factoryInterfaceTypeHint}
         throw new \InvalidArgumentException('Unknown implementation key: ' . \$key::class . '::' . \$key->name);
     }
 
-    /** @return list<string> */
+    /** @return list<\BackedEnum> */
     public function keys(): array
     {
-        return array_keys(\$this->byKey);
+        return array_map(
+            static fn(string \$key): \BackedEnum => {$enumTypeHint}::from(\$key),
+            array_keys(\$this->byKey),
+        );
     }
 }
 
@@ -211,6 +220,35 @@ PHP;
 
         file_put_contents($outPath, $content);
         return self::REGISTRY_NAMESPACE . '\\' . $factoryShortName;
+    }
+
+    /**
+     * @param ReflectionClass<object> $factoryRef
+     * @param array<string, string> $imports
+     * @param array<string, string> $usedShortNames
+     */
+    private static function resolveFactoryEnumTypeHint(ReflectionClass $factoryRef, array &$imports, array &$usedShortNames): ?string
+    {
+        if (!$factoryRef->hasMethod('get')) {
+            return null;
+        }
+
+        $params = $factoryRef->getMethod('get')->getParameters();
+        if (count($params) !== 1) {
+            return null;
+        }
+
+        $type = $params[0]->getType();
+        if (!$type instanceof \ReflectionNamedType || $type->isBuiltin()) {
+            return null;
+        }
+
+        $enumClass = ltrim($type->getName(), '\\');
+        if (!enum_exists($enumClass) || !is_subclass_of($enumClass, \BackedEnum::class)) {
+            return null;
+        }
+
+        return self::addImport($enumClass, $imports, $usedShortNames);
     }
 
 
@@ -231,7 +269,9 @@ PHP;
         }
         $outPath = $root . '/' . self::REGISTRY_CONTRACTS_DIR . '/' . $resolverShortName . '.php';
 
+        /** @var array<string, string> $imports */
         $imports = [];
+        /** @var array<string, string> $usedShortNames */
         $usedShortNames = [];
         $params = [];
         $paramNames = [];
@@ -308,6 +348,12 @@ PHP;
         return $name;
     }
 
+    /**
+     * @param array<string, string> $imports
+     * @param-out array<string, string> $imports
+     * @param array<string, string> $usedShortNames
+     * @param-out array<string, string> $usedShortNames
+     */
     private static function addImport(string $fqn, array &$imports, array &$usedShortNames): string
     {
         $ref = new ReflectionClass($fqn);
@@ -322,11 +368,16 @@ PHP;
         return $short;
     }
 
+    /**
+     * @param array<string, string> $imports
+     */
     private static function formatUseBlock(array $imports): string
     {
         $lines = [];
         foreach ($imports as $fqn => $alias) {
-            $short = (new ReflectionClass($fqn))->getShortName();
+            $short = str_contains($fqn, '\\')
+                ? substr($fqn, strrpos($fqn, '\\') + 1)
+                : $fqn;
             $lines[] = "use {$fqn}" . ($alias !== $short ? " as {$alias}" : '') . ";";
         }
         return implode("\n", $lines);

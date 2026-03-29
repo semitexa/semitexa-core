@@ -19,6 +19,10 @@ use PHPStan\Rules\RuleErrorBuilder;
  * This is a transitional rule that flags classes whose names suggest they should
  * be execution-scoped but lack the explicit attribute or handler/listener annotation.
  *
+ * SCOPING_ATTRIBUTES are matched against the literal source spelling returned by
+ * $attr->name->toString(). Aliased imports such as `use ExecutionScoped as ES;`
+ * are therefore not resolved by this rule today.
+ *
  * @implements Rule<Class_>
  */
 final class ExecutionScopedWithoutAttributeRule implements Rule

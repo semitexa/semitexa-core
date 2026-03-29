@@ -90,8 +90,9 @@ final class LintDiCommand extends BaseCommand
                 }
 
                 // Trait check
-                if ($prop->getDeclaringClass()->isTrait()) {
-                    $errors[] = "{$class}::\${$prop->getName()}: Injection attribute inside trait {$prop->getDeclaringClass()->getName()} is forbidden.";
+                $declaringTrait = $this->findDeclaringTraitForProperty($ref, $prop->getName());
+                if ($declaringTrait !== null) {
+                    $errors[] = "{$class}::\${$prop->getName()}: Injection attribute inside trait {$declaringTrait} is forbidden.";
                 }
 
                 $type = $prop->getType();
@@ -115,11 +116,13 @@ final class LintDiCommand extends BaseCommand
 
                 // #[InjectAs*] type check
                 if ($hasInject) {
-                    if ($type instanceof \ReflectionNamedType && $type->isBuiltin()) {
-                        $errors[] = "{$class}::\${$prop->getName()}: #[InjectAs*] on scalar type {$type->getName()}. Use #[Config] instead.";
-                    }
-                    if ($type instanceof \ReflectionNamedType && $type->allowsNull()) {
-                        $errors[] = "{$class}::\${$prop->getName()}: Nullable injected properties are forbidden on container-managed framework objects.";
+                    if ($type instanceof \ReflectionNamedType) {
+                        if ($type->isBuiltin()) {
+                            $nullable = $type->allowsNull() ? ' Nullable scalar injection is also forbidden.' : '';
+                            $errors[] = "{$class}::\${$prop->getName()}: #[InjectAs*] on scalar type {$type->getName()}. Use #[Config] instead.{$nullable}";
+                        } elseif ($type->allowsNull()) {
+                            $errors[] = "{$class}::\${$prop->getName()}: Nullable injected properties are forbidden on container-managed framework objects.";
+                        }
                     }
                 }
             }
@@ -135,5 +138,24 @@ final class LintDiCommand extends BaseCommand
         }
         $io->error(sprintf('%d error(s) found in %d classes.', count($errors), $classesChecked));
         return self::FAILURE;
+    }
+
+    /**
+     * @param \ReflectionClass<object> $class
+     */
+    private function findDeclaringTraitForProperty(\ReflectionClass $class, string $propertyName): ?string
+    {
+        foreach ($class->getTraits() as $trait) {
+            if ($trait->hasProperty($propertyName)) {
+                return $trait->getName();
+            }
+
+            $nested = $this->findDeclaringTraitForProperty($trait, $propertyName);
+            if ($nested !== null) {
+                return $nested;
+            }
+        }
+
+        return null;
     }
 }

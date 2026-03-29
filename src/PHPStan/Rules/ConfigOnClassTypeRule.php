@@ -47,7 +47,7 @@ final class ConfigOnClassTypeRule implements Rule
         }
 
         if ($type instanceof Node\Name) {
-            $resolved = $type->toString();
+            $resolved = $this->resolveName($type);
             // Check if it's a class/interface (not a scalar)
             if (class_exists($resolved) || interface_exists($resolved)) {
                 // Allow backed enums
@@ -70,6 +70,16 @@ final class ConfigOnClassTypeRule implements Rule
         }
 
         return [];
+    }
+
+    private function resolveName(Node\Name $name): string
+    {
+        $resolved = $name->getAttribute('resolvedName');
+        if ($resolved instanceof Node\Name) {
+            return $resolved->toString();
+        }
+
+        return $name->toString();
     }
 
     private function hasConfigAttribute(Property $node): bool

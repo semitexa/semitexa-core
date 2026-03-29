@@ -269,10 +269,10 @@ final class SemitexaContainer implements ContainerInterface
         $this->assertNoCycles();
 
         // === BootPhase::ReadonlyBuild ===
-        $this->buildReadonlyGraph($registry, $contractDetails);
+        $this->buildReadonlyGraph();
 
         // === BootPhase::ExecutionScopedBuild ===
-        $this->buildExecutionScopedPrototypes($registry, $contractDetails);
+        $this->buildExecutionScopedPrototypes();
 
         // === BootPhase::ResolverBuild ===
         $this->buildResolvers($contractDetails);
@@ -388,16 +388,39 @@ final class SemitexaContainer implements ContainerInterface
                 continue;
             }
 
+            if (count($injectAttrs) > 1) {
+                $kinds = implode(', ', array_map(static fn(array $attr): string => $attr['kind'], $injectAttrs));
+                throw new InjectionException(
+                    targetClass: $class,
+                    propertyName: $prop->getName(),
+                    propertyType: (string) $prop->getType(),
+                    injectionKind: $injectAttrs[0]['kind'],
+                    message: "Property {$class}::\${$prop->getName()} declares multiple #[InjectAs*] attributes ({$kinds}). "
+                        . 'Choose exactly one injection mode.',
+                );
+            }
+
+            if (!empty($injectAttrs) && !empty($configAttrs)) {
+                throw new InjectionException(
+                    targetClass: $class,
+                    propertyName: $prop->getName(),
+                    propertyType: (string) $prop->getType(),
+                    injectionKind: $injectAttrs[0]['kind'],
+                    message: "Property {$class}::\${$prop->getName()} cannot combine #[Config] with #[InjectAs*]. "
+                        . 'Choose configuration injection or service injection, but not both.',
+                );
+            }
+
             // Validate: no #[InjectAs*] or #[Config] inside traits
-            $declaringClass = $prop->getDeclaringClass();
-            if ($declaringClass->isTrait()) {
+            $declaringTrait = $this->findDeclaringTraitForProperty($ref, $prop->getName());
+            if ($declaringTrait !== null) {
                 $attrName = !empty($injectAttrs) ? '#[InjectAs*]' : '#[Config]';
                 throw new InjectionException(
                     targetClass: $class,
                     propertyName: $prop->getName(),
                     propertyType: (string) $prop->getType(),
                     injectionKind: !empty($injectAttrs) ? $injectAttrs[0]['kind'] : 'config',
-                    message: "{$attrName} is forbidden inside traits. Property {$declaringClass->getName()}::\${$prop->getName()} "
+                    message: "{$attrName} is forbidden inside traits. Property {$declaringTrait}::\${$prop->getName()} "
                         . "must be moved to the consuming class {$class}.",
                 );
             }
@@ -443,6 +466,25 @@ final class SemitexaContainer implements ContainerInterface
         }
 
         return $out;
+    }
+
+    /**
+     * @param ReflectionClass<object> $class
+     */
+    private function findDeclaringTraitForProperty(ReflectionClass $class, string $propertyName): ?string
+    {
+        foreach ($class->getTraits() as $trait) {
+            if ($trait->hasProperty($propertyName)) {
+                return $trait->getName();
+            }
+
+            $nested = $this->findDeclaringTraitForProperty($trait, $propertyName);
+            if ($nested !== null) {
+                return $nested;
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -514,6 +556,9 @@ final class SemitexaContainer implements ContainerInterface
             if (isset($gray[$neighbor])) {
                 // Found a cycle — extract the cycle path
                 $cycleStart = array_search($neighbor, $path, true);
+                if ($cycleStart === false) {
+                    throw new \LogicException("Cycle detection invariant violated: {$neighbor} is gray but missing from path.");
+                }
                 $chain = array_slice($path, $cycleStart);
                 $chain[] = $neighbor;
                 throw new CircularDependencyException(
@@ -530,8 +575,7 @@ final class SemitexaContainer implements ContainerInterface
         $black[$node] = true;
     }
 
-    /** @param array<string, array{implementations: list<array{module: string, class: string}>, active: string}> $contractDetails */
-    private function buildReadonlyGraph(ServiceContractRegistry $registry, array $contractDetails): void
+    private function buildReadonlyGraph(): void
     {
         $readonlyClasses = [];
         foreach ($this->idToClass as $id => $class) {
@@ -546,7 +590,7 @@ final class SemitexaContainer implements ContainerInterface
             }
             $readonlyClasses[$class] = true;
         }
-        $order = $this->topologicalOrder(array_keys($readonlyClasses), 'readonly');
+        $order = $this->topologicalOrder(array_keys($readonlyClasses));
         foreach ($order as $class) {
             $instance = $this->createInstance($class);
             $this->readonlyInstances[$class] = $instance;
@@ -576,10 +620,9 @@ final class SemitexaContainer implements ContainerInterface
         }
     }
 
-    /** @param array<string, array{implementations: list<array{module: string, class: string}>, active: string}> $contractDetails */
-    private function buildExecutionScopedPrototypes(ServiceContractRegistry $registry, array $contractDetails): void
+    private function buildExecutionScopedPrototypes(): void
     {
-        $order = $this->topologicalOrder(array_keys($this->executionScopedClasses), 'execution-scoped');
+        $order = $this->topologicalOrder(array_keys($this->executionScopedClasses));
         foreach ($order as $class) {
             $prototype = $this->createInstance($class);
             $this->executionScopedPrototypes[$class] = $prototype;
@@ -908,6 +951,7 @@ final class SemitexaContainer implements ContainerInterface
                 ?? $this->executionScopedPrototypes[$this->idToClass[$typeName] ?? '']
                 ?? $this->executionContextValues[$typeName]
                 ?? null,
+            default => throw new \InvalidArgumentException("Unknown injection kind in resolveForInjection(): {$kind}"),
         };
     }
 
@@ -987,7 +1031,7 @@ final class SemitexaContainer implements ContainerInterface
      * @param array<string> $classes
      * @return array<string>
      */
-    private function topologicalOrder(array $classes, string $graphKind): array
+    private function topologicalOrder(array $classes): array
     {
         $dep = [];
         foreach ($classes as $c) {

@@ -19,12 +19,18 @@ use Semitexa\Core\Event\EventExecution;
 #[Attribute(Attribute::TARGET_CLASS)]
 class AsEventListener
 {
+    public EventExecution $execution;
+
     public function __construct(
         public string $event,
-        public EventExecution|string $execution,
+        EventExecution|string $execution,
         public ?string $transport = null,
         public ?string $queue = null,
         public ?int $priority = null,
     ) {
+        $this->execution = match (true) {
+            $execution instanceof EventExecution => $execution,
+            is_string($execution) => EventExecution::fromAttributeValue($execution),
+        };
     }
 }

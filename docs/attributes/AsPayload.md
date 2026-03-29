@@ -104,5 +104,5 @@ For a fuller explanation of environment-controlled route changes, see [Payload R
 
 ## Related
 
-- [AsPayloadHandler](AsRequestHandler.md)
+- [AsPayloadHandler](AsPayloadHandler.md)
 - [AsPayloadPart](AsPayloadPart.md)

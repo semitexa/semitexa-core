@@ -29,7 +29,18 @@ final class EventDispatcher implements EventDispatcherInterface
         if (!class_exists($eventClass)) {
             throw new \InvalidArgumentException("Event class does not exist: {$eventClass}");
         }
-        $instance = new $eventClass();
+
+        $reflection = new \ReflectionClass($eventClass);
+        if (!$reflection->isInstantiable()) {
+            throw new \InvalidArgumentException("Event class is not instantiable: {$eventClass}");
+        }
+
+        $constructor = $reflection->getConstructor();
+        if ($constructor !== null && $constructor->getNumberOfRequiredParameters() > 0) {
+            throw new \InvalidArgumentException("Event class must have a zero-argument constructor: {$eventClass}");
+        }
+
+        $instance = $reflection->newInstance();
         return DtoSerializer::hydrate($instance, $payload);
     }
 
@@ -44,7 +55,7 @@ final class EventDispatcher implements EventDispatcherInterface
         $listeners = EventListenerRegistry::getListeners($eventClass);
 
         foreach ($listeners as $meta) {
-            $execution = EventExecution::tryFrom($meta['execution'] ?? 'sync') ?? EventExecution::Sync;
+            $execution = EventExecution::fromAttributeValue((string) ($meta['execution'] ?? EventExecution::Sync->value));
             match ($execution) {
                 EventExecution::Sync => $this->runListenerSync($meta, $event),
                 EventExecution::Async => $this->runListenerDefer($meta, $event),

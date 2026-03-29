@@ -12,8 +12,9 @@ use Psr\Container\ContainerInterface;
  * Factory for creating the Semitexa DI container.
  * Build once per worker; RequestScopedContainer sets ExecutionContext per request.
  *
- * ContainerFactory::get() and ContainerFactory::getRequestScoped() are @internal
- * runtime hooks for Semitexa core and low-level framework plumbing. They are
+ * ContainerFactory::get() is an @internal runtime hook for Semitexa core and
+ * low-level framework plumbing. RequestScopedContainer is created via
+ * createRequestScoped() and sets ExecutionContext per request. These APIs are
  * forbidden in application modules, feature code, handlers, services, listeners,
  * repositories, and package-level business logic.
  */

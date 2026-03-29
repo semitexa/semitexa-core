@@ -34,6 +34,11 @@ class ServerReloadCommand extends BaseCommand
             return Command::FAILURE;
         }
 
+        if (!function_exists('posix_kill')) {
+            $io->error('posix_kill() is unavailable; server reload requires the POSIX extension.');
+            return Command::FAILURE;
+        }
+
         posix_kill($pid, SIGUSR1);
 
         $io->success("Reload signal (SIGUSR1) sent to Swoole master process (PID {$pid}). All workers will gracefully restart.");
@@ -51,8 +56,13 @@ class ServerReloadCommand extends BaseCommand
         ];
 
         foreach ($candidates as $path) {
-            if (file_exists($path)) {
-                $pid = (int) trim(file_get_contents($path));
+            if (is_readable($path)) {
+                $pidRaw = file_get_contents($path);
+                if ($pidRaw === false) {
+                    continue;
+                }
+
+                $pid = (int) trim($pidRaw);
                 // posix_kill($pid, 0) only checks existence — the OS may have recycled the PID
                 // for a different process after a crash. Verify it's actually a server.php process.
                 if ($pid > 0 && posix_kill($pid, 0) && $this->isSwooleProcess($pid)) {

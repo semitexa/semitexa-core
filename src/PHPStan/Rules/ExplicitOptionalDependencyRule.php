@@ -26,6 +26,8 @@ final class ExplicitOptionalDependencyRule implements Rule
         'Semitexa\\Core\\Application',
         'Semitexa\\Core\\Console\\',
         'Semitexa\\Core\\Discovery\\',
+        'Semitexa\\Core\\Pipeline\\',
+        'Semitexa\\Core\\Server\\',
     ];
 
     public function getNodeType(): string

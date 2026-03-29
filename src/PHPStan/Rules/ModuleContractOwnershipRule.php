@@ -30,7 +30,10 @@ final class ModuleContractOwnershipRule implements Rule
     {
         $namespace = $scope->getNamespace() ?? '';
         $name = $node->name?->toString() ?? '';
-        if ($namespace !== 'Semitexa\\Core\\Contract' || $name === '') {
+        $isCoreContractNamespace = $namespace === 'Semitexa\\Core\\Contract'
+            || str_starts_with($namespace, 'Semitexa\\Core\\Contract\\');
+
+        if (!$isCoreContractNamespace || $name === '') {
             return [];
         }
 

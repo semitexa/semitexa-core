@@ -39,11 +39,11 @@ final class DirectResponseConstructionRule implements Rule
     {
         $isResponseNew = $node instanceof New_
             && $node->class instanceof Node\Name
-            && $this->isResponseClass($node->class->toString());
+            && $this->isResponseClass($node->class);
 
         $isResponseStatic = $node instanceof StaticCall
             && $node->class instanceof Node\Name
-            && $this->isResponseClass($node->class->toString());
+            && $this->isResponseClass($node->class);
 
         if (!$isResponseNew && !$isResponseStatic) {
             return [];
@@ -69,8 +69,13 @@ final class DirectResponseConstructionRule implements Rule
         ];
     }
 
-    private function isResponseClass(string $name): bool
+    private function isResponseClass(Node\Name $name): bool
     {
-        return $name === self::RESPONSE_CLASS || $name === 'Response';
+        $resolved = $name->getAttribute('resolvedName');
+        if ($resolved instanceof Node\Name) {
+            return $resolved->toString() === self::RESPONSE_CLASS;
+        }
+
+        return $name->toString() === self::RESPONSE_CLASS;
     }
 }

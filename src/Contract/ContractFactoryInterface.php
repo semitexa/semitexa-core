@@ -17,7 +17,7 @@ namespace Semitexa\Core\Contract;
  * {
  *     public function getDefault(): ItemListProviderInterface;
  *     public function get(ItemListProviderKind $key): ItemListProviderInterface;
- *     public function keys(): array; // @return list<ItemListProviderKind>
+ *     public function keys(): array; // @return list<\BackedEnum>
  * }
  * </code>
  *
@@ -40,7 +40,7 @@ interface ContractFactoryInterface
     public function get(\BackedEnum $key): object;
 
     /**
-     * Available keys.
+     * Available enum cases for this factory.
      *
      * @return list<\BackedEnum>
      */
