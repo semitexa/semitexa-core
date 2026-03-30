@@ -422,8 +422,10 @@ class AttributeDiscovery
         // Find handlers and map to requests (Semitexa packages + project App\ handlers)
         $httpHandlerClasses = array_filter(
             ClassDiscovery::findClassesWithAttribute(AsPayloadHandler::class),
-            fn ($class) => (str_starts_with($class, 'Semitexa\\') && self::isModuleActiveForClass($class))
-                || self::isProjectHandler($class)
+            fn ($class) => (
+                (str_starts_with($class, 'Semitexa\\') || str_starts_with($class, 'App\\Modules\\'))
+                && self::isModuleActiveForClass($class)
+            ) || self::isProjectHandler($class)
         );
         foreach ($httpHandlerClasses as $className) {
             try {

@@ -156,7 +156,10 @@ class ClassDiscovery
                 }
 
                 $iterator = new \RecursiveIteratorIterator(
-                    new \RecursiveDirectoryIterator($dir, \FilesystemIterator::SKIP_DOTS),
+                    new \RecursiveDirectoryIterator(
+                        $dir,
+                        \FilesystemIterator::SKIP_DOTS | \FilesystemIterator::FOLLOW_SYMLINKS,
+                    ),
                 );
 
                 foreach ($iterator as $fileInfo) {
@@ -222,11 +225,15 @@ class ClassDiscovery
         $namespace = '';
         $collectNamespace = false;
         $collectClass = false;
+        $previousSignificantToken = null;
 
         foreach ($tokens as $token) {
             if (!is_array($token)) {
                 if ($collectNamespace && ($token === ';' || $token === '{')) {
                     $collectNamespace = false;
+                }
+                if (trim($token) !== '') {
+                    $previousSignificantToken = $token;
                 }
                 continue;
             }
@@ -247,12 +254,20 @@ class ClassDiscovery
             }
 
             if ($id === T_CLASS || $id === T_INTERFACE || $id === T_TRAIT || $id === T_ENUM) {
+                if ($previousSignificantToken === T_DOUBLE_COLON || $previousSignificantToken === '::') {
+                    continue;
+                }
                 $collectClass = true;
+                $previousSignificantToken = $id;
                 continue;
             }
 
             if ($collectClass && $id === T_STRING) {
                 return $namespace !== '' ? $namespace . '\\' . $text : $text;
+            }
+
+            if (!in_array($id, [T_WHITESPACE, T_COMMENT, T_DOC_COMMENT], true)) {
+                $previousSignificantToken = $id;
             }
         }
 
