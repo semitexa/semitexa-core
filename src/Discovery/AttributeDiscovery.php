@@ -16,6 +16,7 @@ use Semitexa\Core\Util\ProjectRoot;
 use Semitexa\Core\Queue\HandlerExecution;
 use Semitexa\Core\Contract\TypedHandlerInterface;
 use Semitexa\Core\Pipeline\HandlerReflectionCache;
+use Semitexa\Core\Support\TenantModuleScopeResolver;
 use ReflectionClass;
 
 /**
@@ -113,6 +114,7 @@ class AttributeDiscovery
         if ($path === '') {
             $path = '/';
         }
+        $matches = [];
         foreach (self::$routes as $route) {
             $routePath = $route['path'];
             if ($routePath === '') {
@@ -122,7 +124,8 @@ class AttributeDiscovery
             
             // Exact match
             if ($routePath === $path && in_array($method, $routeMethods)) {
-                return self::enrichRoute($route);
+                $matches[] = self::enrichRoute($route);
+                continue;
             }
             
             // Pattern match (e.g., /window-manager/{type}/{file} matches /window-manager/js/window-manager.js)
@@ -152,12 +155,21 @@ class AttributeDiscovery
                 $pattern = '#^' . $pattern . '$#';
                 
                 if (preg_match($pattern, $path)) {
-                    return self::enrichRoute($route);
+                    $matches[] = self::enrichRoute($route);
                 }
             }
         }
-        
-        return null;
+
+        if ($matches === []) {
+            return null;
+        }
+
+        $selectedRoutes = TenantModuleScopeResolver::selectRoutesForCurrentTenant($matches);
+        if ($selectedRoutes === []) {
+            return null;
+        }
+
+        return $selectedRoutes[0];
     }
 
     /**
@@ -342,12 +354,16 @@ class AttributeDiscovery
                 $methods = (array) ($resolved['methods'] ?? ['GET']);
                 sort($methods);
                 $routeKey = $resolved['path'] . "\0" . implode(',', array_map('strtoupper', $methods));
-                $byRoute[$routeKey][] = [
+                $moduleName = ModuleRegistry::getModuleNameForClass($className) ?? 'project';
+                $scopeSignature = TenantModuleScopeResolver::scopeSignatureForModule($moduleName);
+                $byRoute[$routeKey . "\0" . $scopeSignature][] = [
                     'class' => $className,
                     'file' => $meta['file'],
                     'priority' => $meta['priority'],
                     'overrides' => $overrides,
                     'resolved' => $resolved,
+                    'module' => $moduleName,
+                    'tenantScopes' => TenantModuleScopeResolver::scopesForModule($moduleName),
                 ];
             } catch (\Throwable $e) {
                 if (Environment::getEnvValue('APP_DEBUG') === '1') {
@@ -371,6 +387,8 @@ class AttributeDiscovery
                 'name' => $resolved['name'],
                 'responseClass' => $resolved['responseWith'],
                 'file' => $selected['file'],
+                'module' => $selected['module'],
+                'tenantScopes' => $selected['tenantScopes'],
                 'handlers' => [],
             ];
 
@@ -412,6 +430,8 @@ class AttributeDiscovery
                 'type' => 'http-request',
                 'consumes' => $resolved['consumes'] ?? null,
                 'produces' => $routeProduces,
+                'module' => $selected['module'],
+                'tenantScopes' => $selected['tenantScopes'],
             ];
 
             foreach ($candidates as $candidate) {
