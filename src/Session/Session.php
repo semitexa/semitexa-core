@@ -84,6 +84,11 @@ final class Session implements SessionInterface
         return $v;
     }
 
+    /**
+     * @template T of object
+     * @param class-string<T> $payloadClass
+     * @return T
+     */
     public function getPayload(string $payloadClass): object
     {
         $segment = $this->getSegmentName($payloadClass);

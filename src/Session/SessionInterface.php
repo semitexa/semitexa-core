@@ -32,6 +32,12 @@ interface SessionInterface
 
     /**
      * Get session segment as typed payload. Class must be attributed with #[SessionSegment('name')].
+     *
+     * Returns a hydrated payload when the segment exists, otherwise a new empty payload instance.
+     *
+     * @template T of object
+     * @param class-string<T> $payloadClass
+     * @return T
      */
     public function getPayload(string $payloadClass): object;
 
