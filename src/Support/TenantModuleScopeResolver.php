@@ -44,13 +44,13 @@ final class TenantModuleScopeResolver
     {
         $rawTenantScopes = $route['tenantScopes'] ?? [];
         if (!is_array($rawTenantScopes)) {
-            return true;
+            return false;
         }
 
         $tenantScopes = array_values(array_filter(array_map(
             static fn (mixed $value): string => is_scalar($value) ? trim((string) $value) : '',
             $rawTenantScopes,
-        )));
+        ), static fn (string $value): bool => $value !== ''));
 
         if ($tenantScopes === []) {
             return true;
