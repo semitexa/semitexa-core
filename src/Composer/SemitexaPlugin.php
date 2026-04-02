@@ -13,11 +13,9 @@ use Composer\Script\ScriptEvents;
 use Symfony\Component\Process\Process;
 
 /**
- * Composer plugin: after install/update, if semitexa/core is installed:
- * - For semitexa/ultimate projects, keep the project scaffold in sync through the
- *   `semitexa init` command provided by semitexa/ultimate.
- * - For non-ultimate projects, skip scaffold sync because the canonical assets
- *   now live in semitexa/ultimate.
+ * Composer plugin: after install/update, if semitexa/core is installed in a
+ * semitexa/ultimate project, sync the generated registry (payloads + contracts).
+ * Scaffold assets ship directly with semitexa/ultimate and need no init step.
  */
 final class SemitexaPlugin implements PluginInterface, EventSubscriberInterface
 {
@@ -73,38 +71,7 @@ final class SemitexaPlugin implements PluginInterface, EventSubscriberInterface
         }
 
         $php = PHP_BINARY;
-        $needsFullInit = !file_exists($root . '/server.php')
-            || !file_exists($root . '/AI_ENTRY.md')
-            || !file_exists($root . '/README.md')
-            || !file_exists($root . '/docker-compose.yml');
-
-        if ($needsFullInit) {
-            $this->io->write('<info>Semitexa: scaffolding / updating project structure (semitexa init)...</info>');
-            $process = new Process([$php, $bin, 'init'], $root);
-            $process->setTimeout(30);
-            $process->run(function (string $type, string $buffer): void {
-                $this->io->write($buffer, false);
-            });
-            if (!$process->isSuccessful()) {
-                $this->io->write('<comment>Semitexa init failed. Run manually: vendor/bin/semitexa init</comment>');
-                return;
-            }
-            $this->runRegistrySync($php, $bin, $root);
-            $this->io->write('<info>Semitexa: project structure created. Next: cp .env.example .env && bin/semitexa server:start</info>');
-            return;
-        }
-
-        // Existing project: refresh docs + scaffold (Dockerfile, docker-compose, phpunit, bin/semitexa, public/.htaccess, etc.); never touch .env
-        $this->io->write('<info>Semitexa: syncing docs and scaffold (semitexa init --only-docs)...</info>');
-        $process = new Process([$php, $bin, 'init', '--only-docs', '--force'], $root);
-        $process->setTimeout(30);
-        $process->run(function (string $type, string $buffer): void {
-            $this->io->write($buffer, false);
-        });
-        if ($process->isSuccessful()) {
-            $this->runRegistrySync($php, $bin, $root);
-            $this->io->write('<info>Semitexa: docs and scaffold (Dockerfile, docker-compose, phpunit, etc.) updated. .env not touched. Your notes: AI_NOTES.md (never overwritten).</info>');
-        }
+        $this->runRegistrySync($php, $bin, $root);
     }
 
     private function runRegistrySync(string $php, string $bin, string $root): void
