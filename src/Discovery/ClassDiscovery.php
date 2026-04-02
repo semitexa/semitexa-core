@@ -80,10 +80,13 @@ class ClassDiscovery
                 // PSR-4 directory scan but is absent from Composer's generated classmap.
                 // Load it directly with require_once (idempotent: won't double-include).
                 $filePath = self::$classMap[$className] ?? null;
-                if ($filePath !== null && is_file($filePath)) {
+                if (is_string($filePath) && is_file($filePath)) {
                     try {
                         (static function (string $f): void { require_once $f; })($filePath);
-                    } catch (\Throwable) {
+                    } catch (\Throwable $e) {
+                        if (Environment::getEnvValue('APP_DEBUG') === '1') {
+                            error_log("[Semitexa] ClassDiscovery: require_once failed for {$className} ({$filePath}): " . $e->getMessage());
+                        }
                         continue;
                     }
                 }
@@ -219,9 +222,9 @@ class ClassDiscovery
         // Keep fallback scanning limited to live project code and path repositories
         // (e.g. vendor symlinks into packages/*). Regular vendor packages should rely
         // on Composer's classmap and avoid a full filesystem walk on every bootstrap.
-        if (str_starts_with($realPath, $projectRoot . '/src')
-            || str_starts_with($realPath, $projectRoot . '/tests')
-            || str_starts_with($realPath, $projectRoot . '/packages')
+        if (($realPath === $projectRoot . '/src' || str_starts_with($realPath, $projectRoot . '/src/'))
+            || ($realPath === $projectRoot . '/tests' || str_starts_with($realPath, $projectRoot . '/tests/'))
+            || ($realPath === $projectRoot . '/packages' || str_starts_with($realPath, $projectRoot . '/packages/'))
         ) {
             return true;
         }
