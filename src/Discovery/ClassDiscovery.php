@@ -218,12 +218,19 @@ class ClassDiscovery
             return false;
         }
 
-        // Keep fallback scanning limited to live project code and path repositories
-        // (e.g. vendor symlinks into packages/*). Regular vendor packages should rely
-        // on Composer's classmap and avoid a full filesystem walk on every bootstrap.
+        // Keep fallback scanning limited to live project code, Semitexa vendor
+        // packages, and path repositories (e.g. vendor symlinks into packages/*).
+        // Non-Semitexa vendor packages should still rely on Composer's classmap to
+        // avoid a full filesystem walk on every bootstrap.
         if (($realPath === $projectRoot . '/src' || str_starts_with($realPath, $projectRoot . '/src/'))
             || ($realPath === $projectRoot . '/tests' || str_starts_with($realPath, $projectRoot . '/tests/'))
             || ($realPath === $projectRoot . '/packages' || str_starts_with($realPath, $projectRoot . '/packages/'))
+        ) {
+            return true;
+        }
+
+        if (($realPath === $projectRoot . '/vendor/semitexa' || str_starts_with($realPath, $projectRoot . '/vendor/semitexa/'))
+            && str_starts_with($dir, $vendorRoot)
         ) {
             return true;
         }
