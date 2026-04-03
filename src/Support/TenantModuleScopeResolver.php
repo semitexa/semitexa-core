@@ -17,17 +17,59 @@ final class TenantModuleScopeResolver
             return [];
         }
 
+        $normalizedModuleNames = self::normalizeModuleIdentifiers($moduleName);
         $matchedTenantIds = [];
 
         foreach (self::tenantModuleMap() as $tenantId => $modules) {
-            if (in_array($moduleName, $modules, true)) {
-                $matchedTenantIds[] = $tenantId;
+            foreach ($modules as $candidate) {
+                if (array_intersect($normalizedModuleNames, self::normalizeModuleIdentifiers($candidate)) !== []) {
+                    $matchedTenantIds[] = $tenantId;
+                    break;
+                }
             }
         }
 
         sort($matchedTenantIds);
 
-        return $matchedTenantIds;
+        return array_values(array_unique($matchedTenantIds));
+    }
+
+    /**
+     * @return list<string>
+     */
+    private static function normalizeModuleIdentifiers(string $moduleName): array
+    {
+        $normalized = trim(strtolower($moduleName));
+        if ($normalized === '') {
+            return [];
+        }
+
+        $variants = [$normalized];
+
+        if (str_contains($normalized, '/')) {
+            $hyphenated = str_replace('/', '-', $normalized);
+            $variants[] = $hyphenated;
+
+            $parts = explode('/', $normalized, 2);
+            if (count($parts) === 2 && $parts[0] === 'semitexa') {
+                $variants[] = $parts[1];
+            }
+        }
+
+        if (str_starts_with($normalized, 'semitexa-')) {
+            $variants[] = substr($normalized, strlen('semitexa-'));
+        } else {
+            $variants[] = 'semitexa-' . $normalized;
+        }
+
+        if (!str_contains($normalized, '/')) {
+            $variants[] = str_replace('semitexa-', 'semitexa/', $normalized);
+            if (!str_starts_with($normalized, 'semitexa-')) {
+                $variants[] = 'semitexa/' . $normalized;
+            }
+        }
+
+        return array_values(array_unique(array_filter($variants, static fn (string $value): bool => $value !== '')));
     }
 
     public static function scopeSignatureForModule(?string $moduleName): string

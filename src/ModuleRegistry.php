@@ -43,6 +43,8 @@ class ModuleRegistry
      */
     public static function getModules(): array
     {
+        self::initialize();
+
         return self::$modules;
     }
 
