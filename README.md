@@ -1,4 +1,4 @@
-# semitexa/core
+# Semitexa Core
 
 Framework runtime: request/response lifecycle, attribute-driven discovery, DI container, CLI tooling, and Swoole integration.
 
