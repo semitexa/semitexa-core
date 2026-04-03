@@ -100,6 +100,10 @@ readonly class Environment
     {
         $env = [];
         $lines = file($file, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+
+        if ($lines === false) {
+            return [];
+        }
         
         foreach ($lines as $line) {
             if (strpos($line, '#') === 0) {
