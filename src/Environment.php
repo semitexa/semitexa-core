@@ -76,6 +76,13 @@ readonly class Environment
         $env = [];
         $root = ProjectRoot::get();
 
+        $envDefaultFile = $root . '/.env.default';
+        if (is_file($envDefaultFile)) {
+            $env = array_merge($env, self::parseEnvFile($envDefaultFile));
+        }
+
+        // Legacy compatibility layer: .env remains supported during the
+        // migration window while projects move to .env.default + .env.local.
         $envFile = $root . '/.env';
         if (is_file($envFile)) {
             $env = array_merge($env, self::parseEnvFile($envFile));
@@ -156,7 +163,7 @@ readonly class Environment
     
     /**
      * Get any environment variable value (not just predefined ones).
-     * Checks getenv() first, then cached .env/.env.local values.
+     * Checks getenv() first, then cached .env.default/.env/.env.local values.
      * The .env file cache is parsed once per worker and reused across requests.
      *
      * @param string $key Environment variable name
@@ -185,7 +192,7 @@ readonly class Environment
     }
 
     /**
-     * Load .env and .env.local into getenv() / $_ENV / $_SERVER.
+     * Load .env.default, legacy .env, and .env.local into getenv() / $_ENV / $_SERVER.
      * Call from Swoole WorkerStart so workers have DB_*, etc. (fork may not inherit env in some setups).
      * Variables already set in the process env (e.g. by Docker) are not overwritten, so compose overrides win.
      */
