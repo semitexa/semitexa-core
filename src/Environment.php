@@ -34,7 +34,7 @@ readonly class Environment
         public string $corsAllowMethods,
         public string $corsAllowHeaders,
         public bool $corsAllowCredentials,
-        public int $redisPoolSize,
+        public int $redisPoolSize = 16,
     ) {}
     
     public static function create(): self

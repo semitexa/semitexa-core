@@ -150,14 +150,15 @@ final class PipelineExecutor
             return;
         }
 
+        if (!is_object($context->resourceDto)) {
+            return;
+        }
+
         $handle = method_exists($context->resourceDto, 'getRenderHandle')
             ? $context->resourceDto->getRenderHandle()
             : null;
 
         if (!is_string($handle) || $handle === '') {
-            return;
-        }
-        if (!is_object($context->resourceDto)) {
             return;
         }
 

@@ -7,6 +7,7 @@ namespace Semitexa\Core\Queue;
 use Semitexa\Core\Contract\AsyncResultDeliveryInterface;
 use Semitexa\Core\Queue\Message\QueuedEventListenerMessage;
 use Semitexa\Core\Queue\Message\QueuedHandlerMessage;
+use Semitexa\Core\Support\CoroutineLocal;
 use Semitexa\Core\Support\PayloadSerializer;
 use Semitexa\Core\Container\ContainerFactory;
 use Semitexa\Core\Support\ProjectRoot;
@@ -69,19 +70,25 @@ class QueueWorker
 
     public function processPayload(string $payload): void
     {
-        try {
-            $data = json_decode($payload, true, 512, JSON_THROW_ON_ERROR);
-        } catch (\Throwable $e) {
-            $this->log("❌ Failed to decode queued message: {$e->getMessage()}", 'error');
-            $this->updateStats('failed');
-            return;
-        }
+        CoroutineLocal::beginRequest();
 
-        $type = $data['type'] ?? 'handler';
-        if ($type === QueuedEventListenerMessage::TYPE) {
-            $this->processEventPayload($payload);
-        } else {
-            $this->processHandlerPayload($payload);
+        try {
+            try {
+                $data = json_decode($payload, true, 512, JSON_THROW_ON_ERROR);
+            } catch (\Throwable $e) {
+                $this->log("❌ Failed to decode queued message: {$e->getMessage()}", 'error');
+                $this->updateStats('failed');
+                return;
+            }
+
+            $type = $data['type'] ?? 'handler';
+            if ($type === QueuedEventListenerMessage::TYPE) {
+                $this->processEventPayload($payload);
+            } else {
+                $this->processHandlerPayload($payload);
+            }
+        } finally {
+            CoroutineLocal::endRequest();
         }
     }
 

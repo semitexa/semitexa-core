@@ -128,7 +128,9 @@ final class SessionPhase
                 'host' => $redisHost,
                 'port' => (int) Environment::getEnvValue('REDIS_PORT', '6379'),
                 'password' => (string) (Environment::getEnvValue('REDIS_PASSWORD', '') ?? ''),
+                'scheme' => (string) (Environment::getEnvValue('REDIS_SCHEME', 'tcp') ?? 'tcp'),
             ]);
+            $pool->boot();
             return new RedisSessionHandler($pool);
         }
         return new SwooleTableSessionHandler();

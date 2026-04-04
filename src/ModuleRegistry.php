@@ -195,9 +195,9 @@ class ModuleRegistry
             return $modules;
         }
 
-        $directories = glob($modulesPath . '/*', GLOB_ONLYDIR);
+        $directories = $this->globDirectories($modulesPath . '/*');
 
-        foreach ($directories ?: [] as $dir) {
+        foreach ($directories as $dir) {
             $moduleName = basename($dir);
             $namespace = 'Semitexa\\Modules\\' . Str::toStudly($moduleName);
 
@@ -335,8 +335,31 @@ class ModuleRegistry
                 $meta['extends'] = $extra['extends'];
             }
             if (!empty($json['autoload']['psr-4']) && is_array($json['autoload']['psr-4'])) {
-                /** @var array<string, list<string>|string> $autoloadPsr4 */
-                $autoloadPsr4 = $json['autoload']['psr-4'];
+                $autoloadPsr4 = [];
+                foreach ($json['autoload']['psr-4'] as $prefix => $paths) {
+                    if (!is_string($prefix) || $prefix === '') {
+                        continue;
+                    }
+
+                    if (is_string($paths)) {
+                        $autoloadPsr4[$prefix] = $paths;
+                        continue;
+                    }
+
+                    if (!is_array($paths)) {
+                        continue;
+                    }
+
+                    $normalizedPaths = array_values(array_filter(
+                        $paths,
+                        static fn (mixed $path): bool => is_string($path) && $path !== '',
+                    ));
+
+                    if ($normalizedPaths !== []) {
+                        $autoloadPsr4[$prefix] = $normalizedPaths;
+                    }
+                }
+
                 $meta['autoload_psr4'] = $autoloadPsr4;
             }
         } catch (\Throwable) {
@@ -381,9 +404,9 @@ class ModuleRegistry
     private function findControllers(string $path, string $namespace): array
     {
         $controllers = [];
-        $files = glob($path . '/*Controller.php');
+        $files = $this->globPaths($path . '/*Controller.php');
 
-        foreach ($files ?: [] as $file) {
+        foreach ($files as $file) {
             $className = basename($file, '.php');
             $controllers[] = $namespace . '\\' . $className;
         }
@@ -425,8 +448,8 @@ class ModuleRegistry
             return $modules;
         }
 
-        $dirs = glob(rtrim($root, '/') . '/*', GLOB_ONLYDIR);
-        foreach ($dirs ?: [] as $dir) {
+        $dirs = $this->globDirectories(rtrim($root, '/') . '/*');
+        foreach ($dirs as $dir) {
             if (is_file($dir . '/composer.json')) {
                 $packageName = basename($dir);
                 $namespace = $this->inferNamespaceFromComposer($dir)
@@ -440,8 +463,8 @@ class ModuleRegistry
                 continue;
             }
 
-            $packageDirs = glob($dir . '/*', GLOB_ONLYDIR);
-            foreach ($packageDirs ?: [] as $subDir) {
+            $packageDirs = $this->globDirectories($dir . '/*');
+            foreach ($packageDirs as $subDir) {
                 $packageName = basename($subDir);
                 $namespace = $this->inferNamespaceFromComposer($subDir)
                     ?? $this->buildNamespaceFromVendor(basename($dir), $packageName);
@@ -490,5 +513,26 @@ class ModuleRegistry
         }
 
         return Str::toStudly($vendor) . '\\' . $packageNamespace;
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function globDirectories(string $pattern): array
+    {
+        return $this->globPaths($pattern, GLOB_ONLYDIR);
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function globPaths(string $pattern, int $flags = 0): array
+    {
+        $paths = glob($pattern, $flags);
+        if ($paths === false) {
+            throw new \RuntimeException(sprintf('Failed to scan filesystem pattern "%s".', $pattern));
+        }
+
+        return $paths;
     }
 }

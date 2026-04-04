@@ -33,6 +33,10 @@ final class RedisConnectionPool
      */
     public function __construct(int $size, array $config)
     {
+        if ($size < 1) {
+            throw new \InvalidArgumentException('Redis pool size must be at least 1');
+        }
+
         $this->size = $size;
         $this->scheme = $config['scheme'] ?? 'tcp';
         $this->host = $config['host'] ?? '127.0.0.1';
@@ -50,7 +54,7 @@ final class RedisConnectionPool
             return;
         }
 
-        if (!$this->inSwoole() || \Swoole\Coroutine::getuid() === -1) {
+        if (!$this->inSwoole() || \Swoole\Coroutine::getCid() < 0) {
             return;
         }
 
@@ -67,6 +71,10 @@ final class RedisConnectionPool
      */
     public function get(): ClientInterface
     {
+        if ($this->pool === null && $this->inSwoole() && \Swoole\Coroutine::getCid() >= 0) {
+            $this->boot();
+        }
+
         if ($this->pool !== null) {
             $client = $this->pool->pop();
             if (!$client instanceof ClientInterface) {
@@ -107,6 +115,12 @@ final class RedisConnectionPool
         } catch (\Throwable $e) {
             // On error, discard the potentially broken connection and create a fresh one
             if ($this->pool !== null) {
+                try {
+                    $client->disconnect();
+                } catch (\Throwable) {
+                    // Ignore disconnect failures for broken clients.
+                }
+
                 try {
                     $this->pool->push($this->createClient());
                 } catch (\Throwable) {

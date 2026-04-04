@@ -114,7 +114,10 @@ final class ContainerBootstrapper
             /** @var class-string $serviceClass */
             $idToClass[$serviceClass] = $serviceClass;
         }
-        if (class_exists(\Semitexa\Orm\Discovery\RepositoryDiscovery::class)) {
+        if (
+            class_exists(\Semitexa\Orm\Discovery\RepositoryDiscovery::class)
+            && in_array('discoverRepositoryClasses', get_class_methods(\Semitexa\Orm\Discovery\RepositoryDiscovery::class), true)
+        ) {
             /** @var list<class-string> $repositoryClasses */
             $repositoryClasses = \Semitexa\Orm\Discovery\RepositoryDiscovery::discoverRepositoryClasses($classDiscovery);
             foreach ($repositoryClasses as $repositoryClass) {

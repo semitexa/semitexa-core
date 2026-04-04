@@ -62,10 +62,25 @@ final class CoroutineLocal
         unset(self::$cliStore[$key]);
     }
 
+    public static function beginRequest(): void
+    {
+        self::clearCliStore();
+    }
+
+    public static function endRequest(): void
+    {
+        self::clearCliStore();
+    }
+
     /**
      * Reset CLI fallback store. For testing only.
      */
     public static function resetCliStore(): void
+    {
+        self::clearCliStore();
+    }
+
+    private static function clearCliStore(): void
     {
         self::$cliStore = [];
     }
@@ -77,11 +92,11 @@ final class CoroutineLocal
     }
 
     /**
-     * @return \ArrayAccess<string, mixed>
+     * @return \Swoole\Coroutine\Context
      */
-    private static function coroutineContext(): \ArrayAccess
+    private static function coroutineContext(): \Swoole\Coroutine\Context
     {
-        /** @var \ArrayAccess<string, mixed> $context */
+        /** @var \Swoole\Coroutine\Context $context */
         $context = \Swoole\Coroutine::getContext();
 
         return $context;

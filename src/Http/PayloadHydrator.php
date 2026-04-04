@@ -39,12 +39,12 @@ class PayloadHydrator
      */
     public static function enableStrictMode(bool $enabled = true): void
     {
-        if ($enabled
+        if (self::$strictTypes !== $enabled
             && class_exists(\Swoole\Coroutine::class, false)
             && \Swoole\Coroutine::getCid() >= 0
         ) {
             throw new \LogicException(
-                'PayloadHydrator::enableStrictMode() must not be called in Swoole workers. '
+                'PayloadHydrator::enableStrictMode() must not change state in Swoole workers. '
                 . 'The flag is process-global and unsafe under concurrency.'
             );
         }

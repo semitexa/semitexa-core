@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Server;
 
+use JsonException;
 use Semitexa\Core\Http\HttpStatus;
 use Swoole\Http\Request as SwooleRequest;
 use Swoole\Http\Response as SwooleResponse;
@@ -31,6 +32,18 @@ final class MetricsHandler
             return false;
         }
 
+        if (!$this->isEnabled()) {
+            return false;
+        }
+
+        if (!$this->isAuthorized($request)) {
+            $response->status(HttpStatus::Forbidden->value);
+            $response->header('Content-Type', 'application/json');
+            $response->end('{}');
+
+            return true;
+        }
+
         /** @var array<string, mixed> $stats */
         $stats = $this->server->stats();
         $stats['worker_memory_usage'] = memory_get_usage(true);
@@ -42,10 +55,48 @@ final class MetricsHandler
             $stats['coroutine_num'] = $coStats['coroutine_num'] ?? 0;
         }
 
-        $response->status(HttpStatus::Ok->value);
         $response->header('Content-Type', 'application/json');
-        $response->end(json_encode($stats, JSON_THROW_ON_ERROR | JSON_PRETTY_PRINT));
+
+        try {
+            $payload = json_encode($stats, JSON_THROW_ON_ERROR | JSON_PRETTY_PRINT);
+            $response->status(HttpStatus::Ok->value);
+            $response->end($payload);
+        } catch (JsonException) {
+            $response->status(HttpStatus::InternalServerError->value);
+            $response->end('{}');
+        }
 
         return true;
+    }
+
+    private function isEnabled(): bool
+    {
+        $value = \Semitexa\Core\Environment::getEnvValue('SEMITEXA_METRICS_ENABLED', '0');
+        $normalized = is_string($value) ? strtolower($value) : '';
+
+        return in_array($normalized, ['1', 'true', 'yes', 'on'], true);
+    }
+
+    private function isAuthorized(SwooleRequest $request): bool
+    {
+        /** @var array<string, mixed> $serverVars */
+        $serverVars = $request->server ?? [];
+        $remoteAddrValue = $serverVars['remote_addr'] ?? '';
+        $remoteAddr = is_string($remoteAddrValue) ? $remoteAddrValue : '';
+        if (in_array($remoteAddr, ['127.0.0.1', '::1'], true)) {
+            return true;
+        }
+
+        $configuredTokenValue = \Semitexa\Core\Environment::getEnvValue('SEMITEXA_METRICS_TOKEN', '');
+        $configuredToken = is_string($configuredTokenValue) ? $configuredTokenValue : '';
+        if ($configuredToken === '') {
+            return false;
+        }
+
+        /** @var array<string, mixed> $headers */
+        $headers = $request->header ?? [];
+        $providedToken = $headers['x-metrics-token'] ?? $headers['X-Metrics-Token'] ?? null;
+
+        return is_string($providedToken) && hash_equals($configuredToken, $providedToken);
     }
 }

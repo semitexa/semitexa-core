@@ -35,7 +35,7 @@ class RoutesShowCommand extends BaseCommand
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
         $rawId = $input->getArgument('id');
-        $id = is_string($rawId) ? $rawId : '';
+        $id = is_scalar($rawId) || $rawId instanceof \Stringable ? (string) $rawId : '';
         $routes = $this->attributeDiscovery->getRoutes();
         $route = $this->findRoute($routes, $id);
 
@@ -139,8 +139,21 @@ class RoutesShowCommand extends BaseCommand
             ];
         }
 
-        usort($handlers, fn ($a, $b) => ($b['priority'] ?? 0) <=> ($a['priority'] ?? 0));
-        foreach ($handlers as $h) {
+        $normalizedHandlers = [];
+        foreach ($handlers as $handler) {
+            if (!is_array($handler)) {
+                continue;
+            }
+
+            $normalizedHandlers[] = $handler;
+        }
+
+        usort(
+            $normalizedHandlers,
+            static fn (array $a, array $b): int => self::handlerPriority($b) <=> self::handlerPriority($a)
+        );
+
+        foreach ($normalizedHandlers as $h) {
             $handlerClass = is_string($h['class'] ?? null) ? $h['class'] : '';
             if ($handlerClass === '') {
                 continue;
@@ -158,6 +171,17 @@ class RoutesShowCommand extends BaseCommand
         }
 
         return $info;
+    }
+
+    private static function handlerPriority(mixed $handler): int
+    {
+        if (!is_array($handler)) {
+            return 0;
+        }
+
+        $priority = $handler['priority'] ?? 0;
+
+        return is_int($priority) ? $priority : (is_numeric($priority) ? (int) $priority : 0);
     }
 
     private function renderHuman(SymfonyStyle $io, array $info): void

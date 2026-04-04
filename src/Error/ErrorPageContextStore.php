@@ -40,6 +40,11 @@ final class ErrorPageContextStore
         }
 
         array_pop($stack);
+        if ($stack === []) {
+            CoroutineLocal::remove(self::CTX_KEY);
+            return;
+        }
+
         CoroutineLocal::set(self::CTX_KEY, $stack);
     }
 }

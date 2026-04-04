@@ -63,7 +63,6 @@ class ContainerFactory
                 'port'     => (int) \Semitexa\Core\Environment::getEnvValue('REDIS_PORT', '6379'),
                 'password' => \Semitexa\Core\Environment::getEnvValue('REDIS_PASSWORD') ?? '',
             ]);
-            $redisPool->boot();
             $container->set(RedisConnectionPool::class, $redisPool);
         }
     }

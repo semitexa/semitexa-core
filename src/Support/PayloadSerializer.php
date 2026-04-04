@@ -33,14 +33,14 @@ class PayloadSerializer
     }
 
     /**
-     * @param array<string, mixed> $payload
+     * @param array<array-key, mixed> $payload
      */
     public static function hydrate(object $dto, array $payload): object
     {
         $reflection = new ReflectionClass($dto);
 
         foreach ($payload as $key => $value) {
-            if ($key === '') {
+            if (!is_string($key) || $key === '') {
                 continue;
             }
             $setterName = 'set' . ucfirst(Str::snakeToCamel($key));
