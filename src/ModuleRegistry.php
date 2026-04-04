@@ -337,7 +337,7 @@ class ModuleRegistry
             if (!empty($json['autoload']['psr-4']) && is_array($json['autoload']['psr-4'])) {
                 $autoloadPsr4 = [];
                 foreach ($json['autoload']['psr-4'] as $prefix => $paths) {
-                    if (!is_string($prefix) || $prefix === '') {
+                    if (!is_string($prefix)) {
                         continue;
                     }
 
@@ -352,7 +352,7 @@ class ModuleRegistry
 
                     $normalizedPaths = array_values(array_filter(
                         $paths,
-                        static fn (mixed $path): bool => is_string($path) && $path !== '',
+                        static fn (mixed $path): bool => is_string($path),
                     ));
 
                     if ($normalizedPaths !== []) {
@@ -376,16 +376,12 @@ class ModuleRegistry
     {
         $resolved = [];
         foreach ($psr4 as $prefix => $paths) {
-            if ($prefix === '') {
-                continue;
-            }
-            $normalizedPrefix = rtrim($prefix, '\\') . '\\';
+            $normalizedPrefix = $prefix === '' ? '' : rtrim($prefix, '\\') . '\\';
             $paths = is_array($paths) ? $paths : [$paths];
             foreach ($paths as $rel) {
-                if ($rel === '') {
-                    continue;
-                }
-                $full = rtrim($modulePath, '/') . '/' . ltrim($rel, '/');
+                $full = $rel === ''
+                    ? rtrim($modulePath, '/')
+                    : rtrim($modulePath, '/') . '/' . ltrim($rel, '/');
                 $full = realpath($full) ?: $full;
                 if (is_dir($full)) {
                     $resolved[$normalizedPrefix][] = $full;

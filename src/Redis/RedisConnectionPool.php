@@ -58,11 +58,13 @@ final class RedisConnectionPool
             return;
         }
 
-        $this->pool = new \Swoole\Coroutine\Channel($this->size);
+        $pool = new \Swoole\Coroutine\Channel($this->size);
 
         for ($i = 0; $i < $this->size; $i++) {
-            $this->pool->push($this->createClient());
+            $pool->push($this->createClient());
         }
+
+        $this->pool = $pool;
     }
 
     /**

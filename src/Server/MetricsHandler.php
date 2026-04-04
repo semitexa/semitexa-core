@@ -83,20 +83,41 @@ final class MetricsHandler
         $serverVars = $request->server ?? [];
         $remoteAddrValue = $serverVars['remote_addr'] ?? '';
         $remoteAddr = is_string($remoteAddrValue) ? $remoteAddrValue : '';
-        if (in_array($remoteAddr, ['127.0.0.1', '::1'], true)) {
-            return true;
-        }
 
         $configuredTokenValue = \Semitexa\Core\Environment::getEnvValue('SEMITEXA_METRICS_TOKEN', '');
         $configuredToken = is_string($configuredTokenValue) ? $configuredTokenValue : '';
-        if ($configuredToken === '') {
-            return false;
-        }
 
         /** @var array<string, mixed> $headers */
         $headers = $request->header ?? [];
-        $providedToken = $headers['x-metrics-token'] ?? $headers['X-Metrics-Token'] ?? null;
 
-        return is_string($providedToken) && hash_equals($configuredToken, $providedToken);
+        if ($configuredToken !== '') {
+            $providedToken = $headers['x-metrics-token'] ?? $headers['X-Metrics-Token'] ?? null;
+
+            return is_string($providedToken) && hash_equals($configuredToken, $providedToken);
+        }
+
+        if (
+            in_array($remoteAddr, ['127.0.0.1', '::1'], true)
+            && !$this->hasProxyHeaders($headers)
+        ) {
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * @param array<string, mixed> $headers
+     */
+    private function hasProxyHeaders(array $headers): bool
+    {
+        foreach (['x-forwarded-for', 'forwarded', 'x-real-ip', 'true-client-ip'] as $header) {
+            $value = $headers[$header] ?? $headers[strtoupper($header)] ?? $headers[ucwords($header, '-')] ?? null;
+            if (is_string($value) && $value !== '') {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

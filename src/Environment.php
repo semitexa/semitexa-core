@@ -46,7 +46,7 @@ readonly class Environment
             return $value !== false ? $value : ($fileEnv[$key] ?? $default);
         };
         
-        $redisPoolSize = $get('REDIS_POOL_SIZE', '16');
+        $redisPoolSize = self::parsePositiveInt($get('REDIS_POOL_SIZE', '16'), 'REDIS_POOL_SIZE');
 
         return new self(
             appEnv: $get('APP_ENV', 'prod'),
@@ -71,7 +71,7 @@ readonly class Environment
             corsAllowMethods: $get('CORS_ALLOW_METHODS', 'GET, POST, PUT, DELETE, OPTIONS'),
             corsAllowHeaders: $get('CORS_ALLOW_HEADERS', 'Content-Type, Authorization'),
             corsAllowCredentials: (bool) $get('CORS_ALLOW_CREDENTIALS', '0'),
-            redisPoolSize: is_scalar($redisPoolSize) ? (int) $redisPoolSize : 16,
+            redisPoolSize: $redisPoolSize,
         );
     }
     
@@ -129,6 +129,15 @@ readonly class Environment
         }
         
         return $env;
+    }
+
+    private static function parsePositiveInt(mixed $value, string $name): int
+    {
+        if (!is_scalar($value) || preg_match('/^[1-9]\d*$/', (string) $value) !== 1) {
+            throw new \InvalidArgumentException(sprintf('%s must be a positive integer', $name));
+        }
+
+        return (int) $value;
     }
     
     public function get(string $key, string $default = ''): string
