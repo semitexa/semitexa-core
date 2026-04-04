@@ -21,7 +21,7 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 /**
  * Verify container-managed classes with #[InjectAsMutable] properties have explicit scoping attributes.
  */
-#[AsCommand(name: 'semitexa:lint:scoping', description: 'Verify execution-scoped classes have explicit scoping attributes')]
+#[AsCommand(name: 'semitexa:lint:scoping', description: 'Verify container-managed classes with #[InjectAsMutable] properties have explicit scoping attributes')]
 final class LintScopingCommand extends BaseCommand
 {
     private const SCOPING_ATTRIBUTES = [
@@ -78,7 +78,7 @@ final class LintScopingCommand extends BaseCommand
 
             if (!$hasScoping) {
                 $errors[] = "{$class}: Uses #[InjectAsMutable] but lacks explicit scoping attribute. "
-                    . "Add #[ExecutionScoped] so the container clones this class per request.";
+                    . "Add one of #[ExecutionScoped], #[AsPayloadHandler], #[AsEventListener], or #[AsPipelineListener] so the container applies a valid execution scope.";
             }
         }
 

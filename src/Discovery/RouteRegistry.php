@@ -130,7 +130,7 @@ class RouteRegistry
     /**
      * Compile a route path pattern into a regex string.
      * E.g., "/users/{id}" becomes "#^/users/([^/]+)$#"
-     * Supports requirements: "/files/{type:js|css}" uses the given pattern.
+     * Requirements come from the $requirements array keyed by parameter name.
      */
     private static function compilePattern(string $path, array $requirements): string
     {
