@@ -8,8 +8,10 @@ use Semitexa\Core\Support\ProjectRoot;
 
 class ClassDiscovery
 {
+    /** @var array<class-string, string> */
     private array $classMap = [];
     private bool $initialized = false;
+    /** @var array<class-string, list<class-string>> */
     private array $attributeCache = [];
 
     private array $allowedNamespacePrefixes = [
@@ -26,6 +28,8 @@ class ClassDiscovery
         $composerDir = ProjectRoot::get() . '/vendor/composer';
         $composerClassMap = require $composerDir . '/autoload_classmap.php';
         $composerPsr4Map = require $composerDir . '/autoload_psr4.php';
+        /** @var array<class-string, string> $composerClassMap */
+        /** @var array<string, list<string>|string> $composerPsr4Map */
 
         $this->refreshComposerAutoloader($composerDir, $composerClassMap);
 
@@ -68,8 +72,8 @@ class ClassDiscovery
             }
 
             if (!$exists) {
-                $filePath = $this->classMap[$className] ?? null;
-                if (is_string($filePath) && is_file($filePath)) {
+                $filePath = $this->classMap[$className];
+                if (is_file($filePath)) {
                     try {
                         (static function (string $f): void { require_once $f; })($filePath);
                     } catch (\Throwable $e) {
@@ -93,11 +97,15 @@ class ClassDiscovery
             }
         }
 
+        /** @var class-string $attributeClass */
         $this->attributeCache[$attributeClass] = $classes;
 
         return $classes;
     }
 
+    /**
+     * @return array<class-string, string>
+     */
     public function getClassMap(): array
     {
         $this->initialize();
@@ -105,10 +113,14 @@ class ClassDiscovery
         return $this->classMap;
     }
 
+    /**
+     * @param array<class-string, string> $freshClassMap
+     */
     private function refreshComposerAutoloader(string $composerDir, array $freshClassMap): void
     {
         try {
             $psr4File = $composerDir . '/autoload_psr4.php';
+            /** @var array<string, list<string>|string> $freshPsr4 */
             $freshPsr4 = is_file($psr4File) ? (require $psr4File) : [];
 
             foreach (spl_autoload_functions() as $loader) {
@@ -169,6 +181,7 @@ class ClassDiscovery
                     }
 
                     if (!isset($this->classMap[$className])) {
+                        /** @var class-string $className */
                         $this->classMap[$className] = $fileInfo->getPathname();
                         if ($realPath !== false) {
                             $seenRealPaths[$realPath] = true;

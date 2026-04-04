@@ -40,16 +40,16 @@ final class SemitexaContainer implements ContainerInterface
     /** @var array<string, object> factory interface => ContractFactory instance */
     private array $factories = [];
 
-    /** @var array<string, string> id => concrete class (for interfaces, resolved from registry/resolver) */
+    /** @var array<string, class-string> id => concrete class (for interfaces, resolved from registry/resolver) */
     private array $idToClass = [];
 
-    /** @var array<string, true> classes that are execution-scoped */
+    /** @var array<class-string, true> classes that are execution-scoped */
     private array $executionScopedClasses = [];
 
-    /** @var array<string, string> interface => resolver class (when resolver exists) */
+    /** @var array<class-string, class-string> interface => resolver class (when resolver exists) */
     private array $interfaceToResolver = [];
 
-    /** @var array<string, array<string, array{kind: string, type: string}>> */
+    /** @var array<class-string, array<string, array{kind: string, type: class-string}>> */
     private array $injections = [];
 
     /** @var array<string, object> type => execution context value (Request, Session, etc.) */

@@ -6,6 +6,12 @@ namespace Semitexa\Core\PHPStan\Rules;
 
 use PhpParser\Node;
 use PhpParser\Node\Stmt\ClassMethod;
+use Semitexa\Core\Attribute\AsEventListener;
+use Semitexa\Core\Attribute\AsPipelineListener;
+use Semitexa\Core\Attribute\AsPayloadHandler;
+use Semitexa\Core\Attribute\AsService;
+use Semitexa\Core\Attribute\SatisfiesRepositoryContract;
+use Semitexa\Core\Attribute\SatisfiesServiceContract;
 use PHPStan\Analyser\Scope;
 use PHPStan\Rules\Rule;
 use PHPStan\Rules\RuleErrorBuilder;
@@ -21,13 +27,13 @@ use PHPStan\Rules\RuleErrorBuilder;
 final class ForbiddenConstructorRule implements Rule
 {
     private const CONTAINER_MANAGED_ATTRIBUTES = [
-        'Semitexa\\Core\\Attributes\\AsService',
+        AsService::class,
         'Semitexa\\Orm\\Attribute\\AsRepository',
-        'Semitexa\\Core\\Attributes\\AsPayloadHandler',
-        'Semitexa\\Core\\Attributes\\AsEventListener',
-        'Semitexa\\Core\\Attributes\\AsPipelineListener',
-        'Semitexa\\Core\\Attributes\\SatisfiesServiceContract',
-        'Semitexa\\Core\\Attributes\\SatisfiesRepositoryContract',
+        AsPayloadHandler::class,
+        AsEventListener::class,
+        AsPipelineListener::class,
+        SatisfiesServiceContract::class,
+        SatisfiesRepositoryContract::class,
     ];
 
     public function getNodeType(): string

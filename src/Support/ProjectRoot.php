@@ -15,7 +15,7 @@ class ProjectRoot
         }
 
         // 0. Explicit root (set in server.php so Swoole workers see it after fork)
-        if (defined('SEMITEXA_PROJECT_ROOT') && SEMITEXA_PROJECT_ROOT !== '' && is_dir(SEMITEXA_PROJECT_ROOT)) {
+        if (defined('SEMITEXA_PROJECT_ROOT') && is_string(SEMITEXA_PROJECT_ROOT) && SEMITEXA_PROJECT_ROOT !== '' && is_dir(SEMITEXA_PROJECT_ROOT)) {
             self::$root = rtrim(SEMITEXA_PROJECT_ROOT, '/\\');
             return self::$root;
         }
@@ -23,7 +23,7 @@ class ProjectRoot
         // 1. Try known candidates (Docker, CWD)
         $candidates = ['/var/www/html'];
         $cwd = getcwd();
-        if ($cwd !== false && $cwd !== '') {
+        if (is_string($cwd)) {
             $candidates[] = $cwd;
         }
         foreach ($candidates as $dir) {
@@ -35,7 +35,7 @@ class ProjectRoot
 
         // 2. Walk up from this file until composer.json + src/modules found
         $dir = __DIR__;
-        while ($dir !== '/' && $dir !== '') {
+        while ($dir !== '/') {
             if (is_file($dir . '/composer.json') && is_dir($dir . '/src/modules')) {
                 self::$root = $dir;
                 return self::$root;

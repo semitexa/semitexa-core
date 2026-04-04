@@ -9,9 +9,14 @@ use Semitexa\Core\Http\HttpStatus;
 
 /**
  * HTTP Response representation
+ *
+ * @phpstan-type HeaderValue string|array<int|string, string>
  */
 readonly class HttpResponse implements ResourceInterface
 {
+    /**
+     * @param array<string, HeaderValue> $headers
+     */
     public function __construct(
         public string $content,
         public int $statusCode = HttpStatus::Ok->value,
@@ -30,6 +35,9 @@ readonly class HttpResponse implements ResourceInterface
         return $this->alreadySent;
     }
     
+    /**
+     * @param array<array-key, mixed> $data
+     */
     public static function json(array $data, int $statusCode = HttpStatus::Ok->value): self
     {
         $encoded = json_encode(
@@ -88,6 +96,9 @@ readonly class HttpResponse implements ResourceInterface
         return $this->statusCode;
     }
     
+    /**
+     * @return array<string, HeaderValue>
+     */
     public function getHeaders(): array
     {
         return $this->headers;
@@ -96,12 +107,19 @@ readonly class HttpResponse implements ResourceInterface
     /**
      * Return a new response with additional headers. Values can be string or string[] (e.g. multiple Set-Cookie).
      */
+    /**
+     * @param array<string, HeaderValue> $headersToAdd
+     */
     public function withHeaders(array $headersToAdd): self
     {
         $merged = $this->headers;
         foreach ($headersToAdd as $name => $value) {
             if (is_array($value)) {
-                $merged[$name] = array_merge($merged[$name] ?? [], $value);
+                $existing = $merged[$name] ?? [];
+                if (!is_array($existing)) {
+                    $existing = [$existing];
+                }
+                $merged[$name] = array_merge($existing, $value);
             } else {
                 $merged[$name] = $value;
             }

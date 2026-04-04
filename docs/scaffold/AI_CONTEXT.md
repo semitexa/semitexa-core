@@ -12,7 +12,7 @@ This is a **reference copy** of the template used to generate **docs/AI_CONTEXT.
 
 Before diving into package-specific docs, read Semitexa's **why** and **goals** so your changes align with the project's intent:
 
-- **Project docs hub:** **docs/README.md** — start here for project-level navigation and what is canonical vs draft.
+- **Project docs hub:** **docs/README.md** — start here for project-level navigation and documentation ownership.
 - **Vision and motivation (human):** **vendor/semitexa/docs/README.md** — pain points, economics, Swoole, elegance paradox, AI-oriented design.
 - **Philosophy for agents:** **vendor/semitexa/docs/AI_REFERENCE.md** — same ideas in a pragmatic form (Pain → Goal → For agents). Use it to align suggestions and generated code with project goals.
 
@@ -33,7 +33,7 @@ Project-specific guidance lives in `docs/`. Detailed framework reference stays i
 
 ### Adding a New Page/Endpoint
 1.  **Create Module**: `src/modules/MyFeature/` + `composer.json` (`type: semitexa-module`).
-2.  **Request DTO**: Create `Application/Payload/Request/MyPagePayload.php` with `#[AsPayload(path, methods, responseWith)]`. See **docs/MODULE_STRUCTURE.md** (Payload/Request, Session, Event; Handlers by type).
+2.  **Request DTO**: Create `Application/Payload/Request/MyPagePayload.php` with `#[AsPayload(path, methods, responseWith)]`. See **vendor/semitexa/core/docs/MODULE_STRUCTURE.md** (Payload/Request, Session, Event; Handlers by type).
 3.  **Handler**: Create `Application/Handler/PayloadHandler/MyPageHandler.php` with `#[AsPayloadHandler(payload: ..., resource: ...)]`.
 4.  **Response**: Return `Response::json(...)` or a Twig-based Response DTO. Do not treat `registry:sync` as a required manual step for ordinary payload changes unless a specific package doc requires it.
 
@@ -43,7 +43,7 @@ Project-specific guidance lives in `docs/`. Detailed framework reference stays i
 3.  Inject: In consumers use **property injection** — `#[InjectAsReadonly]`, `#[InjectAsMutable]`, or `#[InjectAsFactory]` on protected properties. No constructor injection. See **vendor/semitexa/core/docs/SERVICE_CONTRACTS.md** and **vendor/semitexa/core/src/Container/README.md**.
 
 ## 🔍 Discovery
-- **Routes**: Built from `src/registry/Payloads/` (generated); module request DTOs live in `Application/Payload/Request/`. Session/Event DTOs in `Payload/Session/`, `Payload/Event/`. See **docs/MODULE_STRUCTURE.md**.
+- **Routes**: Built from `src/registry/Payloads/` (generated); module request DTOs live in `Application/Payload/Request/`. Session/Event DTOs in `Payload/Session/`, `Payload/Event/`. See **vendor/semitexa/core/docs/MODULE_STRUCTURE.md**.
 - **Modules**: Discovered via `composer.json` in `src/modules/*` and `packages/*` (or vendor).
 
 ## 🧪 Testing

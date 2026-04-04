@@ -14,6 +14,7 @@ use Semitexa\Core\Locale\DefaultLocaleContext;
 use Semitexa\Core\Locale\LocaleContextInterface;
 use Semitexa\Core\Request;
 use Semitexa\Core\HttpResponse;
+use Semitexa\Core\Redis\RedisConnectionPool;
 use Semitexa\Core\Session\RedisSessionHandler;
 use Semitexa\Core\Session\Session;
 use Semitexa\Core\Session\SessionHandlerInterface;
@@ -37,7 +38,7 @@ final class SessionPhase
         private readonly RequestScopedContainer $requestScopedContainer,
         private readonly ?TenancyBootstrapper $tenancy,
     ) {
-        $this->sessionHandler = self::createSessionHandler();
+        $this->sessionHandler = $this->createSessionHandler();
     }
 
     public function execute(RequestLifecycleContext $context): void
@@ -71,7 +72,7 @@ final class SessionPhase
         $session = $this->requestScopedContainer->get(SessionInterface::class);
         $cookieJar = $this->requestScopedContainer->get(CookieJarInterface::class);
 
-        if (!$session instanceof Session) {
+        if (!$session instanceof Session || !$cookieJar instanceof CookieJarInterface) {
             return $response;
         }
 
@@ -83,7 +84,7 @@ final class SessionPhase
         } catch (\Throwable $e) {
             $this->logSessionPersistenceFailure($e, $request);
             try {
-                $this->sessionHandler = self::createSessionHandler();
+                $this->sessionHandler = $this->createSessionHandler();
                 $session->setHandler($this->sessionHandler);
                 $session->save();
                 $sessionPersisted = true;
@@ -105,17 +106,32 @@ final class SessionPhase
 
         $lines = $cookieJar->getSetCookieLines();
         if ($lines !== []) {
+            /** @var array<int|string, string> $lines */
             $response = $response->withHeaders(['Set-Cookie' => $lines]);
         }
 
         return $response;
     }
 
-    private static function createSessionHandler(): SessionHandlerInterface
+    private function createSessionHandler(): SessionHandlerInterface
     {
         $redisHost = Environment::getEnvValue('REDIS_HOST');
         if ($redisHost !== null && $redisHost !== '') {
-            return new RedisSessionHandler();
+            if ($this->container->has(RedisConnectionPool::class)) {
+                $pool = $this->container->get(RedisConnectionPool::class);
+                if ($pool instanceof RedisConnectionPool) {
+                    return new RedisSessionHandler($pool);
+                }
+            }
+            // Fallback: create a single-connection pool (CLI/tests without container bootstrap)
+            $pool = new RedisConnectionPool(1, [
+                'host' => $redisHost,
+                'port' => (int) Environment::getEnvValue('REDIS_PORT', '6379'),
+                'password' => (string) (Environment::getEnvValue('REDIS_PASSWORD', '') ?? ''),
+                'scheme' => (string) (Environment::getEnvValue('REDIS_SCHEME', 'tcp') ?? 'tcp'),
+            ]);
+            $pool->boot();
+            return new RedisSessionHandler($pool);
         }
         return new SwooleTableSessionHandler();
     }
@@ -144,19 +160,19 @@ final class SessionPhase
      */
     private function initContextInterfaces(): void
     {
-        $tenantContext = DefaultTenantContext::getInstance();
         if ($this->tenancy !== null && $this->tenancy->isEnabled()) {
             $resolved = CoroutineContextStore::get();
             if ($resolved !== null) {
-                $tenantContext = $resolved;
                 TenancyTenantContext::set($resolved);
+                $this->requestScopedContainer->set(TenantContextInterface::class, $resolved);
             } else {
                 TenancyTenantContext::clear();
+                $this->requestScopedContainer->set(TenantContextInterface::class, DefaultTenantContext::getInstance());
             }
         } else {
             TenancyTenantContext::clear();
+            $this->requestScopedContainer->set(TenantContextInterface::class, DefaultTenantContext::getInstance());
         }
-        $this->requestScopedContainer->set(TenantContextInterface::class, $tenantContext);
 
         $authContext = \Semitexa\Auth\Context\AuthManager::getInstance();
         $this->requestScopedContainer->set(AuthContextInterface::class, $authContext);

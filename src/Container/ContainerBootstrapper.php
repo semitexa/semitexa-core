@@ -19,6 +19,11 @@ use Semitexa\Core\Pipeline\PipelineListenerRegistry;
  * Orchestrates the container build process through all boot phases.
  *
  * @internal Used only by SemitexaContainer::build().
+ * @phpstan-type ContractImplementation array{module: string, class: class-string, factoryKey?: \BackedEnum|null}
+ * @phpstan-type ContractDetail array{implementations: list<ContractImplementation>, active: class-string}
+ * @phpstan-type InjectionsMap array<class-string, array<string, array{kind: string, type: class-string}>>
+ * @phpstan-type IdToClassMap array<string, class-string>
+ * @phpstan-type ObjectMap array<string, object>
  */
 final class ContainerBootstrapper
 {
@@ -31,13 +36,17 @@ final class ContainerBootstrapper
     /**
      * Run the full container build sequence.
      *
-     * @param array<string, object> $readonlyInstances
-     * @param array<string, object> $executionScopedPrototypes
-     * @param array<string, object> $factories
-     * @param array<string, string> $idToClass
-     * @param array<string, true> $executionScopedClasses
-     * @param array<string, string> $interfaceToResolver
-     * @param array<string, array<string, array{kind: string, type: string}>> $injections
+     * @param ObjectMap $readonlyInstances
+     * @param ObjectMap $executionScopedPrototypes
+     * @param ObjectMap $factories
+     * @param IdToClassMap $idToClass
+     * @param-out IdToClassMap $idToClass
+     * @param array<class-string, true> $executionScopedClasses
+     * @param-out array<class-string, true> $executionScopedClasses
+     * @param array<class-string, class-string> $interfaceToResolver
+     * @param-out array<class-string, class-string> $interfaceToResolver
+     * @param InjectionsMap $injections
+     * @param-out InjectionsMap $injections
      */
     public function build(
         array &$readonlyInstances,
@@ -80,46 +89,57 @@ final class ContainerBootstrapper
 
         // === BootPhase::ContractResolution ===
         $registry = new ServiceContractRegistry($classDiscovery, $moduleRegistry);
+        /** @var array<class-string, ContractDetail> $contractDetails */
         $contractDetails = $registry->getContractDetails();
         foreach ($contractDetails as $interface => $data) {
-            $active = $data['active'] ?? null;
-            foreach ($data['implementations'] ?? [] as $impl) {
+            $active = $data['active'];
+            foreach ($data['implementations'] as $impl) {
                 $implClass = $impl['class'];
                 $idToClass[$implClass] = $implClass;
             }
-            if ($active !== null) {
-                $idToClass[$interface] = $active;
-                $resolverClass = $this->graphBuilder->getResolverClassForContract($interface);
-                if ($resolverClass !== null && class_exists($resolverClass)) {
-                    $idToClass[$resolverClass] = $resolverClass;
-                    $interfaceToResolver[$interface] = $resolverClass;
-                }
+            $idToClass[$interface] = $active;
+            $resolverClass = $this->graphBuilder->getResolverClassForContract($interface);
+            if ($resolverClass !== null && class_exists($resolverClass)) {
+                $idToClass[$resolverClass] = $resolverClass;
+                $interfaceToResolver[$interface] = $resolverClass;
             }
         }
 
         // === BootPhase::ServiceRegistration ===
         foreach ($attributeDiscovery->getDiscoveredPayloadHandlerClassNames() as $handlerClass) {
+            /** @var class-string $handlerClass */
             $idToClass[$handlerClass] = $handlerClass;
         }
         foreach ($classDiscovery->findClassesWithAttribute(AsService::class) as $serviceClass) {
+            /** @var class-string $serviceClass */
             $idToClass[$serviceClass] = $serviceClass;
         }
-        if (class_exists(\Semitexa\Orm\Discovery\RepositoryDiscovery::class)) {
-            $repositoryDiscovery = new \Semitexa\Orm\Discovery\RepositoryDiscovery($classDiscovery);
-            foreach ($repositoryDiscovery->discoverRepositoryClasses() as $repositoryClass) {
+        if (
+            class_exists(\Semitexa\Orm\Discovery\RepositoryDiscovery::class)
+            && in_array('discoverRepositoryClasses', get_class_methods(\Semitexa\Orm\Discovery\RepositoryDiscovery::class), true)
+        ) {
+            /** @var list<class-string> $repositoryClasses */
+            $repositoryClasses = \Semitexa\Orm\Discovery\RepositoryDiscovery::discoverRepositoryClasses($classDiscovery);
+            foreach ($repositoryClasses as $repositoryClass) {
                 $idToClass[$repositoryClass] = $repositoryClass;
             }
         }
         // Auth handlers need execution-scoped injection
         if (class_exists(\Semitexa\Auth\Attribute\AsAuthHandler::class)) {
             foreach ($classDiscovery->findClassesWithAttribute(\Semitexa\Auth\Attribute\AsAuthHandler::class) as $handlerClass) {
+                /** @var class-string $handlerClass */
                 $idToClass[$handlerClass] = $handlerClass;
             }
         }
         // Pipeline listeners are resolved per execution
         foreach ([AuthCheck::class, HandleRequest::class] as $phaseClass) {
             foreach ($pipelineListenerRegistry->getListeners($phaseClass) as $meta) {
-                $idToClass[$meta['class']] = $meta['class'];
+                $listenerClass = $meta['class'];
+                if ($listenerClass === '') {
+                    continue;
+                }
+                /** @var class-string $listenerClass */
+                $idToClass[$listenerClass] = $listenerClass;
             }
         }
 
@@ -156,12 +176,17 @@ final class ContainerBootstrapper
         BootDiagnostics::current()->finalize(strict: $strictMode);
     }
 
+    /**
+     * @param IdToClassMap $idToClass
+     * @return class-string|null
+     */
     private function resolveToClass(string $id, array $idToClass): ?string
     {
         if (isset($idToClass[$id])) {
             return $idToClass[$id];
         }
         if (class_exists($id) && !interface_exists($id)) {
+            /** @var class-string $id */
             return $id;
         }
         return null;
@@ -169,6 +194,13 @@ final class ContainerBootstrapper
 
     /**
      * Validate all bindings at boot time.
+     *
+     * @param InjectionsMap $injections
+     * @param IdToClassMap $idToClass
+     * @param array<class-string, true> $executionScopedClasses
+     * @param ObjectMap $readonlyInstances
+     * @param ObjectMap $executionScopedPrototypes
+     * @param ObjectMap $factories
      */
     private function validateAllBindings(
         array $injections,

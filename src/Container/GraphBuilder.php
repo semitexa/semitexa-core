@@ -15,6 +15,11 @@ use ReflectionNamedType;
  * Handles topological ordering, instance creation, and property injection.
  *
  * @internal Used only by ContainerBootstrapper during build.
+ * @phpstan-type ContractImplementation array{module: string, class: class-string, factoryKey?: \BackedEnum|null}
+ * @phpstan-type ContractDetail array{implementations: list<ContractImplementation>, active: class-string}
+ * @phpstan-type InjectionsMap array<class-string, array<string, array{kind: string, type: class-string}>>
+ * @phpstan-type IdToClassMap array<string, class-string>
+ * @phpstan-type ObjectMap array<string, object>
  */
 final class GraphBuilder
 {
@@ -25,10 +30,10 @@ final class GraphBuilder
     /**
      * Build readonly (worker-scoped) instances in dependency order.
      *
-     * @param array<string, string> $idToClass
-     * @param array<string, true> $executionScopedClasses
-     * @param array<string, array<string, array{kind: string, type: string}>> $injections
-     * @param array<string, object> $readonlyInstances Existing instances (mutated in place)
+     * @param IdToClassMap $idToClass
+     * @param array<class-string, true> $executionScopedClasses
+     * @param InjectionsMap $injections
+     * @param ObjectMap $readonlyInstances Existing instances (mutated in place)
      * @param callable(string): ?string $resolveToClass
      */
     public function buildReadonlyGraph(
@@ -66,11 +71,11 @@ final class GraphBuilder
     /**
      * Build execution-scoped prototypes in dependency order.
      *
-     * @param array<string, true> $executionScopedClasses
-     * @param array<string, array<string, array{kind: string, type: string}>> $injections
-     * @param array<string, object> $readonlyInstances
-     * @param array<string, string> $idToClass (mutated: registers prototypes)
-     * @param array<string, object> $executionScopedPrototypes (mutated in place)
+     * @param array<class-string, true> $executionScopedClasses
+     * @param InjectionsMap $injections
+     * @param ObjectMap $readonlyInstances
+     * @param IdToClassMap $idToClass (mutated: registers prototypes)
+     * @param ObjectMap $executionScopedPrototypes (mutated in place)
      * @param callable(string): ?string $resolveToClass
      */
     public function buildExecutionScopedPrototypes(
@@ -97,10 +102,11 @@ final class GraphBuilder
     /**
      * Build resolver instances (generated registry resolvers with constructor injection).
      *
-     * @param array<string, array{implementations: list<array{module: string, class: string}>, active: string}> $contractDetails
-     * @param array<string, string> $idToClass
-     * @param array<string, object> $readonlyInstances (mutated in place)
-     * @param array<string, object> $executionScopedPrototypes
+     * @param array<class-string, ContractDetail> $contractDetails
+     * @param IdToClassMap $idToClass
+     * @param ObjectMap $readonlyInstances (mutated in place)
+     * @param ObjectMap $executionScopedPrototypes
+     * @param InjectionsMap $injections
      */
     public function buildResolvers(
         array $contractDetails,
@@ -122,11 +128,11 @@ final class GraphBuilder
     /**
      * Build factory instances for contracts with 2+ implementations.
      *
-     * @param array<string, array{implementations: list<array{module: string, class: string, factoryKey?: \BackedEnum}>, active: string}> $contractDetails
-     * @param array<string, string> $interfaceToResolver
-     * @param array<string, object> $readonlyInstances
-     * @param array<string, object> $executionScopedPrototypes
-     * @param array<string, object> $factories (mutated in place)
+     * @param array<class-string, ContractDetail> $contractDetails
+     * @param array<class-string, class-string> $interfaceToResolver
+     * @param ObjectMap $readonlyInstances
+     * @param ObjectMap $executionScopedPrototypes
+     * @param ObjectMap $factories (mutated in place)
      */
     public function buildFactories(
         array $contractDetails,
@@ -136,7 +142,7 @@ final class GraphBuilder
         array &$factories,
     ): void {
         foreach ($contractDetails as $baseInterface => $data) {
-            $implementations = $data['implementations'] ?? [];
+            $implementations = $data['implementations'];
             if (count($implementations) < 2) {
                 continue;
             }
@@ -149,8 +155,11 @@ final class GraphBuilder
             $resolverClass = $interfaceToResolver[$baseInterface] ?? null;
             if ($resolverClass !== null) {
                 $resolver = $readonlyInstances[$resolverClass] ?? null;
-                if ($resolver !== null) {
-                    $defaultImpl = $resolver->getContract();
+                if ($resolver !== null && is_callable([$resolver, 'getContract'])) {
+                    $contract = $resolver->getContract();
+                    if (is_object($contract)) {
+                        $defaultImpl = $contract;
+                    }
                 }
             }
             if ($defaultImpl === null) {
@@ -185,9 +194,6 @@ final class GraphBuilder
                     $enumKeys[$key] = $factoryKey;
                 }
             }
-            if ($enumClass === null || !enum_exists($enumClass)) {
-                throw new ContainerBuildException("Factory contract {$baseInterface} has no enum key type.");
-            }
             foreach ($enumClass::cases() as $case) {
                 if (!isset($byKey[(string) $case->value])) {
                     throw new ContainerBuildException(
@@ -202,9 +208,9 @@ final class GraphBuilder
     /**
      * Inject factory instances into execution-scoped prototypes that have InjectAsFactory.
      *
-     * @param array<string, object> $executionScopedPrototypes
-     * @param array<string, array<string, array{kind: string, type: string}>> $injections
-     * @param array<string, object> $factories
+     * @param ObjectMap $executionScopedPrototypes
+     * @param InjectionsMap $injections
+     * @param ObjectMap $factories
      */
     public function injectFactoriesIntoPrototypes(
         array $executionScopedPrototypes,
@@ -214,7 +220,7 @@ final class GraphBuilder
         foreach ($executionScopedPrototypes as $class => $instance) {
             $classInjections = $injections[$class] ?? [];
             foreach ($classInjections as $propName => $info) {
-                if (($info['kind'] ?? '') !== 'factory') {
+                if ($info['kind'] !== 'factory') {
                     continue;
                 }
                 $factory = $factories[$info['type']] ?? null;
@@ -229,10 +235,10 @@ final class GraphBuilder
     }
 
     /**
-     * @param array<string> $classes
-     * @param array<string, array<string, array{kind: string, type: string}>> $injections
+     * @param list<class-string> $classes
+     * @param InjectionsMap $injections
      * @param callable(string): ?string $resolveToClass
-     * @return array<string>
+     * @return list<class-string>
      */
     public function topologicalOrder(array $classes, array $injections, callable $resolveToClass): array
     {
@@ -267,6 +273,7 @@ final class GraphBuilder
         foreach ($classes as $c) {
             $visit($c);
         }
+        /** @var list<class-string> $out */
         return $out;
     }
 
@@ -274,10 +281,11 @@ final class GraphBuilder
      * Create instance of a container-managed framework object.
      * Uses newInstanceWithoutConstructor(). Constructors with parameters are forbidden.
      *
-     * @param array<string, array<string, array{kind: string, type: string}>> $injections
-     * @param array<string, object> $readonlyInstances
-     * @param array<string, string> $idToClass
-     * @param array<string, true> $executionScopedClasses
+     * @param class-string $class
+     * @param InjectionsMap $injections
+     * @param ObjectMap $readonlyInstances
+     * @param IdToClassMap $idToClass
+     * @param array<class-string, true> $executionScopedClasses
      */
     private function createInstance(
         string $class,
@@ -314,6 +322,12 @@ final class GraphBuilder
     /**
      * Resolve constructor params from container and create instance; then set InjectAs* properties.
      * Used for resolver classes (generated registry resolvers) that have constructor dependencies.
+     *
+     * @param class-string $class
+     * @param ObjectMap $readonlyInstances
+     * @param ObjectMap $executionScopedPrototypes
+     * @param IdToClassMap $idToClass
+     * @param InjectionsMap $injections
      */
     private function createInstanceWithConstructor(
         string $class,
@@ -336,8 +350,11 @@ final class GraphBuilder
                     throw new \RuntimeException("Container: cannot resolve constructor param \${$param->getName()} for {$class}");
                 }
                 $name = $type->getName();
-                $inst = $readonlyInstances[$name] ?? $readonlyInstances[$idToClass[$name] ?? ''] ?? null
-                    ?? $executionScopedPrototypes[$name] ?? $executionScopedPrototypes[$idToClass[$name] ?? ''] ?? null;
+                $mappedClass = $idToClass[$name] ?? null;
+                $inst = $readonlyInstances[$name]
+                    ?? ($mappedClass !== null ? ($readonlyInstances[$mappedClass] ?? null) : null)
+                    ?? $executionScopedPrototypes[$name]
+                    ?? ($mappedClass !== null ? ($executionScopedPrototypes[$mappedClass] ?? null) : null);
                 if ($inst === null) {
                     if ($param->isDefaultValueAvailable()) {
                         $args[] = $param->getDefaultValue();
@@ -356,6 +373,12 @@ final class GraphBuilder
     /**
      * Inject #[InjectAs*] properties with strict failure.
      * Every annotated property must resolve. No silent skip.
+     *
+     * @param class-string $class
+     * @param InjectionsMap $injections
+     * @param ObjectMap $readonlyInstances
+     * @param IdToClassMap $idToClass
+     * @param array<class-string, true> $executionScopedClasses
      */
     private function injectPropertiesInto(
         object $instance,
@@ -404,6 +427,9 @@ final class GraphBuilder
 
     /**
      * Resolve a dependency during build phase (no execution context yet, no factories yet).
+     *
+     * @param ObjectMap $readonlyInstances
+     * @param IdToClassMap $idToClass
      */
     private function resolveForBuildInjection(string $kind, string $typeName, array $readonlyInstances, array $idToClass): ?object
     {
@@ -422,6 +448,9 @@ final class GraphBuilder
         return in_array($typeName, SemitexaContainer::EXECUTION_CONTEXT_TYPES, true);
     }
 
+    /**
+     * @param class-string $class
+     */
     public function isResolverClass(string $class): bool
     {
         return str_contains($class, '\\Registry\\Contracts\\') && str_ends_with($class, 'Resolver');

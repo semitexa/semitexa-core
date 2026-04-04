@@ -26,6 +26,9 @@ final class EventDispatcher implements EventDispatcherInterface
      * Create an event instance. Use this instead of "new Event()" so the framework
      * can apply initialization, validation, or optimizations now or later.
      */
+    /**
+     * @param array<string, mixed> $payload
+     */
     public function create(string $eventClass, array $payload): object
     {
         $eventClass = ltrim($eventClass, '\\');

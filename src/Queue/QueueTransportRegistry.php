@@ -7,6 +7,16 @@ namespace Semitexa\Core\Queue;
 use Semitexa\Core\Queue\Transport\InMemoryTransportFactory;
 use Semitexa\Core\Queue\Transport\RabbitMqTransportFactory;
 
+/**
+ * Registry of queue transport factories.
+ *
+ * Factories are registered at boot (worker-scoped). Transport instances are
+ * cached per-key so each worker reuses the same connection. This is safe
+ * because transports with stateful connections (RabbitMQ) are only used
+ * in the queue:work CLI process (single coroutine).
+ *
+ * @worker-scoped Initialized once per worker, read-only during requests.
+ */
 class QueueTransportRegistry
 {
     /**
@@ -21,6 +31,9 @@ class QueueTransportRegistry
 
     private static bool $initialized = false;
 
+    /**
+     * Initialize default factories. Called once per worker (idempotent).
+     */
     public static function initialize(): void
     {
         if (self::$initialized) {
@@ -53,5 +66,14 @@ class QueueTransportRegistry
 
         return self::$instances[$key];
     }
-}
 
+    /**
+     * Reset registry state. For testing only.
+     */
+    public static function reset(): void
+    {
+        self::$factories = [];
+        self::$instances = [];
+        self::$initialized = false;
+    }
+}

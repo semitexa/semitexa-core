@@ -94,7 +94,8 @@ final class Session implements SessionInterface
         $segment = $this->getSegmentName($payloadClass);
         $arr = $this->data[$segment] ?? [];
         $dto = new $payloadClass();
-        if ($arr !== []) {
+        if (is_array($arr) && $arr !== []) {
+            /** @var array<string, mixed> $arr */
             PayloadSerializer::hydrate($dto, $arr);
         }
         return $dto;

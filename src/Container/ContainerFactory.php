@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Semitexa\Core\Container;
 
 use Psr\Container\ContainerInterface;
+use Semitexa\Core\Redis\RedisConnectionPool;
 
 /**
  * @internal Bootstrap-only. Application code uses #[InjectAs*] property injection.
@@ -50,6 +51,20 @@ class ContainerFactory
         $container->set(\Semitexa\Orm\Adapter\ConnectionPoolInterface::class, $orm->getPool());
         $container->set(\Semitexa\Orm\Adapter\DatabaseAdapterInterface::class, $orm->getAdapter());
         $container->set(\Semitexa\Orm\Transaction\TransactionManager::class, $orm->getTransactionManager());
+
+        // Redis connection pool (worker-scoped singleton, boot() fills the channel)
+        /** @var \Semitexa\Core\Environment $env */
+        $env = $container->get(\Semitexa\Core\Environment::class);
+        $redisHost = \Semitexa\Core\Environment::getEnvValue('REDIS_HOST');
+        if ($redisHost !== null && $redisHost !== '') {
+            $redisPool = new RedisConnectionPool($env->redisPoolSize, [
+                'scheme'   => \Semitexa\Core\Environment::getEnvValue('REDIS_SCHEME', 'tcp') ?? 'tcp',
+                'host'     => $redisHost,
+                'port'     => (int) \Semitexa\Core\Environment::getEnvValue('REDIS_PORT', '6379'),
+                'password' => \Semitexa\Core\Environment::getEnvValue('REDIS_PASSWORD') ?? '',
+            ]);
+            $container->set(RedisConnectionPool::class, $redisPool);
+        }
     }
 
     public static function reset(): void

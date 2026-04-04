@@ -6,6 +6,7 @@ namespace Semitexa\Core\PHPStan\Rules;
 
 use PhpParser\Node;
 use PhpParser\Node\Stmt\Class_;
+use Semitexa\Core\Attribute\SatisfiesServiceContract;
 use PHPStan\Analyser\Scope;
 use PHPStan\Rules\Rule;
 use PHPStan\Rules\RuleErrorBuilder;
@@ -33,7 +34,7 @@ final class FactoryClosedWorldRule implements Rule
         }
 
         $native = $classReflection->getNativeReflection();
-        $attrs = $native->getAttributes('Semitexa\\Core\\Attributes\\SatisfiesServiceContract');
+        $attrs = $native->getAttributes(SatisfiesServiceContract::class);
         if ($attrs === []) {
             return [];
         }

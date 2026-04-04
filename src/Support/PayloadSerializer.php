@@ -13,6 +13,9 @@ use ReflectionClass;
  */
 class PayloadSerializer
 {
+    /**
+     * @return array<string, mixed>
+     */
     public static function toArray(object $dto): array
     {
         $reflection = new ReflectionClass($dto);
@@ -29,11 +32,17 @@ class PayloadSerializer
         return $data;
     }
 
+    /**
+     * @param array<array-key, mixed> $payload
+     */
     public static function hydrate(object $dto, array $payload): object
     {
         $reflection = new ReflectionClass($dto);
 
         foreach ($payload as $key => $value) {
+            if (!is_string($key) || $key === '') {
+                continue;
+            }
             $setterName = 'set' . ucfirst(Str::snakeToCamel($key));
             if (!method_exists($dto, $setterName)) {
                 continue;

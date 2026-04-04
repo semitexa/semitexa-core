@@ -31,10 +31,6 @@ class AttributeDiscovery
     private array $httpHandlers = [];
     /** @var array<string, list<array{class: string, for?: string, payload?: string, resource?: string, execution: string, transport: ?string, queue: ?string, priority: int}>> key: payload . "\0" . resource */
     private array $handlersByPayloadAndResource = [];
-    private array $requestClassAliases = [];
-    private array $rawRequestAttrs = [];
-    private array $resolvedRequestAttrs = [];
-    private array $rawResponseAttrs = [];
     private array $resolvedResponseAttrs = [];
     private array $responseClassAliases = [];
     /** @var array<string, list<string>> baseClass => [traitFQN, ...] */
@@ -140,11 +136,15 @@ class AttributeDiscovery
     private function enrichRoute(array $route): array
     {
         if (($route['type'] ?? null) === 'http-request') {
-            $reqClass = $route['class'];
+            $reqClass = is_string($route['class'] ?? null) ? $route['class'] : null;
+            if ($reqClass === null) {
+                return $route;
+            }
             $extra = $this->httpRequests[$reqClass] ?? null;
             if ($extra) {
                 $route['responseClass'] = $extra['responseClass'];
-                $route['handlers'] = $this->findHandlersByPayloadAndResource($reqClass, $extra['responseClass']);
+                $responseClass = is_string($extra['responseClass'] ?? null) ? $extra['responseClass'] : null;
+                $route['handlers'] = $this->findHandlersByPayloadAndResource($reqClass, $responseClass);
             }
         }
         return $route;
@@ -239,10 +239,6 @@ class AttributeDiscovery
         $this->httpRequests = [];
         $this->httpHandlers = [];
         $this->handlersByPayloadAndResource = [];
-        $this->requestClassAliases = [];
-        $this->rawRequestAttrs = [];
-        $this->resolvedRequestAttrs = [];
-        $this->rawResponseAttrs = [];
         $this->resolvedResponseAttrs = [];
         $this->responseClassAliases = [];
         $this->payloadParts = [];
@@ -257,7 +253,7 @@ class AttributeDiscovery
         $allPayloadClasses = $this->classDiscovery->findClassesWithAttribute(AsPayload::class);
         $httpRequestClasses = array_values(array_filter(
             $allPayloadClasses,
-            fn ($class) => $this->moduleRegistry->isClassActive($class) || self::isProjectPayload($class)
+            fn (string $class) => $this->moduleRegistry->isClassActive($class) || self::isProjectPayload($class)
         ));
         $requestMeta = [];
         $requestGroups = [];
@@ -313,7 +309,13 @@ class AttributeDiscovery
                 $resolved = $this->resolveRequestAttributes($className, $requestMeta, $resolvedCache);
                 $meta = $requestMeta[$className];
                 $overrides = $meta['attr']['overrides'] ?? null;
-                $methods = (array) ($resolved['methods'] ?? ['GET']);
+                $methods = array_values(array_filter(
+                    is_array($resolved['methods'] ?? null) ? $resolved['methods'] : ['GET'],
+                    static fn (mixed $method): bool => is_string($method) && $method !== '',
+                ));
+                if ($methods === []) {
+                    $methods = ['GET'];
+                }
                 sort($methods);
                 $routeKey = $resolved['path'] . "\0" . implode(',', array_map('strtoupper', $methods));
                 $moduleName = $this->moduleRegistry->getModuleNameForClass($className) ?? 'project';
@@ -357,7 +359,7 @@ class AttributeDiscovery
             // Resolve produces: payload-level takes precedence over response class AsResource
             $routeProduces = $resolved['produces'] ?? null;
             if ($routeProduces === null) {
-                $responseClass = $resolved['responseWith'] ?? null;
+                $responseClass = is_string($resolved['responseWith'] ?? null) ? $resolved['responseWith'] : null;
                 if ($responseClass !== null) {
                     $resolvedResp = $this->getResolvedResponseAttributes($responseClass);
                     if ($resolvedResp !== null && isset($resolvedResp['produces'])) {
@@ -397,7 +399,6 @@ class AttributeDiscovery
             ]);
 
             foreach ($candidates as $candidate) {
-                $this->requestClassAliases[$candidate['class']] = $class;
             }
         }
     }
@@ -407,7 +408,7 @@ class AttributeDiscovery
         // Find handlers and map to requests (Semitexa packages + project App\ handlers)
         $httpHandlerClasses = array_filter(
             $this->classDiscovery->findClassesWithAttribute(AsPayloadHandler::class),
-            fn ($class) => (
+            fn (string $class) => (
                 (str_starts_with($class, 'Semitexa\\') || str_starts_with($class, 'App\\Modules\\'))
                 && $this->moduleRegistry->isClassActive($class)
             ) || (
@@ -433,8 +434,8 @@ class AttributeDiscovery
                         'payload' => $payloadClass,
                         'resource' => $resourceClass,
                         'execution' => $execution->value,
-                        'transport' => $transport ?: null,
-                        'queue' => $queue ?: null,
+                        'transport' => is_string($transport) && $transport !== '' ? $transport : null,
+                        'queue' => is_string($queue) && $queue !== '' ? $queue : null,
                         'priority' => $priority,
                         'maxRetries' => $attr->maxRetries,
                         'retryDelay' => $attr->retryDelay,
@@ -628,13 +629,15 @@ class AttributeDiscovery
         $meta = $metaMap[$className];
         $attr = $meta['attr'];
         if (!empty($attr['base'])) {
-            $baseAttr = $this->resolveRequestAttributes($attr['base'], $metaMap, $cache);
+            $baseClass = is_string($attr['base']) ? $attr['base'] : '';
+            $baseAttr = $this->resolveRequestAttributes($baseClass, $metaMap, $cache);
             $merged = self::mergeRequestAttributes($baseAttr, $attr);
         } else {
             $merged = self::applyRequestDefaults($attr, $meta['short'], $className);
         }
         if (!empty($merged['responseWith'])) {
-            $merged['responseWith'] = $this->canonicalResponseClass($merged['responseWith']);
+            $responseWith = is_string($merged['responseWith']) ? $merged['responseWith'] : null;
+            $merged['responseWith'] = $this->canonicalResponseClass($responseWith);
         }
         return $cache[$className] = $merged;
     }
@@ -676,7 +679,7 @@ class AttributeDiscovery
         $allResourceClasses = $this->classDiscovery->findClassesWithAttribute(AsResource::class);
         $responseClasses = array_values(array_filter(
             $allResourceClasses,
-            fn ($class) => $this->moduleRegistry->isClassActive($class) || self::isProjectResource($class)
+            fn (string $class) => $this->moduleRegistry->isClassActive($class) || self::isProjectResource($class)
         ));
         if (empty($responseClasses)) {
             return;
@@ -725,7 +728,6 @@ class AttributeDiscovery
             return;
         }
 
-        $this->rawResponseAttrs = $responseMeta;
         $cache = [];
         foreach ($responseMeta as $className => $meta) {
             $this->resolvedResponseAttrs[$className] = self::resolveResponseAttributes($className, $responseMeta, $cache);

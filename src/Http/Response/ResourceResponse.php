@@ -11,6 +11,9 @@ use Semitexa\Core\HttpResponse as CoreResponse;
 
 class ResourceResponse implements ResourceInterface, LayoutRenderableInterface
 {
+    /**
+     * @param array<string, string> $headers
+     */
     public function __construct(
         private string $content = '',
         private int $statusCode = HttpStatus::Ok->value,
@@ -69,6 +72,7 @@ class ResourceResponse implements ResourceInterface, LayoutRenderableInterface
     // Render pipeline hints (optional)
     private ?string $renderHandle = null;
     private ?string $layoutFrame = null;
+    /** @var array<string, mixed> */
     private array $renderContext = [];
     private ?\Semitexa\Core\Http\Response\ResponseFormat $renderFormat = null;
     private ?string $rendererClass = null;
@@ -96,12 +100,18 @@ class ResourceResponse implements ResourceInterface, LayoutRenderableInterface
         return $this->layoutFrame;
     }
 
+    /**
+     * @param array<string, mixed> $context
+     */
     public function setRenderContext(array $context): self
     {
         $this->renderContext = $context;
         return $this;
     }
 
+    /**
+     * @return array<string, mixed>
+     */
     public function getRenderContext(): array
     {
         return $this->renderContext;
@@ -110,6 +120,9 @@ class ResourceResponse implements ResourceInterface, LayoutRenderableInterface
     /**
      * Alias for setRenderContext for convenience
      */
+    /**
+     * @param array<string, mixed> $context
+     */
     public function setContext(array $context): self
     {
         return $this->setRenderContext($context);
@@ -117,6 +130,9 @@ class ResourceResponse implements ResourceInterface, LayoutRenderableInterface
 
     /**
      * Alias for getRenderContext for convenience
+     */
+    /**
+     * @return array<string, mixed>
      */
     public function getContext(): array
     {
@@ -145,5 +161,4 @@ class ResourceResponse implements ResourceInterface, LayoutRenderableInterface
         return $this->rendererClass;
     }
 }
-
 

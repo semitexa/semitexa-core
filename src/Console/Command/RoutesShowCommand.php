@@ -34,7 +34,8 @@ class RoutesShowCommand extends BaseCommand
 
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
-        $id = $input->getArgument('id');
+        $rawId = $input->getArgument('id');
+        $id = is_scalar($rawId) || $rawId instanceof \Stringable ? (string) $rawId : '';
         $routes = $this->attributeDiscovery->getRoutes();
         $route = $this->findRoute($routes, $id);
 
@@ -83,30 +84,37 @@ class RoutesShowCommand extends BaseCommand
 
     private function buildDebugInfo(array $route): array
     {
-        $payloadClass = $route['class'] ?? '';
-        $methods = $route['methods'] ?? [$route['method'] ?? 'GET'];
+        $payloadClass = is_string($route['class'] ?? null) ? $route['class'] : '';
+        $methods = array_values(array_filter(
+            is_array($route['methods'] ?? null) ? $route['methods'] : [$route['method'] ?? 'GET'],
+            static fn (mixed $method): bool => is_string($method) && $method !== '',
+        ));
+        if ($methods === []) {
+            $methods = ['GET'];
+        }
 
         // Enrich with handlers and response via findRoute
         $enriched = null;
-        if (!empty($route['path'])) {
+        $routePath = is_string($route['path'] ?? null) ? $route['path'] : '';
+        if ($routePath !== '') {
             foreach ($methods as $method) {
-                $enriched = $this->attributeDiscovery->findRoute($route['path'], $method);
+                $enriched = $this->attributeDiscovery->findRoute($routePath, $method);
                 if ($enriched !== null) {
                     break;
                 }
             }
         }
 
-        $responseClass = $enriched['responseClass'] ?? null;
+        $responseClass = is_string($enriched['responseClass'] ?? null) ? $enriched['responseClass'] : null;
         $handlers = $enriched['handlers'] ?? [];
         $responseAttrs = $responseClass ? $this->attributeDiscovery->getResolvedResponseAttributes($responseClass) : null;
 
         $info = [
-            'path' => $route['path'] ?? '',
+            'path' => $routePath,
             'methods' => $methods,
-            'name' => $route['name'] ?? null,
+            'name' => is_string($route['name'] ?? null) ? $route['name'] : null,
             'public' => $route['public'] ?? true,
-            'type' => $route['type'] ?? null,
+            'type' => is_string($route['type'] ?? null) ? $route['type'] : null,
             'payload' => [
                 'class' => $payloadClass,
                 'module' => $this->moduleRegistry->getModuleNameForClass($payloadClass) ?? 'project',
@@ -125,27 +133,55 @@ class RoutesShowCommand extends BaseCommand
                 'class' => $responseClass,
                 'module' => $this->moduleRegistry->getModuleNameForClass($responseClass) ?? 'project',
                 'file' => $this->resolveFile($responseClass),
-                'handle' => $responseAttrs['handle'] ?? null,
+                'handle' => is_string($responseAttrs['handle'] ?? null) ? $responseAttrs['handle'] : null,
                 'format' => $responseAttrs['format'] ?? null,
-                'renderer' => $responseAttrs['renderer'] ?? null,
+                'renderer' => is_string($responseAttrs['renderer'] ?? null) ? $responseAttrs['renderer'] : null,
             ];
         }
 
-        usort($handlers, fn ($a, $b) => ($b['priority'] ?? 0) <=> ($a['priority'] ?? 0));
-        foreach ($handlers as $h) {
+        $normalizedHandlers = [];
+        foreach ($handlers as $handler) {
+            if (!is_array($handler)) {
+                continue;
+            }
+
+            $normalizedHandlers[] = $handler;
+        }
+
+        usort(
+            $normalizedHandlers,
+            static fn (array $a, array $b): int => self::handlerPriority($b) <=> self::handlerPriority($a)
+        );
+
+        foreach ($normalizedHandlers as $h) {
+            $handlerClass = is_string($h['class'] ?? null) ? $h['class'] : '';
+            if ($handlerClass === '') {
+                continue;
+            }
             $info['handlers'][] = [
-                'class' => $h['class'],
-                'module' => $this->moduleRegistry->getModuleNameForClass($h['class']) ?? 'project',
-                'execution' => $h['execution'] ?? 'sync',
+                'class' => $handlerClass,
+                'module' => $this->moduleRegistry->getModuleNameForClass($handlerClass) ?? 'project',
+                'execution' => is_string($h['execution'] ?? null) ? $h['execution'] : 'sync',
                 'priority' => $h['priority'] ?? 0,
-                'transport' => $h['transport'] ?? null,
-                'queue' => $h['queue'] ?? null,
+                'transport' => is_string($h['transport'] ?? null) ? $h['transport'] : null,
+                'queue' => is_string($h['queue'] ?? null) ? $h['queue'] : null,
                 'maxRetries' => $h['maxRetries'] ?? null,
                 'retryDelay' => $h['retryDelay'] ?? null,
             ];
         }
 
         return $info;
+    }
+
+    private static function handlerPriority(mixed $handler): int
+    {
+        if (!is_array($handler)) {
+            return 0;
+        }
+
+        $priority = $handler['priority'] ?? 0;
+
+        return is_int($priority) ? $priority : (is_numeric($priority) ? (int) $priority : 0);
     }
 
     private function renderHuman(SymfonyStyle $io, array $info): void

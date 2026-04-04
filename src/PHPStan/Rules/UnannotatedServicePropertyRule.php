@@ -6,6 +6,17 @@ namespace Semitexa\Core\PHPStan\Rules;
 
 use PhpParser\Node;
 use PhpParser\Node\Stmt\Property;
+use Semitexa\Core\Attribute\AsEventListener;
+use Semitexa\Core\Attribute\AsPipelineListener;
+use Semitexa\Core\Attribute\AsPayloadHandler;
+use Semitexa\Core\Attribute\AsService;
+use Semitexa\Core\Attribute\Config;
+use Semitexa\Core\Attribute\ExecutionScoped;
+use Semitexa\Core\Attribute\InjectAsFactory;
+use Semitexa\Core\Attribute\InjectAsMutable;
+use Semitexa\Core\Attribute\InjectAsReadonly;
+use Semitexa\Core\Attribute\SatisfiesRepositoryContract;
+use Semitexa\Core\Attribute\SatisfiesServiceContract;
 use PHPStan\Analyser\Scope;
 use PHPStan\Rules\Rule;
 use PHPStan\Rules\RuleErrorBuilder;
@@ -34,10 +45,10 @@ final class UnannotatedServicePropertyRule implements Rule
     ];
 
     private const INJECTION_ATTRIBUTES = [
-        'Semitexa\\Core\\Attributes\\InjectAsReadonly',
-        'Semitexa\\Core\\Attributes\\InjectAsMutable',
-        'Semitexa\\Core\\Attributes\\InjectAsFactory',
-        'Semitexa\\Core\\Attributes\\Config',
+        InjectAsReadonly::class,
+        InjectAsMutable::class,
+        InjectAsFactory::class,
+        Config::class,
         'InjectAsReadonly',
         'InjectAsMutable',
         'InjectAsFactory',
@@ -45,14 +56,14 @@ final class UnannotatedServicePropertyRule implements Rule
     ];
 
     private const CONTAINER_MANAGED_ATTRIBUTES = [
-        'Semitexa\\Core\\Attributes\\AsService',
+        AsService::class,
         'Semitexa\\Orm\\Attribute\\AsRepository',
-        'Semitexa\\Core\\Attributes\\AsPayloadHandler',
-        'Semitexa\\Core\\Attributes\\AsEventListener',
-        'Semitexa\\Core\\Attributes\\AsPipelineListener',
-        'Semitexa\\Core\\Attributes\\SatisfiesServiceContract',
-        'Semitexa\\Core\\Attributes\\SatisfiesRepositoryContract',
-        'Semitexa\\Core\\Attributes\\ExecutionScoped',
+        AsPayloadHandler::class,
+        AsEventListener::class,
+        AsPipelineListener::class,
+        SatisfiesServiceContract::class,
+        SatisfiesRepositoryContract::class,
+        ExecutionScoped::class,
     ];
 
     public function getNodeType(): string

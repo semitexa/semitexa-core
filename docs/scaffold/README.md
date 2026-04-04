@@ -18,4 +18,6 @@ The scaffold sources for the project documentation entry points are:
 - [README.md](https://github.com/semitexa/semitexa-ultimate/blob/main/README.md)
 - [docs/AI_CONTEXT.md](https://github.com/semitexa/semitexa-ultimate/blob/main/docs/AI_CONTEXT.md)
 
-This folder keeps reference copies for scaffold-related docs.
+This folder keeps reference copies for scaffold-related docs only.
+
+Do not treat this folder as a canonical documentation hub. If scaffold content changes, update the canonical asset in `semitexa-ultimate` first.

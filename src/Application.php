@@ -13,6 +13,7 @@ use Semitexa\Core\Lifecycle\RequestLifecycleContext;
 use Semitexa\Core\Lifecycle\RoutePhase;
 use Semitexa\Core\Lifecycle\SessionPhase;
 use Semitexa\Core\Lifecycle\TenancyPhase;
+use Semitexa\Core\Support\CoroutineLocal;
 use Psr\Container\ContainerInterface;
 use Semitexa\Locale\LocaleBootstrapper;
 use Semitexa\Tenancy\TenancyBootstrapper;
@@ -94,27 +95,33 @@ class Application
 
     public function handleRequest(Request $request): HttpResponse
     {
-        $context = new RequestLifecycleContext($request);
+        CoroutineLocal::beginRequest();
 
-        // Tenant resolution (can short-circuit)
-        $this->tenancyPhase->execute($context);
-        if ($context->hasEarlyResponse()) {
-            return $context->getEarlyResponse();
+        try {
+            $context = new RequestLifecycleContext($request);
+
+            // Tenant resolution (can short-circuit)
+            $this->tenancyPhase->execute($context);
+            if ($context->hasEarlyResponse()) {
+                return $context->getEarlyResponse();
+            }
+
+            // Session and cookies
+            $this->sessionPhase->execute($context);
+
+            // Locale resolution (can redirect)
+            $this->localePhase->execute($context);
+            if ($context->hasEarlyResponse()) {
+                return $this->sessionPhase->finalize($context, $context->getEarlyResponse());
+            }
+
+            // Route matching and execution
+            $response = $this->routePhase->execute($context);
+
+            return $this->sessionPhase->finalize($context, $response);
+        } finally {
+            CoroutineLocal::endRequest();
         }
-
-        // Session and cookies
-        $this->sessionPhase->execute($context);
-
-        // Locale resolution (can redirect)
-        $this->localePhase->execute($context);
-        if ($context->hasEarlyResponse()) {
-            return $this->sessionPhase->finalize($context, $context->getEarlyResponse());
-        }
-
-        // Route matching and execution
-        $response = $this->routePhase->execute($context);
-
-        return $this->sessionPhase->finalize($context, $response);
     }
 
     /**

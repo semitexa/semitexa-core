@@ -30,14 +30,12 @@ if ($autoload === null || !file_exists($autoload)) {
 }
 require_once $autoload;
 
-use Semitexa\Core\Discovery\AttributeDiscovery;
 use Semitexa\Core\Console\Application;
 
 if (semitexaIsLifecycleCommand($argv[1] ?? '')) {
     exit(semitexaRunLifecycleCommand($argv));
 }
 
-AttributeDiscovery::initialize();
 $application = new Application();
 $application->run();
 

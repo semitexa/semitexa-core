@@ -46,6 +46,11 @@ class SwooleBootstrap
     {
         self::verifyRequirements();
 
+        // Hook all blocking PHP functions (PDO, streams, file I/O, sleep, etc.)
+        // so they yield to other coroutines instead of blocking the worker.
+        // Must be called before Server creation.
+        \Swoole\Runtime::enableCoroutine(SWOOLE_HOOK_ALL);
+
         $env = Environment::create();
         ErrorHandler::configure($env);
 
@@ -62,6 +67,7 @@ class SwooleBootstrap
 
         $corsHandler = new CorsHandler($env);
         $healthHandler = new HealthCheckHandler();
+        $metricsHandler = new MetricsHandler($server);
         $staticAssetHandler = new StaticAssetHandler();
         $bootstrapState = new ServerBootstrapState();
         $lifecycleRegistry = new ServerLifecycleRegistry(new ClassDiscovery());
@@ -137,7 +143,7 @@ class SwooleBootstrap
 
         $emitter = new SwooleResponseEmitter();
 
-        $server->on(SwooleEvent::Request->value, function (SwooleRequest $request, SwooleResponse $response) use ($emitter, $corsHandler, $healthHandler, $staticAssetHandler, $server) {
+        $server->on(SwooleEvent::Request->value, function (SwooleRequest $request, SwooleResponse $response) use ($emitter, $corsHandler, $healthHandler, $metricsHandler, $staticAssetHandler, $server) {
             $sent = false;
             $ensureResponseSent = function () use ($response, &$sent): void {
                 if ($sent) {
@@ -153,6 +159,10 @@ class SwooleBootstrap
             };
 
             if ($healthHandler->handle($request, $response)) {
+                return;
+            }
+
+            if ($metricsHandler->handle($request, $response)) {
                 return;
             }
 

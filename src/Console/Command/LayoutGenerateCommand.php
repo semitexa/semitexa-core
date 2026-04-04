@@ -37,7 +37,7 @@ class LayoutGenerateCommand extends BaseCommand
         $all = $input->getOption('all');
 
         try {
-            if ($all || $layout === null) {
+            if ($all || !is_string($layout) || $layout === '') {
                 $this->layoutGenerator->generateAll($io);
             } else {
                 $this->layoutGenerator->generate($layout, $io);
@@ -53,4 +53,3 @@ class LayoutGenerateCommand extends BaseCommand
         return Command::SUCCESS;
     }
 }
-

@@ -42,8 +42,8 @@ final class InjectionAnalyzer
      * Collect execution-scoped classes by explicit #[ExecutionScoped] attribute
      * and implied by handler/listener attributes. No name-string fallback.
      *
-     * @param array<string, string> $idToClass
-     * @return array<string, true>
+     * @param array<string, class-string> $idToClass
+     * @return array<class-string, true>
      */
     public function collectExecutionScopedClasses(array $idToClass): array
     {
@@ -58,11 +58,7 @@ final class InjectionAnalyzer
             if (interface_exists($id)) {
                 continue;
             }
-            try {
-                $ref = new ReflectionClass($class);
-            } catch (\Throwable) {
-                continue;
-            }
+            $ref = new ReflectionClass($class);
             if ($ref->getAttributes(ExecutionScoped::class) !== []) {
                 $executionScopedClasses[$class] = true;
             }
@@ -70,22 +66,26 @@ final class InjectionAnalyzer
 
         // Implied by #[AsPayloadHandler]
         foreach ($this->attributeDiscovery->getDiscoveredPayloadHandlerClassNames() as $handlerClass) {
+            /** @var class-string $handlerClass */
             $executionScopedClasses[$handlerClass] = true;
         }
 
         // Implied by #[AsEventListener]
         foreach ($this->classDiscovery->findClassesWithAttribute(AsEventListener::class) as $listenerClass) {
+            /** @var class-string $listenerClass */
             $executionScopedClasses[$listenerClass] = true;
         }
 
         // Implied by #[AsPipelineListener]
         foreach ($this->classDiscovery->findClassesWithAttribute(AsPipelineListener::class) as $listenerClass) {
+            /** @var class-string $listenerClass */
             $executionScopedClasses[$listenerClass] = true;
         }
 
         // Auth handlers are execution-scoped
         if (class_exists(\Semitexa\Auth\Attribute\AsAuthHandler::class)) {
             foreach ($this->classDiscovery->findClassesWithAttribute(\Semitexa\Auth\Attribute\AsAuthHandler::class) as $handlerClass) {
+                /** @var class-string $handlerClass */
                 $executionScopedClasses[$handlerClass] = true;
             }
         }
@@ -96,9 +96,9 @@ final class InjectionAnalyzer
     /**
      * Collect injection metadata for all registered classes.
      *
-     * @param array<string, string> $idToClass
-     * @param array<string, true> $executionScopedClasses
-     * @return array<string, array<string, array{kind: string, type: string}>>
+     * @param array<string, class-string> $idToClass
+     * @param array<class-string, true> $executionScopedClasses
+     * @return array<class-string, array<string, array{kind: string, type: class-string}>>
      */
     public function collectInjections(array $idToClass, array $executionScopedClasses): array
     {
@@ -114,6 +114,7 @@ final class InjectionAnalyzer
 
         $injections = [];
         foreach (array_keys($seen) as $class) {
+            /** @var class-string $class */
             $injections[$class] = $this->buildInjectionsForClass($class);
         }
 
@@ -123,16 +124,16 @@ final class InjectionAnalyzer
     /**
      * Build injection metadata for a single class with strict validation.
      *
-     * @return array<string, array{kind: string, type: string}>
+     * @return array<string, array{kind: string, type: class-string}>
+     */
+    /**
+     * @param class-string $class
+     * @return array<string, array{kind: string, type: class-string}>
      */
     public function buildInjectionsForClass(string $class): array
     {
         $out = [];
-        try {
-            $ref = new ReflectionClass($class);
-        } catch (\Throwable) {
-            return [];
-        }
+        $ref = new ReflectionClass($class);
 
         foreach ($ref->getProperties() as $prop) {
             $injectAttrs = [
@@ -220,9 +221,11 @@ final class InjectionAnalyzer
                 );
             }
 
+            /** @var class-string $typeName */
+            $typeName = $type->getName();
             $out[$prop->getName()] = [
                 'kind' => $injectAttrs[0]['kind'],
-                'type' => $type->getName(),
+                'type' => $typeName,
             ];
         }
 
@@ -231,6 +234,9 @@ final class InjectionAnalyzer
 
     /**
      * Inject #[Config] properties from environment variables or defaults.
+     */
+    /**
+     * @param ReflectionClass<object> $ref
      */
     public function injectConfigProperties(object $instance, string $class, ReflectionClass $ref): void
     {
@@ -342,18 +348,23 @@ final class InjectionAnalyzer
         return match ($targetType) {
             'int' => (int) $raw,
             'float' => (float) $raw,
-            'string' => $raw,
-            'bool' => filter_var($raw, FILTER_VALIDATE_BOOLEAN),
+            'string' => (string) $raw,
+            'bool' => (bool) filter_var($raw, FILTER_VALIDATE_BOOLEAN),
             default => $this->resolveEnvBackedEnum($raw, $targetType, $default),
         };
     }
 
-    private function resolveEnvBackedEnum(string $raw, string $enumClass, mixed $default): mixed
+    private function resolveEnvBackedEnum(
+        string $raw,
+        string $enumClass,
+        int|float|string|bool|null $default
+    ): int|float|string|bool|null
     {
         if (!enum_exists($enumClass) || !is_subclass_of($enumClass, \BackedEnum::class)) {
             return $default;
         }
-        return $enumClass::tryFrom($raw) ?? $default;
+        $value = $enumClass::tryFrom($raw);
+        return $value instanceof \BackedEnum ? $value->value : $default;
     }
 
     /**

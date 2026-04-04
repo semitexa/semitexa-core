@@ -82,6 +82,14 @@ final class AsyncJsonLogger implements LoggerInterface
             'message' => $message,
             'context' => $context,
         ];
+
+        // Add coroutine ID for request tracing in Swoole
+        if (class_exists(\Swoole\Coroutine::class, false)) {
+            $cid = \Swoole\Coroutine::getCid();
+            if ($cid >= 0) {
+                $entry['cid'] = $cid;
+            }
+        }
         $this->buffer[] = $entry;
 
         // In CLI (e.g. queue worker) there is no Swoole event loop, so defer would never run — flush immediately.

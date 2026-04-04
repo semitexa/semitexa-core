@@ -14,36 +14,47 @@ use Semitexa\Core\Support\TenantModuleScopeResolver;
  */
 class RouteRegistry
 {
-    /** @var list<array> All raw routes (flat list) */
+    /** @var list<array<string, mixed>> All raw routes (flat list) */
     private array $routes = [];
 
-    /** @var array<string, list<array>> Exact match index: "METHOD:path" => [route, ...] */
+    /** @var array<string, list<array<string, mixed>>> Exact match index: "METHOD:path" => [route, ...] */
     private array $exactIndex = [];
 
-    /** @var list<array{route: array, regex: string, methods: list<string>}> Pre-compiled pattern routes */
+    /** @var list<array{route: array<string, mixed>, regex: string, methods: list<string>}> Pre-compiled pattern routes */
     private array $patternIndex = [];
 
-    /** @var array<string, list<array>> Named route index: "name" => [route, ...] */
+    /** @var array<string, list<array<string, mixed>>> Named route index: "name" => [route, ...] */
     private array $namedIndex = [];
 
     /**
      * Register a route and add it to the appropriate index.
      * Called during discovery — not after boot.
      */
+    /**
+     * @param array<string, mixed> $route
+     */
     public function register(array $route): void
     {
         $this->routes[] = $route;
 
-        $path = $route['path'] ?? '';
-        $methods = (array) ($route['methods'] ?? [$route['method'] ?? 'GET']);
-        $name = $route['name'] ?? null;
+        $path = is_string($route['path'] ?? null) ? $route['path'] : '';
+        $methods = array_values(array_filter(
+            is_array($route['methods'] ?? null) ? $route['methods'] : [$route['method'] ?? 'GET'],
+            static fn (mixed $method): bool => is_string($method) && $method !== '',
+        ));
+        if ($methods === []) {
+            $methods = ['GET'];
+        }
+        $name = is_string($route['name'] ?? null) ? $route['name'] : null;
 
         if ($name !== null && $name !== '') {
             $this->namedIndex[$name][] = $route;
         }
 
         if (str_contains($path, '{')) {
-            $regex = self::compilePattern($path, $route['requirements'] ?? []);
+            /** @var array<string, mixed> $requirements */
+            $requirements = is_array($route['requirements'] ?? null) ? $route['requirements'] : [];
+            $regex = self::compilePattern($path, $requirements);
             $this->patternIndex[] = [
                 'route' => $route,
                 'regex' => $regex,
@@ -60,7 +71,7 @@ class RouteRegistry
     /**
      * Find a raw (non-enriched) route by path and method.
      *
-     * @return array|null The matched route or null
+     * @return array<string, mixed>|null The matched route or null
      */
     public function find(string $path, string $method = 'GET'): ?array
     {
@@ -93,11 +104,15 @@ class RouteRegistry
         }
 
         $selected = TenantModuleScopeResolver::selectRoutesForCurrentTenant($matches);
-        return $selected[0] ?? null;
+        $selectedRoute = $selected[0] ?? null;
+        return is_array($selectedRoute) ? $selectedRoute : null;
     }
 
     /**
      * Find a raw route by its name.
+     */
+    /**
+     * @return array<string, mixed>|null
      */
     public function findByName(string $name): ?array
     {
@@ -107,13 +122,14 @@ class RouteRegistry
         }
 
         $selected = TenantModuleScopeResolver::selectRoutesForCurrentTenant($matches);
-        return $selected[0] ?? null;
+        $selectedRoute = $selected[0] ?? null;
+        return is_array($selectedRoute) ? $selectedRoute : null;
     }
 
     /**
      * Get all raw routes.
      *
-     * @return list<array>
+     * @return list<array<string, mixed>>
      */
     public function getAll(): array
     {
@@ -134,19 +150,26 @@ class RouteRegistry
     /**
      * Compile a route path pattern into a regex string.
      */
+    /**
+     * @param array<string, mixed> $requirements
+     */
     private static function compilePattern(string $path, array $requirements): string
     {
         $placeholders = [];
         $tempPath = preg_replace_callback(
             '/\{([^}]+)\}/',
-            function ($m) use (&$placeholders, $requirements) {
+            static function (array $m) use (&$placeholders, $requirements): string {
                 $placeholder = '__PLACEHOLDER_' . count($placeholders) . '__';
-                $paramName = $m[1];
-                $placeholders[$placeholder] = '(' . ($requirements[$paramName] ?? '[^/]+') . ')';
+                $paramName = (string) $m[1];
+                $requirement = $requirements[$paramName] ?? '[^/]+';
+                $placeholders[$placeholder] = '(' . (is_string($requirement) ? $requirement : '[^/]+') . ')';
                 return $placeholder;
             },
             $path
         );
+        if (!is_string($tempPath)) {
+            return '#^$#';
+        }
 
         $pattern = preg_quote($tempPath, '#');
 

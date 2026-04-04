@@ -12,8 +12,12 @@ namespace Semitexa\Core\Http;
  */
 final class PayloadFactory
 {
+    /** @var array<string, class-string> */
     private static array $classCache = [];
 
+    /**
+     * @param list<string> $traits
+     */
     public static function createInstance(string $baseClass, array $traits): object
     {
         $traits = array_values(array_unique(array_map(
@@ -35,6 +39,10 @@ final class PayloadFactory
         return new $wrapperClass();
     }
 
+    /**
+     * @param list<string> $traits
+     * @return class-string
+     */
     private static function buildWrapperClass(string $signature, string $baseClass, array $traits): string
     {
         $hash = substr(hash('sha256', $signature), 0, 16);
@@ -49,6 +57,7 @@ final class PayloadFactory
             eval("namespace Semitexa\\Runtime; class {$className} extends \\" . ltrim($baseClass, '\\') . " { {$traitUses} }");
         }
 
+        /** @var class-string $fqn */
         return $fqn;
     }
 }

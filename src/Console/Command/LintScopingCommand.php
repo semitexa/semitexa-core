@@ -100,6 +100,9 @@ final class LintScopingCommand extends BaseCommand
         return self::FAILURE;
     }
 
+    /**
+     * @param \ReflectionClass<object> $ref
+     */
     private function hasMutableInjection(\ReflectionClass $ref): bool
     {
         foreach ($ref->getProperties() as $prop) {

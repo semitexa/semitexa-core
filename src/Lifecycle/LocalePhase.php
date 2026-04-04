@@ -33,6 +33,9 @@ final class LocalePhase
         $cookieJar = $this->requestScopedContainer->has(CookieJarInterface::class)
             ? $this->requestScopedContainer->get(CookieJarInterface::class)
             : null;
+        if (!$cookieJar instanceof CookieJarInterface) {
+            $cookieJar = null;
+        }
 
         $resolution = $this->localeBootstrapper->resolve($request, $cookieJar);
         $this->requestScopedContainer->set(LocaleContextInterface::class, $this->localeBootstrapper->getLocaleContext());
