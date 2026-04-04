@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Console\Command;
 
-use Semitexa\Core\Attributes\AsCommand;
+use Semitexa\Core\Attribute\AsCommand;
 use Semitexa\Core\Discovery\AttributeDiscovery;
 use Semitexa\Core\ModuleRegistry;
 use Symfony\Component\Console\Command\Command;
@@ -16,6 +16,13 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 #[AsCommand(name: 'routes:list', description: 'List all discovered routes with source information.')]
 class RoutesListCommand extends BaseCommand
 {
+    public function __construct(
+        private readonly AttributeDiscovery $attributeDiscovery,
+        private readonly ModuleRegistry $moduleRegistry,
+    ) {
+        parent::__construct();
+    }
+
     protected function configure(): void
     {
         $this->setName('routes:list')
@@ -25,9 +32,7 @@ class RoutesListCommand extends BaseCommand
 
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
-        AttributeDiscovery::initialize();
-
-        $routes = AttributeDiscovery::getRoutes();
+        $routes = $this->attributeDiscovery->getRoutes();
         $asJson = (bool) $input->getOption('json');
 
         if ($asJson) {
@@ -82,6 +87,6 @@ class RoutesListCommand extends BaseCommand
 
     private function detectModule(string $className): string
     {
-        return ModuleRegistry::getModuleNameForClass($className) ?? 'project';
+        return $this->moduleRegistry->getModuleNameForClass($className) ?? 'project';
     }
 }

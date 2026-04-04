@@ -4,34 +4,34 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Console\Command;
 
-use Semitexa\Core\Attributes\AsCommand;
-use Semitexa\Core\Attributes\AsPayloadHandler;
+use Semitexa\Core\Attribute\AsCommand;
+use Semitexa\Core\Attribute\AsPayloadHandler;
 use Semitexa\Core\Contract\ResourceInterface;
 use Semitexa\Core\Contract\TypedHandlerInterface;
 use Semitexa\Core\Discovery\AttributeDiscovery;
 use Semitexa\Core\Discovery\ClassDiscovery;
-use Semitexa\Core\Response;
+use Semitexa\Core\HttpResponse;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Style\SymfonyStyle;
 
 /**
- * Verify no Response construction or static factory usage in application code.
+ * Verify no HttpResponse construction or static factory usage in application code.
  */
-#[AsCommand(name: 'semitexa:lint:responses', description: 'Verify no Response construction in application code')]
+#[AsCommand(name: 'semitexa:lint:responses', description: 'Verify no HttpResponse construction in application code')]
 final class LintResponsesCommand extends BaseCommand
 {
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
         $io = new SymfonyStyle($input, $output);
-        $io->title('Lint: Response Construction');
+        $io->title('Lint: HttpResponse Construction');
 
         $errors = [];
         $filesChecked = 0;
 
         $root = $this->getProjectRoot();
 
-        // Scan application directories for Response usage
+        // Scan application directories for HttpResponse usage
         $scanDirs = [
             $root . '/src/modules',
         ];
@@ -74,23 +74,23 @@ final class LintResponsesCommand extends BaseCommand
                 $filesChecked++;
                 $content = file_get_contents($path);
 
-                // Check for Response:: static calls
-                if (preg_match('/Response::(json|html|text|notFound|redirect)\s*\(/', $content)) {
+                // Check for HttpResponse:: static calls
+                if (preg_match('/HttpResponse::(json|html|text|notFound|redirect)\s*\(/', $content)) {
                     $relativePath = str_replace($root . '/', '', $path);
-                    $errors[] = "{$relativePath}: Contains Response:: static factory call. Handlers must return ResourceInterface DTOs.";
+                    $errors[] = "{$relativePath}: Contains HttpResponse:: static factory call. Handlers must return ResourceInterface DTOs.";
                 }
 
-                // Check for new Response(
-                if (preg_match('/new\s+Response\s*\(/', $content)
+                // Check for new HttpResponse(
+                if (preg_match('/new\s+HttpResponse\s*\(/', $content)
                     && !str_contains($path, 'semitexa-core')) {
                     $relativePath = str_replace($root . '/', '', $path);
-                    $errors[] = "{$relativePath}: Contains 'new Response('. Only kernel code may construct Response objects.";
+                    $errors[] = "{$relativePath}: Contains 'new HttpResponse('. Only kernel code may construct HttpResponse objects.";
                 }
             }
         }
 
         if ($errors === []) {
-            $io->success(sprintf('No forbidden Response construction found in %d files.', $filesChecked));
+            $io->success(sprintf('No forbidden HttpResponse construction found in %d files.', $filesChecked));
             return self::SUCCESS;
         }
 

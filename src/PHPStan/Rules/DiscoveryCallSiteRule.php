@@ -32,6 +32,7 @@ final class DiscoveryCallSiteRule implements Rule
     /** Classes where initialize() calls are allowed */
     private const ALLOWED_CALLERS = [
         'Semitexa\\Core\\Container\\SemitexaContainer',
+        'Semitexa\\Core\\Container\\ContainerBootstrapper',
         'Semitexa\\Core\\Container\\ServiceContractRegistry',
         'Semitexa\\Core\\Discovery\\AttributeDiscovery',
         'Semitexa\\Core\\Console\\Application',

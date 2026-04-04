@@ -6,8 +6,8 @@ namespace Semitexa\Core\Contract;
 
 /**
  * Contract for the response DTO (Resource) that handlers receive and return.
- * Implemented by GenericResponse (and subclasses like MinimalPageResource)
- * and by Semitexa\Core\Response (ready HTTP response).
+ * Implemented by ResourceResponse (and subclasses like MinimalPageResource)
+ * and by Semitexa\Core\HttpResponse (ready HTTP response).
  */
 interface ResourceInterface
 {

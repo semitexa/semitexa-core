@@ -6,7 +6,7 @@ namespace Semitexa\Core\Pipeline;
 
 use Semitexa\Core\Contract\ResourceInterface;
 use Semitexa\Core\Contract\TypedHandlerInterface;
-use Semitexa\Core\Response;
+use Semitexa\Core\HttpResponse;
 
 /**
  * Caches reflection metadata for TypedHandlerInterface handlers at boot time.
@@ -77,12 +77,12 @@ final class HandlerReflectionCache
             );
         }
 
-        // Validate return type: must not be Response and should be ResourceInterface
+        // Validate return type: must not be HttpResponse and should be ResourceInterface
         $returnType = $method->getReturnType();
         if ($returnType instanceof \ReflectionNamedType) {
-            if ($returnType->getName() === Response::class) {
+            if ($returnType->getName() === HttpResponse::class) {
                 throw new \LogicException(
-                    "{$handlerClass}::handle() must return a ResourceInterface, not a Response object."
+                    "{$handlerClass}::handle() must return a ResourceInterface, not a HttpResponse object."
                 );
             }
             if ($returnType->getName() !== 'object' && !is_a($returnType->getName(), ResourceInterface::class, true)) {

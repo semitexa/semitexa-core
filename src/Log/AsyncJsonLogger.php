@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Log;
 
-use Semitexa\Core\Attributes\SatisfiesServiceContract;
-use Semitexa\Core\Attributes\InjectAsReadonly;
+use Semitexa\Core\Attribute\SatisfiesServiceContract;
+use Semitexa\Core\Attribute\InjectAsReadonly;
 use Semitexa\Core\Environment;
 
 /**
@@ -130,6 +130,6 @@ final class AsyncJsonLogger implements LoggerInterface
 
     private function resolveProjectRoot(): string
     {
-        return \Semitexa\Core\Util\ProjectRoot::get();
+        return \Semitexa\Core\Support\ProjectRoot::get();
     }
 }

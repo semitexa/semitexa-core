@@ -4,12 +4,12 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Http;
 
-use Semitexa\Core\Response;
+use Semitexa\Core\HttpResponse;
 use Swoole\Http\Response as SwooleResponse;
 
 final class SwooleResponseEmitter implements ResponseEmitterInterface
 {
-    public function emit(Response $response, mixed $transport): void
+    public function emit(HttpResponse $response, mixed $transport): void
     {
         if (!$transport instanceof SwooleResponse) {
             throw new \InvalidArgumentException(

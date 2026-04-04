@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Semitexa\Core\Session;
 
 use Semitexa\Core\Session\Attribute\SessionSegment;
-use Semitexa\Core\Support\DtoSerializer;
+use Semitexa\Core\Support\PayloadSerializer;
 
 /**
  * Session implementation: in-memory bag + backend persistence (Swoole Table or Redis).
@@ -95,7 +95,7 @@ final class Session implements SessionInterface
         $arr = $this->data[$segment] ?? [];
         $dto = new $payloadClass();
         if ($arr !== []) {
-            DtoSerializer::hydrate($dto, $arr);
+            PayloadSerializer::hydrate($dto, $arr);
         }
         return $dto;
     }
@@ -103,7 +103,7 @@ final class Session implements SessionInterface
     public function setPayload(object $payload): void
     {
         $segment = $this->getSegmentName($payload::class);
-        $this->data[$segment] = DtoSerializer::toArray($payload);
+        $this->data[$segment] = PayloadSerializer::toArray($payload);
     }
 
     public function save(): void

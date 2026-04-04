@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Semitexa\Core\Registry;
 
 use ReflectionClass;
-use Semitexa\Core\Util\ProjectRoot;
+use Semitexa\Core\Support\ProjectRoot;
 
 /**
  * Generates contract resolver classes in src/registry/Contracts/ when an interface

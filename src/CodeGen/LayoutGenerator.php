@@ -6,13 +6,18 @@ namespace Semitexa\Core\CodeGen;
 
 use Semitexa\Core\ModuleRegistry;
 use Semitexa\Core\Support\Str;
-use Semitexa\Core\Util\ProjectRoot;
+use Semitexa\Core\Support\ProjectRoot;
 
 class LayoutGenerator
 {
-    private static bool $bootstrapped = false;
+    private bool $bootstrapped = false;
     /** @var array<int, array<string, mixed>> */
-    private static array $layouts = [];
+    private array $layouts = [];
+
+    public function __construct(
+        private readonly ModuleRegistry $moduleRegistry,
+    ) {
+    }
 
     /**
      * Generate (or refresh) a layout copy for the given identifier.
@@ -22,27 +27,27 @@ class LayoutGenerator
      *  - Module/handle (e.g. "UserFrontend/login")
      *  - module-handle/handle (e.g. "module-user-frontend/login")
      */
-    public static function generate(string $identifier, ?\Symfony\Component\Console\Style\SymfonyStyle $io = null): void
+    public function generate(string $identifier, ?\Symfony\Component\Console\Style\SymfonyStyle $io = null): void
     {
-        $layouts = self::bootstrap();
-        $target = self::resolveTarget($layouts, $identifier);
+        $layouts = $this->bootstrap();
+        $target = $this->resolveTarget($layouts, $identifier);
         if ($target === null) {
             throw new \RuntimeException("Layout '{$identifier}' not found. Use 'Module/handle' if the handle is duplicated.");
         }
 
-        self::writeLayout($target, false, $io);
+        $this->writeLayout($target, false, $io);
     }
 
     /**
      * Generate layout copies for every discovered module layout.
      */
-    public static function generateAll(?\Symfony\Component\Console\Style\SymfonyStyle $io = null): void
+    public function generateAll(?\Symfony\Component\Console\Style\SymfonyStyle $io = null): void
     {
-        $layouts = self::bootstrap();
+        $layouts = $this->bootstrap();
         $generated = 0;
 
         foreach ($layouts as $layout) {
-            if (self::writeLayout($layout, true, $io)) {
+            if ($this->writeLayout($layout, true, $io)) {
                 $generated++;
             }
         }
@@ -65,26 +70,25 @@ class LayoutGenerator
     /**
      * @return array<int, array<string, mixed>>
      */
-    private static function bootstrap(): array
+    private function bootstrap(): array
     {
-        if (!self::$bootstrapped) {
-            ModuleRegistry::initialize();
-            self::$layouts = self::collectLayouts();
-            self::$bootstrapped = true;
+        if (!$this->bootstrapped) {
+            $this->layouts = $this->collectLayouts();
+            $this->bootstrapped = true;
         }
 
-        return self::$layouts;
+        return $this->layouts;
     }
 
     /**
      * @return array<int, array<string, mixed>>
      */
-    private static function collectLayouts(): array
+    private function collectLayouts(): array
     {
         $result = [];
         $projectRoot = ProjectRoot::get();
 
-        foreach (ModuleRegistry::getModules() as $module) {
+        foreach ($this->moduleRegistry->getModules() as $module) {
             $modulePath = $module['path'] ?? null;
             if ($modulePath === null) {
                 continue;
@@ -125,7 +129,7 @@ class LayoutGenerator
      * @param array<int, array<string, mixed>> $layouts
      * @return array<string, mixed>|null
      */
-    private static function resolveTarget(array $layouts, string $identifier): ?array
+    private function resolveTarget(array $layouts, string $identifier): ?array
     {
         $normalized = strtolower($identifier);
         foreach ($layouts as $layout) {
@@ -155,7 +159,7 @@ class LayoutGenerator
     /**
      * @param array<string, mixed> $layout
      */
-    private static function writeLayout(array $layout, bool $silentSkip = false, ?\Symfony\Component\Console\Style\SymfonyStyle $io = null): bool
+    private function writeLayout(array $layout, bool $silentSkip = false, ?\Symfony\Component\Console\Style\SymfonyStyle $io = null): bool
     {
         $destination = $layout['destination'];
         $dir = dirname($destination);

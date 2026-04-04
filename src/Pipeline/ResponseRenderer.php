@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Semitexa\Core\Pipeline;
 
 use Semitexa\Core\Request;
-use Semitexa\Core\Response;
+use Semitexa\Core\HttpResponse;
 use Semitexa\Core\Http\ContentType;
 use Semitexa\Core\Http\ContentNegotiator;
 use Semitexa\Core\Http\HttpStatus;
@@ -25,7 +25,7 @@ final class ResponseRenderer
         if (method_exists($resDto, 'getRedirectUrl') && $resDto->getRedirectUrl() !== null) {
             $redirectUrl = $resDto->getRedirectUrl();
             $statusCode = method_exists($resDto, 'getStatusCode') ? $resDto->getStatusCode() : HttpStatus::Found->value;
-            return Response::redirect(
+            return HttpResponse::redirect(
                 is_string($redirectUrl) ? $redirectUrl : '',
                 is_int($statusCode) ? $statusCode : HttpStatus::Found->value,
             );
@@ -71,7 +71,7 @@ final class ResponseRenderer
                 $negotiatedKey = ContentNegotiator::negotiateResponseFormat($produces, $request, $defaultKey);
                 $format = self::keyToFormatEnum($negotiatedKey);
             } catch (NegotiationFailedException $e) {
-                return Response::json([
+                return HttpResponse::json([
                     'error' => 'Not Acceptable',
                     'message' => $e->getMessage(),
                     'available' => $e->produces,

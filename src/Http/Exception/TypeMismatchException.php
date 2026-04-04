@@ -7,7 +7,7 @@ namespace Semitexa\Core\Http\Exception;
 use RuntimeException;
 
 /**
- * Thrown by RequestDtoHydrator when strict mode is enabled and an incoming value
+ * Thrown by PayloadHydrator when strict mode is enabled and an incoming value
  * cannot be meaningfully coerced to the declared property type.
  *
  * The Application converts this into a 422 Unprocessable Entity response.

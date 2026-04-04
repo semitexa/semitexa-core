@@ -7,9 +7,9 @@ namespace Semitexa\Core\Queue;
 use Semitexa\Core\Contract\AsyncResultDeliveryInterface;
 use Semitexa\Core\Queue\Message\QueuedEventListenerMessage;
 use Semitexa\Core\Queue\Message\QueuedHandlerMessage;
-use Semitexa\Core\Support\DtoSerializer;
+use Semitexa\Core\Support\PayloadSerializer;
 use Semitexa\Core\Container\ContainerFactory;
-use Semitexa\Core\Util\ProjectRoot;
+use Semitexa\Core\Support\ProjectRoot;
 
 class QueueWorker
 {
@@ -243,7 +243,7 @@ class QueueWorker
     {
         $dto = class_exists($class) ? new $class() : new \stdClass();
 
-        return DtoSerializer::hydrate($dto, $payload);
+        return PayloadSerializer::hydrate($dto, $payload);
     }
 }
 

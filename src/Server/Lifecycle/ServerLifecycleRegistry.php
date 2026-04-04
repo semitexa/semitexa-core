@@ -5,39 +5,44 @@ declare(strict_types=1);
 namespace Semitexa\Core\Server\Lifecycle;
 
 use ReflectionClass;
-use Semitexa\Core\Attributes\AsServerLifecycleListener;
+use Semitexa\Core\Attribute\AsServerLifecycleListener;
 use Semitexa\Core\Discovery\ClassDiscovery;
 
 final class ServerLifecycleRegistry
 {
     /** @var array<string, list<array{class: string, phase: string, priority: int, requiresContainer: bool}>> */
-    private static array $listenersByPhase = [];
+    private array $listenersByPhase = [];
 
-    private static bool $built = false;
+    private bool $built = false;
+
+    public function __construct(
+        private readonly ClassDiscovery $classDiscovery,
+    ) {
+    }
 
     /**
      * @return list<array{class: string, phase: string, priority: int, requiresContainer: bool}>
      */
-    public static function getListeners(string $phase): array
+    public function getListeners(string $phase): array
     {
-        self::ensureBuilt();
+        $this->ensureBuilt();
 
-        return self::$listenersByPhase[$phase] ?? [];
+        return $this->listenersByPhase[$phase] ?? [];
     }
 
-    public static function ensureBuilt(): void
+    public function ensureBuilt(): void
     {
-        if (self::$built) {
+        if ($this->built) {
             return;
         }
 
-        ClassDiscovery::initialize();
-        $classes = ClassDiscovery::findClassesWithAttribute(AsServerLifecycleListener::class);
+        $classes = $this->classDiscovery->findClassesWithAttribute(AsServerLifecycleListener::class);
         $filtered = array_filter(
             $classes,
             static fn(string $class): bool => str_starts_with($class, 'Semitexa\\')
                 || self::isProjectLifecycleListener($class),
         );
+
 
         foreach ($filtered as $className) {
             try {
@@ -57,21 +62,21 @@ final class ServerLifecycleRegistry
                     'requiresContainer' => $attr->requiresContainer,
                 ];
 
-                self::$listenersByPhase[$phase] ??= [];
-                self::$listenersByPhase[$phase][] = $meta;
+                $this->listenersByPhase[$phase] ??= [];
+                $this->listenersByPhase[$phase][] = $meta;
             } catch (\Throwable) {
                 continue;
             }
         }
 
-        foreach (self::$listenersByPhase as $phase => $listeners) {
+        foreach ($this->listenersByPhase as $phase => $listeners) {
             usort(
-                self::$listenersByPhase[$phase],
+                $this->listenersByPhase[$phase],
                 static fn(array $a, array $b): int => $a['priority'] <=> $b['priority'],
             );
         }
 
-        self::$built = true;
+        $this->built = true;
     }
 
     private static function normalizePhase(string $phase): string

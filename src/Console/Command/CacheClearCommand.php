@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Console\Command;
 
-use Semitexa\Core\Attributes\AsCommand;
+use Semitexa\Core\Attribute\AsCommand;
 use Semitexa\Llm\Attributes\AsAiSkill;
 use Semitexa\Llm\Policy\AiConfirmationMode;
 use Semitexa\Llm\Policy\AiRiskLevel;

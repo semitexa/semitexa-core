@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Console;
 
-use Semitexa\Core\Attributes\AsCommand;
+use Semitexa\Core\Attribute\AsCommand;
 use Semitexa\Core\Container\ContainerFactory;
 use Semitexa\Core\Container\NotFoundException;
 use Semitexa\Core\Discovery\BootDiagnostics;
@@ -20,7 +20,9 @@ class Application extends SymfonyApplication
         parent::__construct('Semitexa', '1.1.31');
 
         $container = ContainerFactory::get();
-        $commandClasses = ClassDiscovery::findClassesWithAttribute(AsCommand::class);
+        /** @var ClassDiscovery $classDiscovery */
+        $classDiscovery = $container->get(ClassDiscovery::class);
+        $commandClasses = $classDiscovery->findClassesWithAttribute(AsCommand::class);
 
         $commandsWithMeta = [];
         foreach ($commandClasses as $className) {

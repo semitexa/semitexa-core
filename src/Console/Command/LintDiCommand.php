@@ -4,17 +4,17 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Console\Command;
 
-use Semitexa\Core\Attributes\AsCommand;
-use Semitexa\Core\Attributes\AsEventListener;
-use Semitexa\Core\Attributes\AsPipelineListener;
-use Semitexa\Core\Attributes\AsPayloadHandler;
-use Semitexa\Core\Attributes\AsService;
-use Semitexa\Core\Attributes\Config;
-use Semitexa\Core\Attributes\InjectAsFactory;
-use Semitexa\Core\Attributes\InjectAsMutable;
-use Semitexa\Core\Attributes\InjectAsReadonly;
-use Semitexa\Core\Attributes\SatisfiesServiceContract;
-use Semitexa\Core\Attributes\SatisfiesRepositoryContract;
+use Semitexa\Core\Attribute\AsCommand;
+use Semitexa\Core\Attribute\AsEventListener;
+use Semitexa\Core\Attribute\AsPipelineListener;
+use Semitexa\Core\Attribute\AsPayloadHandler;
+use Semitexa\Core\Attribute\AsService;
+use Semitexa\Core\Attribute\Config;
+use Semitexa\Core\Attribute\InjectAsFactory;
+use Semitexa\Core\Attribute\InjectAsMutable;
+use Semitexa\Core\Attribute\InjectAsReadonly;
+use Semitexa\Core\Attribute\SatisfiesServiceContract;
+use Semitexa\Core\Attribute\SatisfiesRepositoryContract;
 use Semitexa\Core\Discovery\AttributeDiscovery;
 use Semitexa\Core\Discovery\ClassDiscovery;
 use Symfony\Component\Console\Input\InputInterface;
@@ -28,6 +28,13 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 #[AsCommand(name: 'semitexa:lint:di', description: 'Verify DI injection rules on all container-managed classes')]
 final class LintDiCommand extends BaseCommand
 {
+    public function __construct(
+        private readonly ClassDiscovery $classDiscovery,
+        private readonly AttributeDiscovery $attributeDiscovery,
+    ) {
+        parent::__construct();
+    }
+
     private const CONTAINER_MANAGED_ATTRIBUTES = [
         AsService::class,
         'Semitexa\\Orm\\Attribute\\AsRepository',
@@ -49,11 +56,11 @@ final class LintDiCommand extends BaseCommand
         // Collect all container-managed classes
         $classes = [];
         foreach (self::CONTAINER_MANAGED_ATTRIBUTES as $attrClass) {
-            foreach (ClassDiscovery::findClassesWithAttribute($attrClass) as $class) {
+            foreach ($this->classDiscovery->findClassesWithAttribute($attrClass) as $class) {
                 $classes[$class] = true;
             }
         }
-        foreach (AttributeDiscovery::getDiscoveredPayloadHandlerClassNames() as $class) {
+        foreach ($this->attributeDiscovery->getDiscoveredPayloadHandlerClassNames() as $class) {
             $classes[$class] = true;
         }
 

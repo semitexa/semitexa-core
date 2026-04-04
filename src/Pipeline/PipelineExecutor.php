@@ -7,8 +7,8 @@ namespace Semitexa\Core\Pipeline;
 use Psr\Container\ContainerInterface;
 use Semitexa\Core\Contract\TypedHandlerInterface;
 use Semitexa\Core\Event\EventDispatcherInterface;
-use Semitexa\Core\Response;
-use Semitexa\Core\Events\HandlerCompleted;
+use Semitexa\Core\HttpResponse;
+use Semitexa\Core\Event\HandlerCompleted;
 use Semitexa\Core\Queue\HandlerExecution;
 use Semitexa\Core\Queue\QueueDispatcher;
 
@@ -45,7 +45,9 @@ final class PipelineExecutor
 
     private function dispatchPhase(string $phaseClass, RequestPipelineContext $context): void
     {
-        $listeners = PipelineListenerRegistry::getListeners($phaseClass);
+        /** @var PipelineListenerRegistry $registry */
+        $registry = $this->container->get(PipelineListenerRegistry::class);
+        $listeners = $registry->getListeners($phaseClass);
         foreach ($listeners as $meta) {
             $instance = $this->requestScopedContainer->get($meta['class']);
             $this->invokeListener($instance, $context);
@@ -78,9 +80,9 @@ final class PipelineExecutor
                 $context->resourceDto,
             );
 
-            if ($result instanceof Response) {
+            if ($result instanceof HttpResponse) {
                 throw new \LogicException(sprintf(
-                    'Handler %s must return a ResourceInterface, not a Response object. '
+                    'Handler %s must return a ResourceInterface, not a HttpResponse object. '
                     . 'Use domain exceptions for errors and resource DTO methods for data.',
                     $instance::class,
                 ));

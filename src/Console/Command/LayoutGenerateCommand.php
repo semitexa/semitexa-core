@@ -4,7 +4,8 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Console\Command;
 
-use Semitexa\Core\Attributes\AsCommand;
+use Semitexa\Core\Attribute\AsCommand;
+use Semitexa\Core\CodeGen\LayoutGenerator;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Input\InputInterface;
@@ -15,6 +16,12 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 #[AsCommand(name: 'layout:generate', description: 'Copy module layouts into src/')]
 class LayoutGenerateCommand extends BaseCommand
 {
+    public function __construct(
+        private readonly LayoutGenerator $layoutGenerator,
+    ) {
+        parent::__construct();
+    }
+
     protected function configure(): void
     {
         $this->setName('layout:generate')
@@ -31,9 +38,9 @@ class LayoutGenerateCommand extends BaseCommand
 
         try {
             if ($all || $layout === null) {
-                \Semitexa\Core\CodeGen\LayoutGenerator::generateAll($io);
+                $this->layoutGenerator->generateAll($io);
             } else {
-                \Semitexa\Core\CodeGen\LayoutGenerator::generate($layout, $io);
+                $this->layoutGenerator->generate($layout, $io);
             }
         } catch (\Throwable $e) {
             $io->error($e->getMessage());

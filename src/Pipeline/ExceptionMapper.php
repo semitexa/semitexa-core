@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Pipeline;
 
-use Semitexa\Core\Attributes\SatisfiesServiceContract;
+use Semitexa\Core\Attribute\SatisfiesServiceContract;
 use Semitexa\Core\Contract\ExceptionResponseMapperInterface;
 use Semitexa\Core\Discovery\ResolvedRouteMetadata;
 use Semitexa\Core\Exception\DomainException;
@@ -12,7 +12,7 @@ use Semitexa\Core\Exception\RateLimitException;
 use Semitexa\Core\Http\ContentNegotiator;
 use Semitexa\Core\Http\HttpStatus;
 use Semitexa\Core\Request;
-use Semitexa\Core\Response;
+use Semitexa\Core\HttpResponse;
 
 /**
  * Maps domain exceptions to content-negotiated HTTP error responses.
@@ -28,7 +28,7 @@ final class ExceptionMapper implements ExceptionResponseMapperInterface
     /**
      * Convert a caught exception into an error Response.
      */
-    public function map(\Throwable $e, Request $request, ResolvedRouteMetadata $metadata): Response
+    public function map(\Throwable $e, Request $request, ResolvedRouteMetadata $metadata): HttpResponse
     {
         if ($e instanceof DomainException) {
             return $this->mapDomainException($e, $request, $metadata);
@@ -37,7 +37,7 @@ final class ExceptionMapper implements ExceptionResponseMapperInterface
         return $this->mapUnknownException($e);
     }
 
-    private function mapDomainException(DomainException $e, Request $request, ResolvedRouteMetadata $metadata): Response
+    private function mapDomainException(DomainException $e, Request $request, ResolvedRouteMetadata $metadata): HttpResponse
     {
         $status = $e->getStatusCode();
         $body = [
@@ -49,11 +49,11 @@ final class ExceptionMapper implements ExceptionResponseMapperInterface
         $format = $this->negotiateErrorFormat($request, $metadata->produces);
 
         $response = match ($format) {
-            'json' => Response::json($body, $status->value),
+            'json' => HttpResponse::json($body, $status->value),
             'html' => $this->renderErrorHtml($status, $body),
-            'xml'  => Response::text($this->arrayToXml($body, 'error'), $status->value)
+            'xml'  => HttpResponse::text($this->arrayToXml($body, 'error'), $status->value)
                           ->withHeaders(['Content-Type' => 'application/xml; charset=utf-8']),
-            default => Response::text($e->getMessage(), $status->value),
+            default => HttpResponse::text($e->getMessage(), $status->value),
         };
 
         if ($e instanceof RateLimitException) {
@@ -63,9 +63,9 @@ final class ExceptionMapper implements ExceptionResponseMapperInterface
         return $response;
     }
 
-    private function mapUnknownException(\Throwable $e): Response
+    private function mapUnknownException(\Throwable $e): HttpResponse
     {
-        return Response::json([
+        return HttpResponse::json([
             'error' => 'Internal Server Error',
             'message' => 'An unexpected error occurred.',
         ], HttpStatus::InternalServerError->value);
@@ -80,14 +80,14 @@ final class ExceptionMapper implements ExceptionResponseMapperInterface
         }
     }
 
-    private function renderErrorHtml(HttpStatus $status, array $body): Response
+    private function renderErrorHtml(HttpStatus $status, array $body): HttpResponse
     {
         $title = htmlspecialchars($status->reason(), ENT_QUOTES | ENT_HTML5);
         $message = htmlspecialchars($body['message'] ?? '', ENT_QUOTES | ENT_HTML5);
         $html = "<!DOCTYPE html><html><head><title>{$title}</title></head>"
             . "<body><h1>{$status->value} {$title}</h1><p>{$message}</p></body></html>";
 
-        return Response::html($html, $status->value);
+        return HttpResponse::html($html, $status->value);
     }
 
     private function arrayToXml(array $data, string $rootElement): string

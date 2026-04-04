@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Config;
 
-use Semitexa\Core\Util\ProjectRoot;
+use Semitexa\Core\Support\ProjectRoot;
 
 /**
  * Reads registry-related config from composer.json "extra.semitexa.registry".

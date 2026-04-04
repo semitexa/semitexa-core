@@ -12,14 +12,14 @@ Request/Payload classes must live in modules under `src/modules/`, `packages/`, 
 
 ```php
 use Semitexa\Core\Attributes\AsPayload;
-use Semitexa\Core\Http\Response\GenericResponse;
+use Semitexa\Core\Http\Response\ResourceResponse;
 
 #[AsPayload(
     doc: 'packages/semitexa-core/docs/attributes/AsPayload.md',
     path: '/api/users',
     methods: ['GET'],
     name: 'api.users.list',
-    responseWith: GenericResponse::class,
+    responseWith: ResourceResponse::class,
 )]
 final class UserListPayload
 {
@@ -86,7 +86,7 @@ Example:
     path: 'env::API_LOGIN_PATH::/api/login',
     methods: ['POST'],
     name: 'env::API_LOGIN_ROUTE_NAME::api.login',
-    responseWith: GenericResponse::class,
+    responseWith: ResourceResponse::class,
 )]
 final class LoginPayload
 {

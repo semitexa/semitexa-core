@@ -4,22 +4,22 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Discovery;
 
-use Semitexa\Core\Util\ProjectRoot;
+use Semitexa\Core\Support\ProjectRoot;
 
 class ClassDiscovery
 {
-    private static array $classMap = [];
-    private static bool $initialized = false;
-    private static array $attributeCache = [];
+    private array $classMap = [];
+    private bool $initialized = false;
+    private array $attributeCache = [];
 
-    private static array $allowedNamespacePrefixes = [
+    private array $allowedNamespacePrefixes = [
         'Semitexa\\' => true,
         'App\\' => true,
     ];
 
-    public static function initialize(): void
+    public function initialize(): void
     {
-        if (self::$initialized) {
+        if ($this->initialized) {
             return;
         }
 
@@ -27,36 +27,33 @@ class ClassDiscovery
         $composerClassMap = require $composerDir . '/autoload_classmap.php';
         $composerPsr4Map = require $composerDir . '/autoload_psr4.php';
 
-        // Refresh the Composer ClassLoader with the current classmap and PSR-4 namespaces.
-        // Needed after graceful Swoole reload: workers inherit the master's stale ClassLoader,
-        // so newly-installed packages fail to autoload at request time.
-        self::refreshComposerAutoloader($composerDir, $composerClassMap);
+        $this->refreshComposerAutoloader($composerDir, $composerClassMap);
 
         foreach ($composerClassMap as $className => $filePath) {
-            if (self::isNamespaceAllowed($className)) {
-                self::$classMap[$className] = $filePath;
+            if ($this->isNamespaceAllowed($className)) {
+                $this->classMap[$className] = $filePath;
             }
         }
 
-        self::mergePsr4ClassCandidates($composerPsr4Map);
+        $this->mergePsr4ClassCandidates($composerPsr4Map);
 
-        self::$initialized = true;
+        $this->initialized = true;
     }
 
     /**
      * @return list<string>
      */
-    public static function findClassesWithAttribute(string $attributeClass): array
+    public function findClassesWithAttribute(string $attributeClass): array
     {
-        if (isset(self::$attributeCache[$attributeClass])) {
-            return self::$attributeCache[$attributeClass];
+        if (isset($this->attributeCache[$attributeClass])) {
+            return $this->attributeCache[$attributeClass];
         }
 
-        self::initialize();
+        $this->initialize();
 
         $classes = [];
 
-        foreach (self::$classMap as $className => $filePath) {
+        foreach ($this->classMap as $className => $filePath) {
             if (str_starts_with($className, 'Semitexa\\Core\\Composer\\')
                 || str_starts_with($className, 'App\\Tests\\')
             ) {
@@ -66,17 +63,12 @@ class ClassDiscovery
             try {
                 $exists = class_exists($className, true) || interface_exists($className, true) || trait_exists($className, true);
             } catch (\Throwable $e) {
-                // Class file loaded but references a missing dependency (e.g. a dev-only
-                // interface like PHPUnit's in production). Skip it — it cannot be used.
                 BootDiagnostics::current()->skip('ClassDiscovery', "Skipping {$className} (load error): " . $e->getMessage(), $e);
                 continue;
             }
 
             if (!$exists) {
-                // class_exists with autoload failed — the class may have been found via
-                // PSR-4 directory scan but is absent from Composer's generated classmap.
-                // Load it directly with require_once (idempotent: won't double-include).
-                $filePath = self::$classMap[$className] ?? null;
+                $filePath = $this->classMap[$className] ?? null;
                 if (is_string($filePath) && is_file($filePath)) {
                     try {
                         (static function (string $f): void { require_once $f; })($filePath);
@@ -101,26 +93,19 @@ class ClassDiscovery
             }
         }
 
-        self::$attributeCache[$attributeClass] = $classes;
+        $this->attributeCache[$attributeClass] = $classes;
 
         return $classes;
     }
 
-    public static function getClassMap(): array
+    public function getClassMap(): array
     {
-        self::initialize();
+        $this->initialize();
 
-        return self::$classMap;
+        return $this->classMap;
     }
 
-    /**
-     * Inject the current classmap and PSR-4 namespace map into the Composer ClassLoader.
-     * This is a no-op on first boot (the ClassLoader is already current), but after a
-     * Swoole graceful reload the master's forked workers inherit a stale ClassLoader —
-     * calling this at ClassDiscovery::initialize() time ensures every newly-installed
-     * package is autoloadable without a full server restart.
-     */
-    private static function refreshComposerAutoloader(string $composerDir, array $freshClassMap): void
+    private function refreshComposerAutoloader(string $composerDir, array $freshClassMap): void
     {
         try {
             $psr4File = $composerDir . '/autoload_psr4.php';
@@ -144,24 +129,20 @@ class ClassDiscovery
     }
 
     /**
-     * Composer's generated classmap can lag behind local PSR-4 edits until
-     * dump-autoload runs. Merge PSR-4-derived class candidates so attribute
-     * discovery sees newly-added or renamed classes immediately.
-     *
      * @param array<string, list<string>|string> $psr4Map
      */
-    private static function mergePsr4ClassCandidates(array $psr4Map): void
+    private function mergePsr4ClassCandidates(array $psr4Map): void
     {
         uksort($psr4Map, static fn (string $a, string $b): int => strlen($b) <=> strlen($a));
 
         $seenRealPaths = [];
         foreach ($psr4Map as $namespace => $dirs) {
-            if (!self::isNamespaceAllowed($namespace)) {
+            if (!$this->isNamespaceAllowed($namespace)) {
                 continue;
             }
 
             foreach ((array) $dirs as $dir) {
-                if (!self::shouldMergePsr4Directory($dir)) {
+                if (!$this->shouldMergePsr4Directory($dir)) {
                     continue;
                 }
 
@@ -183,12 +164,12 @@ class ClassDiscovery
                     }
 
                     $className = self::extractDeclaredClassName($fileInfo->getPathname());
-                    if ($className === null || !self::isNamespaceAllowed($className)) {
+                    if ($className === null || !$this->isNamespaceAllowed($className)) {
                         continue;
                     }
 
-                    if (!isset(self::$classMap[$className])) {
-                        self::$classMap[$className] = $fileInfo->getPathname();
+                    if (!isset($this->classMap[$className])) {
+                        $this->classMap[$className] = $fileInfo->getPathname();
                         if ($realPath !== false) {
                             $seenRealPaths[$realPath] = true;
                         }
@@ -198,7 +179,7 @@ class ClassDiscovery
         }
     }
 
-    private static function shouldMergePsr4Directory(string $dir): bool
+    private function shouldMergePsr4Directory(string $dir): bool
     {
         if (!is_dir($dir)) {
             return false;
@@ -213,10 +194,6 @@ class ClassDiscovery
             return false;
         }
 
-        // Keep fallback scanning limited to live project code, Semitexa vendor
-        // packages, and path repositories (e.g. vendor symlinks into packages/*).
-        // Non-Semitexa vendor packages should still rely on Composer's classmap to
-        // avoid a full filesystem walk on every bootstrap.
         if (($realPath === $projectRootReal . '/src' || str_starts_with($realPath, $projectRootReal . '/src/'))
             || ($realPath === $projectRootReal . '/tests' || str_starts_with($realPath, $projectRootReal . '/tests/'))
             || ($realPath === $projectRootReal . '/packages' || str_starts_with($realPath, $projectRootReal . '/packages/'))
@@ -302,9 +279,9 @@ class ClassDiscovery
         return null;
     }
 
-    private static function isNamespaceAllowed(string $className): bool
+    private function isNamespaceAllowed(string $className): bool
     {
-        foreach (array_keys(self::$allowedNamespacePrefixes) as $prefix) {
+        foreach (array_keys($this->allowedNamespacePrefixes) as $prefix) {
             if (str_starts_with($className, $prefix)) {
                 return true;
             }

@@ -4,13 +4,13 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Console\Command;
 
-use Semitexa\Core\Attributes\AsCommand;
-use Semitexa\Core\Attributes\AsPayloadHandler;
+use Semitexa\Core\Attribute\AsCommand;
+use Semitexa\Core\Attribute\AsPayloadHandler;
 use Semitexa\Core\Contract\ResourceInterface;
 use Semitexa\Core\Contract\TypedHandlerInterface;
 use Semitexa\Core\Discovery\AttributeDiscovery;
 use Semitexa\Core\Discovery\ClassDiscovery;
-use Semitexa\Core\Response;
+use Semitexa\Core\HttpResponse;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Style\SymfonyStyle;
@@ -21,12 +21,18 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 #[AsCommand(name: 'semitexa:lint:handlers', description: 'Validate handler signatures, return types, and payload/resource bindings')]
 final class LintHandlersCommand extends BaseCommand
 {
+    public function __construct(
+        private readonly AttributeDiscovery $attributeDiscovery,
+    ) {
+        parent::__construct();
+    }
+
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
         $io = new SymfonyStyle($input, $output);
         $io->title('Lint: Handlers');
 
-        $handlerClasses = AttributeDiscovery::getDiscoveredPayloadHandlerClassNames();
+        $handlerClasses = $this->attributeDiscovery->getDiscoveredPayloadHandlerClassNames();
         $errors = [];
 
         foreach ($handlerClasses as $handlerClass) {
@@ -78,9 +84,9 @@ final class LintHandlersCommand extends BaseCommand
                 $errors[] = "{$handlerClass}::handle() parameter 1 type {$p1Type->getName()} must implement ResourceInterface.";
             }
 
-            // Return type must not be Response
+            // Return type must not be HttpResponse
             $returnType = $method->getReturnType();
-            if ($returnType instanceof \ReflectionNamedType && $returnType->getName() === Response::class) {
+            if ($returnType instanceof \ReflectionNamedType && $returnType->getName() === HttpResponse::class) {
                 $errors[] = "{$handlerClass}::handle() must return ResourceInterface, not Response.";
             }
 

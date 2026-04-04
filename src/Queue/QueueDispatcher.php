@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Semitexa\Core\Queue;
 
 use Semitexa\Core\Queue\Message\QueuedHandlerMessage;
-use Semitexa\Core\Support\DtoSerializer;
+use Semitexa\Core\Support\PayloadSerializer;
 
 class QueueDispatcher
 {
@@ -25,8 +25,8 @@ class QueueDispatcher
             handlerClass: $handlerMeta['class'],
             requestClass: get_class($requestDto),
             responseClass: get_class($responseDto),
-            requestPayload: DtoSerializer::toArray($requestDto),
-            responsePayload: DtoSerializer::toArray($responseDto),
+            requestPayload: PayloadSerializer::toArray($requestDto),
+            responsePayload: PayloadSerializer::toArray($responseDto),
             sessionId: $sessionId,
             maxRetries: $handlerMeta['maxRetries'] ?? 0,
             retryDelay: $handlerMeta['retryDelay'] ?? 0,

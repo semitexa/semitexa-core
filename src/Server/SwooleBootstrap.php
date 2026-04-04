@@ -12,10 +12,12 @@ use Semitexa\Core\ErrorHandler;
 use Semitexa\Core\Http\HttpStatus;
 use Semitexa\Core\Http\SwooleResponseEmitter;
 use Semitexa\Core\Request;
+use Semitexa\Core\Discovery\ClassDiscovery;
 use Semitexa\Core\Server\Lifecycle\ServerLifecycleContext;
 use Semitexa\Core\Server\Lifecycle\ServerBootstrapState;
 use Semitexa\Core\Server\Lifecycle\ServerLifecycleInvoker;
 use Semitexa\Core\Server\Lifecycle\ServerLifecyclePhase;
+use Semitexa\Core\Server\Lifecycle\ServerLifecycleRegistry;
 use Semitexa\Core\Session\SwooleSessionTableHolder;
 use Semitexa\Ssr\Asset\StaticAssetHandler;
 use Swoole\Coroutine;
@@ -61,15 +63,17 @@ class SwooleBootstrap
         $healthHandler = new HealthCheckHandler();
         $staticAssetHandler = new StaticAssetHandler();
         $bootstrapState = new ServerBootstrapState();
+        $lifecycleRegistry = new ServerLifecycleRegistry(new ClassDiscovery());
+        $lifecycleInvoker = new ServerLifecycleInvoker($lifecycleRegistry);
         $bootstrapContext = new ServerLifecycleContext(
             server: $server,
             workerId: null,
             environment: $env,
             bootstrapState: $bootstrapState,
         );
-        (new ServerLifecycleInvoker())->invokePhase(ServerLifecyclePhase::PreStart, $bootstrapContext, false);
+        $lifecycleInvoker->invokePhase(ServerLifecyclePhase::PreStart, $bootstrapContext, false);
 
-        $server->on(SwooleEvent::WorkerStart->value, function (Server $server, int $workerId) use ($bootstrapState) {
+        $server->on(SwooleEvent::WorkerStart->value, function (Server $server, int $workerId) use ($bootstrapState, $lifecycleInvoker) {
             self::syncInheritedComposerAutoloader();
             Environment::syncEnvFromFiles();
             $workerEnv = Environment::create();
@@ -79,25 +83,24 @@ class SwooleBootstrap
                 environment: $workerEnv,
                 bootstrapState: $bootstrapState,
             );
-            $invoker = new ServerLifecycleInvoker();
-            $invoker->invokePhase(ServerLifecyclePhase::WorkerStartBeforeContainer, $context, false);
+            $lifecycleInvoker->invokePhase(ServerLifecyclePhase::WorkerStartBeforeContainer, $context, false);
             ContainerFactory::create();
-            $invoker->invokePhase(ServerLifecyclePhase::WorkerStartAfterContainer, $context, true);
-            $invoker->invokePhase(ServerLifecyclePhase::WorkerStartAfterServerBindings, $context, true);
-            $invoker->invokePhase(ServerLifecyclePhase::WorkerStartFinalize, $context, true);
+            $lifecycleInvoker->invokePhase(ServerLifecyclePhase::WorkerStartAfterContainer, $context, true);
+            $lifecycleInvoker->invokePhase(ServerLifecyclePhase::WorkerStartAfterServerBindings, $context, true);
+            $lifecycleInvoker->invokePhase(ServerLifecyclePhase::WorkerStartFinalize, $context, true);
         });
 
-        $server->on(SwooleEvent::WorkerStop->value, function (Server $server, int $workerId) use ($bootstrapState) {
+        $server->on(SwooleEvent::WorkerStop->value, function (Server $server, int $workerId) use ($bootstrapState, $lifecycleInvoker) {
             $context = new ServerLifecycleContext(
                 server: $server,
                 workerId: $workerId,
                 environment: Environment::create(),
                 bootstrapState: $bootstrapState,
             );
-            new ServerLifecycleInvoker()->invokePhase(ServerLifecyclePhase::WorkerStop, $context, true);
+            $lifecycleInvoker->invokePhase(ServerLifecyclePhase::WorkerStop, $context, true);
         });
 
-        $server->on(SwooleEvent::WorkerError->value, function (Server $server, int $workerId, int $workerPid, int $exitCode, int $signal) use ($bootstrapState) {
+        $server->on(SwooleEvent::WorkerError->value, function (Server $server, int $workerId, int $workerPid, int $exitCode, int $signal) use ($bootstrapState, $lifecycleInvoker) {
             ServerLifecycleFallbackLogger::logWorkerError($workerId, $workerPid, $exitCode, $signal);
             $context = new ServerLifecycleContext(
                 server: $server,
@@ -108,27 +111,27 @@ class SwooleBootstrap
                 exitCode: $exitCode,
                 signal: $signal,
             );
-            new ServerLifecycleInvoker()->invokePhase(ServerLifecyclePhase::WorkerError, $context, false);
+            $lifecycleInvoker->invokePhase(ServerLifecyclePhase::WorkerError, $context, false);
         });
 
-        $server->on(SwooleEvent::Start->value, function (Server $server) use ($bootstrapState) {
+        $server->on(SwooleEvent::Start->value, function (Server $server) use ($bootstrapState, $lifecycleInvoker) {
             $context = new ServerLifecycleContext(
                 server: $server,
                 workerId: null,
                 environment: Environment::create(),
                 bootstrapState: $bootstrapState,
             );
-            new ServerLifecycleInvoker()->invokePhase(ServerLifecyclePhase::Start, $context, false);
+            $lifecycleInvoker->invokePhase(ServerLifecyclePhase::Start, $context, false);
         });
 
-        $server->on(SwooleEvent::Shutdown->value, function (Server $server) use ($bootstrapState) {
+        $server->on(SwooleEvent::Shutdown->value, function (Server $server) use ($bootstrapState, $lifecycleInvoker) {
             $context = new ServerLifecycleContext(
                 server: $server,
                 workerId: null,
                 environment: Environment::create(),
                 bootstrapState: $bootstrapState,
             );
-            new ServerLifecycleInvoker()->invokePhase(ServerLifecyclePhase::Shutdown, $context, false);
+            $lifecycleInvoker->invokePhase(ServerLifecyclePhase::Shutdown, $context, false);
         });
 
         $emitter = new SwooleResponseEmitter();
@@ -203,7 +206,7 @@ class SwooleBootstrap
      */
     private static function syncInheritedComposerAutoloader(): void
     {
-        $composerDir = \Semitexa\Core\Util\ProjectRoot::get() . '/vendor/composer';
+        $composerDir = \Semitexa\Core\Support\ProjectRoot::get() . '/vendor/composer';
         $classMapFile = $composerDir . '/autoload_classmap.php';
         $psr4File = $composerDir . '/autoload_psr4.php';
 

@@ -45,14 +45,6 @@ class ContainerFactory
         $container->set(\Semitexa\Core\Environment::class, \Semitexa\Core\Environment::create());
         $container->set(\Psr\Container\ContainerInterface::class, $container);
 
-        $root = \Semitexa\Core\Util\ProjectRoot::get();
-        $container->set(\Semitexa\Core\ProjectContext::class, new \Semitexa\Core\ProjectContext(
-            rootPath: $root,
-            varPath: $root . '/var',
-            modulesPath: $root . '/src/modules',
-            packagesPath: $root . '/packages',
-        ));
-
         $orm = new \Semitexa\Orm\OrmManager();
         $container->set(\Semitexa\Orm\OrmManager::class, $orm);
         $container->set(\Semitexa\Orm\Adapter\ConnectionPoolInterface::class, $orm->getPool());

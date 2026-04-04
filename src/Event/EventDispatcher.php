@@ -4,11 +4,12 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Event;
 
-use Semitexa\Core\Attributes\SatisfiesServiceContract;
+use Semitexa\Core\Attribute\InjectAsReadonly;
+use Semitexa\Core\Attribute\SatisfiesServiceContract;
 use Semitexa\Core\Container\ContainerFactory;
 use Semitexa\Core\Queue\QueueConfig;
 use Semitexa\Core\Queue\QueueTransportRegistry;
-use Semitexa\Core\Support\DtoSerializer;
+use Semitexa\Core\Support\PayloadSerializer;
 
 /**
  * Single entry point for events: create() builds the event instance (framework-controlled),
@@ -19,6 +20,8 @@ use Semitexa\Core\Support\DtoSerializer;
 #[SatisfiesServiceContract(of: EventDispatcherInterface::class)]
 final class EventDispatcher implements EventDispatcherInterface
 {
+    #[InjectAsReadonly]
+    protected EventListenerRegistry $eventListenerRegistry;
     /**
      * Create an event instance. Use this instead of "new Event()" so the framework
      * can apply initialization, validation, or optimizations now or later.
@@ -37,12 +40,12 @@ final class EventDispatcher implements EventDispatcherInterface
 
         $constructor = $reflection->getConstructor();
         if ($constructor === null) {
-            return DtoSerializer::hydrate($reflection->newInstance(), $payload);
+            return PayloadSerializer::hydrate($reflection->newInstance(), $payload);
         }
 
         $instance = $reflection->newInstanceArgs($this->buildConstructorArgs($constructor, $payload, $eventClass));
 
-        return DtoSerializer::hydrate($instance, $payload);
+        return PayloadSerializer::hydrate($instance, $payload);
     }
 
     /**
@@ -51,9 +54,9 @@ final class EventDispatcher implements EventDispatcherInterface
      */
     public function dispatch(object $event): void
     {
-        EventListenerRegistry::ensureBuilt();
+        $this->eventListenerRegistry->ensureBuilt();
         $eventClass = get_class($event);
-        $listeners = EventListenerRegistry::getListeners($eventClass);
+        $listeners = $this->eventListenerRegistry->getListeners($eventClass);
 
         foreach ($listeners as $meta) {
             $execution = EventExecution::fromAttributeValue((string) ($meta['execution'] ?? EventExecution::Sync->value));
@@ -105,7 +108,7 @@ final class EventDispatcher implements EventDispatcherInterface
         $message = new \Semitexa\Core\Queue\Message\QueuedEventListenerMessage(
             listenerClass: $meta['class'],
             eventClass: get_class($event),
-            eventPayload: DtoSerializer::toArray($event),
+            eventPayload: PayloadSerializer::toArray($event),
         );
 
         $transport = QueueTransportRegistry::create($transportName);

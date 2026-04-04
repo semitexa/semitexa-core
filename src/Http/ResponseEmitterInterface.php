@@ -4,15 +4,15 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Http;
 
-use Semitexa\Core\Response;
+use Semitexa\Core\HttpResponse;
 
 interface ResponseEmitterInterface
 {
     /**
-     * Emit a framework Response to the underlying transport.
+     * Emit a framework HttpResponse to the underlying transport.
      *
-     * @param Response $response The framework response to emit
-     * @param mixed $transport The transport-specific response object (e.g. Swoole\Http\Response)
+     * @param HttpResponse $response The framework response to emit
+     * @param mixed $transport The transport-specific response object (e.g. Swoole\Http\HttpResponse)
      */
-    public function emit(Response $response, mixed $transport): void;
+    public function emit(HttpResponse $response, mixed $transport): void;
 }

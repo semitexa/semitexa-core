@@ -91,7 +91,7 @@ class EmailSendHandler implements TypedHandlerInterface
     #[InjectAsReadonly]
     protected EmailServiceInterface $emailService;
 
-    public function handle(EmailSendRequest $request, GenericResponse $response): GenericResponse
+    public function handle(EmailSendRequest $request, ResourceResponse $response): ResourceResponse
     {
         // This code will run asynchronously in a worker process
         $this->emailService->send($request->email, $request->subject);

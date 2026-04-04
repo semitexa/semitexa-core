@@ -9,11 +9,16 @@ use Semitexa\Core\Container\ContainerFactory;
 
 final class ServerLifecycleInvoker
 {
+    public function __construct(
+        private readonly ServerLifecycleRegistry $registry,
+    ) {
+    }
+
     public function invokePhase(ServerLifecyclePhase $phase, ServerLifecycleContext $context, bool $containerAvailable = false): void
     {
-        ServerLifecycleRegistry::ensureBuilt();
+        $this->registry->ensureBuilt();
 
-        foreach (ServerLifecycleRegistry::getListeners($phase->value) as $meta) {
+        foreach ($this->registry->getListeners($phase->value) as $meta) {
             $listener = $this->resolveListener($phase, $meta, $containerAvailable);
             if (!$listener instanceof ServerLifecycleListenerInterface) {
                 continue;

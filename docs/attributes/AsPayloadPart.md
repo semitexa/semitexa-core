@@ -10,7 +10,7 @@ At runtime, Semitexa discovers all matching payload-part traits and composes a w
 
 - extends the base payload
 - uses all discovered traits targeting that payload
-- is cached per worker by `PayloadDtoFactory`
+- is cached per worker by `PayloadFactory`
 
 The handler still receives one payload object. The transport boundary stays singular even when multiple modules extend it.
 
@@ -93,7 +93,7 @@ final class SearchHandler implements TypedHandlerInterface
 
 - `#[AsPayloadPart]` is about **modular transport-boundary extension**, not inheritance hacks.
 - This is especially useful when one module owns the route, but another module must add request concerns such as tracking, preview flags, tenant hints, or feature toggles.
-- Composition happens at runtime through `PayloadDtoFactory`; there is no separate payload code-generation step.
+- Composition happens at runtime through `PayloadFactory`; there is no separate payload code-generation step.
 
 ## Related
 

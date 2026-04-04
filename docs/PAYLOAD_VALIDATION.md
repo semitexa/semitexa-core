@@ -6,7 +6,7 @@ Payload DTOs are the **shield** from external data: hydration, type casting, and
 
 ## Pipeline
 
-1. **Hydrate** — `RequestDtoHydrator::hydrate($dto, $request)` fills the DTO using the **setter convention**: for each key in raw data (JSON/POST/query + path params), the hydrator calls `set{CamelCase}($value)` if the method exists. The value is cast to the setter’s parameter type before calling.
+1. **Hydrate** — `PayloadHydrator::hydrate($dto, $request)` fills the DTO using the **setter convention**: for each key in raw data (JSON/POST/query + path params), the hydrator calls `set{CamelCase}($value)` if the method exists. The value is cast to the setter’s parameter type before calling.
 2. **Validate** — `PayloadValidator::validate($dto, $request)` calls **`$dto->validate()`**. Every Payload must implement `ValidatablePayload` and return a `PayloadValidationResult`. Validation logic lives in the DTO (e.g. using validation traits).
 3. If validation fails → return **422** with a body listing field errors; handler is **not** called.
 4. If validation passes → handler runs with a DTO that is guaranteed to satisfy your rules.
@@ -75,4 +75,4 @@ class ContactFormPayload implements PayloadInterface, ValidatablePayload
 
 ## Session / Cookie payloads
 
-The same rules apply: protected fields, getters/setters, `ValidatablePayload`. Session and queue payloads are serialized with `DtoSerializer`, which uses getters for `toArray()` and setters for `hydrate()`.
+The same rules apply: protected fields, getters/setters, `ValidatablePayload`. Session and queue payloads are serialized with `PayloadSerializer`, which uses getters for `toArray()` and setters for `hydrate()`.

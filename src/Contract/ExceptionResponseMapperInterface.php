@@ -6,7 +6,7 @@ namespace Semitexa\Core\Contract;
 
 use Semitexa\Core\Discovery\ResolvedRouteMetadata;
 use Semitexa\Core\Request;
-use Semitexa\Core\Response;
+use Semitexa\Core\HttpResponse;
 
 /**
  * Converts a caught Throwable into an HTTP error Response.
@@ -26,5 +26,5 @@ interface ExceptionResponseMapperInterface
      * produces formats, extension flags such as 'external_api', and other
      * route-level contract information without touching discovery internals.
      */
-    public function map(\Throwable $e, Request $request, ResolvedRouteMetadata $metadata): Response;
+    public function map(\Throwable $e, Request $request, ResolvedRouteMetadata $metadata): HttpResponse;
 }

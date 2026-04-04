@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Event;
 
-use Semitexa\Core\Attributes\AsEventListener;
+use Semitexa\Core\Attribute\AsEventListener;
 use Semitexa\Core\Event\EventExecution;
 use Semitexa\Core\Discovery\ClassDiscovery;
 use Semitexa\Core\ModuleRegistry;
@@ -17,31 +17,36 @@ use ReflectionClass;
 final class EventListenerRegistry
 {
     /** @var array<string, array<array{class: string, event: string, execution: string, transport: mixed, queue: mixed, priority: int}>> */
-    private static array $listenersByEvent = [];
+    private array $listenersByEvent = [];
 
-    private static bool $built = false;
+    private bool $built = false;
+
+    public function __construct(
+        private readonly ClassDiscovery $classDiscovery,
+        private readonly ModuleRegistry $moduleRegistry,
+    ) {}
 
     /**
      * @return array<array{class: string, event: string, execution: string, transport: mixed, queue: mixed, priority: int}>
      */
-    public static function getListeners(string $eventClass): array
+    public function getListeners(string $eventClass): array
     {
-        self::ensureBuilt();
-        return self::$listenersByEvent[$eventClass] ?? [];
+        $this->ensureBuilt();
+        return $this->listenersByEvent[$eventClass] ?? [];
     }
 
-    public static function ensureBuilt(): void
+    public function ensureBuilt(): void
     {
-        if (self::$built) {
+        if ($this->built) {
             return;
         }
-        ClassDiscovery::initialize();
-        ModuleRegistry::initialize();
+        $this->classDiscovery->initialize();
+        $this->moduleRegistry->initialize();
 
-        $classes = ClassDiscovery::findClassesWithAttribute(AsEventListener::class);
+        $classes = $this->classDiscovery->findClassesWithAttribute(AsEventListener::class);
         $filtered = array_filter(
             $classes,
-            fn(string $class) => (str_starts_with($class, 'Semitexa\\') && ModuleRegistry::isClassActive($class))
+            fn(string $class) => (str_starts_with($class, 'Semitexa\\') && $this->moduleRegistry->isClassActive($class))
                 || self::isProjectEventListeners($class)
         );
 
@@ -67,29 +72,29 @@ final class EventListenerRegistry
                     'queue' => $queue ?: null,
                     'priority' => $priority,
                 ];
-                if (!isset(self::$listenersByEvent[$eventClass])) {
-                    self::$listenersByEvent[$eventClass] = [];
+                if (!isset($this->listenersByEvent[$eventClass])) {
+                    $this->listenersByEvent[$eventClass] = [];
                 }
-                self::$listenersByEvent[$eventClass][] = $meta;
+                $this->listenersByEvent[$eventClass][] = $meta;
             } catch (\Throwable $e) {
                 continue;
             }
         }
 
-        foreach (self::$listenersByEvent as $eventClass => $list) {
-            usort(self::$listenersByEvent[$eventClass], fn($a, $b) => ($a['priority'] <=> $b['priority']));
+        foreach ($this->listenersByEvent as $eventClass => $list) {
+            usort($this->listenersByEvent[$eventClass], fn($a, $b) => ($a['priority'] <=> $b['priority']));
         }
-        self::$built = true;
+        $this->built = true;
     }
 
     /**
      * @return string[] All discovered listener class names (across all events).
      */
-    public static function getAllListenerClasses(): array
+    public function getAllListenerClasses(): array
     {
-        self::ensureBuilt();
+        $this->ensureBuilt();
         $classes = [];
-        foreach (self::$listenersByEvent as $listeners) {
+        foreach ($this->listenersByEvent as $listeners) {
             foreach ($listeners as $meta) {
                 $classes[$meta['class']] = true;
             }
@@ -104,7 +109,6 @@ final class EventListenerRegistry
         );
     }
 
-    /** Execution is required on the attribute and already validated there. */
     private static function resolveExecution(EventExecution $listenerExecution): EventExecution
     {
         return $listenerExecution;

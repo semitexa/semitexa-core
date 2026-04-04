@@ -4,15 +4,15 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Discovery;
 
-use Semitexa\Core\Attributes\AsPayload;
-use Semitexa\Core\Attributes\AsPayloadHandler;
-use Semitexa\Core\Attributes\AsPayloadPart;
-use Semitexa\Core\Attributes\AsResource;
-use Semitexa\Core\Attributes\AsResourcePart;
+use Semitexa\Core\Attribute\AsPayload;
+use Semitexa\Core\Attribute\AsPayloadHandler;
+use Semitexa\Core\Attribute\AsPayloadPart;
+use Semitexa\Core\Attribute\AsResource;
+use Semitexa\Core\Attribute\AsResourcePart;
 use Semitexa\Core\Config\EnvValueResolver;
 use Semitexa\Core\Environment;
 use Semitexa\Core\ModuleRegistry;
-use Semitexa\Core\Util\ProjectRoot;
+use Semitexa\Core\Support\ProjectRoot;
 use Semitexa\Core\Queue\HandlerExecution;
 use Semitexa\Core\Contract\TypedHandlerInterface;
 use Semitexa\Core\Pipeline\HandlerReflectionCache;
@@ -21,68 +21,74 @@ use ReflectionClass;
 
 /**
  * Discovers and caches attributes from PHP classes
- * 
+ *
  * This class scans the src/ directory for classes with specific attributes
  * and builds a registry of controllers and routes.
  */
 class AttributeDiscovery
 {
-    private static array $httpRequests = [];
-    private static array $httpHandlers = [];
+    private array $httpRequests = [];
+    private array $httpHandlers = [];
     /** @var array<string, list<array{class: string, for?: string, payload?: string, resource?: string, execution: string, transport: ?string, queue: ?string, priority: int}>> key: payload . "\0" . resource */
-    private static array $handlersByPayloadAndResource = [];
-    private static array $requestClassAliases = [];
-    private static array $rawRequestAttrs = [];
-    private static array $resolvedRequestAttrs = [];
-    private static array $rawResponseAttrs = [];
-    private static array $resolvedResponseAttrs = [];
-    private static array $responseClassAliases = [];
+    private array $handlersByPayloadAndResource = [];
+    private array $requestClassAliases = [];
+    private array $rawRequestAttrs = [];
+    private array $resolvedRequestAttrs = [];
+    private array $rawResponseAttrs = [];
+    private array $resolvedResponseAttrs = [];
+    private array $responseClassAliases = [];
     /** @var array<string, list<string>> baseClass => [traitFQN, ...] */
-    private static array $payloadParts = [];
+    private array $payloadParts = [];
     /** @var array<string, list<string>> baseClass => [traitFQN, ...] */
-    private static array $resourceParts = [];
+    private array $resourceParts = [];
     /** @var array<string, string> className => attribute base class */
-    private static array $payloadBaseMap = [];
+    private array $payloadBaseMap = [];
     /** @var array<string, string> className => attribute base class */
-    private static array $resourceBaseMap = [];
-    private static bool $initialized = false;
-    
+    private array $resourceBaseMap = [];
+    private bool $initialized = false;
+
+    public function __construct(
+        private readonly ClassDiscovery $classDiscovery,
+        private readonly ModuleRegistry $moduleRegistry,
+        private readonly RouteRegistry $routeRegistry,
+    ) {}
+
     /**
      * Initialize the discovery system
      * This should be called once at server startup
      */
-    public static function initialize(): void
+    public function initialize(): void
     {
-        if (self::$initialized) {
+        if ($this->initialized) {
             return;
         }
 
         // Discovery relies on tenant/module env such as TENANT_*_MODULES.
         // CLI entrypoints can reach discovery before worker bootstrap syncs .env values.
         Environment::syncEnvFromFiles();
-        
+
         $startTime = microtime(true);
-        
+
         // Initialize class discovery
-        ClassDiscovery::initialize();
+        $this->classDiscovery->initialize();
 
         // Initialize module registry
-        ModuleRegistry::initialize();
-        
+        $this->moduleRegistry->initialize();
+
         // Scan attributes using intelligent autoloader
-        self::scanAttributesIntelligently();
-        
+        $this->scanAttributesIntelligently();
+
         $endTime = microtime(true);
-        
-        self::$initialized = true;
+
+        $this->initialized = true;
     }
-    
+
     /**
      * Get all discovered routes
      */
-    public static function getRoutes(): array
+    public function getRoutes(): array
     {
-        return RouteRegistry::getAll();
+        return $this->routeRegistry->getAll();
     }
 
     /**
@@ -90,9 +96,9 @@ class AttributeDiscovery
      *
      * @return list<array>
      */
-    public static function getEnrichedRoutes(): array
+    public function getEnrichedRoutes(): array
     {
-        return array_map(static fn(array $route) => self::enrichRoute($route), RouteRegistry::getAll());
+        return array_map(fn(array $route) => $this->enrichRoute($route), $this->routeRegistry->getAll());
     }
 
     /**
@@ -101,48 +107,48 @@ class AttributeDiscovery
      *
      * @return list<string>
      */
-    public static function getDiscoveredPayloadHandlerClassNames(): array
+    public function getDiscoveredPayloadHandlerClassNames(): array
     {
-        self::initialize();
-        return array_keys(self::$httpHandlers);
+        $this->initialize();
+        return array_keys($this->httpHandlers);
     }
 
     /**
      * Find a route by path and method.
      * Delegates to RouteRegistry for indexed lookup, then enriches with handler/response data.
      */
-    public static function findRoute(string $path, string $method = 'GET'): ?array
+    public function findRoute(string $path, string $method = 'GET'): ?array
     {
-        $route = RouteRegistry::find($path, $method);
+        $route = $this->routeRegistry->find($path, $method);
         if ($route === null) {
             return null;
         }
-        return self::enrichRoute($route);
+        return $this->enrichRoute($route);
     }
 
     /**
      * Find a route by its name (e.g. error.404 for custom 404 page).
      */
-    public static function findRouteByName(string $name): ?array
+    public function findRouteByName(string $name): ?array
     {
-        $route = RouteRegistry::findByName($name);
+        $route = $this->routeRegistry->findByName($name);
         if ($route === null) {
             return null;
         }
-        return self::enrichRoute($route);
+        return $this->enrichRoute($route);
     }
-    
+
     /**
      * Enrich route with handlers and response class.
      */
-    private static function enrichRoute(array $route): array
+    private function enrichRoute(array $route): array
     {
         if (($route['type'] ?? null) === 'http-request') {
             $reqClass = $route['class'];
-            $extra = self::$httpRequests[$reqClass] ?? null;
+            $extra = $this->httpRequests[$reqClass] ?? null;
             if ($extra) {
                 $route['responseClass'] = $extra['responseClass'];
-                $route['handlers'] = self::findHandlersByPayloadAndResource($reqClass, $extra['responseClass']);
+                $route['handlers'] = $this->findHandlersByPayloadAndResource($reqClass, $extra['responseClass']);
             }
         }
         return $route;
@@ -153,11 +159,11 @@ class AttributeDiscovery
      *
      * @throws \RuntimeException when a handler payload has no discovered route
      */
-    private static function assertPayloadsHaveDiscoveredRoutes(): void
+    private function assertPayloadsHaveDiscoveredRoutes(): void
     {
-        $discoveredPayloadClasses = array_keys(self::$httpRequests);
+        $discoveredPayloadClasses = array_keys($this->httpRequests);
         $missing = [];
-        foreach (self::$handlersByPayloadAndResource as $key => $handlers) {
+        foreach ($this->handlersByPayloadAndResource as $key => $handlers) {
             $parts = explode("\0", $key, 2);
             if (count($parts) !== 2) {
                 continue;
@@ -190,13 +196,13 @@ class AttributeDiscovery
      *
      * @return list<array{class: string, for?: string, execution: string, transport: ?string, queue: ?string, priority: int, ...}>
      */
-    private static function findHandlersByPayloadAndResource(string $requestClass, ?string $responseClass): array
+    private function findHandlersByPayloadAndResource(string $requestClass, ?string $responseClass): array
     {
         if ($responseClass === null) {
             return [];
         }
         $found = [];
-        foreach (self::$handlersByPayloadAndResource as $key => $handlers) {
+        foreach ($this->handlersByPayloadAndResource as $key => $handlers) {
             $parts = explode("\0", $key, 2);
             if (count($parts) !== 2) {
                 continue;
@@ -215,47 +221,47 @@ class AttributeDiscovery
         }
         return $found;
     }
-    
+
     /**
      * Scan attributes using intelligent autoloader.
      * Orchestrates discovery in named phases for readability.
      */
-    private static function scanAttributesIntelligently(): void
+    private function scanAttributesIntelligently(): void
     {
         $diagnostics = BootDiagnostics::current();
 
-        self::resetState();
-        self::discoverPayloadsAndRoutes($diagnostics);
-        self::discoverHandlers($diagnostics);
-        self::discoverParts($diagnostics);
-        self::discoverSsrComponents($diagnostics);
+        $this->resetState();
+        $this->discoverPayloadsAndRoutes($diagnostics);
+        $this->discoverHandlers($diagnostics);
+        $this->discoverParts($diagnostics);
+        $this->discoverSsrComponents($diagnostics);
     }
 
-    private static function resetState(): void
+    private function resetState(): void
     {
-        RouteRegistry::reset();
-        self::$httpRequests = [];
-        self::$httpHandlers = [];
-        self::$handlersByPayloadAndResource = [];
-        self::$requestClassAliases = [];
-        self::$rawRequestAttrs = [];
-        self::$resolvedRequestAttrs = [];
-        self::$rawResponseAttrs = [];
-        self::$resolvedResponseAttrs = [];
-        self::$responseClassAliases = [];
-        self::$payloadParts = [];
-        self::$resourceParts = [];
-        self::$payloadBaseMap = [];
-        self::$resourceBaseMap = [];
+        $this->routeRegistry->reset();
+        $this->httpRequests = [];
+        $this->httpHandlers = [];
+        $this->handlersByPayloadAndResource = [];
+        $this->requestClassAliases = [];
+        $this->rawRequestAttrs = [];
+        $this->resolvedRequestAttrs = [];
+        $this->rawResponseAttrs = [];
+        $this->resolvedResponseAttrs = [];
+        $this->responseClassAliases = [];
+        $this->payloadParts = [];
+        $this->resourceParts = [];
+        $this->payloadBaseMap = [];
+        $this->resourceBaseMap = [];
     }
 
-    private static function discoverPayloadsAndRoutes(BootDiagnostics $diagnostics): void
+    private function discoverPayloadsAndRoutes(BootDiagnostics $diagnostics): void
     {
         // Runtime discovery: accept payloads from active modules and project src/
-        $allPayloadClasses = ClassDiscovery::findClassesWithAttribute(AsPayload::class);
+        $allPayloadClasses = $this->classDiscovery->findClassesWithAttribute(AsPayload::class);
         $httpRequestClasses = array_values(array_filter(
             $allPayloadClasses,
-            fn ($class) => ModuleRegistry::isClassActive($class) || self::isProjectPayload($class)
+            fn ($class) => $this->moduleRegistry->isClassActive($class) || self::isProjectPayload($class)
         ));
         $requestMeta = [];
         $requestGroups = [];
@@ -291,7 +297,7 @@ class AttributeDiscovery
                 ];
                 $requestMeta[$className] = $meta;
                 if ($meta['attr']['base'] !== null) {
-                    self::$payloadBaseMap[$className] = $meta['attr']['base'];
+                    $this->payloadBaseMap[$className] = $meta['attr']['base'];
                 }
                 $groupKey = $meta['attr']['base'] ?? $className;
                 $requestGroups[$groupKey][] = $meta;
@@ -301,20 +307,20 @@ class AttributeDiscovery
         }
 
         // Process responses before finalizing requests
-        self::processResponseAttributes($diagnostics);
+        $this->processResponseAttributes($diagnostics);
 
         // Build flat list of all requests with resolved path/methods, then group by route and apply override chain
         $resolvedCache = [];
         $byRoute = [];
         foreach (array_keys($requestMeta) as $className) {
             try {
-                $resolved = self::resolveRequestAttributes($className, $requestMeta, $resolvedCache);
+                $resolved = $this->resolveRequestAttributes($className, $requestMeta, $resolvedCache);
                 $meta = $requestMeta[$className];
                 $overrides = $meta['attr']['overrides'] ?? null;
                 $methods = (array) ($resolved['methods'] ?? ['GET']);
                 sort($methods);
                 $routeKey = $resolved['path'] . "\0" . implode(',', array_map('strtoupper', $methods));
-                $moduleName = ModuleRegistry::getModuleNameForClass($className) ?? 'project';
+                $moduleName = $this->moduleRegistry->getModuleNameForClass($className) ?? 'project';
                 $scopeSignature = TenantModuleScopeResolver::scopeSignatureForModule($moduleName);
                 $byRoute[$routeKey . "\0" . $scopeSignature][] = [
                     'class' => $className,
@@ -340,7 +346,7 @@ class AttributeDiscovery
             $resolved = $selected['resolved'];
             $class = $selected['class'];
 
-            self::$httpRequests[$class] = [
+            $this->httpRequests[$class] = [
                 'requestClass' => $class,
                 'path' => $resolved['path'],
                 'methods' => $resolved['methods'],
@@ -357,7 +363,7 @@ class AttributeDiscovery
             if ($routeProduces === null) {
                 $responseClass = $resolved['responseWith'] ?? null;
                 if ($responseClass !== null) {
-                    $resolvedResp = self::getResolvedResponseAttributes($responseClass);
+                    $resolvedResp = $this->getResolvedResponseAttributes($responseClass);
                     if ($resolvedResp !== null && isset($resolvedResp['produces'])) {
                         $routeProduces = $resolvedResp['produces'];
                     }
@@ -376,7 +382,7 @@ class AttributeDiscovery
                 );
             }
 
-            RouteRegistry::register([
+            $this->routeRegistry->register([
                 'path' => $resolved['path'],
                 'methods' => $resolved['methods'],
                 'name' => $resolved['name'],
@@ -395,19 +401,19 @@ class AttributeDiscovery
             ]);
 
             foreach ($candidates as $candidate) {
-                self::$requestClassAliases[$candidate['class']] = $class;
+                $this->requestClassAliases[$candidate['class']] = $class;
             }
         }
     }
 
-    private static function discoverHandlers(BootDiagnostics $diagnostics): void
+    private function discoverHandlers(BootDiagnostics $diagnostics): void
     {
         // Find handlers and map to requests (Semitexa packages + project App\ handlers)
         $httpHandlerClasses = array_filter(
-            ClassDiscovery::findClassesWithAttribute(AsPayloadHandler::class),
+            $this->classDiscovery->findClassesWithAttribute(AsPayloadHandler::class),
             fn ($class) => (
                 (str_starts_with($class, 'Semitexa\\') || str_starts_with($class, 'App\\Modules\\'))
-                && ModuleRegistry::isClassActive($class)
+                && $this->moduleRegistry->isClassActive($class)
             ) || (
                 self::isProjectHandler($class)
                 && !str_starts_with($class, 'App\\Modules\\')
@@ -438,11 +444,11 @@ class AttributeDiscovery
                         'retryDelay' => $attr->retryDelay,
                     ];
                     $key = $payloadClass . "\0" . $resourceClass;
-                    if (!isset(self::$handlersByPayloadAndResource[$key])) {
-                        self::$handlersByPayloadAndResource[$key] = [];
+                    if (!isset($this->handlersByPayloadAndResource[$key])) {
+                        $this->handlersByPayloadAndResource[$key] = [];
                     }
-                    self::$handlersByPayloadAndResource[$key][] = $handlerMeta;
-                    self::$httpHandlers[$class->getName()] = $handlerMeta;
+                    $this->handlersByPayloadAndResource[$key][] = $handlerMeta;
+                    $this->httpHandlers[$class->getName()] = $handlerMeta;
 
                     // Warm reflection cache for TypedHandlerInterface handlers
                     if ($class->implementsInterface(TypedHandlerInterface::class)) {
@@ -462,16 +468,16 @@ class AttributeDiscovery
             }
         }
 
-        self::assertPayloadsHaveDiscoveredRoutes();
+        $this->assertPayloadsHaveDiscoveredRoutes();
     }
 
-    private static function discoverParts(BootDiagnostics $diagnostics): void
+    private function discoverParts(BootDiagnostics $diagnostics): void
     {
-        self::discoverPayloadParts($diagnostics);
-        self::discoverResourceParts($diagnostics);
+        $this->discoverPayloadParts($diagnostics);
+        $this->discoverResourceParts($diagnostics);
     }
 
-    private static function discoverSsrComponents(BootDiagnostics $diagnostics): void
+    private function discoverSsrComponents(BootDiagnostics $diagnostics): void
     {
         // Discover layout slot contributions (optional)
         if (
@@ -479,7 +485,7 @@ class AttributeDiscovery
             && class_exists('Semitexa\\Ssr\\Layout\\LayoutSlotRegistry')
         ) {
             $slotAttribute = 'Semitexa\\Ssr\\Attributes\\AsLayoutSlot';
-            $slotClasses = ClassDiscovery::findClassesWithAttribute($slotAttribute);
+            $slotClasses = $this->classDiscovery->findClassesWithAttribute($slotAttribute);
             foreach ($slotClasses as $className) {
                 try {
                     $class = new \ReflectionClass($className);
@@ -519,8 +525,8 @@ class AttributeDiscovery
         ) {
             $dpAttribute = 'Semitexa\\Ssr\\Attributes\\AsDataProvider';
             $dpClasses = array_values(array_filter(
-                ClassDiscovery::findClassesWithAttribute($dpAttribute),
-                fn (string $class) => ModuleRegistry::isClassActive($class) || self::isProjectResource($class)
+                $this->classDiscovery->findClassesWithAttribute($dpAttribute),
+                fn (string $class) => $this->moduleRegistry->isClassActive($class) || self::isProjectResource($class)
             ));
             foreach ($dpClasses as $className) {
                 try {
@@ -551,8 +557,8 @@ class AttributeDiscovery
         ) {
             $slotResourceAttribute = 'Semitexa\\Ssr\\Attributes\\AsSlotResource';
             $slotResourceClasses = array_values(array_filter(
-                ClassDiscovery::findClassesWithAttribute($slotResourceAttribute),
-                fn (string $class) => ModuleRegistry::isClassActive($class) || self::isProjectResource($class)
+                $this->classDiscovery->findClassesWithAttribute($slotResourceAttribute),
+                fn (string $class) => $this->moduleRegistry->isClassActive($class) || self::isProjectResource($class)
             ));
             foreach ($slotResourceClasses as $className) {
                 try {
@@ -592,8 +598,8 @@ class AttributeDiscovery
         ) {
             $slotHandlerAttribute = 'Semitexa\\Ssr\\Attributes\\AsSlotHandler';
             $slotHandlerClasses = array_values(array_filter(
-                ClassDiscovery::findClassesWithAttribute($slotHandlerAttribute),
-                fn (string $class) => ModuleRegistry::isClassActive($class) || self::isProjectResource($class)
+                $this->classDiscovery->findClassesWithAttribute($slotHandlerAttribute),
+                fn (string $class) => $this->moduleRegistry->isClassActive($class) || self::isProjectResource($class)
             ));
             foreach ($slotHandlerClasses as $className) {
                 try {
@@ -615,7 +621,7 @@ class AttributeDiscovery
         }
     }
 
-    private static function resolveRequestAttributes(string $className, array $metaMap, array &$cache = []): array
+    private function resolveRequestAttributes(string $className, array $metaMap, array &$cache = []): array
     {
         if (isset($cache[$className])) {
             return $cache[$className];
@@ -626,13 +632,13 @@ class AttributeDiscovery
         $meta = $metaMap[$className];
         $attr = $meta['attr'];
         if (!empty($attr['base'])) {
-            $baseAttr = self::resolveRequestAttributes($attr['base'], $metaMap, $cache);
+            $baseAttr = $this->resolveRequestAttributes($attr['base'], $metaMap, $cache);
             $merged = self::mergeRequestAttributes($baseAttr, $attr);
         } else {
             $merged = self::applyRequestDefaults($attr, $meta['short'], $className);
         }
         if (!empty($merged['responseWith'])) {
-            $merged['responseWith'] = self::canonicalResponseClass($merged['responseWith']);
+            $merged['responseWith'] = $this->canonicalResponseClass($merged['responseWith']);
         }
         return $cache[$className] = $merged;
     }
@@ -668,13 +674,13 @@ class AttributeDiscovery
         ];
     }
 
-    private static function processResponseAttributes(BootDiagnostics $diagnostics): void
+    private function processResponseAttributes(BootDiagnostics $diagnostics): void
     {
         // Runtime discovery: accept resources from active modules and project src/
-        $allResourceClasses = ClassDiscovery::findClassesWithAttribute(AsResource::class);
+        $allResourceClasses = $this->classDiscovery->findClassesWithAttribute(AsResource::class);
         $responseClasses = array_values(array_filter(
             $allResourceClasses,
-            fn ($class) => ModuleRegistry::isClassActive($class) || self::isProjectResource($class)
+            fn ($class) => $this->moduleRegistry->isClassActive($class) || self::isProjectResource($class)
         ));
         if (empty($responseClasses)) {
             return;
@@ -708,12 +714,12 @@ class AttributeDiscovery
                 ];
                 $responseMeta[$className] = $meta;
                 if ($meta['attr']['base'] !== null) {
-                    self::$resourceBaseMap[$className] = $meta['attr']['base'];
+                    $this->resourceBaseMap[$className] = $meta['attr']['base'];
                 }
                 $groupKey = $meta['attr']['base'] ?? $className;
                 $responseGroups[$groupKey][] = $meta;
 
-                self::$responseClassAliases[$className] = $className;
+                $this->responseClassAliases[$className] = $className;
             } catch (\Throwable $e) {
                 $diagnostics->skip('AttributeDiscovery', "Resource reflection failed for {$className}: " . $e->getMessage(), $e);
             }
@@ -723,17 +729,17 @@ class AttributeDiscovery
             return;
         }
 
-        self::$rawResponseAttrs = $responseMeta;
+        $this->rawResponseAttrs = $responseMeta;
         $cache = [];
         foreach ($responseMeta as $className => $meta) {
-            self::$resolvedResponseAttrs[$className] = self::resolveResponseAttributes($className, $responseMeta, $cache);
+            $this->resolvedResponseAttrs[$className] = self::resolveResponseAttributes($className, $responseMeta, $cache);
         }
 
         foreach ($responseGroups as $baseClass => $candidates) {
             usort($candidates, fn ($a, $b) => $b['priority'] <=> $a['priority']);
             $selected = $candidates[0]['class'];
             foreach ($candidates as $candidate) {
-                self::$responseClassAliases[$candidate['class']] = $selected;
+                $this->responseClassAliases[$candidate['class']] = $selected;
             }
         }
     }
@@ -796,18 +802,18 @@ class AttributeDiscovery
         return strtolower(ltrim(preg_replace('/[A-Z]/', '-$0', $shortName), '-'));
     }
 
-    private static function canonicalResponseClass(?string $class): ?string
+    private function canonicalResponseClass(?string $class): ?string
     {
         if ($class === null) {
             return null;
         }
-        return self::$responseClassAliases[$class] ?? $class;
+        return $this->responseClassAliases[$class] ?? $class;
     }
 
-    public static function getResolvedResponseAttributes(string $class): ?array
+    public function getResolvedResponseAttributes(string $class): ?array
     {
-        $canonical = self::$responseClassAliases[$class] ?? $class;
-        return self::$resolvedResponseAttrs[$canonical] ?? null;
+        $canonical = $this->responseClassAliases[$class] ?? $class;
+        return $this->resolvedResponseAttrs[$canonical] ?? null;
     }
 
     /**
@@ -941,15 +947,15 @@ class AttributeDiscovery
         $pos = strrpos($class, '\\');
         return $pos === false ? $class : substr($class, $pos + 1);
     }
-    
+
     /**
      * Discover traits marked with #[AsPayloadPart] from active modules.
      */
-    private static function discoverPayloadParts(BootDiagnostics $diagnostics): void
+    private function discoverPayloadParts(BootDiagnostics $diagnostics): void
     {
-        $classes = ClassDiscovery::findClassesWithAttribute(AsPayloadPart::class);
+        $classes = $this->classDiscovery->findClassesWithAttribute(AsPayloadPart::class);
         foreach ($classes as $className) {
-            if (!ModuleRegistry::isClassActive($className) && !self::isProjectPayload($className)) {
+            if (!$this->moduleRegistry->isClassActive($className) && !self::isProjectPayload($className)) {
                 continue;
             }
             try {
@@ -961,7 +967,7 @@ class AttributeDiscovery
                 foreach ($attrs as $attr) {
                     $instance = $attr->newInstance();
                     $base = ltrim($instance->base, '\\');
-                    self::$payloadParts[$base][] = $className;
+                    $this->payloadParts[$base][] = $className;
                 }
             } catch (\Throwable $e) {
                 $diagnostics->skip('AttributeDiscovery', "Payload part failed for {$className}: " . $e->getMessage(), $e);
@@ -969,11 +975,11 @@ class AttributeDiscovery
         }
     }
 
-    private static function discoverResourceParts(BootDiagnostics $diagnostics): void
+    private function discoverResourceParts(BootDiagnostics $diagnostics): void
     {
-        $classes = ClassDiscovery::findClassesWithAttribute(AsResourcePart::class);
+        $classes = $this->classDiscovery->findClassesWithAttribute(AsResourcePart::class);
         foreach ($classes as $className) {
-            if (!ModuleRegistry::isClassActive($className) && !self::isProjectResource($className)) {
+            if (!$this->moduleRegistry->isClassActive($className) && !self::isProjectResource($className)) {
                 continue;
             }
             try {
@@ -985,7 +991,7 @@ class AttributeDiscovery
                 foreach ($attrs as $attr) {
                     $instance = $attr->newInstance();
                     $base = ltrim($instance->base, '\\');
-                    self::$resourceParts[$base][] = $className;
+                    $this->resourceParts[$base][] = $className;
                 }
             } catch (\Throwable $e) {
                 $diagnostics->skip('AttributeDiscovery', "Resource part failed for {$className}: " . $e->getMessage(), $e);
@@ -999,12 +1005,12 @@ class AttributeDiscovery
      *
      * @return list<string>
      */
-    public static function getPayloadPartsForClass(string $requestClass): array
+    public function getPayloadPartsForClass(string $requestClass): array
     {
-        self::initialize();
-        $chain = self::buildBaseChain($requestClass, self::$payloadBaseMap);
+        $this->initialize();
+        $chain = self::buildBaseChain($requestClass, $this->payloadBaseMap);
         $traits = [];
-        foreach (self::$payloadParts as $base => $traitList) {
+        foreach ($this->payloadParts as $base => $traitList) {
             if (in_array($base, $chain, true) || is_subclass_of($requestClass, $base)) {
                 array_push($traits, ...$traitList);
             }
@@ -1018,12 +1024,12 @@ class AttributeDiscovery
      *
      * @return list<string>
      */
-    public static function getResourcePartsForClass(string $responseClass): array
+    public function getResourcePartsForClass(string $responseClass): array
     {
-        self::initialize();
-        $chain = self::buildBaseChain($responseClass, self::$resourceBaseMap);
+        $this->initialize();
+        $chain = self::buildBaseChain($responseClass, $this->resourceBaseMap);
         $traits = [];
-        foreach (self::$resourceParts as $base => $traitList) {
+        foreach ($this->resourceParts as $base => $traitList) {
             if (in_array($base, $chain, true) || is_subclass_of($responseClass, $base)) {
                 array_push($traits, ...$traitList);
             }

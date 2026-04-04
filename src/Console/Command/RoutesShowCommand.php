@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Console\Command;
 
-use Semitexa\Core\Attributes\AsCommand;
+use Semitexa\Core\Attribute\AsCommand;
 use Semitexa\Core\Discovery\AttributeDiscovery;
 use Semitexa\Core\ModuleRegistry;
 use Symfony\Component\Console\Command\Command;
@@ -17,6 +17,13 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 #[AsCommand(name: 'routes:show', description: 'Show detailed debug information for a specific route.')]
 class RoutesShowCommand extends BaseCommand
 {
+    public function __construct(
+        private readonly AttributeDiscovery $attributeDiscovery,
+        private readonly ModuleRegistry $moduleRegistry,
+    ) {
+        parent::__construct();
+    }
+
     protected function configure(): void
     {
         $this->setName('routes:show')
@@ -27,10 +34,8 @@ class RoutesShowCommand extends BaseCommand
 
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
-        AttributeDiscovery::initialize();
-
         $id = $input->getArgument('id');
-        $routes = AttributeDiscovery::getRoutes();
+        $routes = $this->attributeDiscovery->getRoutes();
         $route = $this->findRoute($routes, $id);
 
         if ($route === null) {
@@ -85,7 +90,7 @@ class RoutesShowCommand extends BaseCommand
         $enriched = null;
         if (!empty($route['path'])) {
             foreach ($methods as $method) {
-                $enriched = AttributeDiscovery::findRoute($route['path'], $method);
+                $enriched = $this->attributeDiscovery->findRoute($route['path'], $method);
                 if ($enriched !== null) {
                     break;
                 }
@@ -94,7 +99,7 @@ class RoutesShowCommand extends BaseCommand
 
         $responseClass = $enriched['responseClass'] ?? null;
         $handlers = $enriched['handlers'] ?? [];
-        $responseAttrs = $responseClass ? AttributeDiscovery::getResolvedResponseAttributes($responseClass) : null;
+        $responseAttrs = $responseClass ? $this->attributeDiscovery->getResolvedResponseAttributes($responseClass) : null;
 
         $info = [
             'path' => $route['path'] ?? '',
@@ -104,7 +109,7 @@ class RoutesShowCommand extends BaseCommand
             'type' => $route['type'] ?? null,
             'payload' => [
                 'class' => $payloadClass,
-                'module' => ModuleRegistry::getModuleNameForClass($payloadClass) ?? 'project',
+                'module' => $this->moduleRegistry->getModuleNameForClass($payloadClass) ?? 'project',
                 'file' => $this->resolveFile($payloadClass),
             ],
             'resource' => null,
@@ -118,7 +123,7 @@ class RoutesShowCommand extends BaseCommand
         if ($responseClass) {
             $info['resource'] = [
                 'class' => $responseClass,
-                'module' => ModuleRegistry::getModuleNameForClass($responseClass) ?? 'project',
+                'module' => $this->moduleRegistry->getModuleNameForClass($responseClass) ?? 'project',
                 'file' => $this->resolveFile($responseClass),
                 'handle' => $responseAttrs['handle'] ?? null,
                 'format' => $responseAttrs['format'] ?? null,
@@ -130,7 +135,7 @@ class RoutesShowCommand extends BaseCommand
         foreach ($handlers as $h) {
             $info['handlers'][] = [
                 'class' => $h['class'],
-                'module' => ModuleRegistry::getModuleNameForClass($h['class']) ?? 'project',
+                'module' => $this->moduleRegistry->getModuleNameForClass($h['class']) ?? 'project',
                 'execution' => $h['execution'] ?? 'sync',
                 'priority' => $h['priority'] ?? 0,
                 'transport' => $h['transport'] ?? null,

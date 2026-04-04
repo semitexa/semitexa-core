@@ -4,9 +4,9 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Console\Command;
 
-use Semitexa\Core\Attributes\AsCommand;
+use Semitexa\Core\Attribute\AsCommand;
 use Semitexa\Core\ModuleRegistry;
-use Semitexa\Core\Util\ProjectRoot;
+use Semitexa\Core\Support\ProjectRoot;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputOption;
@@ -47,6 +47,12 @@ class LintTemplatesCommand extends BaseCommand
         'slots'    => 'deferred',
     ];
 
+    public function __construct(
+        private readonly ModuleRegistry $moduleRegistry,
+    ) {
+        parent::__construct();
+    }
+
     protected function configure(): void
     {
         $this->setName('semitexa:lint:templates')
@@ -60,8 +66,6 @@ class LintTemplatesCommand extends BaseCommand
         $io     = new SymfonyStyle($input, $output);
         $strict = (bool) $input->getOption('strict');
         $json   = (bool) $input->getOption('json');
-
-        ModuleRegistry::initialize();
 
         $errors   = [];
         $warnings = [];
@@ -106,7 +110,7 @@ class LintTemplatesCommand extends BaseCommand
      *  @param array<int, array{module: string, path: string, message: string}> $warnings */
     private function scanPackageModules(array &$errors, array &$warnings): void
     {
-        $modules = ModuleRegistry::getModules();
+        $modules = $this->moduleRegistry->getModules();
 
         foreach ($modules as $module) {
             $moduleName = $module['name'] ?? '';

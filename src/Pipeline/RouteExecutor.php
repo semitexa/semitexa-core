@@ -5,14 +5,14 @@ declare(strict_types=1);
 namespace Semitexa\Core\Pipeline;
 
 use Semitexa\Core\Request;
-use Semitexa\Core\Response;
-use Semitexa\Core\Http\RequestDtoHydrator;
+use Semitexa\Core\HttpResponse;
+use Semitexa\Core\Http\PayloadHydrator;
 use Semitexa\Core\Http\PayloadValidator;
-use Semitexa\Core\Http\Response\GenericResponse;
+use Semitexa\Core\Http\Response\ResourceResponse;
 use Semitexa\Core\Discovery\AttributeDiscovery;
 use Semitexa\Core\Discovery\DefaultRouteMetadataResolver;
 use Semitexa\Core\Discovery\ResolvedRouteMetadata;
-use Semitexa\Core\Http\PayloadDtoFactory;
+use Semitexa\Core\Http\PayloadFactory;
 use Semitexa\Core\Http\ContentNegotiator;
 use Semitexa\Core\Http\HttpStatus;
 use Semitexa\Core\Exception\DomainException;
@@ -31,10 +31,15 @@ class RouteExecutor
         private readonly ?object $authBootstrapper = null,
     ) {}
 
+    private function getAttributeDiscovery(): AttributeDiscovery
+    {
+        return $this->container->get(AttributeDiscovery::class);
+    }
+
     /**
      * @param array{type?: string, class?: string, handlers?: list<array{class?: string, execution?: string}>, responseClass?: string, method?: string, name?: string, consumes?: list<string>|null, produces?: list<string>|null} $route
      */
-    public function execute(array $route, Request $request): Response
+    public function execute(array $route, Request $request): HttpResponse
     {
         $metadata = null;
         $exceptionMapper = null;
@@ -49,7 +54,7 @@ class RouteExecutor
                 $request
             );
             if ($consumesResult !== true) {
-                return $this->decorateResponse(Response::json([
+                return $this->decorateResponse(HttpResponse::json([
                     'error' => 'Unsupported Media Type',
                     'message' => "Content-Type '{$consumesResult}' is not supported.",
                     'supported' => $metadata->consumes,
@@ -87,7 +92,7 @@ class RouteExecutor
             $renderer = new ResponseRenderer();
             $resDto = $renderer->render($resDto, $reqDto, $request, $route);
 
-            // 6. Adapt to Core Response
+            // 6. Adapt to HttpResponse
             return $this->decorateResponse($this->adaptResponse($resDto), $request, $metadata);
 
         } catch (\Semitexa\Core\Exception\NotFoundException $e) {
@@ -132,7 +137,7 @@ class RouteExecutor
         return new ExceptionMapper();
     }
 
-    private function decorateResponse(Response $response, Request $request, ResolvedRouteMetadata $metadata): Response
+    private function decorateResponse(HttpResponse $response, Request $request, ResolvedRouteMetadata $metadata): HttpResponse
     {
         if ($this->container->has(RouteResponseDecoratorInterface::class)) {
             /** @var RouteResponseDecoratorInterface $decorator */
@@ -144,7 +149,7 @@ class RouteExecutor
     }
 
     /**
-     * @return array{0: object, 1: ?Response}
+     * @return array{0: object, 1: ?HttpResponse}
      */
     private function hydrateRequest(array $route, Request $request): array
     {
@@ -153,26 +158,26 @@ class RouteExecutor
             throw new \RuntimeException('Route has no class defined');
         }
 
-        $traits = AttributeDiscovery::getPayloadPartsForClass($requestClass);
-        $reqDto = class_exists($requestClass) ? PayloadDtoFactory::createInstance($requestClass, $traits) : null;
+        $traits = $this->getAttributeDiscovery()->getPayloadPartsForClass($requestClass);
+        $reqDto = class_exists($requestClass) ? PayloadFactory::createInstance($requestClass, $traits) : null;
         if (!$reqDto) {
             throw new \RuntimeException("Cannot instantiate request class: {$requestClass}");
         }
 
         try {
-            $reqDto = RequestDtoHydrator::hydrate($reqDto, $request);
+            $reqDto = PayloadHydrator::hydrate($reqDto, $request);
             if (method_exists($reqDto, 'setHttpRequest')) {
                 $reqDto->setHttpRequest($request);
             }
         } catch (\Semitexa\Core\Http\Exception\TypeMismatchException $e) {
-            return [$reqDto, Response::json(['errors' => [$e->field => [$e->getMessage()]]], HttpStatus::UnprocessableEntity->value)];
+            return [$reqDto, HttpResponse::json(['errors' => [$e->field => [$e->getMessage()]]], HttpStatus::UnprocessableEntity->value)];
         } catch (\Throwable $e) {
-            return [$reqDto, Response::json(['errors' => ['_body' => ['Request body could not be processed: ' . $e->getMessage()]]], HttpStatus::UnprocessableEntity->value)];
+            return [$reqDto, HttpResponse::json(['errors' => ['_body' => ['Request body could not be processed: ' . $e->getMessage()]]], HttpStatus::UnprocessableEntity->value)];
         }
 
         $validationResult = PayloadValidator::validate($reqDto, $request);
         if (!$validationResult->isValid()) {
-            return [$reqDto, Response::json(['errors' => $validationResult->getErrors()], HttpStatus::UnprocessableEntity->value)];
+            return [$reqDto, HttpResponse::json(['errors' => $validationResult->getErrors()], HttpStatus::UnprocessableEntity->value)];
         }
 
         return [$reqDto, null];
@@ -185,18 +190,18 @@ class RouteExecutor
             throw new \RuntimeException("Cannot instantiate response class: {$responseClass}");
         }
         if ($responseClass !== null) {
-            $traits = AttributeDiscovery::getResourcePartsForClass($responseClass);
-            $resDto = PayloadDtoFactory::createInstance($responseClass, $traits);
+            $traits = $this->getAttributeDiscovery()->getResourcePartsForClass($responseClass);
+            $resDto = PayloadFactory::createInstance($responseClass, $traits);
         } else {
             $resDto = null;
         }
 
         if ($resDto === null) {
-            $resDto = new GenericResponse();
+            $resDto = new ResourceResponse();
         }
 
         // Apply AsResource defaults from resolved attributes
-        $resolvedResponse = AttributeDiscovery::getResolvedResponseAttributes($responseClass ?? get_class($resDto));
+        $resolvedResponse = $this->getAttributeDiscovery()->getResolvedResponseAttributes($responseClass ?? get_class($resDto));
         if ($resolvedResponse) {
             if (isset($resolvedResponse['handle']) && $resolvedResponse['handle'] && method_exists($resDto, 'setRenderHandle')) {
                 $resDto->setRenderHandle($resolvedResponse['handle']);
@@ -218,14 +223,14 @@ class RouteExecutor
         return $resDto;
     }
 
-    private function adaptResponse(object $resDto): Response
+    private function adaptResponse(object $resDto): HttpResponse
     {
-        if ($resDto instanceof Response) {
+        if ($resDto instanceof HttpResponse) {
             return $resDto;
         }
         if (method_exists($resDto, 'toCoreResponse')) {
             return $resDto->toCoreResponse();
         }
-        return Response::json(['ok' => true]);
+        return HttpResponse::json(['ok' => true]);
     }
 }

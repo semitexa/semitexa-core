@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Container;
 
-use Semitexa\Core\Attributes\SatisfiesRepositoryContract;
-use Semitexa\Core\Attributes\SatisfiesServiceContract;
+use Semitexa\Core\Attribute\SatisfiesRepositoryContract;
+use Semitexa\Core\Attribute\SatisfiesServiceContract;
 use Semitexa\Core\Discovery\BootDiagnostics;
 use Semitexa\Core\Discovery\ClassDiscovery;
 use Semitexa\Core\ModuleRegistry;
@@ -23,15 +23,14 @@ final class ServiceContractRegistry
      */
     private array $contractDetails = [];
 
-    public function __construct()
-    {
+    public function __construct(
+        private readonly ClassDiscovery $classDiscovery,
+        private readonly ModuleRegistry $moduleRegistry,
+    ) {
         $this->build();
     }
 
     /**
-     * Returns contract (interface) => implementation class for all discovered contracts.
-     * Derived from contract details (module "extends" order: most derived wins).
-     *
      * @return array<string, string>
      */
     public function getContracts(): array
@@ -44,9 +43,6 @@ final class ServiceContractRegistry
     }
 
     /**
-     * Returns per-interface details: all implementations (module + class) and the active implementation.
-     * Useful for debugging and for the contracts:list command.
-     *
      * @return array<string, array{implementations: list<array{module: string, class: string, factoryKey?: \BackedEnum|null}>, active: string}>
      */
     public function getContractDetails(): array
@@ -56,13 +52,13 @@ final class ServiceContractRegistry
 
     private function build(): void
     {
-        ClassDiscovery::initialize();
+        $this->classDiscovery->initialize();
         $candidates = array_unique(array_merge(
-            ClassDiscovery::findClassesWithAttribute(SatisfiesServiceContract::class),
-            ClassDiscovery::findClassesWithAttribute(SatisfiesRepositoryContract::class)
+            $this->classDiscovery->findClassesWithAttribute(SatisfiesServiceContract::class),
+            $this->classDiscovery->findClassesWithAttribute(SatisfiesRepositoryContract::class)
         ));
 
-        /** @var array<string, array<int, array{module: string, impl: string, factoryKey?: \BackedEnum|null}>> interface => list of {module, impl, factoryKey} */
+        /** @var array<string, array<int, array{module: string, impl: string, factoryKey?: \BackedEnum|null}>> */
         $byInterface = [];
 
         foreach ($candidates as $implClass) {
@@ -81,9 +77,8 @@ final class ServiceContractRegistry
                     continue;
                 }
 
-                $moduleName = ModuleRegistry::getModuleNameForClass($implClass);
+                $moduleName = $this->moduleRegistry->getModuleNameForClass($implClass);
                 if ($moduleName === null) {
-                    // Classes from Semitexa\Core (e.g. AsyncJsonLogger) are treated as module "Core"
                     if (!str_starts_with(ltrim($implClass, '\\'), 'Semitexa\\Core\\')) {
                         continue;
                     }
@@ -109,7 +104,7 @@ final class ServiceContractRegistry
             }
         }
 
-        $moduleOrder = ModuleRegistry::getModuleOrderByExtends();
+        $moduleOrder = $this->moduleRegistry->getModuleOrderByExtends();
 
         foreach ($byInterface as $interface => $candidatesList) {
             $winner = null;

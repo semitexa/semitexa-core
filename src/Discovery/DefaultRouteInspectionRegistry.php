@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Discovery;
 
-use Semitexa\Core\Attributes\InjectAsReadonly;
-use Semitexa\Core\Attributes\SatisfiesServiceContract;
+use Semitexa\Core\Attribute\InjectAsReadonly;
+use Semitexa\Core\Attribute\SatisfiesServiceContract;
 use Semitexa\Core\Contract\RouteInspectionRegistryInterface;
 use Semitexa\Core\Contract\RouteMetadataResolverInterface;
 
@@ -25,6 +25,9 @@ final class DefaultRouteInspectionRegistry implements RouteInspectionRegistryInt
     #[InjectAsReadonly]
     protected RouteMetadataResolverInterface $metadataResolver;
 
+    #[InjectAsReadonly]
+    protected AttributeDiscovery $attributeDiscovery;
+
     /** @var list<ResolvedRouteMetadata>|null Worker-scoped cache after first call */
     private ?array $cache = null;
 
@@ -34,10 +37,8 @@ final class DefaultRouteInspectionRegistry implements RouteInspectionRegistryInt
             return $this->cache;
         }
 
-        AttributeDiscovery::initialize();
-
         $resolved = [];
-        foreach (AttributeDiscovery::getEnrichedRoutes() as $route) {
+        foreach ($this->attributeDiscovery->getEnrichedRoutes() as $route) {
             $resolved[] = $this->metadataResolver->resolve($route);
         }
 

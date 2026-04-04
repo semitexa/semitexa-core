@@ -4,12 +4,12 @@ declare(strict_types=1);
 
 namespace Semitexa\Core;
 
-use Semitexa\Core\Util\ProjectRoot;
+use Semitexa\Core\Support\ProjectRoot;
 use Semitexa\Core\Support\Str;
 
 /**
  * Module Registry for managing different types of modules
- * 
+ *
  * This class handles discovery and registration of:
  * - Local modules (src/modules/)
  * - Composer modules (src/packages/)
@@ -17,47 +17,32 @@ use Semitexa\Core\Support\Str;
  */
 class ModuleRegistry
 {
-    private static array $modules = [];
-    private static bool $initialized = false;
-    
-    /**
-     * Initialize the module registry
-     */
-    public static function initialize(): void
+    private array $modules = [];
+    private bool $initialized = false;
+
+    public function initialize(): void
     {
-        if (self::$initialized) {
+        if ($this->initialized) {
             return;
         }
-        
-        
-        $startTime = microtime(true);
-        self::discoverModules();
-        $endTime = microtime(true);
-        
-        
-        self::$initialized = true;
-    }
-    
-    /**
-     * Get all discovered modules
-     */
-    public static function getModules(): array
-    {
-        self::initialize();
 
-        return self::$modules;
+        $this->discoverModules();
+
+        $this->initialized = true;
     }
 
-    /**
-     * Get combined PSR-4 autoload mappings for all modules
-     * (namespace prefix => [absolute directories])
-     */
-    public static function getModuleAutoloadMappings(): array
+    public function getModules(): array
     {
-        self::initialize();
-        
+        $this->initialize();
+        return $this->modules;
+    }
+
+    public function getModuleAutoloadMappings(): array
+    {
+        $this->initialize();
+
         $mappings = [];
-        foreach (self::$modules as $module) {
+        foreach ($this->modules as $module) {
             $psr4 = $module['autoloadPsr4'] ?? [];
             foreach ($psr4 as $prefix => $dirs) {
                 foreach ($dirs as $dir) {
@@ -65,56 +50,40 @@ class ModuleRegistry
                 }
             }
         }
-        
+
         foreach ($mappings as $prefix => $dirs) {
             $mappings[$prefix] = array_values(array_unique($dirs));
         }
-        
+
         return $mappings;
     }
-    
-    /**
-     * Get modules by type
-     */
-    public static function getModulesByType(string $type): array
-    {
-        self::initialize();
 
-        return array_filter(self::$modules, fn($module) => $module['type'] === $type);
-    }
-    
-    /**
-     * Get local modules
-     */
-    public static function getLocalModules(): array
+    public function getModulesByType(string $type): array
     {
-        return self::getModulesByType('local');
-    }
-    
-    /**
-     * Get composer modules
-     */
-    public static function getComposerModules(): array
-    {
-        return self::getModulesByType('composer');
-    }
-    
-    /**
-     * Get vendor modules
-     */
-    public static function getVendorModules(): array
-    {
-        return self::getModulesByType('vendor');
+        $this->initialize();
+        return array_filter($this->modules, fn($module) => $module['type'] === $type);
     }
 
-    /**
-     * Check if module is active
-     */
-    public static function isActive(string $moduleName): bool
+    public function getLocalModules(): array
     {
-        self::initialize();
+        return $this->getModulesByType('local');
+    }
 
-        foreach (self::$modules as $module) {
+    public function getComposerModules(): array
+    {
+        return $this->getModulesByType('composer');
+    }
+
+    public function getVendorModules(): array
+    {
+        return $this->getModulesByType('vendor');
+    }
+
+    public function isActive(string $moduleName): bool
+    {
+        $this->initialize();
+
+        foreach ($this->modules as $module) {
             if ($module['name'] === $moduleName || in_array($moduleName, $module['aliases'], true)) {
                 return (bool)($module['config']['active'] ?? true);
             }
@@ -122,14 +91,11 @@ class ModuleRegistry
         return false;
     }
 
-    /**
-     * Return module name (e.g. "Website") for a class in that module's namespace, or null.
-     */
-    public static function getModuleNameForClass(string $className): ?string
+    public function getModuleNameForClass(string $className): ?string
     {
-        self::initialize();
+        $this->initialize();
         $className = ltrim($className, '\\');
-        foreach (self::$modules as $module) {
+        foreach ($this->modules as $module) {
             $ns = ($module['namespace'] ?? '');
             if ($ns !== '' && str_starts_with($className, $ns . '\\')) {
                 return $module['name'];
@@ -138,31 +104,24 @@ class ModuleRegistry
         return null;
     }
 
-    /**
-     * Returns true if the class belongs to an active module, or if it does not
-     * belong to any module (framework/core classes are always considered active).
-     */
-    public static function isClassActive(string $className): bool
+    public function isClassActive(string $className): bool
     {
-        $moduleName = self::getModuleNameForClass($className);
+        $moduleName = $this->getModuleNameForClass($className);
         if ($moduleName === null) {
             return true;
         }
-        return self::isActive($moduleName);
+        return $this->isActive($moduleName);
     }
 
     /**
-     * Module names ordered by "extends" (most derived first). Used for contract resolution priority.
-     * If A extends B, A appears before B so that A's implementation wins over B's.
-     *
      * @return list<string>
      */
-    public static function getModuleOrderByExtends(): array
+    public function getModuleOrderByExtends(): array
     {
-        self::initialize();
-        $names = array_keys(array_column(self::$modules, null, 'name'));
+        $this->initialize();
+        $names = array_keys(array_column($this->modules, null, 'name'));
         $edges = [];
-        foreach (self::$modules as $module) {
+        foreach ($this->modules as $module) {
             $parent = $module['extends'] ?? null;
             if ($parent !== null && $parent !== '') {
                 $edges[$module['name']] = $parent;
@@ -191,86 +150,67 @@ class ModuleRegistry
         return $order;
     }
 
-    /**
-     * Discover all modules
-     */
-    private static function discoverModules(): void
+    private function discoverModules(): void
     {
         $projectRoot = ProjectRoot::get();
-        
-        // Discover local modules
-        foreach (self::discoverLocalModules($projectRoot) as $module) {
-            self::registerModule($module['path'], $module['name'], 'local', $module['namespace']);
+
+        foreach ($this->discoverLocalModules($projectRoot) as $module) {
+            $this->registerModule($module['path'], $module['name'], 'local', $module['namespace']);
         }
-        
-        // Discover packages/ (all vendors)
-        foreach (self::discoverPackageModules($projectRoot) as $module) {
-            self::registerModule($module['path'], $module['name'], 'composer', $module['namespace']);
+
+        foreach ($this->discoverPackageModules($projectRoot) as $module) {
+            $this->registerModule($module['path'], $module['name'], 'composer', $module['namespace']);
         }
-        
-        // Discover vendor/ (installed via Composer)
-        foreach (self::discoverVendorModules($projectRoot) as $module) {
-            self::registerModule($module['path'], $module['name'], 'vendor', $module['namespace']);
+
+        foreach ($this->discoverVendorModules($projectRoot) as $module) {
+            $this->registerModule($module['path'], $module['name'], 'vendor', $module['namespace']);
         }
     }
-    
-    /**
-     * Discover local modules in src/modules/
-     */
-    private static function discoverLocalModules(string $projectRoot): array
+
+    private function discoverLocalModules(string $projectRoot): array
     {
         $modules = [];
         $modulesPath = $projectRoot . '/src/modules';
-        
+
         if (!is_dir($modulesPath)) {
             return $modules;
         }
-        
+
         $directories = glob($modulesPath . '/*', GLOB_ONLYDIR);
-        
+
         foreach ($directories as $dir) {
             $moduleName = basename($dir);
             $namespace = "Semitexa\\Modules\\" . ucfirst($moduleName);
-            
+
             $modules[] = [
                 'path' => $dir,
                 'name' => $moduleName,
                 'namespace' => $namespace
             ];
         }
-        
+
         return $modules;
     }
-    
-    /**
-     * Discover vendor modules (optional)
-     */
-    private static function discoverVendorModules(string $projectRoot): array
+
+    private function discoverVendorModules(string $projectRoot): array
     {
-        return self::discoverModulesInRoot($projectRoot . '/vendor');
+        return $this->discoverModulesInRoot($projectRoot . '/vendor');
     }
-    
-    /**
-     * Register a module
-     */
-    private static function registerModule(string $path, string $name, string $type, string $namespace): void
+
+    private function registerModule(string $path, string $name, string $type, string $namespace): void
     {
-        // Local modules (src/modules/) are always accepted; vendor/package modules
-        // must declare "type": "semitexa-module" or "semitexa-theme" in composer.json.
-        $composerType = self::readComposerType($path);
+        $composerType = $this->readComposerType($path);
         if ($type !== 'local' && !in_array($composerType, ['semitexa-module', 'semitexa-theme'], true)) {
             return;
         }
 
-        $meta = self::readComposerMeta($path);
+        $meta = $this->readComposerMeta($path);
 
-        // Default template path inside module (check src/ first for PSR-4 packages)
         $defaultTemplatePath = $path . '/src/Application/View/templates';
         if (!is_dir($defaultTemplatePath)) {
             $defaultTemplatePath = $path . '/Application/View/templates';
         }
 
-        // Aliases
         $aliases = [];
         $aliases[] = $name;
         $friendly = $name;
@@ -288,7 +228,6 @@ class ModuleRegistry
         }
         $aliases = array_values(array_unique($aliases));
 
-        // Template paths
         $templatePaths = [];
         if (is_dir($defaultTemplatePath)) {
             $templatePaths[] = $defaultTemplatePath;
@@ -300,17 +239,15 @@ class ModuleRegistry
             }
         }
 
-        // Check if module with same path already registered (avoid duplicates from symlinks)
         $realPath = realpath($path) ?: $path;
-        foreach (self::$modules as $existing) {
+        foreach ($this->modules as $existing) {
             $existingRealPath = realpath($existing['path']) ?: $existing['path'];
             if ($existingRealPath === $realPath) {
-                // Module already registered, skip
                 return;
             }
         }
-        
-        self::$modules[] = [
+
+        $this->modules[] = [
             'path' => $realPath,
             'name' => $name,
             'type' => $type,
@@ -319,15 +256,14 @@ class ModuleRegistry
             'aliases' => $aliases,
             'templatePaths' => $templatePaths,
             'extends' => $meta['extends'] ?? null,
-            'controllers' => self::findControllers($path, $namespace),
-            'routes' => self::findRoutes($path, $namespace),
-            'autoloadPsr4' => self::resolveAutoloadPsr4($path, $meta['autoload_psr4'] ?? []),
-            'config' => self::findModuleConfig($path, $namespace)
+            'controllers' => $this->findControllers($path, $namespace),
+            'routes' => $this->findRoutes($path, $namespace),
+            'autoloadPsr4' => $this->resolveAutoloadPsr4($path, $meta['autoload_psr4'] ?? []),
+            'config' => $this->findModuleConfig($path, $namespace)
         ];
-        
     }
 
-    private static function readComposerType(string $modulePath): ?string
+    private function readComposerType(string $modulePath): ?string
     {
         $composerJson = $modulePath . '/composer.json';
         if (!is_file($composerJson)) {
@@ -336,12 +272,12 @@ class ModuleRegistry
         try {
             $json = json_decode((string)file_get_contents($composerJson), true, 512, JSON_THROW_ON_ERROR);
             return $json['type'] ?? null;
-        } catch (\Throwable $e) {
+        } catch (\Throwable) {
             return null;
         }
     }
 
-    private static function readComposerMeta(string $modulePath): array
+    private function readComposerMeta(string $modulePath): array
     {
         $meta = [
             'template_alias' => null,
@@ -368,13 +304,13 @@ class ModuleRegistry
             if (!empty($json['autoload']['psr-4']) && is_array($json['autoload']['psr-4'])) {
                 $meta['autoload_psr4'] = $json['autoload']['psr-4'];
             }
-        } catch (\Throwable $e) {
+        } catch (\Throwable) {
             // ignore invalid json
         }
         return $meta;
     }
 
-    private static function resolveAutoloadPsr4(string $modulePath, array $psr4): array
+    private function resolveAutoloadPsr4(string $modulePath, array $psr4): array
     {
         $resolved = [];
         foreach ($psr4 as $prefix => $paths) {
@@ -399,43 +335,36 @@ class ModuleRegistry
         }
         return $resolved;
     }
-    
-    /**
-     * Find controllers in module
-     */
-    private static function findControllers(string $path, string $namespace): array
+
+    private function findControllers(string $path, string $namespace): array
     {
         $controllers = [];
         $files = glob($path . '/*Controller.php');
-        
+
         foreach ($files as $file) {
             $className = basename($file, '.php');
             $controllers[] = $namespace . '\\' . $className;
         }
-        
+
         return $controllers;
     }
-    
-    /**
-     * Find routes in module
-     */
-    private static function findRoutes(string $path, string $namespace): array
+
+    private function findRoutes(string $path, string $namespace): array
     {
-        // This will be implemented when we integrate with AttributeDiscovery
         return [];
     }
 
-    private static function findModuleConfig(string $path, string $namespace): array
+    private function findModuleConfig(string $path, string $namespace): array
     {
         return ['active' => true, 'role' => 'observer'];
     }
 
-    private static function discoverPackageModules(string $projectRoot): array
+    private function discoverPackageModules(string $projectRoot): array
     {
-        return self::discoverModulesInRoot($projectRoot . '/packages');
+        return $this->discoverModulesInRoot($projectRoot . '/packages');
     }
 
-    private static function discoverModulesInRoot(string $root): array
+    private function discoverModulesInRoot(string $root): array
     {
         $modules = [];
         if (!is_dir($root)) {
@@ -444,11 +373,10 @@ class ModuleRegistry
 
         $dirs = glob(rtrim($root, '/') . '/*', GLOB_ONLYDIR);
         foreach ($dirs as $dir) {
-            // Flat layout (packages/semitexa-demo/composer.json)
             if (is_file($dir . '/composer.json')) {
                 $packageName = basename($dir);
-                $namespace = self::inferNamespaceFromComposer($dir)
-                    ?? self::buildNamespaceFromVendor('', $packageName);
+                $namespace = $this->inferNamespaceFromComposer($dir)
+                    ?? $this->buildNamespaceFromVendor('', $packageName);
 
                 $modules[] = [
                     'path' => $dir,
@@ -458,12 +386,11 @@ class ModuleRegistry
                 continue;
             }
 
-            // Nested vendor layout (packages/vendor/package/composer.json)
             $packageDirs = glob($dir . '/*', GLOB_ONLYDIR);
             foreach ($packageDirs as $subDir) {
                 $packageName = basename($subDir);
-                $namespace = self::inferNamespaceFromComposer($subDir)
-                    ?? self::buildNamespaceFromVendor(basename($dir), $packageName);
+                $namespace = $this->inferNamespaceFromComposer($subDir)
+                    ?? $this->buildNamespaceFromVendor(basename($dir), $packageName);
 
                 $modules[] = [
                     'path' => $subDir,
@@ -476,7 +403,7 @@ class ModuleRegistry
         return $modules;
     }
 
-    private static function inferNamespaceFromComposer(string $modulePath): ?string
+    private function inferNamespaceFromComposer(string $modulePath): ?string
     {
         $composerJson = $modulePath . '/composer.json';
         if (!is_file($composerJson)) {
@@ -494,14 +421,14 @@ class ModuleRegistry
                     return rtrim($namespace, '\\');
                 }
             }
-        } catch (\Throwable $e) {
+        } catch (\Throwable) {
             return null;
         }
 
         return null;
     }
 
-    private static function buildNamespaceFromVendor(string $vendor, string $package): string
+    private function buildNamespaceFromVendor(string $vendor, string $package): string
     {
         $packageNamespace = Str::toStudly($package);
         if ($vendor === '') {

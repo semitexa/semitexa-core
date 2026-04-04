@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Pipeline;
 
-use Semitexa\Core\Attributes\AsPipelineListener;
+use Semitexa\Core\Attribute\AsPipelineListener;
 use Semitexa\Core\Discovery\ClassDiscovery;
 use Semitexa\Core\ModuleRegistry;
 use ReflectionClass;
@@ -12,31 +12,36 @@ use ReflectionClass;
 final class PipelineListenerRegistry
 {
     /** @var array<string, list<array{class: string, phase: string, priority: int}>> */
-    private static array $listenersByPhase = [];
+    private array $listenersByPhase = [];
 
-    private static bool $built = false;
+    private bool $built = false;
+
+    public function __construct(
+        private readonly ClassDiscovery $classDiscovery,
+        private readonly ModuleRegistry $moduleRegistry,
+    ) {}
 
     /**
      * @return list<array{class: string, phase: string, priority: int}>
      */
-    public static function getListeners(string $phaseClass): array
+    public function getListeners(string $phaseClass): array
     {
-        self::ensureBuilt();
-        return self::$listenersByPhase[$phaseClass] ?? [];
+        $this->ensureBuilt();
+        return $this->listenersByPhase[$phaseClass] ?? [];
     }
 
-    public static function ensureBuilt(): void
+    public function ensureBuilt(): void
     {
-        if (self::$built) {
+        if ($this->built) {
             return;
         }
-        ClassDiscovery::initialize();
-        ModuleRegistry::initialize();
+        $this->classDiscovery->initialize();
+        $this->moduleRegistry->initialize();
 
-        $classes = ClassDiscovery::findClassesWithAttribute(AsPipelineListener::class);
+        $classes = $this->classDiscovery->findClassesWithAttribute(AsPipelineListener::class);
         $filtered = array_filter(
             $classes,
-            fn(string $class) => (str_starts_with($class, 'Semitexa\\') && ModuleRegistry::isClassActive($class))
+            fn(string $class) => (str_starts_with($class, 'Semitexa\\') && $this->moduleRegistry->isClassActive($class))
                 || self::isProjectPipelineListener($class)
         );
 
@@ -56,19 +61,19 @@ final class PipelineListenerRegistry
                     'phase' => $phase,
                     'priority' => $priority,
                 ];
-                if (!isset(self::$listenersByPhase[$phase])) {
-                    self::$listenersByPhase[$phase] = [];
+                if (!isset($this->listenersByPhase[$phase])) {
+                    $this->listenersByPhase[$phase] = [];
                 }
-                self::$listenersByPhase[$phase][] = $meta;
+                $this->listenersByPhase[$phase][] = $meta;
             } catch (\Throwable) {
                 continue;
             }
         }
 
-        foreach (self::$listenersByPhase as $phase => $list) {
-            usort(self::$listenersByPhase[$phase], fn($a, $b) => $a['priority'] <=> $b['priority']);
+        foreach ($this->listenersByPhase as $phase => $list) {
+            usort($this->listenersByPhase[$phase], fn($a, $b) => $a['priority'] <=> $b['priority']);
         }
-        self::$built = true;
+        $this->built = true;
     }
 
     private static function isProjectPipelineListener(string $class): bool

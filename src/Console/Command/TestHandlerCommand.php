@@ -4,10 +4,10 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Console\Command;
 
-use Semitexa\Core\Attributes\AsCommand;
-use Semitexa\Core\Attributes\InjectAsFactory;
-use Semitexa\Core\Attributes\InjectAsMutable;
-use Semitexa\Core\Attributes\InjectAsReadonly;
+use Semitexa\Core\Attribute\AsCommand;
+use Semitexa\Core\Attribute\InjectAsFactory;
+use Semitexa\Core\Attribute\InjectAsMutable;
+use Semitexa\Core\Attribute\InjectAsReadonly;
 use Semitexa\Core\Container\ContainerFactory;
 use Semitexa\Core\Container\RequestScopedContainer;
 use Symfony\Component\Console\Command\Command;
