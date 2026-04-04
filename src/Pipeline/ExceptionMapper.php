@@ -7,6 +7,7 @@ namespace Semitexa\Core\Pipeline;
 use Semitexa\Core\Attribute\SatisfiesServiceContract;
 use Semitexa\Core\Contract\ExceptionResponseMapperInterface;
 use Semitexa\Core\Discovery\ResolvedRouteMetadata;
+use Semitexa\Core\Error\ErrorRouteDispatcher;
 use Semitexa\Core\Exception\DomainException;
 use Semitexa\Core\Exception\RateLimitException;
 use Semitexa\Core\Http\ContentNegotiator;
@@ -25,6 +26,16 @@ use Semitexa\Core\HttpResponse;
 #[SatisfiesServiceContract(of: ExceptionResponseMapperInterface::class)]
 final class ExceptionMapper implements ExceptionResponseMapperInterface
 {
+    private ?ErrorRouteDispatcher $errorRouteDispatcher = null;
+
+    public function withErrorRouteDispatcher(ErrorRouteDispatcher $errorRouteDispatcher): self
+    {
+        $clone = clone $this;
+        $clone->errorRouteDispatcher = $errorRouteDispatcher;
+
+        return $clone;
+    }
+
     /**
      * Convert a caught exception into an error Response.
      */
@@ -34,7 +45,7 @@ final class ExceptionMapper implements ExceptionResponseMapperInterface
             return $this->mapDomainException($e, $request, $metadata);
         }
 
-        return $this->mapUnknownException($e);
+        return $this->mapUnknownException($e, $request, $metadata);
     }
 
     private function mapDomainException(DomainException $e, Request $request, ResolvedRouteMetadata $metadata): HttpResponse
@@ -47,6 +58,17 @@ final class ExceptionMapper implements ExceptionResponseMapperInterface
         ];
 
         $format = $this->negotiateErrorFormat($request, $metadata->produces);
+
+        if ($format === 'html' && $this->errorRouteDispatcher !== null) {
+            $response = $this->errorRouteDispatcher->dispatchThrowable($e, $request, ['name' => $metadata->name]);
+            if ($response !== null) {
+                if ($e instanceof RateLimitException) {
+                    $response = $response->withHeaders(['Retry-After' => (string) $e->getRetryAfter()]);
+                }
+
+                return $response;
+            }
+        }
 
         $response = match ($format) {
             'json' => HttpResponse::json($body, $status->value),
@@ -63,8 +85,15 @@ final class ExceptionMapper implements ExceptionResponseMapperInterface
         return $response;
     }
 
-    private function mapUnknownException(\Throwable $e): HttpResponse
+    private function mapUnknownException(\Throwable $e, Request $request, ResolvedRouteMetadata $metadata): HttpResponse
     {
+        if ($this->errorRouteDispatcher !== null) {
+            $response = $this->errorRouteDispatcher->dispatchThrowable($e, $request, ['name' => $metadata->name]);
+            if ($response !== null) {
+                return $response;
+            }
+        }
+
         return HttpResponse::json([
             'error' => 'Internal Server Error',
             'message' => 'An unexpected error occurred.',

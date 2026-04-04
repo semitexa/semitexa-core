@@ -25,6 +25,8 @@ class Application
 {
     /** @deprecated Use RoutePhase::ROUTE_NAME_404 instead */
     public const ROUTE_NAME_404 = 'error.404';
+    /** @deprecated Use RoutePhase::ROUTE_NAME_500 instead */
+    public const ROUTE_NAME_500 = 'error.500';
 
     public Environment $environment {
         get {
@@ -113,5 +115,21 @@ class Application
         $response = $this->routePhase->execute($context);
 
         return $this->sessionPhase->finalize($context, $response);
+    }
+
+    /**
+     * @param array{name?: string}|null $currentRoute
+     */
+    public function renderErrorThrowable(\Throwable $throwable, Request $request, ?array $currentRoute = null): ?HttpResponse
+    {
+        return $this->routePhase->renderErrorThrowable($throwable, $request, $currentRoute);
+    }
+
+    /**
+     * @param array{name?: string}|null $currentRoute
+     */
+    public function renderErrorStatus(int $statusCode, Request $request, ?array $currentRoute = null): ?HttpResponse
+    {
+        return $this->routePhase->renderErrorStatus($statusCode, $request, $currentRoute);
     }
 }

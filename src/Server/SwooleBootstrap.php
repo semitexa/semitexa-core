@@ -12,6 +12,7 @@ use Semitexa\Core\ErrorHandler;
 use Semitexa\Core\Http\HttpStatus;
 use Semitexa\Core\Http\SwooleResponseEmitter;
 use Semitexa\Core\Request;
+use Semitexa\Core\HttpResponse;
 use Semitexa\Core\Discovery\ClassDiscovery;
 use Semitexa\Core\Server\Lifecycle\ServerLifecycleContext;
 use Semitexa\Core\Server\Lifecycle\ServerBootstrapState;
@@ -165,6 +166,7 @@ class SwooleBootstrap
 
             Coroutine::getContext()[self::COROUTINE_CONTEXT_KEY] = [$request, $response, $server];
             $app = null;
+            $semitexaRequest = null;
 
             try {
                 $app = new Application();
@@ -176,7 +178,7 @@ class SwooleBootstrap
             } catch (\Throwable $e) {
                 try {
                     $env = $app !== null ? $app->environment : Environment::create();
-                    self::handleError($e, $response, $env);
+                    self::handleError($e, $response, $env, $semitexaRequest, $app);
                     $sent = true;
                 } catch (\Throwable $inner) {
                     $ensureResponseSent();
@@ -250,19 +252,48 @@ class SwooleBootstrap
     /**
      * @throws JsonException
      */
-    private static function handleError(\Throwable $e, SwooleResponse $response, Environment $env): void
+    private static function handleError(
+        \Throwable $e,
+        SwooleResponse $response,
+        Environment $env,
+        ?Request $request = null,
+        ?Application $app = null,
+    ): void
     {
-        $response->status(HttpStatus::InternalServerError->value);
-        $response->header('Content-Type', 'application/json');
-        $payload = ['error' => 'Internal Server Error'];
-        if ($env->isDebug()) {
-            $payload['message'] = $e->getMessage();
-            $payload['file'] = $e->getFile() . ':' . $e->getLine();
-            $payload['trace'] = $e->getTraceAsString();
+        $errorResponse = self::buildFatalErrorResponse($e, $env, $request, $app);
+
+        $response->status($errorResponse->getStatusCode());
+        foreach ($errorResponse->getHeaders() as $header => $value) {
+            if (is_array($value)) {
+                foreach ($value as $item) {
+                    $response->header($header, (string) $item);
+                }
+                continue;
+            }
+
+            $response->header($header, (string) $value);
         }
 
-        $response->end(
-            json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR)
-        );
+        $response->end($errorResponse->getContent());
+    }
+
+    public static function buildFatalErrorResponse(
+        \Throwable $e,
+        Environment $env,
+        ?Request $request = null,
+        ?Application $app = null,
+    ): HttpResponse {
+        if ($app !== null && $request !== null) {
+            try {
+                $routeResponse = $app->renderErrorThrowable($e, $request);
+                if ($routeResponse !== null) {
+                    return $routeResponse;
+                }
+            } catch (\Throwable) {
+                // Fatal recovery must degrade immediately to the safe renderer.
+            }
+        }
+
+        return \Semitexa\Core\Http\ErrorRenderer::render($e, $request, $env->isDebug());
     }
 }
