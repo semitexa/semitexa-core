@@ -23,14 +23,21 @@ final class ResponseRenderer
     {
         // Redirect short-circuit: if the resource has a redirect URL, skip rendering
         if (method_exists($resDto, 'getRedirectUrl') && $resDto->getRedirectUrl() !== null) {
+            $redirectUrl = $resDto->getRedirectUrl();
             $statusCode = method_exists($resDto, 'getStatusCode') ? $resDto->getStatusCode() : HttpStatus::Found->value;
-            return Response::redirect($resDto->getRedirectUrl(), $statusCode);
+            return Response::redirect(
+                is_string($redirectUrl) ? $redirectUrl : '',
+                is_int($statusCode) ? $statusCode : HttpStatus::Found->value,
+            );
         }
 
         $handle = method_exists($resDto, 'getRenderHandle') ? $resDto->getRenderHandle() : null;
         $context = method_exists($resDto, 'getRenderContext') ? $resDto->getRenderContext() : [];
         /** @var ResponseFormat|null $format */
         $format = method_exists($resDto, 'getRenderFormat') ? $resDto->getRenderFormat() : null;
+        $handle = is_string($handle) && $handle !== '' ? $handle : null;
+        /** @var array<string, mixed> $context */
+        $context = is_array($context) ? $context : [];
 
         if ($handle) {
             $context = $this->withPageDocumentContext($context, $request, $route);
@@ -50,6 +57,7 @@ final class ResponseRenderer
             }
         }
         $rendererClass = method_exists($resDto, 'getRendererClass') ? $resDto->getRendererClass() : null;
+        $rendererClass = is_string($rendererClass) && $rendererClass !== '' ? $rendererClass : null;
 
         if ($handle && $this->wantsPageDocumentJson($request)) {
             $format = ResponseFormat::Json;
@@ -77,13 +85,17 @@ final class ResponseRenderer
 
         return match ($format) {
             ResponseFormat::Json   => $this->renderJsonResponse($resDto, $request, $route, $handle, $context),
-            ResponseFormat::Layout => $this->renderLayout($resDto, $reqDto, $handle, $context, $rendererClass),
+            ResponseFormat::Layout => $this->renderLayout($resDto, $reqDto, $handle ?? '', $context, $rendererClass),
             ResponseFormat::Xml    => $this->renderXml($resDto, $context),
             ResponseFormat::Text   => $this->renderText($resDto, $context),
             ResponseFormat::Raw    => $resDto,
         };
     }
 
+    /**
+     * @param array<string, mixed> $route
+     * @param array<string, mixed> $context
+     */
     private function renderJsonResponse(
         object $resDto,
         Request $request,
@@ -98,6 +110,9 @@ final class ResponseRenderer
         return $this->renderJson($resDto, $context);
     }
 
+    /**
+     * @param array<string, mixed> $context
+     */
     private function renderJson(object $resDto, array $context): object
     {
         $json = json_encode($context, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
@@ -110,6 +125,9 @@ final class ResponseRenderer
         return $resDto;
     }
 
+    /**
+     * @param array<string, mixed> $context
+     */
     private function renderLayout(object $resDto, ?object $reqDto, string $handle, array $context, ?string $rendererClass): object
     {
         // Resources that render via Twig template inheritance (HtmlResponse subclasses with a
@@ -163,6 +181,9 @@ final class ResponseRenderer
         return $resDto;
     }
 
+    /**
+     * @param array<string, mixed> $context
+     */
     private function renderXml(object $resDto, array $context): object
     {
         $xml = self::arrayToXml($context, 'response');
@@ -175,9 +196,13 @@ final class ResponseRenderer
         return $resDto;
     }
 
+    /**
+     * @param array<string, mixed> $context
+     */
     private function renderText(object $resDto, array $context): object
     {
         $text = $context['text'] ?? json_encode($context, JSON_PRETTY_PRINT);
+        $text = is_string($text) ? $text : (json_encode($context, JSON_PRETTY_PRINT) ?: '');
         if (method_exists($resDto, 'setContent')) {
             $resDto->setContent($text);
         }
@@ -187,24 +212,36 @@ final class ResponseRenderer
         return $resDto;
     }
 
+    /**
+     * @param array<array-key, mixed> $data
+     */
     private static function arrayToXml(array $data, string $rootElement = 'root'): string
     {
         $xml = new \SimpleXMLElement("<{$rootElement}/>");
         self::arrayToXmlRecursive($data, $xml);
         $dom = dom_import_simplexml($xml)->ownerDocument;
+        if (!$dom instanceof \DOMDocument) {
+            return '';
+        }
         $dom->formatOutput = true;
-        return $dom->saveXML();
+        return $dom->saveXML() ?: '';
     }
 
+    /**
+     * @param array<array-key, mixed> $data
+     */
     private static function arrayToXmlRecursive(array $data, \SimpleXMLElement $xml): void
     {
         foreach ($data as $key => $value) {
-            $key = is_int($key) ? 'item' : $key;
+            $key = is_int($key) ? 'item' : (string) $key;
             if (is_array($value)) {
                 $child = $xml->addChild($key);
                 self::arrayToXmlRecursive($value, $child);
             } else {
-                $xml->addChild($key, htmlspecialchars((string) ($value ?? ''), ENT_XML1));
+                $scalar = is_scalar($value) || $value === null
+                    ? (string) ($value ?? '')
+                    : (json_encode($value, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '');
+                $xml->addChild($key, htmlspecialchars($scalar ?: '', ENT_XML1));
             }
         }
     }
@@ -232,8 +269,9 @@ final class ResponseRenderer
     }
 
     /**
-     * @param array<string,mixed> $context
-     * @return array<string,mixed>
+     * @param array<string, mixed> $context
+     * @param array<string, mixed> $route
+     * @return array<string, mixed>
      */
     private function withPageDocumentContext(array $context, Request $request, array $route): array
     {
@@ -247,7 +285,9 @@ final class ResponseRenderer
         $path = $request->getPath();
         $context['__page_document_html_iri'] = $htmlQuery === [] ? $path : $path . '?' . http_build_query($htmlQuery);
         $context['__page_document_json_iri'] = $path . '?' . http_build_query($jsonQuery);
-        $context['__page_alternates'] = $this->buildPageAlternates($route, $path, $request->query);
+        /** @var array<string, mixed> $query */
+        $query = $request->query;
+        $context['__page_alternates'] = $this->buildPageAlternates($route, $path, $query);
 
         return $context;
     }

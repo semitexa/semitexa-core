@@ -79,6 +79,9 @@ class RouteExecutor
             $pipelineExecutor = new PipelineExecutor($this->requestScopedContainer, $this->container);
             $pipelineExecutor->execute($context);
             $resDto = $context->resourceDto;
+            if (!is_object($resDto)) {
+                throw new \RuntimeException('Pipeline did not produce a response DTO.');
+            }
 
             // 5. Render Response
             $renderer = new ResponseRenderer();

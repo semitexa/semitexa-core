@@ -193,7 +193,7 @@ class Application
         }
 
         if ($e instanceof \Semitexa\Core\Exception\NotFoundException) {
-            if ($logger) {
+            if ($logger instanceof \Semitexa\Core\Log\LoggerInterface) {
                 $logger->debug('Route not found', ['path' => $request->getPath(), 'message' => $e->getMessage()]);
             }
 
@@ -279,27 +279,33 @@ class Application
             return $response;
         }
 
+        $sessionPersisted = false;
+
         try {
             $session->save();
+            $sessionPersisted = true;
         } catch (\Throwable $e) {
             $this->logSessionPersistenceFailure($e, $request);
             try {
                 $this->sessionHandler = self::createSessionHandler();
                 $session->setHandler($this->sessionHandler);
                 $session->save();
+                $sessionPersisted = true;
             } catch (\Throwable) {
-                return $response;
+                // Preserve already queued cookies even when session persistence fails.
             }
         }
 
-        $cookieName = $session->getCookieName();
-        $sessionLifetime = (int) (Environment::getEnvValue('SESSION_LIFETIME') ?? '3600');
-        $cookieJar->set($cookieName, $session->getSessionIdForCookie(), [
-            'path' => '/',
-            'httpOnly' => true,
-            'sameSite' => 'lax',
-            'maxAge' => $sessionLifetime,
-        ]);
+        if ($sessionPersisted) {
+            $cookieName = $session->getCookieName();
+            $sessionLifetime = (int) (Environment::getEnvValue('SESSION_LIFETIME') ?? '3600');
+            $cookieJar->set($cookieName, $session->getSessionIdForCookie(), [
+                'path' => '/',
+                'httpOnly' => true,
+                'sameSite' => 'lax',
+                'maxAge' => $sessionLifetime,
+            ]);
+        }
 
         $lines = $cookieJar->getSetCookieLines();
         if ($lines !== []) {
