@@ -27,7 +27,6 @@ use ReflectionClass;
  */
 class AttributeDiscovery
 {
-    private static array $routes = [];
     private static array $httpRequests = [];
     private static array $httpHandlers = [];
     /** @var array<string, list<array{class: string, for?: string, payload?: string, resource?: string, execution: string, transport: ?string, queue: ?string, priority: int}>> key: payload . "\0" . resource */
@@ -83,7 +82,7 @@ class AttributeDiscovery
      */
     public static function getRoutes(): array
     {
-        return self::$routes;
+        return RouteRegistry::getAll();
     }
 
     /**
@@ -93,7 +92,7 @@ class AttributeDiscovery
      */
     public static function getEnrichedRoutes(): array
     {
-        return array_map(static fn(array $route) => self::enrichRoute($route), self::$routes);
+        return array_map(static fn(array $route) => self::enrichRoute($route), RouteRegistry::getAll());
     }
 
     /**
@@ -109,73 +108,16 @@ class AttributeDiscovery
     }
 
     /**
-     * Find a route by path and method
-     * Supports both exact matches and pattern matching with parameters like {type}
+     * Find a route by path and method.
+     * Delegates to RouteRegistry for indexed lookup, then enriches with handler/response data.
      */
     public static function findRoute(string $path, string $method = 'GET'): ?array
     {
-        // Normalize root path so '' and '/' match the same route
-        if ($path === '') {
-            $path = '/';
-        }
-        $matches = [];
-        foreach (self::$routes as $route) {
-            $routePath = $route['path'];
-            if ($routePath === '') {
-                $routePath = '/';
-            }
-            $routeMethods = $route['methods'] ?? [$route['method'] ?? 'GET'];
-            
-            // Exact match
-            if ($routePath === $path && in_array($method, $routeMethods)) {
-                $matches[] = self::enrichRoute($route);
-                continue;
-            }
-            
-            // Pattern match (e.g., /window-manager/{type}/{file} matches /window-manager/js/window-manager.js)
-            if (is_string($routePath) && strpos($routePath, '{') !== false && in_array($method, $routeMethods)) {
-                $requirements = $route['requirements'] ?? [];
-                // Build regex pattern: replace {param} with placeholders first, then escape, then replace with regex
-                $placeholders = [];
-                $tempPath = preg_replace_callback(
-                    '/\{([^}]+)\}/',
-                    function($m) use (&$placeholders, $requirements) {
-                        $placeholder = '__PLACEHOLDER_' . count($placeholders) . '__';
-                        $paramName = $m[1];
-                        $placeholders[$placeholder] = '(' . ($requirements[$paramName] ?? '[^/]+') . ')';
-                        return $placeholder;
-                    },
-                    $routePath
-                );
-                
-                // Escape the path (use # as delimiter to avoid conflicts with /)
-                $pattern = preg_quote($tempPath, '#');
-                
-                // Replace placeholders with regex groups
-                foreach ($placeholders as $placeholder => $regex) {
-                    $pattern = str_replace($placeholder, $regex, $pattern);
-                }
-                
-                $pattern = '#^' . $pattern . '$#';
-                
-                if (preg_match($pattern, $path)) {
-                    $matches[] = self::enrichRoute($route);
-                }
-            }
-        }
-
-        if ($matches === []) {
+        $route = RouteRegistry::find($path, $method);
+        if ($route === null) {
             return null;
         }
-
-        /** @var list<array<string, mixed>> $tenantSelectableMatches */
-        $tenantSelectableMatches = $matches;
-        $selectedRoutes = TenantModuleScopeResolver::selectRoutesForCurrentTenant($tenantSelectableMatches);
-        if ($selectedRoutes === []) {
-            return null;
-        }
-
-        return $selectedRoutes[0];
+        return self::enrichRoute($route);
     }
 
     /**
@@ -183,12 +125,11 @@ class AttributeDiscovery
      */
     public static function findRouteByName(string $name): ?array
     {
-        foreach (self::$routes as $route) {
-            if (($route['name'] ?? null) === $name) {
-                return self::enrichRoute($route);
-            }
+        $route = RouteRegistry::findByName($name);
+        if ($route === null) {
+            return null;
         }
-        return null;
+        return self::enrichRoute($route);
     }
     
     /**
@@ -292,7 +233,7 @@ class AttributeDiscovery
 
     private static function resetState(): void
     {
-        self::$routes = [];
+        RouteRegistry::reset();
         self::$httpRequests = [];
         self::$httpHandlers = [];
         self::$handlersByPayloadAndResource = [];
@@ -435,7 +376,7 @@ class AttributeDiscovery
                 );
             }
 
-            self::$routes[] = [
+            RouteRegistry::register([
                 'path' => $resolved['path'],
                 'methods' => $resolved['methods'],
                 'name' => $resolved['name'],
@@ -451,7 +392,7 @@ class AttributeDiscovery
                 'produces' => $routeProduces,
                 'module' => $selectedModule,
                 'tenantScopes' => $selectedTenantScopes,
-            ];
+            ]);
 
             foreach ($candidates as $candidate) {
                 self::$requestClassAliases[$candidate['class']] = $class;

@@ -10,18 +10,18 @@ use Semitexa\Core\Attributes\AsPipelineListener;
 use Semitexa\Core\Attributes\AsPayloadHandler;
 use Semitexa\Core\Attributes\AsService;
 use Semitexa\Core\Attributes\ExecutionScoped;
+use Semitexa\Core\Attributes\InjectAsMutable;
 use Semitexa\Core\Attributes\SatisfiesServiceContract;
 use Semitexa\Core\Attributes\SatisfiesRepositoryContract;
-use Semitexa\Core\Discovery\AttributeDiscovery;
 use Semitexa\Core\Discovery\ClassDiscovery;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Style\SymfonyStyle;
 
 /**
- * Verify all execution-scoped classes have explicit #[ExecutionScoped] or handler/listener attribute.
+ * Verify container-managed classes with #[InjectAsMutable] properties have explicit scoping attributes.
  */
-#[AsCommand(name: 'semitexa:lint:scoping', description: 'Verify execution-scoped classes have explicit scoping attributes')]
+#[AsCommand(name: 'semitexa:lint:scoping', description: 'Verify container-managed classes with #[InjectAsMutable] properties have explicit scoping attributes')]
 final class LintScopingCommand extends BaseCommand
 {
     private const SCOPING_ATTRIBUTES = [
@@ -62,10 +62,8 @@ final class LintScopingCommand extends BaseCommand
                 continue;
             }
 
-            $shortName = $ref->getShortName();
-
-            // Check if class name suggests it should be execution-scoped
-            if (!str_contains($shortName, 'Handler') && !str_contains($shortName, 'Listener')) {
+            // Check if class uses #[InjectAsMutable] on any property
+            if (!$this->hasMutableInjection($ref)) {
                 continue;
             }
 
@@ -79,8 +77,8 @@ final class LintScopingCommand extends BaseCommand
             }
 
             if (!$hasScoping) {
-                $errors[] = "{$class}: Name contains 'Handler' or 'Listener' but lacks explicit scoping attribute. "
-                    . "Add #[ExecutionScoped] if it needs per-execution state, or rename if it's truly worker-scoped.";
+                $errors[] = "{$class}: Uses #[InjectAsMutable] but lacks explicit scoping attribute. "
+                    . "Add one of #[ExecutionScoped], #[AsPayloadHandler], #[AsEventListener], or #[AsPipelineListener] so the container applies a valid execution scope.";
             }
         }
 
@@ -94,5 +92,15 @@ final class LintScopingCommand extends BaseCommand
         }
         $io->error(sprintf('%d scoping issue(s) found.', count($errors)));
         return self::FAILURE;
+    }
+
+    private function hasMutableInjection(\ReflectionClass $ref): bool
+    {
+        foreach ($ref->getProperties() as $prop) {
+            if ($prop->getAttributes(InjectAsMutable::class) !== []) {
+                return true;
+            }
+        }
+        return false;
     }
 }

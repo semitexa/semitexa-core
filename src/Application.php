@@ -78,12 +78,9 @@ class Application
         $this->requestScopedContainer = \Semitexa\Core\Container\ContainerFactory::createRequestScoped();
         $this->environment = $this->container->get(Environment::class);
 
-        $events = null;
-        try {
-            $events = $this->container->get(EventDispatcherInterface::class);
-        } catch (\Throwable) {
-            // EventDispatcher not registered
-        }
+        $events = $this->container->has(EventDispatcherInterface::class)
+            ? $this->container->get(EventDispatcherInterface::class)
+            : null;
 
         $this->tenancy = new TenancyBootstrapper($events);
 
@@ -185,12 +182,9 @@ class Application
      */
     private function handleRouteException(\Throwable $e, array $route, Request $request): Response
     {
-        $logger = null;
-        try {
-            $logger = $this->container->get(\Semitexa\Core\Log\LoggerInterface::class);
-        } catch (\Throwable) {
-            // Logger not available
-        }
+        $logger = $this->container->has(\Semitexa\Core\Log\LoggerInterface::class)
+            ? $this->container->get(\Semitexa\Core\Log\LoggerInterface::class)
+            : null;
 
         if ($e instanceof \Semitexa\Core\Exception\NotFoundException) {
             if ($logger instanceof \Semitexa\Core\Log\LoggerInterface) {
@@ -268,12 +262,13 @@ class Application
 
     private function finalizeSessionAndCookies(Request $request, Response $response): Response
     {
-        try {
-            $session = $this->requestScopedContainer->get(SessionInterface::class);
-            $cookieJar = $this->requestScopedContainer->get(CookieJarInterface::class);
-        } catch (\Throwable) {
+        if (!$this->requestScopedContainer->has(SessionInterface::class)
+            || !$this->requestScopedContainer->has(CookieJarInterface::class)
+        ) {
             return $response;
         }
+        $session = $this->requestScopedContainer->get(SessionInterface::class);
+        $cookieJar = $this->requestScopedContainer->get(CookieJarInterface::class);
 
         if (!$session instanceof Session) {
             return $response;
@@ -291,8 +286,8 @@ class Application
                 $session->setHandler($this->sessionHandler);
                 $session->save();
                 $sessionPersisted = true;
-            } catch (\Throwable) {
-                // Preserve already queued cookies even when session persistence fails.
+            } catch (\Throwable $retryError) {
+                $this->logSessionPersistenceFailure($retryError, $request);
             }
         }
 
@@ -317,12 +312,11 @@ class Application
 
     private function logSessionPersistenceFailure(\Throwable $e, Request $request): void
     {
-        try {
-            $logger = $this->container->get(\Semitexa\Core\Log\LoggerInterface::class);
-            if (!$logger instanceof \Semitexa\Core\Log\LoggerInterface) {
-                throw new \RuntimeException('Logger service has invalid type.');
-            }
+        $logger = $this->container->has(\Semitexa\Core\Log\LoggerInterface::class)
+            ? $this->container->get(\Semitexa\Core\Log\LoggerInterface::class)
+            : null;
 
+        if ($logger instanceof \Semitexa\Core\Log\LoggerInterface) {
             $logger->error('Session persistence failed', [
                 'path' => $request->getPath(),
                 'method' => $request->getMethod(),
@@ -330,8 +324,6 @@ class Application
                 'message' => $e->getMessage(),
             ]);
             return;
-        } catch (\Throwable) {
-            // Fall back to PHP error log when the logger is unavailable.
         }
 
         error_log('[Semitexa] Session persistence failed: ' . $e->getMessage());

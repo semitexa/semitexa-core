@@ -172,6 +172,19 @@ final class SemitexaContainer implements ContainerInterface
     }
 
     /**
+     * Like get(), but returns null instead of throwing when the service is not found.
+     * Use for optional dependencies where absence is a valid state.
+     */
+    public function getOrNull(string $id): ?object
+    {
+        try {
+            return $this->get($id);
+        } catch (NotFoundException) {
+            return null;
+        }
+    }
+
+    /**
      * Auto-wire and create a class instance that is not pre-registered in the container.
      * Constructor dependencies are resolved from readonly/execution-scoped pools.
      *
