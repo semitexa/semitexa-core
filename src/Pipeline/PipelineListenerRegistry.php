@@ -36,7 +36,7 @@ final class PipelineListenerRegistry
         $classes = ClassDiscovery::findClassesWithAttribute(AsPipelineListener::class);
         $filtered = array_filter(
             $classes,
-            fn(string $class) => (str_starts_with($class, 'Semitexa\\') && self::isModuleActiveForClass($class))
+            fn(string $class) => (str_starts_with($class, 'Semitexa\\') && ModuleRegistry::isClassActive($class))
                 || self::isProjectPipelineListener($class)
         );
 
@@ -69,11 +69,6 @@ final class PipelineListenerRegistry
             usort(self::$listenersByPhase[$phase], fn($a, $b) => $a['priority'] <=> $b['priority']);
         }
         self::$built = true;
-    }
-
-    private static function isModuleActiveForClass(string $class): bool
-    {
-        return ModuleRegistry::getModuleNameForClass($class) !== null;
     }
 
     private static function isProjectPipelineListener(string $class): bool

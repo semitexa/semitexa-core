@@ -29,23 +29,11 @@ final class RedisSessionHandler implements SessionHandlerInterface
         $raw = $this->withReconnect(static fn (ClientInterface $redis): mixed => $redis->get($key));
 
         if (!is_string($raw) || $raw === '') {
-            \Semitexa\Core\Debug\SessionDebugLog::log('RedisSessionHandler.read', [
-                'session_id_preview' => substr($sessionId, 0, 8) . '…',
-                'found' => false,
-            ]);
             return [];
         }
 
         $data = json_decode($raw, true);
-        $data = is_array($data) ? $data : [];
-        $keys = array_keys($data);
-        \Semitexa\Core\Debug\SessionDebugLog::log('RedisSessionHandler.read', [
-            'session_id_preview' => substr($sessionId, 0, 8) . '…',
-            'found' => true,
-            'keys' => $keys,
-            'has_auth_user_id' => array_key_exists('_auth_user_id', $data),
-        ]);
-        return $data;
+        return is_array($data) ? $data : [];
     }
 
     public function write(string $sessionId, array $data, int $lifetimeSeconds = self::DEFAULT_LIFETIME): void
@@ -62,12 +50,6 @@ final class RedisSessionHandler implements SessionHandlerInterface
             $this->withReconnect(static fn (ClientInterface $redis): mixed => $redis->set($key, $raw));
         }
 
-        \Semitexa\Core\Debug\SessionDebugLog::log('RedisSessionHandler.write', [
-            'session_id_preview' => substr($sessionId, 0, 8) . '…',
-            'keys' => array_keys($data),
-            'has_auth_user_id' => array_key_exists('_auth_user_id', $data),
-            'ttl' => $lifetimeSeconds,
-        ]);
     }
 
     public function destroy(string $sessionId): void

@@ -139,6 +139,19 @@ class ModuleRegistry
     }
 
     /**
+     * Returns true if the class belongs to an active module, or if it does not
+     * belong to any module (framework/core classes are always considered active).
+     */
+    public static function isClassActive(string $className): bool
+    {
+        $moduleName = self::getModuleNameForClass($className);
+        if ($moduleName === null) {
+            return true;
+        }
+        return self::isActive($moduleName);
+    }
+
+    /**
      * Module names ordered by "extends" (most derived first). Used for contract resolution priority.
      * If A extends B, A appears before B so that A's implementation wins over B's.
      *

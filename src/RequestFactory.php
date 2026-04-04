@@ -64,16 +64,6 @@ class RequestFactory
             $uri = '/';
         }
 
-        \Semitexa\Core\Debug\SessionDebugLog::log('RequestFactory.fromSwoole', [
-            'method' => $method,
-            'uri' => $uri,
-            'swoole_cookie_keys' => array_keys($swooleCookies),
-            'has_cookie_header' => $cookieHeader !== null && $cookieHeader !== '',
-            'cookie_header_len' => $cookieHeader !== null ? strlen($cookieHeader) : 0,
-            'final_cookie_keys' => array_keys($cookies),
-            'post_keys' => array_keys($post),
-        ]);
-
         return new Request(
             method: $method,
             uri: $uri,

@@ -174,7 +174,11 @@ class QueueWorker
                 $this->log("ℹ️  Retrying handler ({$message->attempts}/{$message->maxRetries}) in {$delay}s...", 'warning');
                 
                 if ($delay > 0) {
-                    sleep($delay);
+                    if (\Swoole\Coroutine::getCid() > 0) {
+                        \Swoole\Coroutine::sleep($delay);
+                    } else {
+                        sleep($delay);
+                    }
                 }
                 
                 if ($this->currentTransport && $this->currentQueue) {

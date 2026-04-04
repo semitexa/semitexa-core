@@ -314,7 +314,7 @@ class AttributeDiscovery
         $allPayloadClasses = ClassDiscovery::findClassesWithAttribute(AsPayload::class);
         $httpRequestClasses = array_values(array_filter(
             $allPayloadClasses,
-            fn ($class) => self::isModuleActiveForClass($class) || self::isProjectPayload($class)
+            fn ($class) => ModuleRegistry::isClassActive($class) || self::isProjectPayload($class)
         ));
         $requestMeta = [];
         $requestGroups = [];
@@ -466,7 +466,7 @@ class AttributeDiscovery
             ClassDiscovery::findClassesWithAttribute(AsPayloadHandler::class),
             fn ($class) => (
                 (str_starts_with($class, 'Semitexa\\') || str_starts_with($class, 'App\\Modules\\'))
-                && self::isModuleActiveForClass($class)
+                && ModuleRegistry::isClassActive($class)
             ) || (
                 self::isProjectHandler($class)
                 && !str_starts_with($class, 'App\\Modules\\')
@@ -579,7 +579,7 @@ class AttributeDiscovery
             $dpAttribute = 'Semitexa\\Ssr\\Attributes\\AsDataProvider';
             $dpClasses = array_values(array_filter(
                 ClassDiscovery::findClassesWithAttribute($dpAttribute),
-                fn (string $class) => self::isModuleActiveForClass($class) || self::isProjectResource($class)
+                fn (string $class) => ModuleRegistry::isClassActive($class) || self::isProjectResource($class)
             ));
             foreach ($dpClasses as $className) {
                 try {
@@ -611,7 +611,7 @@ class AttributeDiscovery
             $slotResourceAttribute = 'Semitexa\\Ssr\\Attributes\\AsSlotResource';
             $slotResourceClasses = array_values(array_filter(
                 ClassDiscovery::findClassesWithAttribute($slotResourceAttribute),
-                fn (string $class) => self::isModuleActiveForClass($class) || self::isProjectResource($class)
+                fn (string $class) => ModuleRegistry::isClassActive($class) || self::isProjectResource($class)
             ));
             foreach ($slotResourceClasses as $className) {
                 try {
@@ -652,7 +652,7 @@ class AttributeDiscovery
             $slotHandlerAttribute = 'Semitexa\\Ssr\\Attributes\\AsSlotHandler';
             $slotHandlerClasses = array_values(array_filter(
                 ClassDiscovery::findClassesWithAttribute($slotHandlerAttribute),
-                fn (string $class) => self::isModuleActiveForClass($class) || self::isProjectResource($class)
+                fn (string $class) => ModuleRegistry::isClassActive($class) || self::isProjectResource($class)
             ));
             foreach ($slotHandlerClasses as $className) {
                 try {
@@ -733,7 +733,7 @@ class AttributeDiscovery
         $allResourceClasses = ClassDiscovery::findClassesWithAttribute(AsResource::class);
         $responseClasses = array_values(array_filter(
             $allResourceClasses,
-            fn ($class) => self::isModuleActiveForClass($class) || self::isProjectResource($class)
+            fn ($class) => ModuleRegistry::isClassActive($class) || self::isProjectResource($class)
         ));
         if (empty($responseClasses)) {
             return;
@@ -1008,7 +1008,7 @@ class AttributeDiscovery
     {
         $classes = ClassDiscovery::findClassesWithAttribute(AsPayloadPart::class);
         foreach ($classes as $className) {
-            if (!self::isModuleActiveForClass($className) && !self::isProjectPayload($className)) {
+            if (!ModuleRegistry::isClassActive($className) && !self::isProjectPayload($className)) {
                 continue;
             }
             try {
@@ -1032,7 +1032,7 @@ class AttributeDiscovery
     {
         $classes = ClassDiscovery::findClassesWithAttribute(AsResourcePart::class);
         foreach ($classes as $className) {
-            if (!self::isModuleActiveForClass($className) && !self::isProjectResource($className)) {
+            if (!ModuleRegistry::isClassActive($className) && !self::isProjectResource($className)) {
                 continue;
             }
             try {
@@ -1106,17 +1106,4 @@ class AttributeDiscovery
         return $chain;
     }
 
-    private static function isModuleActiveForClass(string $className): bool
-    {
-        $modules = ModuleRegistry::getModules();
-        foreach ($modules as $module) {
-            if (str_starts_with($className, $module['namespace'])) {
-                return ModuleRegistry::isActive($module['name']);
-            }
-        }
-        return true; // Default to active if not recognized as part of a module
-    }
-    
-    
-    
 }

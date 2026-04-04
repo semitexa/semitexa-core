@@ -179,5 +179,3 @@ So: CookieJar → `getSetCookieLines()` → response headers → server → `raw
 | Request cookies (parsing) | `src/RequestFactory.php` (Cookie header + Swoole cookie merge) |
 | Sending Set-Cookie in Swoole | `server.php` (`parseSetCookieLineAndSend`, request callback) |
 | Session table setup | `server.php` (Table create + `SwooleSessionTableHolder::setTable`) |
-
-Debug logging (optional): `Semitexa\Core\Debug\SessionDebugLog` writes to `var/log/session-debug.log`; can be disabled or reduced in production.

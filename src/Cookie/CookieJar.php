@@ -58,10 +58,6 @@ final class CookieJar implements CookieJarInterface
         }
 
         $this->setCookieLines[] = implode('; ', $parts);
-        \Semitexa\Core\Debug\SessionDebugLog::log('CookieJar.set', [
-            'cookie_name' => $name,
-            'jar_size_after' => count($this->setCookieLines),
-        ]);
     }
 
     public function remove(string $name, string $path = '/', ?string $domain = null): void

@@ -103,12 +103,6 @@ class Application
     {
         return self::measure('Application::handleRequest', function() use ($request) {
             $this->localeStrippedPath = null;
-            $runId = 'initial';
-            $segmentStart = microtime(true);
-            $this->debugLog('H1', 'Application::handleRequest', 'request_received', [
-                'path' => $request->getPath(),
-                'method' => $request->getMethod(),
-            ], $runId);
 
             // Tenant resolution (can short-circuit)
             $tenantResponse = $this->resolveTenancy($request);
@@ -124,12 +118,6 @@ class Application
             if ($localeRedirect !== null) {
                 return $this->finalizeSessionAndCookies($request, $localeRedirect);
             }
-
-            $this->debugLog('H1', 'Application::handleRequest', 'route_discovery', [
-                'path' => $this->getRoutingPath($request),
-                'method' => $request->getMethod(),
-                'duration_ms' => round((microtime(true) - $segmentStart) * 1000, 2),
-            ], $runId);
 
             // Route matching and execution
             $response = $this->matchAndExecuteRoute($request);
@@ -261,24 +249,12 @@ class Application
             $sessionId = bin2hex(random_bytes(16));
         }
         $sessionLifetime = (int) (Environment::getEnvValue('SESSION_LIFETIME') ?? '3600');
-        $handler = $this->sessionHandler;
-        $handlerType = $handler instanceof RedisSessionHandler ? 'redis' : 'swoole_table';
-        $session = new Session($sessionId, $handler, $cookieName, $sessionLifetime);
+        $session = new Session($sessionId, $this->sessionHandler, $cookieName, $sessionLifetime);
         $this->requestScopedContainer->set(SessionInterface::class, $session);
         $this->requestScopedContainer->set(CookieJarInterface::class, new CookieJar($request));
         $this->requestScopedContainer->set(Request::class, $request);
 
         $this->initContextInterfaces();
-
-        \Semitexa\Core\Debug\SessionDebugLog::log('Application.initSessionAndCookies', [
-            'path' => $request->getPath(),
-            'method' => $request->getMethod(),
-            'handler' => $handlerType,
-            'session_id_source' => $fromCookie ? 'from_cookie' : 'new',
-            'session_id_preview' => substr($sessionId, 0, 8) . '…',
-            'cookie_name' => $cookieName,
-            'has_auth_user_id' => $session->has('_auth_user_id'),
-        ]);
     }
 
     private static function createSessionHandler(): SessionHandlerInterface
@@ -318,14 +294,6 @@ class Application
 
         $cookieName = $session->getCookieName();
         $sessionLifetime = (int) (Environment::getEnvValue('SESSION_LIFETIME') ?? '3600');
-        $linesBeforeSession = $cookieJar->getSetCookieLines();
-        \Semitexa\Core\Debug\SessionDebugLog::log('Application.finalizeSessionAndCookies.beforeAddSession', [
-            'path' => $request->getPath(),
-            'method' => $request->getMethod(),
-            'session_id_preview' => substr($session->getSessionIdForCookie(), 0, 8) . '…',
-            'has_auth_user_id' => $session->has('_auth_user_id'),
-            'jar_line_count' => count($linesBeforeSession),
-        ]);
         $cookieJar->set($cookieName, $session->getSessionIdForCookie(), [
             'path' => '/',
             'httpOnly' => true,
@@ -338,17 +306,6 @@ class Application
             $response = $response->withHeaders(['Set-Cookie' => $lines]);
         }
 
-        $cookieNamesFromLines = [];
-        foreach ($lines as $line) {
-            $eq = strpos($line, '=');
-            $cookieNamesFromLines[] = $eq !== false ? rawurldecode(trim(substr($line, 0, $eq))) : '?';
-        }
-        \Semitexa\Core\Debug\SessionDebugLog::log('Application.finalizeSessionAndCookies', [
-            'path' => $request->getPath(),
-            'set_cookie_count' => count($lines),
-            'set_cookie_names' => $cookieNamesFromLines,
-            'session_id_preview' => substr($session->getSessionIdForCookie(), 0, 8) . '…',
-        ]);
         return $response;
     }
 
@@ -456,31 +413,5 @@ class Application
 
         $localeContext = DefaultLocaleContext::getInstance();
         $this->requestScopedContainer->set(LocaleContextInterface::class, $localeContext);
-    }
-
-    /**
-     * @param array<string, mixed> $data
-     */
-    private function debugLog(string $hypothesisId, string $location, string $message, array $data, string $runId): void
-    {
-        // #region agent log
-        $payload = [
-            'sessionId' => 'debug-session',
-            'runId' => $runId,
-            'hypothesisId' => $hypothesisId,
-            'location' => $location,
-            'message' => $message,
-            'data' => $data,
-            'timestamp' => (int) round(microtime(true) * 1000),
-        ];
-        $logDir = \Semitexa\Core\Util\ProjectRoot::get() . '/var/log';
-        if (is_dir($logDir)) {
-            @file_put_contents(
-                $logDir . '/debug.log',
-                json_encode($payload) . "\n",
-                FILE_APPEND
-            );
-        }
-        // #endregion
     }
 }

@@ -27,7 +27,11 @@ class InMemoryTransport implements QueueTransportInterface
                 $payload = array_shift(self::$queues[$queueName]);
                 $callback($payload);
             } else {
-                usleep(250000);
+                if (\Swoole\Coroutine::getCid() > 0) {
+                    \Swoole\Coroutine::sleep(0.25);
+                } else {
+                    usleep(250000);
+                }
             }
         }
     }

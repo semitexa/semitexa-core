@@ -41,7 +41,7 @@ final class EventListenerRegistry
         $classes = ClassDiscovery::findClassesWithAttribute(AsEventListener::class);
         $filtered = array_filter(
             $classes,
-            fn(string $class) => (str_starts_with($class, 'Semitexa\\') && self::isModuleActiveForClass($class))
+            fn(string $class) => (str_starts_with($class, 'Semitexa\\') && ModuleRegistry::isClassActive($class))
                 || self::isProjectEventListeners($class)
         );
 
@@ -95,11 +95,6 @@ final class EventListenerRegistry
             }
         }
         return array_keys($classes);
-    }
-
-    private static function isModuleActiveForClass(string $class): bool
-    {
-        return ModuleRegistry::getModuleNameForClass($class) !== null;
     }
 
     private static function isProjectEventListeners(string $class): bool
