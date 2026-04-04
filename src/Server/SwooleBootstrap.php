@@ -261,18 +261,14 @@ class SwooleBootstrap
     ): void
     {
         $errorResponse = self::buildFatalErrorResponse($e, $env, $request, $app);
+        /** @var array<string, mixed> $headers */
+        $headers = $errorResponse->getHeaders();
 
         $response->status($errorResponse->getStatusCode());
-        foreach ($errorResponse->getHeaders() as $header => $value) {
-            if (is_array($value)) {
-                foreach ($value as $item) {
-                    $response->header($header, (string) $item);
-                }
-                continue;
-            }
-
-            $response->header($header, (string) $value);
-        }
+        self::emitResponseHeaders(
+            $headers,
+            static fn (string $header, mixed $value): mixed => call_user_func([$response, 'header'], $header, $value),
+        );
 
         $response->end($errorResponse->getContent());
     }
@@ -295,5 +291,16 @@ class SwooleBootstrap
         }
 
         return \Semitexa\Core\Http\ErrorRenderer::render($e, $request, $env->isDebug());
+    }
+
+    /**
+     * @param array<string, mixed> $headers
+     * @param \Closure(string, mixed): mixed $headerEmitter
+     */
+    private static function emitResponseHeaders(array $headers, \Closure $headerEmitter): void
+    {
+        foreach ($headers as $header => $value) {
+            $headerEmitter($header, $value);
+        }
     }
 }

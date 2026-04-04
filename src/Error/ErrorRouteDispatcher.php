@@ -21,7 +21,6 @@ final class ErrorRouteDispatcher
     public const ROUTE_NAME_404 = 'error.404';
     public const ROUTE_NAME_500 = 'error.500';
 
-    /** @var \Closure(array<string,mixed>, Request): HttpResponse */
     private \Closure $routeExecutor;
 
     public function __construct(
@@ -32,7 +31,8 @@ final class ErrorRouteDispatcher
         private readonly Environment $environment,
         ?\Closure $routeExecutor = null,
     ) {
-        $this->routeExecutor = $routeExecutor ?? function (array $route, Request $request): HttpResponse {
+        $defaultRouteExecutor = function (array $route, Request $request): HttpResponse {
+            /** @var array{type?: string, class?: string, handlers?: list<array{class?: string, execution?: string}>, responseClass?: string, method?: string, name?: string, consumes?: list<string>|null, produces?: list<string>|null} $route */
             $executor = new RouteExecutor(
                 $this->requestScopedContainer,
                 $this->container,
@@ -41,6 +41,8 @@ final class ErrorRouteDispatcher
 
             return $executor->execute($route, $request);
         };
+
+        $this->routeExecutor = $routeExecutor ?? $defaultRouteExecutor;
     }
 
     /**
@@ -95,6 +97,7 @@ final class ErrorRouteDispatcher
         if ($route === null) {
             return ErrorRenderer::renderStatus($context, $request);
         }
+        /** @var array{type?: string, class?: string, handlers?: list<array{class?: string, execution?: string}>, responseClass?: string, method?: string, name?: string, consumes?: list<string>|null, produces?: list<string>|null} $route */
 
         $state = $this->getDispatchState();
         if (!$state->enter($routeName)) {
@@ -110,6 +113,9 @@ final class ErrorRouteDispatcher
             ErrorPageContextStore::push($context);
 
             $response = ($this->routeExecutor)($route, $request);
+            if (!$response instanceof HttpResponse) {
+                throw new \RuntimeException('Error route executor must return an instance of HttpResponse.');
+            }
 
             return $this->withStatusCode($response, $context->statusCode);
         } catch (\Throwable $routeFailure) {
@@ -147,8 +153,8 @@ final class ErrorRouteDispatcher
         ?array $currentRoute,
         ?\Throwable $throwable,
     ): ErrorPageContext {
-        $normalizedStatus = HttpStatus::tryFrom($statusCode)?->value ?? HttpStatus::InternalServerError->value;
-        $status = HttpStatus::tryFrom($normalizedStatus) ?? HttpStatus::InternalServerError;
+        $status = HttpStatus::tryFrom($statusCode) ?? HttpStatus::InternalServerError;
+        $normalizedStatus = $status->value;
         $debugEnabled = $this->environment->isDebug();
 
         $publicMessage = $normalizedStatus === HttpStatus::NotFound->value
@@ -188,7 +194,8 @@ final class ErrorRouteDispatcher
         }
 
         return str_contains($accept, 'text/html')
-            || str_contains($accept, 'application/xhtml+xml');
+            || str_contains($accept, 'application/xhtml+xml')
+            || str_contains($accept, '*/*');
     }
 
     private function withStatusCode(HttpResponse $response, int $statusCode): HttpResponse

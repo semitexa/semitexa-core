@@ -25,7 +25,7 @@ final class ErrorPageContextStore
             return null;
         }
 
-        return $stack[array_key_last($stack)] ?? null;
+        return $stack[array_key_last($stack)];
     }
 
     public static function pop(): void
@@ -49,7 +49,7 @@ final class ErrorPageContextStore
         if (class_exists(\Swoole\Coroutine::class)) {
             try {
                 $cid = \Swoole\Coroutine::getCid();
-                if ($cid >= 0) {
+                if (is_int($cid) && $cid >= 0) {
                     return $cid;
                 }
             } catch (\Throwable) {

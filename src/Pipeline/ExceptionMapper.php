@@ -87,7 +87,9 @@ final class ExceptionMapper implements ExceptionResponseMapperInterface
 
     private function mapUnknownException(\Throwable $e, Request $request, ResolvedRouteMetadata $metadata): HttpResponse
     {
-        if ($this->errorRouteDispatcher !== null) {
+        $format = $this->negotiateErrorFormat($request, $metadata->produces);
+
+        if ($format === 'html' && $this->errorRouteDispatcher !== null) {
             $response = $this->errorRouteDispatcher->dispatchThrowable($e, $request, ['name' => $metadata->name]);
             if ($response !== null) {
                 return $response;

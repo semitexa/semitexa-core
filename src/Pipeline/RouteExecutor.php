@@ -27,6 +27,8 @@ use Semitexa\Api\Pipeline\ExternalApiExceptionMapper;
 
 class RouteExecutor
 {
+    private ?ErrorRouteDispatcher $errorRouteDispatcher = null;
+
     public function __construct(
         private readonly RequestScopedContainer $requestScopedContainer,
         private readonly ContainerInterface $container,
@@ -36,7 +38,10 @@ class RouteExecutor
 
     private function getAttributeDiscovery(): AttributeDiscovery
     {
-        return $this->container->get(AttributeDiscovery::class);
+        /** @var AttributeDiscovery $attributeDiscovery */
+        $attributeDiscovery = $this->container->get(AttributeDiscovery::class);
+
+        return $attributeDiscovery;
     }
 
     /**
@@ -131,15 +136,7 @@ class RouteExecutor
      */
     private function resolveExceptionMapper(): ExceptionResponseMapperInterface
     {
-        $dispatcher = new ErrorRouteDispatcher(
-            $this->getAttributeDiscovery(),
-            $this->requestScopedContainer,
-            $this->container,
-            $this->authBootstrapper instanceof \Semitexa\Auth\AuthBootstrapper ? $this->authBootstrapper : null,
-            $this->container->has(Environment::class)
-                ? $this->container->get(Environment::class)
-                : Environment::create(),
-        );
+        $dispatcher = $this->getErrorRouteDispatcher();
         $coreMapper = (new ExceptionMapper())->withErrorRouteDispatcher($dispatcher);
 
         if ($this->container->has(ExceptionResponseMapperInterface::class)) {
@@ -155,6 +152,28 @@ class RouteExecutor
         }
 
         return $coreMapper;
+    }
+
+    private function getErrorRouteDispatcher(): ErrorRouteDispatcher
+    {
+        if ($this->errorRouteDispatcher !== null) {
+            return $this->errorRouteDispatcher;
+        }
+
+        /** @var Environment $environment */
+        $environment = $this->container->has(Environment::class)
+            ? $this->container->get(Environment::class)
+            : Environment::create();
+
+        $this->errorRouteDispatcher = new ErrorRouteDispatcher(
+            $this->getAttributeDiscovery(),
+            $this->requestScopedContainer,
+            $this->container,
+            $this->authBootstrapper instanceof \Semitexa\Auth\AuthBootstrapper ? $this->authBootstrapper : null,
+            $environment,
+        );
+
+        return $this->errorRouteDispatcher;
     }
 
     private function decorateResponse(HttpResponse $response, Request $request, ResolvedRouteMetadata $metadata): HttpResponse
@@ -174,7 +193,7 @@ class RouteExecutor
     private function hydrateRequest(array $route, Request $request): array
     {
         $requestClass = $route['class'] ?? null;
-        if ($requestClass === null) {
+        if (!is_string($requestClass) || $requestClass === '') {
             throw new \RuntimeException('Route has no class defined');
         }
 
@@ -249,7 +268,12 @@ class RouteExecutor
             return $resDto;
         }
         if (method_exists($resDto, 'toCoreResponse')) {
-            return $resDto->toCoreResponse();
+            $response = $resDto->toCoreResponse();
+            if ($response instanceof HttpResponse) {
+                return $response;
+            }
+
+            throw new \RuntimeException('toCoreResponse() must return an instance of HttpResponse.');
         }
         return HttpResponse::json(['ok' => true]);
     }

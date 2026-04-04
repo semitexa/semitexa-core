@@ -21,8 +21,8 @@ use Semitexa\Core\HttpResponse;
 final class RoutePhase
 {
     /** Route name for custom 404 page */
-    public const ROUTE_NAME_404 = 'error.404';
-    public const ROUTE_NAME_500 = 'error.500';
+    public const ROUTE_NAME_404 = ErrorRouteDispatcher::ROUTE_NAME_404;
+    public const ROUTE_NAME_500 = ErrorRouteDispatcher::ROUTE_NAME_500;
 
     private readonly AttributeDiscovery $attributeDiscovery;
     private readonly ErrorRouteDispatcher $errorRouteDispatcher;
@@ -33,7 +33,9 @@ final class RoutePhase
         private readonly ?AuthBootstrapper $authBootstrapper,
         private readonly Environment $environment,
     ) {
-        $this->attributeDiscovery = $this->container->get(AttributeDiscovery::class);
+        /** @var AttributeDiscovery $attributeDiscovery */
+        $attributeDiscovery = $this->container->get(AttributeDiscovery::class);
+        $this->attributeDiscovery = $attributeDiscovery;
         $this->errorRouteDispatcher = new ErrorRouteDispatcher(
             $this->attributeDiscovery,
             $this->requestScopedContainer,
@@ -51,6 +53,7 @@ final class RoutePhase
         $route = $this->attributeDiscovery->findRoute($routingPath, $request->getMethod());
 
         if ($route) {
+            /** @var array{type?: string, class?: string, handlers?: list<array{class?: string, execution?: string}>, responseClass?: string, method?: string, name?: string} $route */
             return $this->handleRoute($route, $request);
         }
 
@@ -59,6 +62,7 @@ final class RoutePhase
             $altPath = $routingPath === '/' ? '' : '/';
             $route = $this->attributeDiscovery->findRoute($altPath, $request->getMethod());
             if ($route) {
+                /** @var array{type?: string, class?: string, handlers?: list<array{class?: string, execution?: string}>, responseClass?: string, method?: string, name?: string} $route */
                 return $this->handleRoute($route, $request);
             }
         }

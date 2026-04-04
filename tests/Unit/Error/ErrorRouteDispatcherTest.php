@@ -57,12 +57,16 @@ final class ErrorRouteDispatcherTest extends TestCase
             container: $container,
             authBootstrapper: null,
             environment: $this->makeEnvironment(debug: true),
-            routeExecutor: function (array $route, Request $request) use ($requestScopedContainer): HttpResponse {
+            routeExecutor: function (array $route, Request $_request) use ($requestScopedContainer): HttpResponse {
                 /** @var ErrorPageContext $context */
                 $context = $requestScopedContainer->get(ErrorPageContext::class);
+                $routeName = $route['name'] ?? null;
+                if (!is_string($routeName)) {
+                    throw new \RuntimeException('Error route name must be a string.');
+                }
 
                 return HttpResponse::html(
-                    '<h1>' . $route['name'] . '</h1><p>' . $context->requestPath . '</p>',
+                    '<h1>' . $routeName . '</h1><p>' . $context->requestPath . '</p>',
                     200,
                 );
             },
@@ -110,6 +114,25 @@ final class ErrorRouteDispatcherTest extends TestCase
         $request = new Request('GET', '/missing', ['Accept' => 'application/json'], [], [], [], []);
 
         self::assertNull($dispatcher->dispatchStatus(404, $request));
+    }
+
+    #[Test]
+    public function wildcard_accept_header_prefers_html_error_flow(): void
+    {
+        $discovery = $this->createMock(AttributeDiscovery::class);
+        $discovery->expects($this->once())
+            ->method('findRouteByName')
+            ->with(ErrorRouteDispatcher::ROUTE_NAME_404)
+            ->willReturn(null);
+
+        $dispatcher = $this->makeDispatcher($discovery);
+        $request = new Request('GET', '/missing', ['Accept' => '*/*'], [], [], [], []);
+
+        $response = $dispatcher->dispatchStatus(404, $request);
+
+        self::assertNotNull($response);
+        self::assertSame(404, $response->getStatusCode());
+        self::assertSame('text/html; charset=utf-8', $response->getHeaders()['Content-Type']);
     }
 
     private function makeDispatcher(AttributeDiscovery $discovery, bool $debug = false): ErrorRouteDispatcher

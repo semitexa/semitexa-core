@@ -38,6 +38,10 @@ final class SwooleBootstrapTest extends TestCase
 
             public function renderErrorThrowable(\Throwable $throwable, Request $request, ?array $currentRoute = null): ?HttpResponse
             {
+                if ($request->getPath() === '/__unreachable-null') {
+                    return null;
+                }
+
                 return HttpResponse::html('<h1>custom fatal</h1>', 500);
             }
         };
@@ -51,6 +55,33 @@ final class SwooleBootstrapTest extends TestCase
 
         self::assertSame(500, $response->getStatusCode());
         self::assertStringContainsString('custom fatal', $response->getContent());
+    }
+
+    #[Test]
+    public function emit_response_headers_preserves_set_cookie_and_joins_other_multi_value_headers(): void
+    {
+        $response = new TestSwooleResponse();
+
+        $method = new \ReflectionMethod(SwooleBootstrap::class, 'emitResponseHeaders');
+        $method->setAccessible(true);
+        $method->invoke(
+            null,
+            [
+                'Set-Cookie' => ['first=1; Path=/', 'second=2; Path=/'],
+                'Vary' => ['Accept', 'Accept-Encoding'],
+                'Content-Type' => 'text/html; charset=utf-8',
+            ],
+            $response->headerEmitter(),
+        );
+
+        self::assertSame(
+            [
+                ['Set-Cookie', ['first=1; Path=/', 'second=2; Path=/']],
+                ['Vary', ['Accept', 'Accept-Encoding']],
+                ['Content-Type', 'text/html; charset=utf-8'],
+            ],
+            $response->headers,
+        );
     }
 
     private function makeHtmlRequest(string $uri): Request
@@ -92,5 +123,18 @@ final class SwooleBootstrapTest extends TestCase
             corsAllowHeaders: 'Content-Type',
             corsAllowCredentials: false,
         );
+    }
+}
+
+final class TestSwooleResponse
+{
+    /** @var list<array{0: string, 1: mixed}> */
+    public array $headers = [];
+
+    public function headerEmitter(): \Closure
+    {
+        return function (string $name, mixed $value): void {
+            $this->headers[] = [$name, $value];
+        };
     }
 }

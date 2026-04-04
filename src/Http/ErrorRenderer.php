@@ -34,7 +34,9 @@ class ErrorRenderer
     public static function renderStatus(ErrorPageContext $context, ?Request $request = null): HttpResponse
     {
         $accept = strtolower($request?->getHeader('Accept') ?? '');
-        $isHtml = str_contains($accept, 'text/html') || str_contains($accept, 'application/xhtml+xml');
+        $isHtml = str_contains($accept, 'text/html')
+            || str_contains($accept, 'application/xhtml+xml')
+            || str_contains($accept, '*/*');
 
         if ($isHtml) {
             $title = htmlspecialchars($context->reasonPhrase, ENT_QUOTES | ENT_HTML5);
