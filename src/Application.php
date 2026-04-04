@@ -72,7 +72,7 @@ class Application
         if (class_exists(AuthBootstrapper::class)) {
             $authBootstrapper = new AuthBootstrapper(
                 container: $this->container,
-                classDiscovery: $classDiscovery instanceof ClassDiscovery ? $classDiscovery : new ClassDiscovery(),
+                classDiscovery: $classDiscovery instanceof ClassDiscovery ? $classDiscovery : null,
                 events: $events instanceof EventDispatcherInterface ? $events : null,
                 requestScopedContainer: $this->requestScopedContainer,
             );

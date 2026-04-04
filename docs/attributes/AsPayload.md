@@ -11,7 +11,7 @@ Request/Payload classes must live in modules under `src/modules/`, `packages/`, 
 ## Usage
 
 ```php
-use Semitexa\Core\Attributes\AsPayload;
+use Semitexa\Core\Attribute\AsPayload;
 use Semitexa\Core\Http\Response\ResourceResponse;
 
 #[AsPayload(

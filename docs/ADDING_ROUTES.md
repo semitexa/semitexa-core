@@ -42,7 +42,7 @@ Request/Handler classes in the project folder `src/` (namespace `App\`) are **no
 
    namespace Semitexa\Modules\Website\Application\Payload\Request;
 
-   use Semitexa\Core\Attributes\AsPayload;
+   use Semitexa\Core\Attribute\AsPayload;
    use Semitexa\Core\Contract\PayloadInterface;
    use Semitexa\Modules\Website\Application\Resource\HomeResource;
 
@@ -61,7 +61,7 @@ Request/Handler classes in the project folder `src/` (namespace `App\`) are **no
 
    namespace Semitexa\Modules\Website\Application\Handler\PayloadHandler;
 
-   use Semitexa\Core\Attributes\AsPayloadHandler;
+   use Semitexa\Core\Attribute\AsPayloadHandler;
    use Semitexa\Core\Contract\PayloadInterface;
    use Semitexa\Core\Contract\ResourceInterface;
    use Semitexa\Core\Response;
@@ -97,7 +97,7 @@ The step-by-step example above uses `Response::json([...])` — suitable for API
 **Steps for HTML pages:**
 
 1. **Install the package:** `composer require semitexa/core-frontend` (or the actual package name in your repository).
-2. Create a Response class with the attribute `#[AsResponse(template: 'path/to/file.html.twig')]`.
+2. Create a Response class with the attribute `#[AsResource(template: 'path/to/file.html.twig')]`.
 3. Store templates in the module under `Application/View/templates/` (or your project’s convention).
 4. The Handler fills the response context and returns the Response DTO; the framework uses core-frontend’s LayoutRenderer to render the Twig template.
 

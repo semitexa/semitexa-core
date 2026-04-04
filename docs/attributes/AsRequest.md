@@ -1,8 +1,8 @@
-# AsRequest Attribute
+# AsPayload Attribute
 
 ## Description
 
-The `#[AsRequest]` attribute marks a class as an HTTP Request DTO (Data Transfer Object)  
+The `#[AsPayload]` attribute marks a class as an HTTP Request DTO (Data Transfer Object)  
 and defines the route, HTTP methods and other routing parameters.
 
 **Placement:** Request classes must live in **modules** (`src/modules/`, `packages/`, or `vendor/`).  
@@ -11,10 +11,10 @@ Classes in project `src/` (namespace `App\`) are **not discovered** for routes â
 ## Usage
 
 ```php
-use Semitexa\Core\Attributes\AsRequest;
+use Semitexa\Core\Attribute\AsPayload;
 use Semitexa\Core\Contract\PayloadInterface;
 
-#[AsRequest(
+#[AsPayload(
     doc: 'docs/attributes/AsRequest.md',
     path: '/api/users',
     methods: ['GET'],
@@ -59,7 +59,7 @@ because it allows colons in default values.
 ### Example with environment variables:
 
 ```php
-#[AsRequest(
+#[AsPayload(
     doc: 'docs/attributes/AsRequest.md',
     path: 'env::API_LOGIN_PATH::/api/login',
     methods: ['POST'],
@@ -79,7 +79,7 @@ You can inherit parameters from another Request:
 
 ```php
 // Base request
-#[AsRequest(
+#[AsPayload(
     doc: 'docs/attributes/AsRequest.md',
     path: '/api',
     methods: ['GET']
@@ -87,7 +87,7 @@ You can inherit parameters from another Request:
 class BaseApiRequest implements PayloadInterface {}
 
 // Derived request
-#[AsRequest(
+#[AsPayload(
     doc: 'docs/attributes/AsRequest.md',
     base: BaseApiRequest::class,
     path: '/users'  // Overrides path, inherits methods
@@ -97,16 +97,16 @@ class UserListRequest extends BaseApiRequest {}
 
 ## Related attributes
 
-- `#[AsRequestHandler]` - Handler for processing the Request.
-- `#[AsRequestPart]` - Trait to extend a Request.
-- `#[AsResponse]` - Response DTO.
+- `#[AsPayloadHandler]` - Handler for processing the Request.
+- `#[AsPayloadPart]` - Trait to extend a Request.
+- `#[AsResource]` - Response DTO.
 
 ## Examples
 
 ### Basic GET request
 
 ```php
-#[AsRequest(
+#[AsPayload(
     doc: 'docs/attributes/AsRequest.md',
     path: '/dashboard',
     methods: ['GET']
@@ -117,7 +117,7 @@ class DashboardRequest implements PayloadInterface {}
 ### POST request with validation
 
 ```php
-#[AsRequest(
+#[AsPayload(
     doc: 'docs/attributes/AsRequest.md',
     path: '/api/users',
     methods: ['POST'],
@@ -133,7 +133,7 @@ class CreateUserRequest implements PayloadInterface
 ### RESTful API with parameters
 
 ```php
-#[AsRequest(
+#[AsPayload(
     doc: 'docs/attributes/AsRequest.md',
     path: '/api/users/{id}',
     methods: ['GET', 'PUT', 'DELETE'],
@@ -155,5 +155,5 @@ class UserRequest implements PayloadInterface
 ## See also
 
 - [AsRequestHandler](AsRequestHandler.md) - Creating a handler for a Request.
-- [AsResponse](AsResponse.md) - Creating a Response DTO.
+- [AsPayload](AsPayload.md) - Using the request payload attribute.
 - [Conventions](../../docs/guides/CONVENTIONS.md) - General conventions.

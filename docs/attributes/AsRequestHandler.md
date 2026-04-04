@@ -12,7 +12,7 @@ Classes in project `src/` (namespace `App\`) are **not discovered** for routes â
 ## Usage
 
 ```php
-use Semitexa\Core\Attributes\AsPayloadHandler;
+use Semitexa\Core\Attribute\AsPayloadHandler;
 use Semitexa\Core\Contract\TypedHandlerInterface;
 
 #[AsPayloadHandler(payload: UserListRequest::class, resource: UserListResource::class)]
@@ -49,8 +49,8 @@ class UserListHandler implements TypedHandlerInterface
 Synchronous handlers are executed immediately during request processing:
 
 ```php
-use Semitexa\Core\Attributes\AsPayloadHandler;
-use Semitexa\Core\Attributes\InjectAsReadonly;
+use Semitexa\Core\Attribute\AsPayloadHandler;
+use Semitexa\Core\Attribute\InjectAsReadonly;
 use Semitexa\Core\Contract\TypedHandlerInterface;
 
 #[AsPayloadHandler(payload: DashboardRequest::class, resource: DashboardResource::class, execution: 'sync')]
@@ -73,9 +73,10 @@ class DashboardHandler implements TypedHandlerInterface
 Asynchronous handlers are executed via a queue:
 
 ```php
-use Semitexa\Core\Attributes\AsPayloadHandler;
-use Semitexa\Core\Attributes\InjectAsReadonly;
+use Semitexa\Core\Attribute\AsPayloadHandler;
+use Semitexa\Core\Attribute\InjectAsReadonly;
 use Semitexa\Core\Contract\TypedHandlerInterface;
+use Semitexa\Core\Http\Response\ResourceResponse;
 use Semitexa\Core\Queue\HandlerExecution;
 
 #[AsPayloadHandler(
@@ -120,8 +121,8 @@ class UserProcessingHandler implements TypedHandlerInterface { ... }
 Handlers get dependencies via **property injection** only (no constructor injection). Use **#[InjectAsReadonly]** for shared services, **#[InjectAsMutable]** for request-scoped clones, **#[InjectAsFactory]** for a factory of a contract. Session, CookieJar, and Request are **not** in the DI graph; the container sets them on the handler clone from **RequestContext** (see [Container README](../src/Container/README.md) and [SESSIONS_AND_COOKIES.md](../SESSIONS_AND_COOKIES.md)).
 
 ```php
-use Semitexa\Core\Attributes\AsPayloadHandler;
-use Semitexa\Core\Attributes\InjectAsReadonly;
+use Semitexa\Core\Attribute\AsPayloadHandler;
+use Semitexa\Core\Attribute\InjectAsReadonly;
 use Semitexa\Core\Contract\TypedHandlerInterface;
 
 #[AsPayloadHandler(payload: UserListRequest::class, resource: UserListResource::class)]
@@ -161,6 +162,6 @@ class UserListHandler implements TypedHandlerInterface
 ## See also
 
 - [AsRequest](AsRequest.md) - Request DTOs.
-- [AsResponse](AsResponse.md) - Response DTOs.
+- `#[AsResource]` - Response DTOs.
 - [SERVICE_CONTRACTS.md](../SERVICE_CONTRACTS.md) - Service contracts and active implementation.
 - Queue system: `packages/semitexa/core/src/Queue/README.md` (if available).

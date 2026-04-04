@@ -6,6 +6,8 @@ namespace Semitexa\Core\Console\Command;
 
 use Semitexa\Core\Attribute\AsCommand;
 use Semitexa\Core\Container\ServiceContractRegistry;
+use Semitexa\Core\Discovery\ClassDiscovery;
+use Semitexa\Core\ModuleRegistry;
 use Semitexa\Llm\Attributes\AsAiSkill;
 use Semitexa\Llm\Policy\AiConfirmationMode;
 use Semitexa\Llm\Policy\AiRiskLevel;
@@ -33,6 +35,13 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 )]
 class ContractsListCommand extends BaseCommand
 {
+    public function __construct(
+        private readonly ClassDiscovery $classDiscovery,
+        private readonly ModuleRegistry $moduleRegistry,
+    ) {
+        parent::__construct();
+    }
+
     protected function configure(): void
     {
         $this->setName('contracts:list')
@@ -45,7 +54,7 @@ class ContractsListCommand extends BaseCommand
         $io = new SymfonyStyle($input, $output);
         $json = (bool) $input->getOption('json');
 
-        $registry = new ServiceContractRegistry();
+        $registry = new ServiceContractRegistry($this->classDiscovery, $this->moduleRegistry);
         $details = $registry->getContractDetails();
 
         if ($details === []) {

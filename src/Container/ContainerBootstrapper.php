@@ -141,7 +141,7 @@ final class ContainerBootstrapper
         $this->graphBuilder->buildExecutionScopedPrototypes($executionScopedClasses, $injections, $readonlyInstances, $idToClass, $executionScopedPrototypes, $resolveToClass);
 
         // === BootPhase::ResolverBuild ===
-        $this->graphBuilder->buildResolvers($contractDetails, $idToClass, $readonlyInstances, $executionScopedPrototypes, $interfaceToResolver, $injections);
+        $this->graphBuilder->buildResolvers($contractDetails, $idToClass, $readonlyInstances, $executionScopedPrototypes, $injections);
 
         // === BootPhase::FactoryBuild ===
         $this->graphBuilder->buildFactories($contractDetails, $interfaceToResolver, $readonlyInstances, $executionScopedPrototypes, $factories);

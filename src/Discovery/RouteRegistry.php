@@ -23,7 +23,7 @@ class RouteRegistry
     /** @var list<array{route: array, regex: string, methods: list<string>}> Pre-compiled pattern routes */
     private array $patternIndex = [];
 
-    /** @var array<string, array> Named route index: "name" => route */
+    /** @var array<string, list<array>> Named route index: "name" => [route, ...] */
     private array $namedIndex = [];
 
     /**
@@ -39,7 +39,7 @@ class RouteRegistry
         $name = $route['name'] ?? null;
 
         if ($name !== null && $name !== '') {
-            $this->namedIndex[$name] = $route;
+            $this->namedIndex[$name][] = $route;
         }
 
         if (str_contains($path, '{')) {
@@ -101,7 +101,13 @@ class RouteRegistry
      */
     public function findByName(string $name): ?array
     {
-        return $this->namedIndex[$name] ?? null;
+        $matches = $this->namedIndex[$name] ?? [];
+        if ($matches === []) {
+            return null;
+        }
+
+        $selected = TenantModuleScopeResolver::selectRoutesForCurrentTenant($matches);
+        return $selected[0] ?? null;
     }
 
     /**

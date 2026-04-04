@@ -47,6 +47,10 @@ final class InjectionAnalyzer
      */
     public function collectExecutionScopedClasses(array $idToClass): array
     {
+        if ($this->classDiscovery === null || $this->attributeDiscovery === null) {
+            throw new \LogicException('setDiscoveryInstances() must be called before collectExecutionScopedClasses()');
+        }
+
         $executionScopedClasses = [];
 
         // Explicit #[ExecutionScoped] attribute

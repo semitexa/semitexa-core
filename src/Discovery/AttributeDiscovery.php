@@ -67,8 +67,6 @@ class AttributeDiscovery
         // CLI entrypoints can reach discovery before worker bootstrap syncs .env values.
         Environment::syncEnvFromFiles();
 
-        $startTime = microtime(true);
-
         // Initialize class discovery
         $this->classDiscovery->initialize();
 
@@ -77,8 +75,6 @@ class AttributeDiscovery
 
         // Scan attributes using intelligent autoloader
         $this->scanAttributesIntelligently();
-
-        $endTime = microtime(true);
 
         $this->initialized = true;
     }

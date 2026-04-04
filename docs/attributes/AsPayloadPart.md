@@ -39,7 +39,7 @@ final class SearchPayload
 2. **Trait** in another module:
 
 ```php
-use Semitexa\Core\Attributes\AsPayloadPart;
+use Semitexa\Core\Attribute\AsPayloadPart;
 
 #[AsPayloadPart(base: SearchPayload::class)]
 trait SearchTrackingPart

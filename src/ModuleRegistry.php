@@ -180,7 +180,7 @@ class ModuleRegistry
 
         foreach ($directories as $dir) {
             $moduleName = basename($dir);
-            $namespace = "Semitexa\\Modules\\" . ucfirst($moduleName);
+            $namespace = 'Semitexa\\Modules\\' . Str::toStudly($moduleName);
 
             $modules[] = [
                 'path' => $dir,

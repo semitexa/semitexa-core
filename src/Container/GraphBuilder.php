@@ -101,14 +101,12 @@ final class GraphBuilder
      * @param array<string, string> $idToClass
      * @param array<string, object> $readonlyInstances (mutated in place)
      * @param array<string, object> $executionScopedPrototypes
-     * @param array<string, string> $interfaceToResolver
      */
     public function buildResolvers(
         array $contractDetails,
         array $idToClass,
         array &$readonlyInstances,
         array $executionScopedPrototypes,
-        array $interfaceToResolver,
         array $injections,
     ): void {
         foreach ($contractDetails as $interface => $data) {

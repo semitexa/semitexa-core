@@ -87,7 +87,7 @@ final class LintHandlersCommand extends BaseCommand
             // Return type must not be HttpResponse
             $returnType = $method->getReturnType();
             if ($returnType instanceof \ReflectionNamedType && $returnType->getName() === HttpResponse::class) {
-                $errors[] = "{$handlerClass}::handle() must return ResourceInterface, not Response.";
+                $errors[] = "{$handlerClass}::handle() must return ResourceInterface, not HttpResponse.";
             }
 
             // #[AsPayloadHandler] validation
