@@ -299,12 +299,21 @@ class Application
             return $response;
         }
 
+        if (!$session instanceof Session) {
+            return $response;
+        }
+
         try {
             $session->save();
         } catch (\Throwable $e) {
-            $this->sessionHandler = self::createSessionHandler();
             $this->logSessionPersistenceFailure($e, $request);
-            return $response;
+            try {
+                $this->sessionHandler = self::createSessionHandler();
+                $session->setHandler($this->sessionHandler);
+                $session->save();
+            } catch (\Throwable) {
+                return $response;
+            }
         }
 
         $cookieName = $session->getCookieName();

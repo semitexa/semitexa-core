@@ -120,6 +120,11 @@ final class Session implements SessionInterface
         $this->handler->write($this->id, $data, $this->lifetimeSeconds);
     }
 
+    public function setHandler(SessionHandlerInterface $handler): void
+    {
+        $this->handler = $handler;
+    }
+
     public function getCookieName(): string
     {
         return $this->cookieName;
