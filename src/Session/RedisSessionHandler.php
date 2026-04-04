@@ -9,7 +9,7 @@ use Semitexa\Core\Environment;
 
 /**
  * Reads/writes session data to Redis. Shared across all workers; survives restarts.
- * Used when REDIS_HOST is set in .env.
+ * Used when REDIS_HOST is set in .env. Redis commands reconnect once on failure.
  */
 final class RedisSessionHandler implements SessionHandlerInterface
 {
@@ -26,9 +26,9 @@ final class RedisSessionHandler implements SessionHandlerInterface
     public function read(string $sessionId): array
     {
         $key = self::KEY_PREFIX . $sessionId;
-        $raw = $this->redis->get($key);
+        $raw = $this->withReconnect(static fn (ClientInterface $redis): mixed => $redis->get($key));
 
-        if ($raw === null || $raw === '') {
+        if (!is_string($raw) || $raw === '') {
             \Semitexa\Core\Debug\SessionDebugLog::log('RedisSessionHandler.read', [
                 'session_id_preview' => substr($sessionId, 0, 8) . '…',
                 'found' => false,
@@ -57,9 +57,9 @@ final class RedisSessionHandler implements SessionHandlerInterface
         );
 
         if ($lifetimeSeconds > 0) {
-            $this->redis->setex($key, $lifetimeSeconds, $raw);
+            $this->withReconnect(static fn (ClientInterface $redis): mixed => $redis->setex($key, $lifetimeSeconds, $raw));
         } else {
-            $this->redis->set($key, $raw);
+            $this->withReconnect(static fn (ClientInterface $redis): mixed => $redis->set($key, $raw));
         }
 
         \Semitexa\Core\Debug\SessionDebugLog::log('RedisSessionHandler.write', [
@@ -72,7 +72,7 @@ final class RedisSessionHandler implements SessionHandlerInterface
 
     public function destroy(string $sessionId): void
     {
-        $this->redis->del(self::KEY_PREFIX . $sessionId);
+        $this->withReconnect(static fn (ClientInterface $redis): mixed => $redis->del(self::KEY_PREFIX . $sessionId));
     }
 
     private static function createClient(): ClientInterface
@@ -90,5 +90,15 @@ final class RedisSessionHandler implements SessionHandlerInterface
             $params['password'] = $password;
         }
         return new \Predis\Client($params);
+    }
+
+    private function withReconnect(callable $operation): mixed
+    {
+        try {
+            return $operation($this->redis);
+        } catch (\Throwable) {
+            $this->redis = self::createClient();
+            return $operation($this->redis);
+        }
     }
 }

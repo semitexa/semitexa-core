@@ -17,10 +17,7 @@ class Str
     public static function snakeToCamel(string $key): string
     {
         $parts = explode('_', $key);
-        $first = array_shift($parts);
-        if ($first === null) {
-            return $key;
-        }
+        $first = (string) array_shift($parts);
         foreach ($parts as $i => $part) {
             $parts[$i] = ucfirst($part);
         }

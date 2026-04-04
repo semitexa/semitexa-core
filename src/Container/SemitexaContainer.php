@@ -292,7 +292,8 @@ final class SemitexaContainer implements ContainerInterface
         // === BootPhase::Ready ===
         $this->sealed = true;
 
-        BootDiagnostics::current()->finalize(strict: (bool) getenv('BOOT_STRICT_MODE'));
+        $strictMode = filter_var(getenv('BOOT_STRICT_MODE'), FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE) ?? false;
+        BootDiagnostics::current()->finalize(strict: $strictMode);
     }
 
     /**

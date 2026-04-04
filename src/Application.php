@@ -219,7 +219,7 @@ class Application
             return Response::notFound($e->getMessage() ?: 'The requested resource was not found');
         }
 
-        if ($logger) {
+        if ($logger instanceof \Semitexa\Core\Log\LoggerInterface) {
             $logger->error($e->getMessage(), [
                 'exception' => get_debug_type($e),
                 'file' => $e->getFile(),
@@ -299,7 +299,13 @@ class Application
             return $response;
         }
 
-        $session->save();
+        try {
+            $session->save();
+        } catch (\Throwable $e) {
+            $this->sessionHandler = self::createSessionHandler();
+            $this->logSessionPersistenceFailure($e, $request);
+            return $response;
+        }
 
         $cookieName = $session->getCookieName();
         $sessionLifetime = (int) (Environment::getEnvValue('SESSION_LIFETIME') ?? '3600');
@@ -335,6 +341,28 @@ class Application
             'session_id_preview' => substr($session->getSessionIdForCookie(), 0, 8) . '…',
         ]);
         return $response;
+    }
+
+    private function logSessionPersistenceFailure(\Throwable $e, Request $request): void
+    {
+        try {
+            $logger = $this->container->get(\Semitexa\Core\Log\LoggerInterface::class);
+            if (!$logger instanceof \Semitexa\Core\Log\LoggerInterface) {
+                throw new \RuntimeException('Logger service has invalid type.');
+            }
+
+            $logger->error('Session persistence failed', [
+                'path' => $request->getPath(),
+                'method' => $request->getMethod(),
+                'exception' => get_debug_type($e),
+                'message' => $e->getMessage(),
+            ]);
+            return;
+        } catch (\Throwable) {
+            // Fall back to PHP error log when the logger is unavailable.
+        }
+
+        error_log('[Semitexa] Session persistence failed: ' . $e->getMessage());
     }
 
     /**
