@@ -17,6 +17,7 @@ Use it for:
 - `MODULE_STRUCTURE.md`
 - `RUNNING.md`
 - `SERVICE_CONTRACTS.md`
+- `RELEASE_NOTES.md`
 - `PAYLOAD_VALIDATION.md`
 - `attributes/README.md`
 
