@@ -173,6 +173,7 @@ final class PipelineExecutor
             return;
         }
 
+        $sessionId = $this->getSessionIdForAsyncDelivery($context->request);
         $events->dispatch(new HandlerCompleted(
             $context->lastHandlerClass,
             $context->resourceDto,
