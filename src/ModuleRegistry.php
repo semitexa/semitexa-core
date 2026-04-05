@@ -461,9 +461,15 @@ class ModuleRegistry
 
             $packageDirs = $this->globDirectories($dir . '/*');
             foreach ($packageDirs as $subDir) {
-                $packageName = basename($subDir);
+                $vendorPrefix = basename($dir);
+                $shortName = basename($subDir);
+                // Build the full vendor-package name (e.g. "semitexa-tenancy") so that
+                // module lookups using the full package name resolve correctly.
+                // The short name is added as an alias inside registerModule via the
+                // "semitexa-" prefix stripping logic.
+                $packageName = $vendorPrefix . '-' . $shortName;
                 $namespace = $this->inferNamespaceFromComposer($subDir)
-                    ?? $this->buildNamespaceFromVendor(basename($dir), $packageName);
+                    ?? $this->buildNamespaceFromVendor($vendorPrefix, $shortName);
 
                 $modules[] = [
                     'path' => $subDir,
