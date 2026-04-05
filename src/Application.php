@@ -54,14 +54,18 @@ class Application
     {
         $this->container = $container ?? ContainerFactory::get();
         $this->requestScopedContainer = ContainerFactory::createRequestScoped();
-        $this->environment = $this->container->get(Environment::class);
+        /** @var Environment $environment */
+        $environment = $this->container->get(Environment::class);
+        $this->environment = $environment;
 
+        /** @var LifecycleComponentRegistry $componentRegistry */
         $componentRegistry = $this->container->get(LifecycleComponentRegistry::class);
 
         $events = $this->container->has(EventDispatcherInterface::class)
             ? $this->container->get(EventDispatcherInterface::class)
             : null;
 
+        /** @var ClassDiscovery|null $classDiscovery */
         $classDiscovery = $this->container->getOrNull(ClassDiscovery::class);
 
         $tenancy = $componentRegistry->createTenancyBootstrapper(

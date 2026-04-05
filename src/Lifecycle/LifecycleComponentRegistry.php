@@ -9,6 +9,7 @@ use Semitexa\Auth\AuthBootstrapper;
 use Semitexa\Core\Container\RequestScopedContainer;
 use Semitexa\Core\Discovery\ClassDiscovery;
 use Semitexa\Core\Event\EventDispatcherInterface;
+use Semitexa\Core\ModuleRegistry;
 use Semitexa\Locale\Context\LocaleManager;
 use Semitexa\Locale\LocaleBootstrapper;
 use Semitexa\Tenancy\TenancyBootstrapper;
@@ -30,11 +31,11 @@ final class LifecycleComponentRegistry
     private bool $authAvailable;
     private bool $localeAvailable;
 
-    public function __construct()
+    public function __construct(private readonly ModuleRegistry $moduleRegistry)
     {
-        $this->tenancyAvailable = class_exists(TenancyBootstrapper::class);
-        $this->authAvailable = class_exists(AuthBootstrapper::class);
-        $this->localeAvailable = class_exists(LocaleBootstrapper::class);
+        $this->tenancyAvailable = $this->moduleRegistry->isActive('semitexa-tenancy');
+        $this->authAvailable = $this->moduleRegistry->isActive('semitexa-auth');
+        $this->localeAvailable = $this->moduleRegistry->isActive('semitexa-locale');
     }
 
     public function isTenancyAvailable(): bool

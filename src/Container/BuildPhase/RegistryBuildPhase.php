@@ -52,7 +52,7 @@ final class RegistryBuildPhase implements BuildPhaseInterface
         $context->instanceStore->readonly[PayloadPartRegistry::class] = $context->payloadPartRegistry;
         $context->instanceStore->readonly[EventListenerRegistry::class] = $eventListenerRegistry;
         $context->instanceStore->readonly[PipelineListenerRegistry::class] = $pipelineListenerRegistry;
-        $context->instanceStore->readonly[LifecycleComponentRegistry::class] = new LifecycleComponentRegistry();
+        $context->instanceStore->readonly[LifecycleComponentRegistry::class] = new LifecycleComponentRegistry($context->moduleRegistry);
         $context->instanceStore->readonly[ServerLifecycleRegistry::class] = new ServerLifecycleRegistry($context->classDiscovery);
     }
 
