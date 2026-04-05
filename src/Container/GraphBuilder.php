@@ -24,10 +24,6 @@ use ReflectionNamedType;
  */
 final class GraphBuilder
 {
-    public function __construct(
-        private readonly InjectionAnalyzer $injectionAnalyzer,
-    ) {}
-
     /**
      * Build readonly (worker-scoped) instances in dependency order.
      *
@@ -43,6 +39,7 @@ final class GraphBuilder
         array $injections,
         array &$readonlyInstances,
         callable $resolveToClass,
+        ?InjectionAnalyzer $injectionAnalyzer = null,
     ): void {
         $readonlyClasses = [];
         foreach ($idToClass as $id => $class) {
@@ -59,7 +56,7 @@ final class GraphBuilder
         }
         $order = $this->topologicalOrder(array_keys($readonlyClasses), $injections, $resolveToClass);
         foreach ($order as $class) {
-            $instance = $this->createInstance($class, $injections, $readonlyInstances, $idToClass, $executionScopedClasses);
+            $instance = $this->createInstance($class, $injections, $readonlyInstances, $idToClass, $executionScopedClasses, $injectionAnalyzer);
             $readonlyInstances[$class] = $instance;
             foreach ($idToClass as $id => $c) {
                 if ($c === $class && $id !== $class) {
@@ -86,10 +83,11 @@ final class GraphBuilder
         array &$idToClass,
         array &$executionScopedPrototypes,
         callable $resolveToClass,
+        ?InjectionAnalyzer $injectionAnalyzer = null,
     ): void {
         $order = $this->topologicalOrder(array_keys($executionScopedClasses), $injections, $resolveToClass);
         foreach ($order as $class) {
-            $prototype = $this->createInstance($class, $injections, $readonlyInstances, $idToClass, $executionScopedClasses);
+            $prototype = $this->createInstance($class, $injections, $readonlyInstances, $idToClass, $executionScopedClasses, $injectionAnalyzer);
             $executionScopedPrototypes[$class] = $prototype;
             $idToClass[$class] = $class;
             foreach ($idToClass as $id => $c) {
@@ -115,13 +113,14 @@ final class GraphBuilder
         array &$readonlyInstances,
         array $executionScopedPrototypes,
         array $injections,
+        ?InjectionAnalyzer $injectionAnalyzer = null,
     ): void {
         foreach ($contractDetails as $interface => $data) {
             $resolverClass = $this->getResolverClassForContract($interface);
             if ($resolverClass === null || !class_exists($resolverClass) || !isset($idToClass[$resolverClass])) {
                 continue;
             }
-            $resolver = $this->createInstanceWithConstructor($resolverClass, $readonlyInstances, $executionScopedPrototypes, $idToClass, $injections);
+            $resolver = $this->createInstanceWithConstructor($resolverClass, $readonlyInstances, $executionScopedPrototypes, $idToClass, $injections, $injectionAnalyzer);
             $readonlyInstances[$resolverClass] = $resolver;
         }
     }
@@ -294,6 +293,7 @@ final class GraphBuilder
         array $readonlyInstances,
         array $idToClass,
         array $executionScopedClasses,
+        ?InjectionAnalyzer $injectionAnalyzer = null,
     ): object {
         $ref = new ReflectionClass($class);
 
@@ -315,7 +315,9 @@ final class GraphBuilder
             throw new ContainerException("Container: cannot instantiate {$class}: " . $e->getMessage(), $e);
         }
 
-        $this->injectionAnalyzer->injectConfigProperties($instance, $class, $ref);
+        if ($injectionAnalyzer !== null) {
+            $injectionAnalyzer->injectConfigProperties($instance, $class, $ref);
+        }
         $this->injectPropertiesInto($instance, $class, $injections, $readonlyInstances, $idToClass, $executionScopedClasses);
         return $instance;
     }
@@ -336,6 +338,7 @@ final class GraphBuilder
         array $executionScopedPrototypes,
         array $idToClass,
         array $injections,
+        ?InjectionAnalyzer $injectionAnalyzer = null,
     ): object {
         $ref = new ReflectionClass($class);
         $ctor = $ref->getConstructor();
@@ -367,6 +370,9 @@ final class GraphBuilder
             }
         }
         $instance = $args !== [] ? $ref->newInstanceArgs($args) : $ref->newInstance();
+        if ($injectionAnalyzer !== null) {
+            $injectionAnalyzer->injectConfigProperties($instance, $class, $ref);
+        }
         $this->injectPropertiesInto($instance, $class, $injections, $readonlyInstances, $idToClass, []);
         return $instance;
     }

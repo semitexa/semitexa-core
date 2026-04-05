@@ -10,8 +10,10 @@ use Semitexa\Core\Discovery\HandlerRegistry;
 use Semitexa\Core\Discovery\PayloadPartRegistry;
 use Semitexa\Core\Discovery\RouteRegistry;
 use Semitexa\Core\Event\EventListenerRegistry;
+use Semitexa\Core\Lifecycle\LifecycleComponentRegistry;
 use Semitexa\Core\ModuleRegistry;
 use Semitexa\Core\Pipeline\PipelineListenerRegistry;
+use Semitexa\Core\Server\Lifecycle\ServerLifecycleRegistry;
 
 /**
  * Builds event and pipeline listener registries, and registers all discovery
@@ -50,6 +52,8 @@ final class RegistryBuildPhase implements BuildPhaseInterface
         $context->instanceStore->readonly[PayloadPartRegistry::class] = $context->payloadPartRegistry;
         $context->instanceStore->readonly[EventListenerRegistry::class] = $eventListenerRegistry;
         $context->instanceStore->readonly[PipelineListenerRegistry::class] = $pipelineListenerRegistry;
+        $context->instanceStore->readonly[LifecycleComponentRegistry::class] = new LifecycleComponentRegistry($context->moduleRegistry);
+        $context->instanceStore->readonly[ServerLifecycleRegistry::class] = new ServerLifecycleRegistry($context->classDiscovery);
     }
 
     public function name(): string

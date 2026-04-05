@@ -13,7 +13,6 @@ use Semitexa\Core\Attribute\InjectAsMutable;
 use Semitexa\Core\Attribute\InjectAsReadonly;
 use Semitexa\Core\Container\Exception\InjectionException;
 use Semitexa\Core\Discovery\AttributeDiscovery;
-use Semitexa\Core\Exception\BootstrapException;
 use Semitexa\Core\Discovery\ClassDiscovery;
 use Semitexa\Core\Environment;
 use ReflectionClass;
@@ -27,16 +26,10 @@ use ReflectionNamedType;
  */
 final class InjectionAnalyzer
 {
-    private ?ClassDiscovery $classDiscovery = null;
-    private ?AttributeDiscovery $attributeDiscovery = null;
-
-    /**
-     * @internal Called by ContainerBootstrapper before collectExecutionScopedClasses.
-     */
-    public function setDiscoveryInstances(ClassDiscovery $classDiscovery, AttributeDiscovery $attributeDiscovery): void
-    {
-        $this->classDiscovery = $classDiscovery;
-        $this->attributeDiscovery = $attributeDiscovery;
+    public function __construct(
+        private readonly ClassDiscovery $classDiscovery,
+        private readonly AttributeDiscovery $attributeDiscovery,
+    ) {
     }
 
     /**
@@ -48,10 +41,6 @@ final class InjectionAnalyzer
      */
     public function collectExecutionScopedClasses(array $idToClass): array
     {
-        if ($this->classDiscovery === null || $this->attributeDiscovery === null) {
-            throw new BootstrapException('setDiscoveryInstances() must be called before collectExecutionScopedClasses()');
-        }
-
         $executionScopedClasses = [];
 
         // Explicit #[ExecutionScoped] attribute

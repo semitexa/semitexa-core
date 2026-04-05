@@ -22,13 +22,15 @@ final class ServiceContractRegistry
      * @var array<string, array{implementations: list<array{module: string, class: string, factoryKey?: \BackedEnum|null}>, active: string}>
      */
     private array $contractDetails = [];
+    private readonly ClassDiscovery $classDiscovery;
+    private readonly ModuleRegistry $moduleRegistry;
 
     public function __construct(
-        private readonly ?ClassDiscovery $classDiscovery = null,
-        private readonly ?ModuleRegistry $moduleRegistry = null,
+        ?ClassDiscovery $classDiscovery = null,
+        ?ModuleRegistry $moduleRegistry = null,
     ) {
-        $this->classDiscovery ??= new ClassDiscovery();
-        $this->moduleRegistry ??= new ModuleRegistry();
+        $this->classDiscovery = $classDiscovery ?? new ClassDiscovery();
+        $this->moduleRegistry = $moduleRegistry ?? new ModuleRegistry();
         $this->build();
     }
 

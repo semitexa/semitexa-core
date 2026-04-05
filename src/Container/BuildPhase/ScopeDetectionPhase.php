@@ -11,21 +11,18 @@ use Semitexa\Core\Container\InjectionAnalyzer;
  * implied scope from handler/listener attributes.
  *
  * Preconditions: context->classDiscovery, attributeDiscovery, idToClass must be populated.
- * Postconditions: context->executionScopedClasses populated.
+ * Postconditions: context->executionScopedClasses populated, context->injectionAnalyzer set.
  */
 final class ScopeDetectionPhase implements BuildPhaseInterface
 {
-    public function __construct(
-        private readonly InjectionAnalyzer $injectionAnalyzer,
-    ) {}
-
     public function execute(BuildContext $context): void
     {
         assert($context->classDiscovery !== null, 'ClassmapLoadPhase must run before ScopeDetectionPhase');
         assert($context->attributeDiscovery !== null, 'AttributeScanPhase must run before ScopeDetectionPhase');
 
-        $this->injectionAnalyzer->setDiscoveryInstances($context->classDiscovery, $context->attributeDiscovery);
-        $context->executionScopedClasses = $this->injectionAnalyzer->collectExecutionScopedClasses($context->idToClass);
+        $injectionAnalyzer = new InjectionAnalyzer($context->classDiscovery, $context->attributeDiscovery);
+        $context->injectionAnalyzer = $injectionAnalyzer;
+        $context->executionScopedClasses = $injectionAnalyzer->collectExecutionScopedClasses($context->idToClass);
     }
 
     public function name(): string

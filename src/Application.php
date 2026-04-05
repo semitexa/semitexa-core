@@ -4,20 +4,18 @@ declare(strict_types=1);
 
 namespace Semitexa\Core;
 
-use Semitexa\Auth\AuthBootstrapper;
+use Semitexa\Core\Container\ContainerFactory;
 use Semitexa\Core\Container\RequestScopedContainer;
+use Semitexa\Core\Container\SemitexaContainer;
 use Semitexa\Core\Discovery\ClassDiscovery;
 use Semitexa\Core\Event\EventDispatcherInterface;
 use Semitexa\Core\Lifecycle\LocalePhase;
+use Semitexa\Core\Lifecycle\LifecycleComponentRegistry;
 use Semitexa\Core\Lifecycle\RequestLifecycleContext;
 use Semitexa\Core\Lifecycle\RoutePhase;
 use Semitexa\Core\Lifecycle\SessionPhase;
 use Semitexa\Core\Lifecycle\TenancyPhase;
 use Semitexa\Core\Support\CoroutineLocal;
-use Psr\Container\ContainerInterface;
-use Semitexa\Locale\LocaleBootstrapper;
-use Semitexa\Tenancy\TenancyBootstrapper;
-
 
 /**
  * Minimal Semitexa Application
@@ -35,7 +33,7 @@ class Application
         }
     }
 
-    private ContainerInterface $container {
+    private SemitexaContainer $container {
         get {
             return $this->container;
         }
@@ -52,40 +50,39 @@ class Application
     private LocalePhase $localePhase;
     private RoutePhase $routePhase;
 
-    public function __construct(?ContainerInterface $container = null)
+    public function __construct(?SemitexaContainer $container = null)
     {
-        $this->container = $container ?? \Semitexa\Core\Container\ContainerFactory::get();
-        $this->requestScopedContainer = \Semitexa\Core\Container\ContainerFactory::createRequestScoped();
-        $this->environment = $this->container->get(Environment::class);
+        $this->container = $container ?? ContainerFactory::get();
+        $this->requestScopedContainer = ContainerFactory::createRequestScoped();
+        /** @var Environment $environment */
+        $environment = $this->container->get(Environment::class);
+        $this->environment = $environment;
+
+        /** @var LifecycleComponentRegistry $componentRegistry */
+        $componentRegistry = $this->container->get(LifecycleComponentRegistry::class);
 
         $events = $this->container->has(EventDispatcherInterface::class)
             ? $this->container->get(EventDispatcherInterface::class)
             : null;
 
-        $classDiscovery = $this->container->has(ClassDiscovery::class)
-            ? $this->container->get(ClassDiscovery::class)
-            : null;
+        /** @var ClassDiscovery|null $classDiscovery */
+        $classDiscovery = $this->container->getOrNull(ClassDiscovery::class);
 
-        $tenancy = new TenancyBootstrapper(
-            classDiscovery: $classDiscovery instanceof ClassDiscovery ? $classDiscovery : null,
+        $tenancy = $componentRegistry->createTenancyBootstrapper(
+            classDiscovery: $classDiscovery,
             events: $events instanceof EventDispatcherInterface ? $events : null,
         );
 
-        $authBootstrapper = null;
-        if (class_exists(AuthBootstrapper::class)) {
-            $authBootstrapper = new AuthBootstrapper(
-                container: $this->container,
-                classDiscovery: $classDiscovery instanceof ClassDiscovery ? $classDiscovery : null,
-                events: $events instanceof EventDispatcherInterface ? $events : null,
-                requestScopedContainer: $this->requestScopedContainer,
-            );
-        }
+        $authBootstrapper = $componentRegistry->createAuthBootstrapper(
+            container: $this->container,
+            requestScopedContainer: $this->requestScopedContainer,
+            classDiscovery: $classDiscovery,
+            events: $events instanceof EventDispatcherInterface ? $events : null,
+        );
 
-        $localeBootstrapper = null;
-        if (class_exists(LocaleBootstrapper::class)) {
-            $localeManager = new \Semitexa\Locale\Context\LocaleManager();
-            $localeBootstrapper = new LocaleBootstrapper($localeManager, events: $events);
-        }
+        $localeBootstrapper = $componentRegistry->createLocaleBootstrapper(
+            events: $events instanceof EventDispatcherInterface ? $events : null,
+        );
 
         $this->tenancyPhase = new TenancyPhase($tenancy);
         $this->sessionPhase = new SessionPhase($this->container, $this->requestScopedContainer, $tenancy);
