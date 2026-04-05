@@ -102,7 +102,13 @@ final class ResponseRenderer
         array $context,
     ): object {
         if ($handle && $this->wantsPageDocumentJson($request) && class_exists(\Semitexa\Ssr\Page\PageDocumentProjector::class)) {
-            $context = \Semitexa\Ssr\Page\PageDocumentProjector::project($resDto, $request, $handle, $context, $route);
+            $context = \Semitexa\Ssr\Page\PageDocumentProjector::project(
+                $resDto,
+                $request,
+                $handle,
+                $context,
+                $route->toArray(),
+            );
         }
 
         return $this->renderJson($resDto, $context);
