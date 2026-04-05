@@ -127,23 +127,7 @@ final class SemitexaContainer implements ContainerInterface
             return $this->instanceStore->factories[$id];
         }
 
-        // 3. Resolve id to concrete class via TypeMap
-        $class = $this->typeMap->resolveClass($id);
-        if ($class !== null) {
-            // Check readonly by concrete class (handles interface → concrete resolution)
-            if (isset($this->instanceStore->readonly[$class])) {
-                return $this->instanceStore->readonly[$class];
-            }
-
-            // Check execution-scoped prototype
-            if (isset($this->instanceStore->prototypes[$class])) {
-                $clone = clone $this->instanceStore->prototypes[$class];
-                $this->injectMutableProperties($clone, $class);
-                return $clone;
-            }
-        }
-
-        // 4. Interface → resolver → active contract
+        // 3. Interface → resolver → active contract
         $resolverClass = $this->typeMap->interfaceToResolver[$id] ?? null;
         if ($resolverClass !== null) {
             $resolver = $this->instanceStore->readonly[$resolverClass] ?? null;
@@ -156,6 +140,22 @@ final class SemitexaContainer implements ContainerInterface
                     return $clone;
                 }
                 return $active;
+            }
+        }
+
+        // 4. Resolve id to concrete class via TypeMap
+        $class = $this->typeMap->resolveClass($id);
+        if ($class !== null) {
+            // Check readonly by concrete class (handles interface → concrete resolution)
+            if (isset($this->instanceStore->readonly[$class])) {
+                return $this->instanceStore->readonly[$class];
+            }
+
+            // Check execution-scoped prototype
+            if (isset($this->instanceStore->prototypes[$class])) {
+                $clone = clone $this->instanceStore->prototypes[$class];
+                $this->injectMutableProperties($clone, $class);
+                return $clone;
             }
         }
 
