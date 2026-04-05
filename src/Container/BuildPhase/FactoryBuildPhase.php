@@ -16,13 +16,11 @@ use Semitexa\Core\Container\GraphBuilder;
  */
 final class FactoryBuildPhase implements BuildPhaseInterface
 {
-    public function __construct(
-        private readonly GraphBuilder $graphBuilder,
-    ) {}
-
     public function execute(BuildContext $context): void
     {
-        $this->graphBuilder->buildFactories(
+        $graphBuilder = new GraphBuilder();
+
+        $graphBuilder->buildFactories(
             $context->contractDetails,
             $context->interfaceToResolver,
             $context->instanceStore->readonly,
@@ -30,7 +28,7 @@ final class FactoryBuildPhase implements BuildPhaseInterface
             $context->instanceStore->factories,
         );
 
-        $this->graphBuilder->injectFactoriesIntoPrototypes(
+        $graphBuilder->injectFactoriesIntoPrototypes(
             $context->instanceStore->prototypes,
             $context->injections,
             $context->instanceStore->factories,

@@ -17,10 +17,6 @@ use Semitexa\Core\Container\ServiceContractRegistry;
  */
 final class ContractResolutionPhase implements BuildPhaseInterface
 {
-    public function __construct(
-        private readonly GraphBuilder $graphBuilder,
-    ) {}
-
     public function execute(BuildContext $context): void
     {
         assert($context->classDiscovery !== null, 'ClassmapLoadPhase must run before ContractResolutionPhase');
@@ -28,6 +24,8 @@ final class ContractResolutionPhase implements BuildPhaseInterface
 
         $registry = new ServiceContractRegistry($context->classDiscovery, $context->moduleRegistry);
         $context->contractDetails = $registry->getContractDetails();
+
+        $graphBuilder = new GraphBuilder();
 
         foreach ($context->contractDetails as $interface => $data) {
             $active = $data['active'];
@@ -37,7 +35,7 @@ final class ContractResolutionPhase implements BuildPhaseInterface
             }
             $context->idToClass[$interface] = $active;
 
-            $resolverClass = $this->graphBuilder->getResolverClassForContract($interface);
+            $resolverClass = $graphBuilder->getResolverClassForContract($interface);
             if ($resolverClass !== null && class_exists($resolverClass)) {
                 $context->idToClass[$resolverClass] = $resolverClass;
                 $context->interfaceToResolver[$interface] = $resolverClass;

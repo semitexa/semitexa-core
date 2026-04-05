@@ -70,14 +70,19 @@ class RequestScopedContainer implements ContainerInterface
         if (isset($this->requestScopedCache[$id])) {
             return true;
         }
-        if (
-            $id === SessionInterface::class
-            || $id === CookieJarInterface::class
-            || $id === Request::class
-        ) {
-            return false;
-        }
         return $this->container->has($id);
+    }
+
+    /**
+     * Check whether the execution context has been fully initialized
+     * (Request, Session, and CookieJar have all been set).
+     *
+     * Use this to guard against accessing execution-scoped services
+     * before SessionPhase has completed its setup.
+     */
+    public function isExecutionContextReady(): bool
+    {
+        return $this->executionContextSet;
     }
 
     /**

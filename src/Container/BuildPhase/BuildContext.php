@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Container\BuildPhase;
 
+use Semitexa\Core\Container\InjectionAnalyzer;
 use Semitexa\Core\Container\Store\InjectionMap;
 use Semitexa\Core\Container\Store\InstanceStore;
 use Semitexa\Core\Container\Store\TypeMap;
@@ -47,6 +48,7 @@ final class BuildContext
     public ?PayloadPartRegistry $payloadPartRegistry = null;
     public ?EventListenerRegistry $eventListenerRegistry = null;
     public ?PipelineListenerRegistry $pipelineListenerRegistry = null;
+    public ?InjectionAnalyzer $injectionAnalyzer = null;
 
     // --- Build-time arrays (used during build, transferred to TypeMap at end) ---
 

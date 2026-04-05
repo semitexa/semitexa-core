@@ -9,9 +9,20 @@ use Semitexa\Core\Container\ContainerFactory;
 
 final class ServerLifecycleInvoker
 {
+    private ServerLifecycleRegistry $registry;
+
     public function __construct(
-        private readonly ServerLifecycleRegistry $registry,
+        ServerLifecycleRegistry $registry,
     ) {
+        $this->registry = $registry;
+    }
+
+    /**
+     * Replace the registry (e.g. switch from pre-container to container-managed instance).
+     */
+    public function setRegistry(ServerLifecycleRegistry $registry): void
+    {
+        $this->registry = $registry;
     }
 
     public function invokePhase(ServerLifecyclePhase $phase, ServerLifecycleContext $context, bool $containerAvailable = false): void

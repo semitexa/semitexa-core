@@ -28,7 +28,7 @@ use Semitexa\Core\Discovery\BootDiagnostics;
  * Each phase is an independent class implementing BuildPhaseInterface.
  * Phases communicate through a shared BuildContext accumulator.
  * No DI is available during build — phases receive explicit dependencies
- * through their constructors.
+ * through their constructors or from the BuildContext.
  *
  * @internal Used only by SemitexaContainer::build().
  */
@@ -44,9 +44,6 @@ final class ContainerBootstrapper
     {
         BootDiagnostics::begin();
 
-        // Create helper instances (not DI-managed — these run before the container exists)
-        $injectionAnalyzer = new InjectionAnalyzer();
-        $graphBuilder = new GraphBuilder($injectionAnalyzer);
         $cycleDetector = new CycleDetector();
 
         /** @var list<BuildPhaseInterface> $phases */
@@ -55,15 +52,15 @@ final class ContainerBootstrapper
             new ModuleDiscoveryPhase(),
             new AttributeScanPhase(),
             new RegistryBuildPhase(),
-            new ContractResolutionPhase($graphBuilder),
+            new ContractResolutionPhase(),
             new ServiceRegistrationPhase(),
-            new ScopeDetectionPhase($injectionAnalyzer),
-            new InjectionAnalysisPhase($injectionAnalyzer),
+            new ScopeDetectionPhase(),
+            new InjectionAnalysisPhase(),
             new CycleDetectionPhase($cycleDetector),
-            new ReadonlyBuildPhase($graphBuilder),
-            new ExecutionScopedBuildPhase($graphBuilder),
-            new ResolverBuildPhase($graphBuilder),
-            new FactoryBuildPhase($graphBuilder),
+            new ReadonlyBuildPhase(),
+            new ExecutionScopedBuildPhase(),
+            new ResolverBuildPhase(),
+            new FactoryBuildPhase(),
             new ValidationPhase(),
         ];
 

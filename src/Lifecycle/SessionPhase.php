@@ -123,15 +123,11 @@ final class SessionPhase
                     return new RedisSessionHandler($pool);
                 }
             }
-            // Fallback: create a single-connection pool (CLI/tests without container bootstrap)
-            $pool = new RedisConnectionPool(1, [
-                'host' => $redisHost,
-                'port' => (int) Environment::getEnvValue('REDIS_PORT', '6379'),
-                'password' => (string) (Environment::getEnvValue('REDIS_PASSWORD', '') ?? ''),
-                'scheme' => (string) (Environment::getEnvValue('REDIS_SCHEME', 'tcp') ?? 'tcp'),
-            ]);
-            $pool->boot();
-            return new RedisSessionHandler($pool);
+            throw new \RuntimeException(
+                'Redis is configured (REDIS_HOST is set) but no RedisConnectionPool '
+                . 'was registered during container bootstrap. Ensure Redis is properly '
+                . 'configured in the application setup.'
+            );
         }
         return new SwooleTableSessionHandler();
     }

@@ -80,7 +80,7 @@ class SwooleBootstrap
         );
         $lifecycleInvoker->invokePhase(ServerLifecyclePhase::PreStart, $bootstrapContext, false);
 
-        $server->on(SwooleEvent::WorkerStart->value, function (Server $server, int $workerId) use ($bootstrapState, $lifecycleInvoker) {
+        $server->on(SwooleEvent::WorkerStart->value, function (Server $server, int $workerId) use ($bootstrapState, $lifecycleInvoker, $lifecycleRegistry) {
             self::syncInheritedComposerAutoloader();
             Environment::syncEnvFromFiles();
             $workerEnv = Environment::create();
@@ -92,6 +92,12 @@ class SwooleBootstrap
             );
             $lifecycleInvoker->invokePhase(ServerLifecyclePhase::WorkerStartBeforeContainer, $context, false);
             ContainerFactory::create();
+            // Switch to container-managed registry (uses container's ClassDiscovery,
+            // avoiding duplicate attribute scanning).
+            $containerRegistry = ContainerFactory::get()->get(ServerLifecycleRegistry::class);
+            if ($containerRegistry instanceof ServerLifecycleRegistry) {
+                $lifecycleInvoker->setRegistry($containerRegistry);
+            }
             $lifecycleInvoker->invokePhase(ServerLifecyclePhase::WorkerStartAfterContainer, $context, true);
             $lifecycleInvoker->invokePhase(ServerLifecyclePhase::WorkerStartAfterServerBindings, $context, true);
             $lifecycleInvoker->invokePhase(ServerLifecyclePhase::WorkerStartFinalize, $context, true);
