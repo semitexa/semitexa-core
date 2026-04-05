@@ -177,6 +177,7 @@ final class PipelineExecutor
             $context->lastHandlerClass,
             $context->resourceDto,
             $handle,
+            $sessionId,
         ));
     }
 

@@ -13,5 +13,6 @@ final class HandlerCompleted
         public readonly string $handlerClass,
         public readonly object $resource,
         public readonly string $handle,
+        public readonly string $sessionId,
     ) {}
 }
