@@ -49,26 +49,31 @@ final readonly class DiscoveredRoute
      */
     public static function fromArray(array $route): self
     {
+        $methods = array_values(array_filter(
+            is_array($route['methods'] ?? null) ? $route['methods'] : [$route['method'] ?? 'GET'],
+            static fn (mixed $v): bool => is_string($v) && $v !== '',
+        ));
+        if ($methods === []) {
+            $methods = ['GET'];
+        }
+
         return new self(
             path: (string) ($route['path'] ?? ''),
-            methods: array_values(array_filter(
-                is_array($route['methods'] ?? null) ? $route['methods'] : [$route['method'] ?? 'GET'],
-                static fn(mixed $v): bool => is_string($v),
-            )),
+            methods: $methods,
             name: is_string($route['name'] ?? null) ? $route['name'] : null,
             requestClass: (string) ($route['class'] ?? $route['requestClass'] ?? ''),
             responseClass: is_string($route['responseClass'] ?? null) ? $route['responseClass'] : null,
-            handlers: is_array($route['handlers'] ?? null) ? $route['handlers'] : [],
+            handlers: array_values(array_filter((array) ($route['handlers'] ?? []), 'is_string')),
             type: (string) ($route['type'] ?? 'http_request'),
-            produces: is_array($route['produces'] ?? null) ? $route['produces'] : null,
-            consumes: is_array($route['consumes'] ?? null) ? $route['consumes'] : null,
+            produces: is_array($route['produces'] ?? null) ? array_values(array_filter($route['produces'], 'is_string')) : null,
+            consumes: is_array($route['consumes'] ?? null) ? array_values(array_filter($route['consumes'], 'is_string')) : null,
             module: (string) ($route['module'] ?? ''),
             requirements: is_array($route['requirements'] ?? null) ? $route['requirements'] : [],
             defaults: is_array($route['defaults'] ?? null) ? $route['defaults'] : [],
             options: is_array($route['options'] ?? null) ? $route['options'] : [],
-            tags: is_array($route['tags'] ?? null) ? $route['tags'] : [],
+            tags: array_values(array_filter((array) ($route['tags'] ?? []), 'is_string')),
             public: (bool) ($route['public'] ?? false),
-            tenantScopes: is_array($route['tenantScopes'] ?? null) ? $route['tenantScopes'] : [],
+            tenantScopes: array_values(array_filter((array) ($route['tenantScopes'] ?? []), 'is_string')),
         );
     }
 

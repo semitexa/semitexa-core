@@ -22,7 +22,7 @@ final class HandlerReflectionCache
      * Validate and cache the handle() method for a TypedHandlerInterface handler.
      * Called during discovery/boot phase.
      *
-     * @throws \LogicException if the handler signature is invalid
+     * @throws ConfigurationException if the handler signature is invalid
      */
     public static function warm(string $handlerClass): void
     {
@@ -103,7 +103,7 @@ final class HandlerReflectionCache
     /**
      * Invoke the cached handle() method on a handler instance.
      *
-     * @throws \LogicException if the handler was not warmed
+     * @throws ConfigurationException if the handler was not warmed
      */
     public static function invoke(object $handler, object $payload, object $resource): object
     {

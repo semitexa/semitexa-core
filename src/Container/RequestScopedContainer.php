@@ -112,5 +112,8 @@ class RequestScopedContainer implements ContainerInterface
     {
         $this->requestScopedCache = [];
         $this->executionContextSet = false;
+        if ($this->container instanceof SemitexaContainer) {
+            $this->container->clearExecutionContext();
+        }
     }
 }

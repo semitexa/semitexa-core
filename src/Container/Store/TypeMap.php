@@ -38,6 +38,11 @@ final class TypeMap
         array $executionScopedClasses,
         array $interfaceToResolver,
     ): void {
+        $this->contractBindings = [];
+        $this->registeredClasses = [];
+        $this->interfaceToResolver = [];
+        $this->executionScoped = [];
+
         $this->interfaceToResolver = $interfaceToResolver;
         $this->executionScoped = $executionScopedClasses;
 

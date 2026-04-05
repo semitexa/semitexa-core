@@ -296,7 +296,7 @@ final class ResponseRenderer
     private function buildPageAlternates(DiscoveredRoute $route, string $path, array $query): array
     {
         $produces = $route->produces;
-        if (!is_array($produces) || $produces === []) {
+        if ($produces === null || $produces === []) {
             return [];
         }
 

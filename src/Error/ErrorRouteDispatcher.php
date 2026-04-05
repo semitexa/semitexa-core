@@ -95,10 +95,15 @@ final class ErrorRouteDispatcher
             );
         }
 
-        $handlerRegistry = $this->container->has(HandlerRegistry::class)
-            ? $this->container->get(HandlerRegistry::class)
-            : null;
-        $route = $this->routeRegistry->findByNameTyped($routeName, $handlerRegistry);
+        try {
+            $handlerRegistry = $this->container->has(HandlerRegistry::class)
+                ? $this->container->get(HandlerRegistry::class)
+                : null;
+            $route = $this->routeRegistry->findByNameTyped($routeName, $handlerRegistry);
+        } catch (\Throwable) {
+            return ErrorRenderer::renderStatus($context, $request);
+        }
+
         if ($route === null) {
             return ErrorRenderer::renderStatus($context, $request);
         }

@@ -95,6 +95,11 @@ final class SemitexaContainer implements ContainerInterface
         }
     }
 
+    public function clearExecutionContext(): void
+    {
+        $this->executionContextValues = [];
+    }
+
     /**
      * Register a pre-built instance (e.g. Environment, Logger) as readonly.
      * Only allowed during build phase. After BootPhase::Ready, throws ContainerSealedException.
