@@ -7,7 +7,8 @@ declare(strict_types=1);
  * Semitexa CLI entry point (shipped with semitexa/core).
  * When installed via Composer, this is linked as vendor/bin/semitexa.
  */
-if (in_array($argv[1] ?? '', ['server:start', 'server:restart', 'server:reload'], true)) {
+// Only rebuild autoload for start/restart (NOT reload — reload is a fast path).
+if (in_array($argv[1] ?? '', ['server:start', 'server:restart'], true)) {
     semitexaPrebuildAutoload();
 }
 
