@@ -6,6 +6,10 @@
 
 Another module can target a base `#[AsPayload(...)]` class and contribute extra typed setters, getters, and transport-boundary logic without reopening or forking the original payload class.
 
+That includes validation ownership. If the trait adds a field, the trait should also own the setter-level guard for that field instead of pushing the rule back into a base-class `validate()` method.
+
+If a setter throws `Semitexa\Core\Exception\ValidationException`, the Core request pipeline surfaces that as a 422 response with field-level errors.
+
 At runtime, Semitexa discovers all matching payload-part traits and composes a wrapper class that:
 
 - extends the base payload
@@ -31,7 +35,15 @@ final class SearchPayload
 
     public function setQuery(string $query): void
     {
-        $this->query = trim($query);
+        $query = trim($query);
+
+        if ($query === '') {
+            throw new \Semitexa\Core\Exception\ValidationException([
+                'query' => ['Search query is required.'],
+            ]);
+        }
+
+        $this->query = $query;
     }
 }
 ```
@@ -54,6 +66,11 @@ trait SearchTrackingPart
     public function setCampaign(?string $campaign): void
     {
         $campaign = $campaign !== null ? trim($campaign) : null;
+        if ($campaign !== null && mb_strlen($campaign) > 64) {
+            throw new \Semitexa\Core\Exception\ValidationException([
+                'campaign' => ['Campaign code must stay below 64 characters.'],
+            ]);
+        }
         $this->campaign = $campaign !== '' ? $campaign : null;
     }
 }
@@ -93,6 +110,7 @@ final class SearchHandler implements TypedHandlerInterface
 
 - `#[AsPayloadPart]` is about **modular transport-boundary extension**, not inheritance hacks.
 - This is especially useful when one module owns the route, but another module must add request concerns such as tracking, preview flags, tenant hints, or feature toggles.
+- Field-level validation for the added concerns should live with the added setters, which keeps the base payload closed for modification.
 - Composition happens at runtime through `PayloadFactory`; there is no separate payload code-generation step.
 
 ## Related

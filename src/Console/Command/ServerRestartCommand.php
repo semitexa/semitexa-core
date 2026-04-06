@@ -5,62 +5,65 @@ declare(strict_types=1);
 namespace Semitexa\Core\Console\Command;
 
 use Semitexa\Core\Attribute\AsCommand;
+use Semitexa\Core\Console\Runtime\PrepareRuntimeAction;
+use Semitexa\Core\Console\Runtime\StartRuntimeAction;
+use Semitexa\Core\Console\Runtime\StopRuntimeAction;
+use Semitexa\Core\Console\Runtime\VerifyRuntimeAction;
+use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Style\SymfonyStyle;
-use Symfony\Component\Console\Command\Command;
 
-use Symfony\Component\Process\Process;
-
-#[AsCommand(name: 'server:restart', description: 'Restart Semitexa Environment (Docker)')]
-class ServerRestartCommand extends BaseCommand
+/**
+ * Lifecycle: prepare → stop → start → verify
+ *
+ * This is the command that refreshes code, autoload, env, and container state.
+ */
+#[AsCommand(name: 'server:restart', description: 'Restart Semitexa Environment (full restart with autoload rebuild and env refresh)')]
+class ServerRestartCommand extends Command
 {
     protected function configure(): void
     {
         $this->setName('server:restart')
-            ->setDescription('Restart Semitexa Environment (Docker)')
-            ->addOption('service', 's', InputOption::VALUE_OPTIONAL, 'Specific service to restart');
+            ->setDescription('Restart Semitexa Environment (full restart with autoload rebuild and env refresh)')
+            ->addOption('service', 's', InputOption::VALUE_REQUIRED, 'Specific service to restart');
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
         $io = new SymfonyStyle($input, $output);
-        $projectRoot = $this->getProjectRoot();
+        /** @var string|null $service */
         $service = $input->getOption('service');
-
-        $io->title('Restarting Semitexa Environment (Docker)');
-
-        if (!$this->rebuildAutoload($io)) {
+        if ($service !== null && trim($service) === '') {
+            $io->error('The --service option requires a non-empty service name.');
             return Command::FAILURE;
         }
 
-        if (!file_exists($projectRoot . '/docker-compose.yml')) {
-            $io->error('docker-compose.yml not found.');
-            $io->text([
-                'Run <comment>semitexa init</comment> to generate project structure including docker-compose.yml, or add docker-compose.yml manually.',
-                'See docs/RUNNING.md for the supported way to run the app (Docker only).',
-            ]);
+        $io->title('Restarting Semitexa Environment');
+
+        // 1. Prepare: composer dump-autoload + build marker
+        $prepare = new PrepareRuntimeAction($io);
+        if (!$prepare->execute()) {
             return Command::FAILURE;
         }
 
-        $command = ['docker', 'compose', 'restart'];
-        if ($service) {
-            $command[] = $service;
-            $io->section("Restarting service: $service");
-        } else {
-            $io->section('Restarting all containers...');
+        // 2. Stop
+        $stop = new StopRuntimeAction($io);
+        if (!$stop->execute($service)) {
+            $io->error('Stop phase failed; aborting restart to avoid starting into a dirty runtime.');
+            return Command::FAILURE;
         }
-        
-        $process = new Process($command, $projectRoot);
-        $process->setTimeout(null);
-        
-        $process->run(function ($type, $buffer) use ($io) {
-             $io->write($buffer);
-        });
 
-        if (!$process->isSuccessful()) {
-            $io->error('Failed to restart environment.');
+        // 3. Start
+        $start = new StartRuntimeAction($io);
+        if (!$start->execute($service)) {
+            return Command::FAILURE;
+        }
+
+        // 4. Verify
+        $verify = new VerifyRuntimeAction($io);
+        if (!$verify->execute(checkBuildMarker: true)) {
             return Command::FAILURE;
         }
 
@@ -68,4 +71,3 @@ class ServerRestartCommand extends BaseCommand
         return Command::SUCCESS;
     }
 }
-

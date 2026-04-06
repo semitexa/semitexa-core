@@ -2,77 +2,104 @@
 
 ## Idea
 
-Payload DTOs are the **shield** from external data: hydration, type casting, and validation happen in one place. Handlers work only with **clean, validated data**. Invalid input is **rejected** (422 Unprocessable Entity). All Payload DTOs (Request, Session, Cookie, etc.) follow the same rules: **protected** fields, access only via **getters/setters**, and **ValidatablePayload** required.
+Payload DTOs are the boundary between external data and application code. Semitexa already hydrates payloads through typed setters, so field ownership and field-level validation should live in those setters instead of in one DTO-wide `validate()` method.
+
+Invalid input is still rejected as `422 Unprocessable Entity`, but the rejection should be expressed by the field that failed, not by a monolithic post-hydration pass.
 
 ## Pipeline
 
-1. **Hydrate** — `PayloadHydrator::hydrate($dto, $request)` fills the DTO using the **setter convention**: for each key in raw data (JSON/POST/query + path params), the hydrator calls `set{CamelCase}($value)` if the method exists. The value is cast to the setter’s parameter type before calling.
-2. **Validate** — `PayloadValidator::validate($dto, $request)` calls **`$dto->validate()`**. Every Payload must implement `ValidatablePayload` and return a `PayloadValidationResult`. Validation logic lives in the DTO (e.g. using validation traits).
-3. If validation fails → return **422** with a body listing field errors; handler is **not** called.
-4. If validation passes → handler runs with a DTO that is guaranteed to satisfy your rules.
+1. **Hydrate** - `PayloadHydrator::hydrate($dto, $request)` fills the DTO using the setter convention: for each key in raw data (JSON/POST/query + path params), the hydrator calls `set{CamelCase}($value)` if the method exists.
+2. **Normalize and guard** - each setter can normalize its input and reject invalid values immediately with a field-aware exception such as `Semitexa\Core\Exception\ValidationException`.
+3. **Return 422 on failure** - `RouteExecutor` or the surrounding request pipeline converts the field error into an HTTP 422 response before the handler runs.
+4. **Handle** - the handler receives a DTO whose individual fields have already been normalized and guarded by their own setters.
 
 ## Payload rules
 
 - **Fields:** `private` or `protected` only.
 - **Access:** only through **getters** (`get*`) and **setters** (`set*`).
-- **Interface:** implement `Semitexa\Core\Contract\ValidatablePayload` with `validate(): PayloadValidationResult`.
-- **Validation:** implement `validate()` (e.g. by using validation traits and collecting errors).
+- **Validation ownership:** field-level rules belong in the setter for that field.
+- **Cross-field rules:** keep them explicit and local. If a rule spans multiple fields, prefer a dedicated helper method or a small field-specific exception path over a hidden DTO-wide validation bag.
 
-## Validation traits (core)
+## Validation helpers
 
-Use these traits in your Payload and call their methods from `validate()`:
+Core still provides reusable building blocks for teams that want shared validation logic:
 
-- **`NotBlankValidationTrait`** — `$this->validateNotBlank('fieldName', $this->fieldName, $errors);`
-- **`EmailValidationTrait`** — `$this->validateEmail('fieldName', $this->fieldName, $errors);`
-- **`LengthValidationTrait`** — `$this->validateLength('fieldName', $this->fieldName, $min, $max, $errors);`
+- `Semitexa\Core\Exception\ValidationException` for structured field errors
+- the existing validation traits in `Semitexa\Core\Validation\Trait\*` for shared rule helpers
 
-Namespaces: `Semitexa\Core\Validation\Trait\*`. You can add your own traits in modules and reuse them across Payloads.
+These helpers are still useful, but they no longer imply that every payload must funnel all rules through `validate()`.
 
 ## Example
 
 ```php
-use Semitexa\Core\Contract\PayloadInterface;
-use Semitexa\Core\Contract\ValidatablePayload;
-use Semitexa\Core\Http\PayloadValidationResult;
-use Semitexa\Core\Validation\Trait\EmailValidationTrait;
-use Semitexa\Core\Validation\Trait\NotBlankValidationTrait;
-use Semitexa\Core\Validation\Trait\LengthValidationTrait;
+use Semitexa\Core\Attribute\AsPayload;
+use Semitexa\Core\Exception\ValidationException;
 
-#[AsPayload(path: '/contact', methods: ['GET', 'POST'], responseWith: ContactFormResource::class)]
-class ContactFormPayload implements PayloadInterface, ValidatablePayload
+#[AsPayload(path: '/contact', methods: ['POST'], responseWith: ContactFormResource::class)]
+class ContactFormPayload
 {
-    use EmailValidationTrait, NotBlankValidationTrait, LengthValidationTrait;
-
     protected string $email = '';
     protected string $message = '';
 
-    public function getEmail(): string { return $this->email; }
-    public function setEmail(string $email): void { $this->email = $email; }
-    public function getMessage(): string { return $this->message; }
-    public function setMessage(string $message): void { $this->message = $message; }
-
-    public function validate(): PayloadValidationResult
+    public function getEmail(): string
     {
-        $errors = [];
-        $this->validateNotBlank('email', $this->email, $errors);
-        $this->validateEmail('email', $this->email, $errors);
-        $this->validateLength('message', $this->message, null, 5000, $errors);
-        return new PayloadValidationResult(empty($errors), $errors);
+        return $this->email;
+    }
+
+    public function setEmail(string $email): void
+    {
+        $email = trim($email);
+
+        if ($email === '') {
+            throw new ValidationException(['email' => ['Email is required.']]);
+        }
+
+        if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            throw new ValidationException(['email' => ['Email must be valid.']]);
+        }
+
+        $this->email = $email;
+    }
+
+    public function getMessage(): string
+    {
+        return $this->message;
+    }
+
+    public function setMessage(string $message): void
+    {
+        $message = trim($message);
+
+        if ($message === '') {
+            throw new ValidationException(['message' => ['Message is required.']]);
+        }
+
+        if (mb_strlen($message) > 5000) {
+            throw new ValidationException(['message' => ['Message must stay below 5000 characters.']]);
+        }
+
+        $this->message = $message;
     }
 }
 ```
 
-## Hydration (setter convention)
+## Hydration
 
-- Data keys (e.g. `email`, `flash_message`) are converted to setter names: `setEmail`, `setFlashMessage` (snake_case → camelCase).
-- Path params from the route (e.g. `{id}`) are passed as key `id` and trigger `setId($value)`.
-- The hydrator uses the setter’s parameter type to cast the value before calling.
+- Data keys such as `email` and `flash_message` are converted to setter names such as `setEmail` and `setFlashMessage`.
+- Path params from the route, such as `{id}`, are passed as key `id` and trigger `setId($value)`.
+- The hydrator uses the setter's parameter type to cast the value before calling it.
 
 ## Response on validation failure
 
 - **Status:** 422 Unprocessable Entity.
-- **Body (e.g. JSON):** `{ "errors": { "fieldName": ["message1", "message2"], ... } }`.
+- **Default Core body example:** `{ "error": "validation_exception", "message": "The given data was invalid.", "context": { "errors": { "fieldName": ["message1", "message2"], ... } } }`.
+
+Setter-thrown `ValidationException` is the field-level signal used by this model, and the Core route pipeline maps it to the 422 envelope above.
 
 ## Session / Cookie payloads
 
-The same rules apply: protected fields, getters/setters, `ValidatablePayload`. Session and queue payloads are serialized with `PayloadSerializer`, which uses getters for `toArray()` and setters for `hydrate()`.
+The same rules apply: protected fields, getters/setters, and explicit field guards. Session and queue payloads are serialized with `PayloadSerializer`, which uses getters for `toArray()` and setters for `hydrate()`.
+
+## Authoring note
+
+`validate()` is not the authoring model for new payloads. New payloads should prefer setter-owned validation and should keep field normalization, field-shape checks, and cross-field guards explicit in the payload itself.

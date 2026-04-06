@@ -8,7 +8,7 @@ use Semitexa\Core\Attribute\AsCommand;
 use Semitexa\Core\Container\ServiceContractRegistry;
 use Semitexa\Core\Discovery\ClassDiscovery;
 use Semitexa\Core\ModuleRegistry;
-use Semitexa\Llm\Attributes\AsAiSkill;
+use Semitexa\Llm\Attribute\AsAiSkill;
 use Semitexa\Llm\Policy\AiConfirmationMode;
 use Semitexa\Llm\Policy\AiRiskLevel;
 use Symfony\Component\Console\Command\Command;

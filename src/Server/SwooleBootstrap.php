@@ -217,10 +217,8 @@ class SwooleBootstrap
     /**
      * Sync the inherited Composer ClassLoader with the latest files from vendor/composer.
      *
-     * `server:reload` runs `composer dump-autoload` before sending SIGUSR1 to the Swoole master.
-     * The master process itself is not restarted, so newly-forked workers can inherit an older
-     * in-memory autoloader. Refreshing it at WorkerStart keeps graceful reloads consistent with
-     * the freshly-written autoload files on disk.
+     * The reload command does not rebuild autoload itself; this hook keeps newly-forked workers
+     * aligned with whatever autoload files are already present on disk after a restart or build.
      */
     private static function syncInheritedComposerAutoloader(): void
     {

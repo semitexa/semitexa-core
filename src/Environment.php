@@ -54,7 +54,7 @@ readonly class Environment
             appName: $get('APP_NAME', 'Semitexa Framework'),
             appHost: $get('APP_HOST', 'localhost'),
             appPort: (int) $get('APP_PORT', '8000'),
-            swoolePort: (int) $get('SWOOLE_PORT', '9501'),
+            swoolePort: (int) $get('SWOOLE_PORT', '9502'),
             swooleSsePort: (int) $get('SWOOLE_SSE_PORT', '9503'),
             swooleHost: $get('SWOOLE_HOST', '0.0.0.0'),
             swooleWorkerNum: (int) $get('SWOOLE_WORKER_NUM', '4'),
@@ -85,16 +85,9 @@ readonly class Environment
             $env = array_merge($env, self::parseEnvFile($envDefaultFile));
         }
 
-        // Legacy compatibility layer: .env remains supported during the
-        // migration window while projects move to .env.default + .env.local.
         $envFile = $root . '/.env';
         if (is_file($envFile)) {
             $env = array_merge($env, self::parseEnvFile($envFile));
-        }
-
-        $envLocalFile = $root . '/.env.local';
-        if (is_file($envLocalFile)) {
-            $env = array_merge($env, self::parseEnvFile($envLocalFile));
         }
 
         return $env;
@@ -181,7 +174,7 @@ readonly class Environment
     
     /**
      * Get any environment variable value (not just predefined ones).
-     * Checks getenv() first, then cached .env.default/.env/.env.local values.
+     * Checks getenv() first, then cached .env.default/.env values.
      * The .env file cache is parsed once per worker and reused across requests.
      *
      * @param string $key Environment variable name
@@ -210,7 +203,7 @@ readonly class Environment
     }
 
     /**
-     * Load .env.default, legacy .env, and .env.local into getenv() / $_ENV / $_SERVER.
+     * Load .env.default and .env into getenv() / $_ENV / $_SERVER.
      * Call from Swoole WorkerStart so workers have DB_*, etc. (fork may not inherit env in some setups).
      * Variables already set in the process env (e.g. by Docker) are not overwritten, so compose overrides win.
      */

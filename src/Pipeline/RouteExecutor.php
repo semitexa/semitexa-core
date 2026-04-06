@@ -220,6 +220,8 @@ class RouteExecutor
             if (method_exists($reqDto, 'setHttpRequest')) {
                 $reqDto->setHttpRequest($request);
             }
+        } catch (\Semitexa\Core\Exception\ValidationException $e) {
+            return [$reqDto, HttpResponse::json(['errors' => $e->getErrorContext()['errors']], HttpStatus::UnprocessableEntity->value)];
         } catch (\Semitexa\Core\Http\Exception\TypeMismatchException $e) {
             return [$reqDto, HttpResponse::json(['errors' => [$e->field => [$e->getMessage()]]], HttpStatus::UnprocessableEntity->value)];
         } catch (\Throwable $e) {
