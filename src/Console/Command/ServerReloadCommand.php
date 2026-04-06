@@ -15,16 +15,17 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 /**
  * Lifecycle: reload → verify
  *
- * Does NOT rebuild autoload. Only safe for changes inside existing files.
- * For new/renamed/deleted classes, use server:restart.
+ * Does NOT rebuild autoload or recreate containers.
+ * Only safe for code changes inside existing files.
+ * For new/renamed/deleted classes or .env changes, use server:restart.
  */
-#[AsCommand(name: 'server:reload', description: 'Gracefully reload Swoole workers (fast, no autoload rebuild)')]
+#[AsCommand(name: 'server:reload', description: 'Gracefully reload Swoole workers (fast, code-only, no env refresh)')]
 class ServerReloadCommand extends Command
 {
     protected function configure(): void
     {
         $this->setName('server:reload')
-            ->setDescription('Gracefully reload Swoole workers (fast, no autoload rebuild)');
+            ->setDescription('Gracefully reload Swoole workers (fast, code-only, no env refresh)');
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int

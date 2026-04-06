@@ -17,14 +17,16 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 
 /**
  * Lifecycle: prepare → stop → start → verify
+ *
+ * This is the command that refreshes code, autoload, env, and container state.
  */
-#[AsCommand(name: 'server:restart', description: 'Restart Semitexa Environment (full restart with autoload rebuild)')]
+#[AsCommand(name: 'server:restart', description: 'Restart Semitexa Environment (full restart with autoload rebuild and env refresh)')]
 class ServerRestartCommand extends Command
 {
     protected function configure(): void
     {
         $this->setName('server:restart')
-            ->setDescription('Restart Semitexa Environment (full restart with autoload rebuild)')
+            ->setDescription('Restart Semitexa Environment (full restart with autoload rebuild and env refresh)')
             ->addOption('service', 's', InputOption::VALUE_OPTIONAL, 'Specific service to restart');
     }
 

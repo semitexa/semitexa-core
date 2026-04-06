@@ -18,6 +18,7 @@ final class ReloadRuntimeAction
     public function execute(): bool
     {
         $this->warnIfAutoloadChanged();
+        $this->warnIfEnvironmentChanged();
 
         $pid = $this->findMasterPid();
 
@@ -57,6 +58,33 @@ final class ReloadRuntimeAction
 
         if ($classMapMtime > $markerMtime) {
             $this->io->warning('Autoload classmap has changed since last restart. Run server:restart for full code refresh.');
+        }
+    }
+
+    private function warnIfEnvironmentChanged(): void
+    {
+        $root = ProjectRoot::get();
+        $markerFile = $root . '/var/runtime/build.hash';
+
+        if (!is_file($markerFile)) {
+            return;
+        }
+
+        $markerMtime = filemtime($markerFile);
+        if ($markerMtime === false) {
+            return;
+        }
+
+        foreach ([$root . '/.env.default', $root . '/.env'] as $envFile) {
+            if (!is_file($envFile)) {
+                continue;
+            }
+
+            $envMtime = filemtime($envFile);
+            if ($envMtime !== false && $envMtime > $markerMtime) {
+                $this->io->warning('Environment files changed after the last restart. Run server:restart to pick up .env changes.');
+                return;
+            }
         }
     }
 
