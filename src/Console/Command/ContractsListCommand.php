@@ -22,6 +22,7 @@ use Symfony\Component\Console\Style\SymfonyStyle;
  * Helps developers and AI agents see contract → implementation binding and debug DI.
  */
 #[AsCommand(name: 'contracts:list', description: 'List service contracts (interfaces) and their active implementation. Use when debugging which class is bound to an interface.')]
+// @phpstan-ignore-next-line Optional AI metadata comes from the semitexa/llm package.
 #[AsAiSkill(
     allowed: true,
     summary: 'List registered service contracts and their active implementations.',

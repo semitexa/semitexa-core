@@ -21,6 +21,7 @@ use Symfony\Component\Process\Process;
  * When cache was created by Swoole (e.g. in Docker as root), run with --via-docker so the command runs inside the container and can delete the files.
  */
 #[AsCommand(name: 'cache:clear', description: 'Clear application cache (e.g. var/cache/twig). Use after template changes or when cache is stale.')]
+// @phpstan-ignore-next-line Optional AI metadata comes from the semitexa/llm package.
 #[AsAiSkill(
     allowed: true,
     summary: 'Clear application cache after template or configuration changes.',
