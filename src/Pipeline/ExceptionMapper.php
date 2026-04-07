@@ -125,10 +125,19 @@ final class ExceptionMapper implements ExceptionResponseMapperInterface
     {
         $xml = new \SimpleXMLElement("<{$rootElement}/>");
         $this->arrayToXmlRecursive($data, $xml);
-        $dom = dom_import_simplexml($xml)->ownerDocument;
+        $node = dom_import_simplexml($xml);
+        // @phpstan-ignore-next-line dom_import_simplexml() can return false at runtime.
+        if ($node === false) {
+            return '';
+        }
+
+        $dom = $node->ownerDocument;
+        if (!$dom instanceof \DOMDocument) {
+            return '';
+        }
         $dom->formatOutput = true;
 
-        return $dom->saveXML();
+        return $dom->saveXML() ?: '';
     }
 
     private function arrayToXmlRecursive(array $data, \SimpleXMLElement $xml): void

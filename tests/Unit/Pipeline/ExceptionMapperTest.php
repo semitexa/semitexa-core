@@ -8,7 +8,7 @@ use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Psr\Container\ContainerInterface;
 use Semitexa\Core\Container\RequestScopedContainer;
-use Semitexa\Core\Discovery\AttributeDiscovery;
+use Semitexa\Core\Discovery\RouteRegistry;
 use Semitexa\Core\Discovery\ResolvedRouteMetadata;
 use Semitexa\Core\Environment;
 use Semitexa\Core\Error\ErrorRouteDispatcher;
@@ -21,11 +21,8 @@ final class ExceptionMapperTest extends TestCase
     #[Test]
     public function unknown_exceptions_keep_json_response_for_json_clients(): void
     {
-        $discovery = $this->createMock(AttributeDiscovery::class);
-        $discovery->expects($this->never())->method('findRouteByName');
-
         $dispatcher = new ErrorRouteDispatcher(
-            attributeDiscovery: $discovery,
+            routeRegistry: new RouteRegistry(),
             requestScopedContainer: new RequestScopedContainer(new ExceptionMapperTestContainer()),
             container: new ExceptionMapperTestContainer(),
             authBootstrapper: null,

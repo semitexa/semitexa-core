@@ -36,7 +36,7 @@ class QueueDispatcher
         $transport->publish($queueName, $message->toJson());
 
         // Record to Inspector
-        if (class_exists('Swoole\Coroutine')) {
+        if (class_exists('Swoole\Coroutine') && \Swoole\Coroutine::getCid() >= 0) {
             $context = \Swoole\Coroutine::getContext();
             if ($context) {
                 if (!isset($context['inspector_segments'])) {

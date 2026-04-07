@@ -29,8 +29,7 @@ class RouteRegistry
     /**
      * Register a route and add it to the appropriate index.
      * Called during discovery — not after boot.
-     */
-    /**
+     *
      * @param array<string, mixed> $route
      */
     public function register(array $route): void
@@ -110,8 +109,7 @@ class RouteRegistry
 
     /**
      * Find a raw route by its name.
-     */
-    /**
+     *
      * @return array<string, mixed>|null
      */
     public function findByName(string $name): ?array
@@ -189,8 +187,7 @@ class RouteRegistry
 
     /**
      * Compile a route path pattern into a regex string.
-     */
-    /**
+     *
      * @param array<string, mixed> $requirements
      */
     private static function compilePattern(string $path, array $requirements): string

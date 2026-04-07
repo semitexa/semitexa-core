@@ -13,7 +13,8 @@ final class BootDiagnostics
 
     public static function begin(): self
     {
-        return self::$current ??= new self();
+        self::$current = new self();
+        return self::$current;
     }
 
     public static function current(): self

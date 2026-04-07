@@ -50,7 +50,7 @@ readonly class Environment
 
         return new self(
             appEnv: $get('APP_ENV', 'prod'),
-            appDebug: (bool) $get('APP_DEBUG', '0'),
+            appDebug: filter_var($get('APP_DEBUG', '0'), FILTER_VALIDATE_BOOLEAN),
             appName: $get('APP_NAME', 'Semitexa Framework'),
             appHost: $get('APP_HOST', 'localhost'),
             appPort: (int) $get('APP_PORT', '8000'),
@@ -70,7 +70,7 @@ readonly class Environment
             corsAllowOrigin: $get('CORS_ALLOW_ORIGIN', '*'),
             corsAllowMethods: $get('CORS_ALLOW_METHODS', 'GET, POST, PUT, DELETE, OPTIONS'),
             corsAllowHeaders: $get('CORS_ALLOW_HEADERS', 'Content-Type, Authorization'),
-            corsAllowCredentials: (bool) $get('CORS_ALLOW_CREDENTIALS', '0'),
+            corsAllowCredentials: filter_var($get('CORS_ALLOW_CREDENTIALS', '0'), FILTER_VALIDATE_BOOLEAN),
             redisPoolSize: $redisPoolSize,
         );
     }
