@@ -106,8 +106,7 @@ readonly class HttpResponse implements ResourceInterface
 
     /**
      * Return a new response with additional headers. Values can be string or string[] (e.g. multiple Set-Cookie).
-     */
-    /**
+     *
      * @param array<string, HeaderValue> $headersToAdd
      */
     public function withHeaders(array $headersToAdd): self

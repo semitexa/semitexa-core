@@ -93,7 +93,7 @@ final class PipelineExecutor
                 throw new PipelineException(sprintf(
                     'Handler %s must return a ResourceInterface, got %s.',
                     $instance::class,
-                    gettype($result) . (is_object($result) ? ' (' . $instance::class . ')' : '')
+                    gettype($result) . (is_object($result) ? ' (' . $result::class . ')' : '')
                 ));
             }
 

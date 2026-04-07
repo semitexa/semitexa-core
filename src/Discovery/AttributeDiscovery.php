@@ -424,9 +424,6 @@ class AttributeDiscovery
                 'module' => $selectedModule,
                 'tenantScopes' => $selectedTenantScopes,
             ]);
-
-            foreach ($candidates as $candidate) {
-            }
         }
     }
 
@@ -976,12 +973,6 @@ class AttributeDiscovery
             BootDiagnostics::current()->skip('AttributeDiscovery', "isProjectResource check failed for {$className}: " . $e->getMessage(), $e);
             return false;
         }
-    }
-
-    private static function classBasename(string $class): string
-    {
-        $pos = strrpos($class, '\\');
-        return $pos === false ? $class : substr($class, $pos + 1);
     }
 
     /**

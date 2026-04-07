@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Semitexa\Core\Event;
 
 use Semitexa\Core\Attribute\AsEventListener;
-use Semitexa\Core\Event\EventExecution;
 use Semitexa\Core\Discovery\ClassDiscovery;
 use Semitexa\Core\ModuleRegistry;
 use Semitexa\Core\Config\EnvValueResolver;
@@ -60,7 +59,7 @@ final class EventListenerRegistry
                 /** @var AsEventListener $attr */
                 $attr = $attrs[0]->newInstance();
                 $eventClass = ltrim($attr->event, '\\');
-                $execution = self::resolveExecution($attr->execution);
+                $execution = $attr->execution;
                 $transport = $attr->transport !== null ? EnvValueResolver::resolve($attr->transport) : null;
                 $queue = $attr->queue !== null ? EnvValueResolver::resolve($attr->queue) : null;
                 $priority = $attr->priority ?? 0;
@@ -107,10 +106,5 @@ final class EventListenerRegistry
         return str_starts_with($class, 'App\\') && (
             str_contains($class, 'Event\\DomainListener\\')
         );
-    }
-
-    private static function resolveExecution(EventExecution $listenerExecution): EventExecution
-    {
-        return $listenerExecution;
     }
 }

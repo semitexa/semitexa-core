@@ -145,7 +145,7 @@ If no route matches the request, or a handler throws `Semitexa\Core\Http\Excepti
 Because route discovery only uses **modules**. Classes in the project `src/` with namespace `App\` are not scanned for route attributes. Create a module in `src/modules/` with a `composer.json` (`"type": "semitexa-module"` and PSR-4 autoload) and put your Request/Handler there. See the step-by-step above.
 
 **I added a new Payload and Handler but the route doesn't exist (404)?**  
-First verify the class lives inside a discovered module, the namespace matches the module PSR-4 mapping, and the app/container was reloaded after the change. `registry:sync` is a maintenance command, not the default fix for ordinary payload changes.
+   First verify the class lives inside a discovered module, the namespace matches the module PSR-4 mapping, and the app/container was reloaded after the change. `registry:sync` is a maintenance command, not the default fix for ordinary payload changes.
 
 **Can I patch `IntelligentAutoloader` or `AttributeDiscovery` to scan `App\`?**  
 Do not patch vendor. The supported way to add routes is via modules; changing framework discovery to scan `App\` would break the intended architecture (everything route-related lives in modules).
