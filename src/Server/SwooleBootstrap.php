@@ -69,7 +69,9 @@ class SwooleBootstrap
         $corsHandler = new CorsHandler($env);
         $healthHandler = new HealthCheckHandler();
         $metricsHandler = new MetricsHandler($server);
-        $staticAssetHandler = new StaticAssetHandler(ContainerFactory::get()->get(ModuleRegistry::class));
+        /** @var ModuleRegistry $moduleRegistry */
+        $moduleRegistry = ContainerFactory::get()->get(ModuleRegistry::class);
+        $staticAssetHandler = new StaticAssetHandler($moduleRegistry);
         $bootstrapState = new ServerBootstrapState();
         $lifecycleRegistry = new ServerLifecycleRegistry(new ClassDiscovery());
         $lifecycleInvoker = new ServerLifecycleInvoker($lifecycleRegistry);
