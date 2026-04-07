@@ -20,6 +20,7 @@ use Semitexa\Core\Server\Lifecycle\ServerLifecycleInvoker;
 use Semitexa\Core\Server\Lifecycle\ServerLifecyclePhase;
 use Semitexa\Core\Server\Lifecycle\ServerLifecycleRegistry;
 use Semitexa\Core\Session\SwooleSessionTableHolder;
+use Semitexa\Core\ModuleRegistry;
 use Semitexa\Ssr\Asset\StaticAssetHandler;
 use Swoole\Coroutine;
 use Swoole\Http\Request as SwooleRequest;
@@ -68,7 +69,7 @@ class SwooleBootstrap
         $corsHandler = new CorsHandler($env);
         $healthHandler = new HealthCheckHandler();
         $metricsHandler = new MetricsHandler($server);
-        $staticAssetHandler = new StaticAssetHandler();
+        $staticAssetHandler = new StaticAssetHandler(ContainerFactory::get()->get(ModuleRegistry::class));
         $bootstrapState = new ServerBootstrapState();
         $lifecycleRegistry = new ServerLifecycleRegistry(new ClassDiscovery());
         $lifecycleInvoker = new ServerLifecycleInvoker($lifecycleRegistry);
