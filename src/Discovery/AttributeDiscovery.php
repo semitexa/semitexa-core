@@ -559,14 +559,14 @@ class AttributeDiscovery
                     $attrs = $class->getAttributes($dpAttribute);
                     foreach ($attrs as $attr) {
                         $meta = $attr->newInstance();
-                        if (!property_exists($meta, 'slot') || $meta->slot === null || $meta->slot === '') {
+                        if ($meta->slot === '') {
                             throw new ConfigurationException("AsDataProvider on {$className} is missing slot.");
                         }
-                        /** @var string $slotId */
                         $slotId = $meta->slot;
-                        $handles = property_exists($meta, 'handles') && is_array($meta->handles)
-                            ? array_values(array_filter($meta->handles, static fn (mixed $handle): bool => is_string($handle) && $handle !== ''))
-                            : [];
+                        $handles = array_values(array_filter(
+                            $meta->handles,
+                            static fn (string $handle): bool => $handle !== '',
+                        ));
                         \Semitexa\Ssr\Application\Service\DataProviderRegistry::register(
                             $slotId,
                             $className,

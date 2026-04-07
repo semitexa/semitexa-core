@@ -48,9 +48,6 @@ final class ErrorRouteDispatcher
     }
 
     /**
-     * @param array{name?: string}|null $currentRoute
-     */
-    /**
      * @param array<string, mixed>|null $currentRoute
      */
     public function dispatchStatus(int $statusCode, Request $request, ?array $currentRoute = null): ?HttpResponse
