@@ -14,7 +14,7 @@ use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Style\SymfonyStyle;
 
 /**
- * Lifecycle: reload → verify
+ * Lifecycle: clear cache → reload → verify
  *
  * Does NOT rebuild autoload or recreate containers.
  * Only safe for code changes inside existing files.
@@ -37,7 +37,14 @@ class ServerReloadCommand extends Command
 
         // 1. Clear cache (twig, etc.)
         $clearCache = new ClearCacheAction($io);
-        $clearCache->execute();
+        try {
+            $clearCache->execute();
+        } catch (\Throwable $e) {
+            $io->warning(sprintf(
+                'Cache clearing failed: %s. Continuing with reload and verification.',
+                $e->getMessage()
+            ));
+        }
 
         // 2. Reload: send SIGUSR1
         $reload = new ReloadRuntimeAction($io);
