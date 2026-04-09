@@ -12,6 +12,7 @@ use Semitexa\Core\Cookie\CookieJarInterface;
 use Semitexa\Core\Environment;
 use Semitexa\Core\Locale\DefaultLocaleContext;
 use Semitexa\Core\Locale\LocaleContextInterface;
+use Semitexa\Core\Log\FallbackErrorLogger;
 use Semitexa\Core\Request;
 use Semitexa\Core\HttpResponse;
 use Semitexa\Core\Redis\RedisConnectionPool;
@@ -142,13 +143,17 @@ final class SessionPhase
             $logger->error('Session persistence failed', [
                 'path' => $request->getPath(),
                 'method' => $request->getMethod(),
-                'exception' => get_debug_type($e),
+                'exception' => $e::class,
                 'message' => $e->getMessage(),
             ]);
-            return;
+        } else {
+            FallbackErrorLogger::log('Session persistence failed', [
+                'path' => $request->getPath(),
+                'method' => $request->getMethod(),
+                'exception' => $e::class,
+                'message' => $e->getMessage(),
+            ]);
         }
-
-        error_log('[Semitexa] Session persistence failed: ' . $e->getMessage());
     }
 
     /**

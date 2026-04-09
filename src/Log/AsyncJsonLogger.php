@@ -83,6 +83,16 @@ final class AsyncJsonLogger implements LoggerInterface
             'context' => $context,
         ];
 
+        // Extract reserved context keys into top-level entry fields
+        if (isset($context['_channel'])) {
+            $entry['channel'] = $context['_channel'];
+            unset($entry['context']['_channel']);
+        }
+        if (isset($context['_request_id'])) {
+            $entry['request_id'] = $context['_request_id'];
+            unset($entry['context']['_request_id']);
+        }
+
         // Add coroutine ID for request tracing in Swoole
         if (class_exists(\Swoole\Coroutine::class, false)) {
             $cid = \Swoole\Coroutine::getCid();
@@ -133,7 +143,20 @@ final class AsyncJsonLogger implements LoggerInterface
         foreach ($entries as $entry) {
             $line .= json_encode($entry, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR) . "\n";
         }
-        @file_put_contents($path, $line, FILE_APPEND | LOCK_EX);
+        error_clear_last();
+        if (@file_put_contents($path, $line, FILE_APPEND | LOCK_EX) === false) {
+            $lastError = error_get_last();
+            $errorMessage = is_array($lastError)
+                ? $lastError['message']
+                : 'unknown error';
+
+            error_log(sprintf(
+                '[Semitexa] Logger write failed: path=%s entries=%d error=%s',
+                $path,
+                count($entries),
+                $errorMessage,
+            ));
+        }
     }
 
     private function resolveProjectRoot(): string

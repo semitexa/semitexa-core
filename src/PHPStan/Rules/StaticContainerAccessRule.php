@@ -24,6 +24,7 @@ final class StaticContainerAccessRule implements Rule
     /** Namespaces where ContainerFactory usage is allowed (core internals only) */
     private const ALLOWED_NAMESPACES = [
         'Semitexa\\Core\\Container\\',
+        'Semitexa\\Core\\Log\\StaticLoggerBridge',
         'Semitexa\\Core\\Application',
         'Semitexa\\Core\\Console\\',
         'Semitexa\\Core\\Server\\',
