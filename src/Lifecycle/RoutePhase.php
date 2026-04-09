@@ -116,12 +116,15 @@ final class RoutePhase
         }
 
         if ($logger instanceof \Semitexa\Core\Log\LoggerInterface) {
-            $logger->error($e->getMessage(), [
-                'exception' => get_debug_type($e),
+            $context = [
+                'exception' => $e::class,
                 'file' => $e->getFile(),
                 'line' => $e->getLine(),
-                'trace' => $this->environment->appDebug ? $e->getTraceAsString() : 'hidden',
-            ]);
+            ];
+            if ($this->environment->appDebug) {
+                $context['trace'] = $e->getTraceAsString();
+            }
+            $logger->error($e->getMessage(), $context);
         } else {
             error_log("[Semitexa] Critical Error: " . $e->getMessage() . " in " . $e->getFile() . ":" . $e->getLine());
         }

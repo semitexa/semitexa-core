@@ -142,13 +142,12 @@ final class SessionPhase
             $logger->error('Session persistence failed', [
                 'path' => $request->getPath(),
                 'method' => $request->getMethod(),
-                'exception' => get_debug_type($e),
+                'exception' => $e::class,
                 'message' => $e->getMessage(),
             ]);
-            return;
+        } else {
+            error_log('[Semitexa] Session persistence failed: ' . $e->getMessage());
         }
-
-        error_log('[Semitexa] Session persistence failed: ' . $e->getMessage());
     }
 
     /**
