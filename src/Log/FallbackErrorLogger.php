@@ -7,7 +7,7 @@ namespace Semitexa\Core\Log;
 final class FallbackErrorLogger
 {
     /**
-     * @param array<string, mixed> $context
+     * @param array<array-key, mixed> $context
      */
     public static function log(string $message, array $context = []): void
     {

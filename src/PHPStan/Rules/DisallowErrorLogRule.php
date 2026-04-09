@@ -14,10 +14,10 @@ use PHPStan\Rules\RuleErrorBuilder;
 /**
  * semitexa.disallowErrorLog
  *
- * Flags direct error_log() calls. Use LoggerInterface or SsrLogger instead.
+ * Flags direct error_log() calls. Use LoggerInterface or StaticLoggerBridge instead.
  *
  * Exceptions: ServerLifecycleFallbackLogger and BootDiagnostics (pre-container boot),
- * FallbackErrorLogger, SsrLogger (the fallback wrapper itself), and AsyncJsonLogger.
+ * FallbackErrorLogger, StaticLoggerBridge (the static fallback bridge), and AsyncJsonLogger.
  *
  * @implements Rule<FuncCall>
  */
@@ -27,7 +27,7 @@ final class DisallowErrorLogRule implements Rule
         'Semitexa\\Core\\Server\\ServerLifecycleFallbackLogger',
         'Semitexa\\Core\\Discovery\\BootDiagnostics',
         'Semitexa\\Core\\Log\\FallbackErrorLogger',
-        'Semitexa\\Ssr\\Log\\SsrLogger',
+        'Semitexa\\Core\\Log\\StaticLoggerBridge',
         'Semitexa\\Core\\Log\\AsyncJsonLogger',
     ];
 
@@ -59,7 +59,7 @@ final class DisallowErrorLogRule implements Rule
             RuleErrorBuilder::message(
                 'Direct error_log() calls are discouraged. '
                 . 'Use Semitexa\\Core\\Log\\LoggerInterface (via #[InjectAsReadonly]) '
-                . 'or Semitexa\\Ssr\\Log\\SsrLogger for static contexts.'
+                . 'or Semitexa\\Core\\Log\\StaticLoggerBridge for static contexts.'
             )->identifier('semitexa.disallowErrorLog')->build(),
         ];
     }
