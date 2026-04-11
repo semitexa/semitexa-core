@@ -46,7 +46,11 @@ class ContainerFactory
         $container->set(\Semitexa\Core\Environment::class, \Semitexa\Core\Environment::create());
         $container->set(\Psr\Container\ContainerInterface::class, $container);
 
-        $orm = new \Semitexa\Orm\OrmManager();
+        $connectionRegistry = new \Semitexa\Orm\Connection\ConnectionRegistry();
+        $container->set(\Semitexa\Orm\Connection\ConnectionRegistry::class, $connectionRegistry);
+
+        // Default connection — backward compatible with existing OrmManager injection
+        $orm = $connectionRegistry->manager('default');
         $container->set(\Semitexa\Orm\OrmManager::class, $orm);
         $container->set(\Semitexa\Orm\Adapter\ConnectionPoolInterface::class, $orm->getPool());
         $container->set(\Semitexa\Orm\Adapter\DatabaseAdapterInterface::class, $orm->getAdapter());

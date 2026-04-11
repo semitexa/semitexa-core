@@ -31,6 +31,11 @@ class ClassDiscovery
         /** @var array<class-string, string> $composerClassMap */
         /** @var array<string, list<string>|string> $composerPsr4Map */
 
+        $composerClassMap = array_filter(
+            $composerClassMap,
+            static fn (string $filePath): bool => is_file($filePath),
+        );
+
         $this->refreshComposerAutoloader($composerDir, $composerClassMap);
 
         foreach ($composerClassMap as $className => $filePath) {

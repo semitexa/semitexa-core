@@ -2,13 +2,13 @@
 
 The **only supported way** to run a Semitexa application is via **Docker**.
 
-- **Start:** `bin/semitexa server:start` (runs `docker compose up -d`; with **EVENTS_ASYNC=1** in `.env` it uses `docker-compose.rabbitmq.yml` as well)
-- **Stop:** `bin/semitexa server:stop` (runs `docker compose down`; if `docker-compose.rabbitmq.yml` exists, stops both app and RabbitMQ)
-- **Logs:** `docker compose logs -f` (if you started with EVENTS_ASYNC=1, use: `docker compose -f docker-compose.yml -f docker-compose.rabbitmq.yml logs -f`)
+- **Start:** `bin/semitexa server:start` (runs `docker compose up -d`; with **EVENTS_ASYNC=1** in `.env` it uses `docker-compose.nats.yml` as well)
+- **Stop:** `bin/semitexa server:stop` (runs `docker compose down`; if `docker-compose.nats.yml` exists, stops both app and NATS)
+- **Logs:** `docker compose logs -f` (if you started with EVENTS_ASYNC=1, use: `docker compose -f docker-compose.yml -f docker-compose.nats.yml logs -f`)
 
 The application runs `php server.php` inside the container; the Swoole server listens on port 9502 by default (configurable via `.env` `SWOOLE_PORT`). Do not run `php server.php` on the host as the primary way to run the app.
 
-After `semitexa init`, the project includes a minimal `docker-compose.yml` (app only) and an optional `docker-compose.rabbitmq.yml`. By default only the **app** container runs, so there is no extra CPU load from RabbitMQ. When **EVENTS_ASYNC=1** in `.env`, `server:start` automatically uses both compose files so RabbitMQ is started and the app depends on it (with a relaxed healthcheck to avoid high CPU).
+After `semitexa init`, the project includes a minimal `docker-compose.yml` (app only) and an optional `docker-compose.nats.yml`. By default only the **app** container runs. When **EVENTS_ASYNC=1** in `.env`, `server:start` automatically uses both compose files so NATS JetStream is started and the app connects to it via `NATS_PRIMARY_URL`.
 
 If you see "docker-compose.yml not found", run `semitexa init` to generate the project structure including `docker-compose.yml`, or add it manually.
 

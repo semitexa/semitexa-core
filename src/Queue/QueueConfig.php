@@ -9,8 +9,8 @@ use Semitexa\Core\Environment;
 class QueueConfig
 {
     /**
-     * When EVENTS_ASYNC=1 (or true/yes), use RabbitMQ; otherwise in-memory (sync).
-     * Override with EVENTS_TRANSPORT=rabbitmq|in-memory if needed.
+     * When EVENTS_ASYNC=1 (or true/yes), use NATS; otherwise in-memory (sync).
+     * Override with EVENTS_TRANSPORT=nats|in-memory if needed.
      */
     public static function defaultTransport(): string
     {
@@ -19,7 +19,7 @@ class QueueConfig
             return $override;
         }
         $async = Environment::getEnvValue('EVENTS_ASYNC', '0') ?? '0';
-        return self::isAsyncEnabled($async) ? 'rabbitmq' : 'in-memory';
+        return self::isAsyncEnabled($async) ? 'nats' : 'in-memory';
     }
 
     public static function isAsyncEnabled(string $value): bool

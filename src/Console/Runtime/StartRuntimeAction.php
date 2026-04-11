@@ -30,15 +30,15 @@ final class StartRuntimeAction
             return false;
         }
 
-        $useRabbitMq = $this->shouldUseOverlay($projectRoot, 'docker-compose.rabbitmq.yml', 'EVENTS_ASYNC', ['1', 'true', 'yes']);
+        $useNats = $this->shouldUseOverlay($projectRoot, 'docker-compose.nats.yml', 'EVENTS_ASYNC', ['1', 'true', 'yes']);
         $useMysql = $this->shouldUseOverlay($projectRoot, 'docker-compose.mysql.yml', 'DB_DRIVER', ['mysql', 'mysqli', 'mariadb']);
         $useRedis = $this->shouldUseOverlay($projectRoot, 'docker-compose.redis.yml', 'REDIS_HOST');
         $useOllama = $this->shouldUseOverlayExact($projectRoot, 'docker-compose.ollama.yml', 'LLM_PROVIDER', 'ollama');
 
-        $composeArgs = $this->getComposeBaseArgs($projectRoot, $useRabbitMq, $useMysql, $useRedis, $useOllama);
+        $composeArgs = $this->getComposeBaseArgs($projectRoot, $useNats, $useMysql, $useRedis, $useOllama);
 
         $overlayNames = array_filter([
-            $useRabbitMq ? 'docker-compose.rabbitmq.yml' : null,
+            $useNats ? 'docker-compose.nats.yml' : null,
             $useMysql ? 'docker-compose.mysql.yml' : null,
             $useRedis ? 'docker-compose.redis.yml' : null,
             $useOllama ? 'docker-compose.ollama.yml' : null,
@@ -75,12 +75,12 @@ final class StartRuntimeAction
     public function getComposeArgs(): array
     {
         $projectRoot = ProjectRoot::get();
-        $useRabbitMq = $this->shouldUseOverlay($projectRoot, 'docker-compose.rabbitmq.yml', 'EVENTS_ASYNC', ['1', 'true', 'yes']);
+        $useNats = $this->shouldUseOverlay($projectRoot, 'docker-compose.nats.yml', 'EVENTS_ASYNC', ['1', 'true', 'yes']);
         $useMysql = $this->shouldUseOverlay($projectRoot, 'docker-compose.mysql.yml', 'DB_DRIVER', ['mysql', 'mysqli', 'mariadb']);
         $useRedis = $this->shouldUseOverlay($projectRoot, 'docker-compose.redis.yml', 'REDIS_HOST');
         $useOllama = $this->shouldUseOverlayExact($projectRoot, 'docker-compose.ollama.yml', 'LLM_PROVIDER', 'ollama');
 
-        return $this->getComposeBaseArgs($projectRoot, $useRabbitMq, $useMysql, $useRedis, $useOllama);
+        return $this->getComposeBaseArgs($projectRoot, $useNats, $useMysql, $useRedis, $useOllama);
     }
 
     /**
@@ -109,10 +109,10 @@ final class StartRuntimeAction
     /**
      * @return list<string>
      */
-    private function getComposeBaseArgs(string $projectRoot, bool $useRabbitMq, bool $useMysql, bool $useRedis, bool $useOllama): array
+    private function getComposeBaseArgs(string $projectRoot, bool $useNats, bool $useMysql, bool $useRedis, bool $useOllama): array
     {
         $overlays = array_filter([
-            $useRabbitMq ? 'docker-compose.rabbitmq.yml' : null,
+            $useNats ? 'docker-compose.nats.yml' : null,
             $useMysql ? 'docker-compose.mysql.yml' : null,
             $useRedis ? 'docker-compose.redis.yml' : null,
             $useOllama ? 'docker-compose.ollama.yml' : null,

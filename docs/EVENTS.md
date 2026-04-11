@@ -48,17 +48,17 @@ Recommended placement:
 
 ## 3. Domain Events (business side-effects)
 
-Domain events are for side-effects triggered after business operations. They support sync, async (Swoole defer), and queued (RabbitMQ) execution.
+Domain events are for side-effects triggered after business operations. They support sync, async (Swoole defer), and queued (NATS) execution.
 
 Domain listeners use `#[AsEventListener(event: EventClass::class, execution: ...)]` and live in `Event/DomainListener/`.
 
 ### Configuration
 
-- **EVENTS_ASYNC** (`.env`): `0` (default) = in-memory (sync); `1` (or `true`/`yes`) = use RabbitMQ for async.
-- **EVENTS_TRANSPORT**: Override transport: `in-memory` or `rabbitmq`.
+- **EVENTS_ASYNC** (`.env`): `0` (default) = in-memory (sync); `1` (or `true`/`yes`) = use NATS for async.
+- **EVENTS_TRANSPORT**: Override transport: `in-memory` or `nats`.
 - **EVENTS_QUEUE_DEFAULT**: Default queue name pattern when not set per handler.
 
-When **EVENTS_ASYNC=1**, the app uses RabbitMQ. If you run with Docker, `bin/semitexa server:start` automatically uses `docker-compose.rabbitmq.yml` (so RabbitMQ is started and the app connects to the `rabbitmq` service).
+When **EVENTS_ASYNC=1**, the app uses NATS JetStream. If you run with Docker, `bin/semitexa server:start` automatically uses `docker-compose.nats.yml` (so NATS is started and the app connects to the `nats` service via `NATS_PRIMARY_URL`).
 
 ### Sync vs async per handler
 

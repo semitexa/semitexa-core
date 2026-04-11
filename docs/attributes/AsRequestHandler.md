@@ -40,7 +40,7 @@ class UserListHandler implements TypedHandlerInterface
   - `'async'` or `HandlerExecution::Async` - asynchronous execution via queue.
 - `transport` (string|null) - Queue transport name (required for async):
   - `'memory'` - In-memory queue (for testing).
-  - `'rabbitmq'` - RabbitMQ queue.
+  - `'nats'` - NATS JetStream queue.
 - `queue` (string|null) - Queue name (default: handler class name).
 - `priority` (int|null) - Handler priority (higher = executed earlier, default: 0).
 
@@ -83,7 +83,7 @@ use Semitexa\Core\Queue\HandlerExecution;
     payload: EmailSendRequest::class,
     resource: null,
     execution: HandlerExecution::Async,
-    transport: 'rabbitmq',
+    transport: 'nats',
     queue: 'emails',
     priority: 10
 )]

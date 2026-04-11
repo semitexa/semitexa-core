@@ -24,7 +24,7 @@ final class StopRuntimeAction
             $composeArgs = array_merge(['docker', 'compose'], (new StartRuntimeAction($this->io))->getComposeArgs());
             $cmd = $service !== null
                 ? array_merge($composeArgs, ['stop', $service])
-                : array_merge($composeArgs, ['down']);
+                : array_merge($composeArgs, ['down', '--remove-orphans']);
 
             $process = new Process($cmd, $projectRoot);
             $process->setTimeout(30);

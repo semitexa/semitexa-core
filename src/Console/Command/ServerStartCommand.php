@@ -9,6 +9,7 @@ use Semitexa\Core\Console\Runtime\PrepareRuntimeAction;
 use Semitexa\Core\Console\Runtime\StartRuntimeAction;
 use Semitexa\Core\Console\Runtime\VerifyRuntimeAction;
 use Semitexa\Core\Environment;
+use Semitexa\Core\Queue\QueueConfig;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Output\OutputInterface;
@@ -64,8 +65,38 @@ class ServerStartCommand extends Command
         $composeArgs = $start->getComposeArgs();
         $projectRoot = \Semitexa\Core\Support\ProjectRoot::get();
 
+        // NATS health check — use the Docker service name 'nats' (set by docker-compose.nats.yml overlay)
+        $eventsAsync = Environment::getEnvValue('EVENTS_ASYNC', '0') ?? '0';
+        if (QueueConfig::isAsyncEnabled($eventsAsync) && file_exists($projectRoot . '/docker-compose.nats.yml')) {
+            $cmd = array_merge(
+                ['docker', 'compose'],
+                $composeArgs,
+                ['exec', '-T', 'app', 'php', '-r',
+                    '$s = @fsockopen(\'nats\', 4222, $e, $es, 3); if ($s) { fclose($s); exit(0); } exit(1);',
+                ]
+            );
+            sleep(1);
+            $reachable = false;
+            for ($attempt = 1; $attempt <= 3; $attempt++) {
+                if ($attempt > 1) {
+                    sleep(2);
+                }
+                $process = new \Symfony\Component\Process\Process($cmd, $projectRoot);
+                $process->setTimeout(8);
+                $process->run();
+                if ($process->isSuccessful()) {
+                    $reachable = true;
+                    break;
+                }
+            }
+            if ($reachable) {
+                $io->success('NATS: reachable.');
+            } else {
+                $io->warning('NATS: not reachable after 3 attempts (may still be starting).');
+            }
+        }
+
         $services = [
-            ['RABBITMQ_HOST', 5672, 'RABBITMQ_PORT', 'RabbitMQ', 3, 2, 1],
             ['DB_HOST', 3306, 'DB_PORT', 'MySQL', 5, 4, 20],
             ['REDIS_HOST', 6379, 'REDIS_PORT', 'Redis', 3, 2, 1],
         ];

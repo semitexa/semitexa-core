@@ -23,6 +23,14 @@ final class EventDispatcher implements EventDispatcherInterface
 {
     #[InjectAsReadonly]
     protected EventListenerRegistry $eventListenerRegistry;
+
+    /**
+     * Callbacks invoked after all listeners for every dispatched event.
+     * Registered by packages (e.g. semitexa-ledger) at worker boot.
+     *
+     * @var list<callable(object): void>
+     */
+    private array $postDispatchHooks = [];
     /**
      * Create an event instance. Use this instead of "new Event()" so the framework
      * can apply initialization, validation, or optimizations now or later.
@@ -53,8 +61,20 @@ final class EventDispatcher implements EventDispatcherInterface
     }
 
     /**
+     * Register a callback to run after all listeners for every dispatched event.
+     * Used by semitexa-ledger to hook LedgerWriter into the dispatch pipeline.
+     *
+     * @param callable(object): void $hook
+     */
+    public function addPostDispatchHook(callable $hook): void
+    {
+        $this->postDispatchHooks[] = $hook;
+    }
+
+    /**
      * Dispatch event to all registered listeners. Sync listeners run immediately;
      * async listeners are enqueued (same queue as async payload handlers).
+     * Post-dispatch hooks run after all listeners.
      */
     public function dispatch(object $event): void
     {
@@ -69,6 +89,10 @@ final class EventDispatcher implements EventDispatcherInterface
                 EventExecution::Async => $this->runListenerDefer($meta, $event),
                 EventExecution::Queued => $this->enqueueListener($meta, $event),
             };
+        }
+
+        foreach ($this->postDispatchHooks as $hook) {
+            $hook($event);
         }
     }
 

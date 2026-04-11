@@ -19,7 +19,7 @@ class QueueWorkCommand extends Command
     {
         $this->setName('queue:work')
             ->setDescription('Run async events worker (processes handlers enqueued with execution: async)')
-            ->addArgument('transport', InputArgument::OPTIONAL, 'Transport: rabbitmq or in-memory (default from EVENTS_ASYNC)', null)
+            ->addArgument('transport', InputArgument::OPTIONAL, 'Transport: nats or in-memory (default from EVENTS_ASYNC)', null)
             ->addArgument('queue', InputArgument::OPTIONAL, 'Queue name (default from EVENTS_QUEUE_DEFAULT)', null)
             ->addOption('timeout', 't', InputOption::VALUE_OPTIONAL, 'Worker timeout in seconds', null);
     }

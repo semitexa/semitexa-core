@@ -6,15 +6,13 @@ namespace Semitexa\Core\Queue;
 
 use Semitexa\Core\Exception\ConfigurationException;
 use Semitexa\Core\Queue\Transport\InMemoryTransportFactory;
-use Semitexa\Core\Queue\Transport\RabbitMqTransportFactory;
 
 /**
  * Registry of queue transport factories.
  *
  * Factories are registered at boot (worker-scoped). Transport instances are
- * cached per-key so each worker reuses the same connection. This is safe
- * because transports with stateful connections (RabbitMQ) are only used
- * in the queue:work CLI process (single coroutine).
+ * cached per-key so each worker reuses the same connection. The 'nats'
+ * transport is registered by LedgerBootstrap when semitexa-ledger is loaded.
  *
  * @worker-scoped Initialized once per worker, read-only during requests.
  */
@@ -43,7 +41,6 @@ class QueueTransportRegistry
 
         self::register('in-memory', new InMemoryTransportFactory());
         self::register('memory', new InMemoryTransportFactory());
-        self::register('rabbitmq', new RabbitMqTransportFactory());
 
         self::$initialized = true;
     }

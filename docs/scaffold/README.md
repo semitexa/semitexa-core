@@ -8,7 +8,7 @@ When you run **`bin/semitexa init`** or **`bin/semitexa init --only-docs --force
 | `README.md` | `README.md` |
 | `docs/AI_CONTEXT.md` | `docs/AI_CONTEXT.md` |
 | `docker-compose.yml` | `docker-compose.yml` |
-| `docker-compose.rabbitmq.yml` | `docker-compose.rabbitmq.yml` |
+| `docker-compose.nats.yml` | `docker-compose.nats.yml` |
 | `server.php`, `.env.default`, `.env`, `Dockerfile`, `phpunit.xml.dist`, `bin/semitexa`, `.gitignore`, `public/.htaccess` | matching file in `semitexa/ultimate/` |
 
 **Important:** Any change to the content of these files in the project root will be overwritten the next time you run `semitexa init` or `semitexa init --only-docs --force`. To change what gets generated, edit the scaffold assets in **semitexa/ultimate** and then re-run init.
