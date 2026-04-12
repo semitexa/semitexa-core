@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Queue;
 
+use Semitexa\Core\Environment;
 use Semitexa\Core\Exception\ConfigurationException;
 use Semitexa\Core\Log\StaticLoggerBridge;
 use Semitexa\Core\Queue\Transport\InMemoryTransportFactory;
@@ -67,6 +68,13 @@ class QueueTransportRegistry
         return self::$instances[$key];
     }
 
+    public static function has(string $name): bool
+    {
+        self::initialize();
+
+        return isset(self::$factories[strtolower($name)]);
+    }
+
     /**
      * Reset registry state. For testing only.
      */
@@ -92,9 +100,7 @@ class QueueTransportRegistry
 
         try {
             $clusters = $clusterRegistryClass::fromEnv();
-            if (method_exists($clusters, 'connect')) {
-                $clusters->connect();
-            }
+            $clusters->connect();
 
             self::register('nats', new $transportFactoryClass($clusters));
         } catch (\Throwable $e) {
@@ -107,10 +113,10 @@ class QueueTransportRegistry
 
     private static function hasNatsConfiguration(): bool
     {
-        $primary = getenv('NATS_PRIMARY_URL');
-        $fallback = getenv('NATS_URL');
+        $primary = Environment::getEnvValue('NATS_PRIMARY_URL');
+        $fallback = Environment::getEnvValue('NATS_URL');
 
-        return ($primary !== false && $primary !== '')
-            || ($fallback !== false && $fallback !== '');
+        return ($primary !== null && $primary !== '')
+            || ($fallback !== null && $fallback !== '');
     }
 }

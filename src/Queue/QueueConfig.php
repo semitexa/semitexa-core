@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Semitexa\Core\Queue;
 
 use Semitexa\Core\Environment;
+use Semitexa\Core\Exception\ConfigurationException;
 
 class QueueConfig
 {
@@ -18,8 +19,19 @@ class QueueConfig
         if ($override !== null && $override !== '') {
             return $override;
         }
+
         $async = Environment::getEnvValue('EVENTS_ASYNC', '0') ?? '0';
-        return self::isAsyncEnabled($async) ? 'nats' : 'in-memory';
+        if (!self::isAsyncEnabled($async)) {
+            return 'in-memory';
+        }
+
+        if (!QueueTransportRegistry::has('nats')) {
+            throw new ConfigurationException(
+                "EVENTS_ASYNC requires the 'nats' queue transport. Configure NATS env values and install semitexa-ledger.",
+            );
+        }
+
+        return 'nats';
     }
 
     public static function isAsyncEnabled(string $value): bool
@@ -40,4 +52,3 @@ class QueueConfig
         return 'events';
     }
 }
-
