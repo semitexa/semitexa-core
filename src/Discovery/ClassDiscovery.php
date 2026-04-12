@@ -26,10 +26,8 @@ class ClassDiscovery
         }
 
         $composerDir = ProjectRoot::get() . '/vendor/composer';
-        $composerClassMap = require $composerDir . '/autoload_classmap.php';
-        $composerPsr4Map = require $composerDir . '/autoload_psr4.php';
-        /** @var array<class-string, string> $composerClassMap */
-        /** @var array<string, list<string>|string> $composerPsr4Map */
+        $composerClassMap = $this->loadComposerClassMap($composerDir . '/autoload_classmap.php');
+        $composerPsr4Map = $this->loadComposerPsr4Map($composerDir . '/autoload_psr4.php');
 
         $composerClassMap = array_filter(
             $composerClassMap,
@@ -47,6 +45,67 @@ class ClassDiscovery
         $this->mergePsr4ClassCandidates($composerPsr4Map);
 
         $this->initialized = true;
+    }
+
+    /**
+     * @return array<class-string, string>
+     */
+    private function loadComposerClassMap(string $path): array
+    {
+        if (!is_file($path) || !is_readable($path)) {
+            return [];
+        }
+
+        $loaded = require $path;
+        if (!is_array($loaded)) {
+            return [];
+        }
+
+        $classMap = [];
+        foreach ($loaded as $className => $filePath) {
+            if (is_string($className) && is_string($filePath)) {
+                /** @var class-string $className */
+                $classMap[$className] = $filePath;
+            }
+        }
+
+        return $classMap;
+    }
+
+    /**
+     * @return array<string, list<string>|string>
+     */
+    private function loadComposerPsr4Map(string $path): array
+    {
+        if (!is_file($path) || !is_readable($path)) {
+            return [];
+        }
+
+        $loaded = require $path;
+        if (!is_array($loaded)) {
+            return [];
+        }
+
+        $psr4Map = [];
+        foreach ($loaded as $namespace => $dirs) {
+            if (!is_string($namespace)) {
+                continue;
+            }
+
+            if (is_string($dirs)) {
+                $psr4Map[$namespace] = $dirs;
+                continue;
+            }
+
+            if (!is_array($dirs)) {
+                continue;
+            }
+
+            $normalizedDirs = array_values(array_filter($dirs, static fn (mixed $dir): bool => is_string($dir)));
+            $psr4Map[$namespace] = $normalizedDirs;
+        }
+
+        return $psr4Map;
     }
 
     /**

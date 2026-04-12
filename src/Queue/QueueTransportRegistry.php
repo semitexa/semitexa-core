@@ -100,13 +100,26 @@ class QueueTransportRegistry
 
         try {
             $clusters = $clusterRegistryClass::fromEnv();
-            self::register('nats', new $transportFactoryClass($clusters));
+            self::register('nats', self::normalizeFactory(new $transportFactoryClass($clusters)));
         } catch (\Throwable $e) {
             StaticLoggerBridge::error('core', 'Failed to register NATS queue transport', [
                 'exception' => $e::class,
                 'message' => $e->getMessage(),
             ]);
         }
+    }
+
+    private static function normalizeFactory(mixed $factory): QueueTransportFactoryInterface
+    {
+        if (!$factory instanceof QueueTransportFactoryInterface) {
+            throw new \RuntimeException(sprintf(
+                'Queue transport factory %s must implement %s.',
+                is_object($factory) ? $factory::class : get_debug_type($factory),
+                QueueTransportFactoryInterface::class,
+            ));
+        }
+
+        return $factory;
     }
 
     private static function hasNatsConfiguration(): bool
