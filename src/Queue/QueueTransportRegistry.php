@@ -100,8 +100,6 @@ class QueueTransportRegistry
 
         try {
             $clusters = $clusterRegistryClass::fromEnv();
-            $clusters->connect();
-
             self::register('nats', new $transportFactoryClass($clusters));
         } catch (\Throwable $e) {
             StaticLoggerBridge::error('core', 'Failed to register NATS queue transport', [
