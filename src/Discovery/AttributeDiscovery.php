@@ -9,6 +9,7 @@ use Semitexa\Core\Attribute\AsPayloadHandler;
 use Semitexa\Core\Attribute\AsPayloadPart;
 use Semitexa\Core\Attribute\AsResource;
 use Semitexa\Core\Attribute\AsResourcePart;
+use Semitexa\Core\Attribute\TransportType;
 use Semitexa\Core\Config\EnvValueResolver;
 use Semitexa\Core\Environment;
 use Semitexa\Core\ModuleRegistry;
@@ -310,6 +311,7 @@ class AttributeDiscovery
                         'overrides' => $attr->overrides ? ltrim($attr->overrides, '\\') : null,
                         'consumes' => $attr->consumes,
                         'produces' => $attr->produces,
+                        'transport' => $attr->transport,
                     ],
                 ];
                 $requestMeta[$className] = $meta;
@@ -406,6 +408,7 @@ class AttributeDiscovery
                 );
             }
 
+            $transport = $resolved['transport'] ?? TransportType::HTTP;
             $this->routeRegistry->register([
                 'path' => $resolved['path'],
                 'methods' => $resolved['methods'],
@@ -419,6 +422,7 @@ class AttributeDiscovery
                 'tags' => $resolved['tags'],
                 'public' => $resolved['public'],
                 'type' => 'http-request',
+                'transport' => $transport instanceof TransportType ? $transport->value : (string) $transport,
                 'consumes' => $resolved['consumes'] ?? null,
                 'produces' => $routeProduces,
                 'module' => $selectedModule,
@@ -679,7 +683,7 @@ class AttributeDiscovery
     private static function mergeRequestAttributes(array $base, array $override): array
     {
         $result = $base;
-        foreach (['path','methods','name','requirements','defaults','options','tags','public','responseWith','consumes','produces'] as $key) {
+        foreach (['path','methods','name','requirements','defaults','options','tags','public','responseWith','consumes','produces','transport'] as $key) {
             if ($override[$key] !== null) {
                 $result[$key] = $override[$key];
             }
@@ -704,6 +708,7 @@ class AttributeDiscovery
             'responseWith' => $attr['responseWith'],
             'consumes' => $attr['consumes'] ?? null,
             'produces' => $attr['produces'] ?? null,
+            'transport' => $attr['transport'] ?? TransportType::HTTP,
         ];
     }
 
