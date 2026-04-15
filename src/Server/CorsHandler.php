@@ -49,6 +49,11 @@ readonly class CorsHandler
     private function isAllowedOrigin(string $origin): bool
     {
         if ($this->env->corsAllowOrigin === '*') {
+            // Security: never allow wildcard origin with credentials (VULN-003)
+            // This prevents any website from making authenticated cross-origin requests
+            if ($this->env->corsAllowCredentials) {
+                return false;
+            }
             return true;
         }
 

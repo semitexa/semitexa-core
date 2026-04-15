@@ -227,7 +227,13 @@ class RouteExecutor
         } catch (\Semitexa\Core\Http\Exception\TypeMismatchException $e) {
             return [$reqDto, HttpResponse::json(['errors' => [$e->field => [$e->getMessage()]]], HttpStatus::UnprocessableEntity->value)];
         } catch (\Throwable $e) {
-            return [$reqDto, HttpResponse::json(['errors' => ['_body' => ['Request body could not be processed: ' . $e->getMessage()]]], HttpStatus::UnprocessableEntity->value)];
+            // Security: suppress exception messages in production (VULN-007)
+            // Only expose details in debug mode for development
+            $httpRequest = method_exists($reqDto, 'getHttpRequest') ? $reqDto->getHttpRequest() : null;
+            $message = $httpRequest instanceof Request && self::isDebugMode($httpRequest)
+                ? $e->getMessage()
+                : 'Request body could not be processed';
+            return [$reqDto, HttpResponse::json(['errors' => ['_body' => [$message]]], HttpStatus::UnprocessableEntity->value)];
         }
 
         $validationResult = PayloadValidator::validate($reqDto, $request);
@@ -292,5 +298,20 @@ class RouteExecutor
             throw new PipelineException('toCoreResponse() must return an instance of HttpResponse.');
         }
         return HttpResponse::json(['ok' => true]);
+    }
+
+    /**
+     * Check if debug mode is enabled via the request's environment.
+     */
+    private static function isDebugMode(?Request $request): bool
+    {
+        if ($request === null) {
+            return false;
+        }
+        $debug = $_ENV['APP_DEBUG'] ?? null;
+        if ($debug === null) {
+            $debug = getenv('APP_DEBUG');
+        }
+        return filter_var($debug, FILTER_VALIDATE_BOOL);
     }
 }

@@ -23,9 +23,21 @@ final class ResponseRenderer
         // Redirect short-circuit: if the resource has a redirect URL, skip rendering
         if (method_exists($resDto, 'getRedirectUrl') && $resDto->getRedirectUrl() !== null) {
             $redirectUrl = $resDto->getRedirectUrl();
+            if (is_string($redirectUrl)) {
+                // Security: validate redirect URL to prevent open redirect attacks (VULN-006)
+                $parsed = parse_url($redirectUrl);
+                if ($parsed !== false && isset($parsed['host'])) {
+                    $requestHost = $request->getHeader('Host') ?? '';
+                    if ($parsed['host'] !== $requestHost && $parsed['host'] !== 'localhost' && $parsed['host'] !== '127.0.0.1') {
+                        $redirectUrl = '/';
+                    }
+                }
+            } else {
+                $redirectUrl = '';
+            }
             $statusCode = method_exists($resDto, 'getStatusCode') ? $resDto->getStatusCode() : HttpStatus::Found->value;
             return HttpResponse::redirect(
-                is_string($redirectUrl) ? $redirectUrl : '',
+                $redirectUrl,
                 is_int($statusCode) ? $statusCode : HttpStatus::Found->value,
             );
         }

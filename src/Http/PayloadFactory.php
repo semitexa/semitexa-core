@@ -45,6 +45,22 @@ final class PayloadFactory
      */
     private static function buildWrapperClass(string $signature, string $baseClass, array $traits): string
     {
+        // Security: validate all class/trait names against strict FQCN pattern
+        // to prevent code injection via eval() (VULN-001)
+        if (!preg_match('/^[A-Za-z0-9_\\\\]+$/', $baseClass)) {
+            throw new \InvalidArgumentException(
+                'Invalid base class name for PayloadFactory. Only alphanumeric, underscore, and backslash allowed.'
+            );
+        }
+
+        foreach ($traits as $trait) {
+            if (!preg_match('/^[A-Za-z0-9_\\\\]+$/', $trait)) {
+                throw new \InvalidArgumentException(
+                    "Invalid trait name '{$trait}' for PayloadFactory. Only alphanumeric, underscore, and backslash allowed."
+                );
+            }
+        }
+
         $hash = substr(hash('sha256', $signature), 0, 16);
         $className = 'PayloadWrapper_' . $hash;
         $fqn = 'Semitexa\\Runtime\\' . $className;
