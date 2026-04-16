@@ -55,12 +55,12 @@ class AsPayload
         public ?bool $public = null,
         /** @deprecated Use $transport instead. Kept for backward compatibility — has no effect. */
         public string $protocol = 'http',
-        public ?TransportType $transport = null,
         public ?string $responseWith = null,
         /** @var list<string>|null Request Content-Types this endpoint accepts. null = all. */
         public ?array $consumes = null,
         /** @var list<string>|null Response Content-Types this endpoint can produce. null = all. */
         public ?array $produces = null,
+        public ?TransportType $transport = null,
     ) {
         $this->doc = $doc;
         if ($this->consumes !== null) {

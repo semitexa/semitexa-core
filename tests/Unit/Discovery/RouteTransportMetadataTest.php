@@ -7,6 +7,7 @@ namespace Semitexa\Core\Tests\Unit\Discovery;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use ReflectionMethod;
+use Semitexa\Core\Attribute\AsPayload;
 use Semitexa\Core\Attribute\TransportType;
 use Semitexa\Core\Discovery\AttributeDiscovery;
 use Semitexa\Core\Discovery\DefaultRouteMetadataResolver;
@@ -17,6 +18,7 @@ final class RouteTransportMetadataTest extends TestCase
     #[Test]
     public function merged_request_attributes_keep_base_transport_when_override_omits_it(): void
     {
+        /** @var array{path: string, transport: TransportType} $merged */
         $merged = $this->invokeAttributeDiscoveryStatic(
             'mergeRequestAttributes',
             [
@@ -56,6 +58,7 @@ final class RouteTransportMetadataTest extends TestCase
     #[Test]
     public function request_defaults_assign_http_transport_when_missing(): void
     {
+        /** @var array{methods: list<string>, transport: TransportType} $defaults */
         $defaults = $this->invokeAttributeDiscoveryStatic(
             'applyRequestDefaults',
             [
@@ -78,6 +81,33 @@ final class RouteTransportMetadataTest extends TestCase
 
         self::assertSame(['GET'], $defaults['methods']);
         self::assertSame(TransportType::Http, $defaults['transport']);
+    }
+
+    #[Test]
+    public function as_payload_keeps_legacy_positional_arguments_compatible(): void
+    {
+        $attribute = new AsPayload(
+            null,
+            null,
+            null,
+            '/docs',
+            ['GET'],
+            'docs.show',
+            null,
+            null,
+            null,
+            null,
+            true,
+            'http',
+            'App\\Response\\DocResponse',
+            ['application/json'],
+            ['text/html'],
+        );
+
+        self::assertSame('App\\Response\\DocResponse', $attribute->responseWith);
+        self::assertSame(['application/json'], $attribute->consumes);
+        self::assertSame(['text/html'], $attribute->produces);
+        self::assertNull($attribute->transport);
     }
 
     #[Test]
