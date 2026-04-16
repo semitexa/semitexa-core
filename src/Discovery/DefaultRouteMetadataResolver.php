@@ -33,7 +33,7 @@ final class DefaultRouteMetadataResolver implements RouteMetadataResolverInterfa
             consumes:      $route->consumes,
             handlers:      $route->handlers,
             requirements:  $route->requirements,
-            extensions:    [],
+            extensions:    $route->transport !== null ? ['transport' => $route->transport] : [],
         );
     }
 }

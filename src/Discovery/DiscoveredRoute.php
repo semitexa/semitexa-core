@@ -31,6 +31,7 @@ final readonly class DiscoveredRoute
         public ?string $responseClass,
         public array $handlers,
         public string $type,
+        public ?string $transport,
         public ?array $produces,
         public ?array $consumes,
         public string $module,
@@ -70,6 +71,8 @@ final readonly class DiscoveredRoute
         $produces = self::normalizeStringList($route['produces'] ?? null);
         /** @var list<string> $consumes */
         $consumes = self::normalizeStringList($route['consumes'] ?? null);
+        /** @var string|null $transport */
+        $transport = is_string($route['transport'] ?? null) ? $route['transport'] : null;
         /** @var string $module */
         $module = is_string($route['module'] ?? null) ? $route['module'] : '';
         /** @var array<string, string> $requirements */
@@ -99,6 +102,7 @@ final readonly class DiscoveredRoute
             responseClass: $responseClass,
             handlers: $handlers,
             type: $type,
+            transport: $transport,
             produces: $produces,
             consumes: $consumes,
             module: $module,
@@ -126,6 +130,7 @@ final readonly class DiscoveredRoute
             'responseClass' => $this->responseClass,
             'handlers' => $this->handlers,
             'type' => $this->type,
+            'transport' => $this->transport,
             'produces' => $this->produces,
             'consumes' => $this->consumes,
             'module' => $this->module,
