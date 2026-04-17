@@ -149,7 +149,16 @@ class LayoutGenerator
         }
 
         if (count($matches) > 1) {
-            $list = implode("\n - ", array_map(fn ($layout) => $layout['id'], $matches));
+            $matchedIds = [];
+            foreach ($matches as $layout) {
+                $id = $layout['id'] ?? null;
+                if (!is_string($id) || $id === '') {
+                    continue;
+                }
+                $matchedIds[] = $id;
+            }
+
+            $list = implode("\n - ", $matchedIds);
             throw new \RuntimeException("Ambiguous layout identifier '{$identifier}'. Matches:\n - {$list}");
         }
 
@@ -200,6 +209,4 @@ class LayoutGenerator
 
 
 }
-
-
 

@@ -174,7 +174,7 @@ final class ResponseRenderer
         // Resources that render via Twig template inheritance (HtmlResponse subclasses with a
         // declared template or already-rendered content) bypass LayoutRenderer entirely.
         // LayoutRenderer is intended for slot-based layout composition without Twig inheritance.
-        $existingContent = method_exists($resDto, 'getContent') ? $resDto->getContent() : '';
+        $existingContent = $this->readContent($resDto);
 
         if ($existingContent === '' && method_exists($resDto, 'getDeclaredTemplate')) {
             $declaredTemplate = $resDto->getDeclaredTemplate();
@@ -183,9 +183,7 @@ final class ResponseRenderer
                     $resDto->setRenderContext($context);
                 }
                 $resDto->renderTemplate($declaredTemplate);
-                if (method_exists($resDto, 'getContent')) {
-                    $existingContent = $resDto->getContent();
-                }
+                $existingContent = $this->readContent($resDto);
             }
         }
 
@@ -220,6 +218,17 @@ final class ResponseRenderer
             $resDto->setHeader('Content-Type', 'text/html; charset=utf-8');
         }
         return $resDto;
+    }
+
+    private function readContent(object $resDto): string
+    {
+        if (!method_exists($resDto, 'getContent')) {
+            return '';
+        }
+
+        $content = $resDto->getContent();
+
+        return is_string($content) ? $content : '';
     }
 
     /**

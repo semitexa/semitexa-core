@@ -305,7 +305,7 @@ class RouteExecutor
      */
     private static function isDebugMode(?Request $_request): bool
     {
-        $debug = \Semitexa\Core\Environment::create()->appDebug ?? false;
+        $debug = \Semitexa\Core\Environment::create()->appDebug;
         return filter_var($debug, FILTER_VALIDATE_BOOL);
     }
 }
