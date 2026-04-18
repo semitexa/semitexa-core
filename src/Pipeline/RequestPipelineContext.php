@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Pipeline;
 
+use Semitexa\Core\Auth\AuthBootstrapperInterface;
 use Semitexa\Core\Auth\AuthResult;
 use Semitexa\Core\Discovery\DiscoveredRoute;
 use Semitexa\Core\Discovery\ResolvedRouteMetadata;
@@ -30,8 +31,8 @@ class RequestPipelineContext
         public readonly DiscoveredRoute $route,
         public readonly Request $request,
         ?object $resourceDto = null,
-        /** Set by Application when auth package is present so AuthCheckListener can delegate to AuthBootstrapper. */
-        public readonly ?object $authBootstrapper = null,
+        /** Set by Application when auth package is present so AuthCheckListener can delegate to AuthBootstrapperInterface. */
+        public readonly ?AuthBootstrapperInterface $authBootstrapper = null,
         /** Typed route metadata resolved at the start of RouteExecutor::execute(). */
         public readonly ?ResolvedRouteMetadata $resolvedMetadata = null,
     ) {

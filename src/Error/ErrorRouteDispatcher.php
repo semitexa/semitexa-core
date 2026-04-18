@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Semitexa\Core\Error;
 
 use Psr\Container\ContainerInterface;
-use Semitexa\Auth\AuthBootstrapper;
+use Semitexa\Core\Auth\AuthBootstrapperInterface;
 use Semitexa\Core\Container\RequestScopedContainer;
 use Semitexa\Core\Discovery\DiscoveredRoute;
 use Semitexa\Core\Discovery\HandlerRegistry;
@@ -30,7 +30,7 @@ final class ErrorRouteDispatcher
         private readonly RouteRegistry $routeRegistry,
         private readonly RequestScopedContainer $requestScopedContainer,
         private readonly ContainerInterface $container,
-        private readonly ?AuthBootstrapper $authBootstrapper,
+        private readonly ?AuthBootstrapperInterface $authBootstrapper,
         private readonly Environment $environment,
         ?\Closure $routeExecutor = null,
     ) {

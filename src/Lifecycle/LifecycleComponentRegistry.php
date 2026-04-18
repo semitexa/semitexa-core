@@ -5,14 +5,16 @@ declare(strict_types=1);
 namespace Semitexa\Core\Lifecycle;
 
 use Psr\Container\ContainerInterface;
-use Semitexa\Auth\AuthBootstrapper;
+use Semitexa\Core\Auth\AuthBootstrapperFactoryInterface;
+use Semitexa\Core\Auth\AuthBootstrapperInterface;
 use Semitexa\Core\Container\RequestScopedContainer;
 use Semitexa\Core\Discovery\ClassDiscovery;
 use Semitexa\Core\Event\EventDispatcherInterface;
 use Semitexa\Core\ModuleRegistry;
+use Semitexa\Core\Tenant\TenancyBootstrapperFactoryInterface;
+use Semitexa\Core\Tenant\TenancyBootstrapperInterface;
 use Semitexa\Locale\Context\LocaleManager;
 use Semitexa\Locale\LocaleBootstrapper;
-use Semitexa\Tenancy\TenancyBootstrapper;
 
 /**
  * Centralizes detection and creation of optional lifecycle bootstrappers.
@@ -58,37 +60,45 @@ final class LifecycleComponentRegistry
      * Returns null if the tenancy package is not available.
      */
     public function createTenancyBootstrapper(
+        ContainerInterface $container,
         ?ClassDiscovery $classDiscovery = null,
         ?EventDispatcherInterface $events = null,
-    ): ?TenancyBootstrapper {
+    ): ?TenancyBootstrapperInterface {
         if (!$this->tenancyAvailable) {
             return null;
         }
-        return new TenancyBootstrapper(
-            classDiscovery: $classDiscovery,
-            events: $events,
-        );
+
+        if (!$container->has(TenancyBootstrapperFactoryInterface::class)) {
+            return null;
+        }
+
+        /** @var TenancyBootstrapperFactoryInterface $factory */
+        $factory = $container->get(TenancyBootstrapperFactoryInterface::class);
+
+        return $factory->create($container);
     }
 
     /**
-     * Create an AuthBootstrapper instance.
-     * Returns null if the auth package is not available.
+     * Create an AuthBootstrapperInterface via the factory binding contributed by
+     * semitexa-auth. Returns null if the auth package is not active, or if the
+     * factory binding is not registered in the container.
      */
     public function createAuthBootstrapper(
         ContainerInterface $container,
         RequestScopedContainer $requestScopedContainer,
-        ?ClassDiscovery $classDiscovery = null,
-        ?EventDispatcherInterface $events = null,
-    ): ?AuthBootstrapper {
+    ): ?AuthBootstrapperInterface {
         if (!$this->authAvailable) {
             return null;
         }
-        return new AuthBootstrapper(
-            container: $container,
-            classDiscovery: $classDiscovery,
-            events: $events,
-            requestScopedContainer: $requestScopedContainer,
-        );
+
+        if (!$container->has(AuthBootstrapperFactoryInterface::class)) {
+            return null;
+        }
+
+        /** @var AuthBootstrapperFactoryInterface $factory */
+        $factory = $container->get(AuthBootstrapperFactoryInterface::class);
+
+        return $factory->create($container, $requestScopedContainer);
     }
 
     /**
