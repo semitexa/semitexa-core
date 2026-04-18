@@ -66,6 +66,68 @@ readonly class Request
         
         return null;
     }
+
+    public function getHost(): string
+    {
+        $hostHeader = trim($this->getHeader('Host') ?? '');
+        if ($hostHeader === '') {
+            return '';
+        }
+
+        $hostParts = explode(',', $hostHeader);
+        $host = trim($hostParts[0]);
+        if ($host === '') {
+            return '';
+        }
+
+        $parsedHost = parse_url('http://' . $host, PHP_URL_HOST);
+        if (is_string($parsedHost) && $parsedHost !== '') {
+            return strtolower($parsedHost);
+        }
+
+        return strtolower(explode(':', $host, 2)[0]);
+    }
+
+    public function getScheme(): string
+    {
+        $schemeHeader = trim($this->getHeader('X-Forwarded-Proto') ?? '');
+        if ($schemeHeader !== '' && $this->isTrustedForwardedRequest()) {
+            $schemeParts = array_values(array_filter(array_map(
+                static fn (string $value): string => strtolower(trim($value)),
+                explode(',', $schemeHeader)
+            )));
+            $forwardedScheme = $schemeParts[0] ?? '';
+            if ($forwardedScheme === 'http' || $forwardedScheme === 'https') {
+                return $forwardedScheme;
+            }
+        }
+
+        $https = strtolower($this->getServer('https'));
+        if ($https === 'on' || $https === '1') {
+            return 'https';
+        }
+
+        return 'http';
+    }
+
+    public function getOrigin(): string
+    {
+        $host = $this->getHost();
+        if ($host === '') {
+            return '';
+        }
+
+        return $this->getScheme() . '://' . $host;
+    }
+
+    private function isTrustedForwardedRequest(): bool
+    {
+        $remoteAddr = strtolower(trim($this->getServer('remote_addr')));
+
+        return $remoteAddr === '127.0.0.1'
+            || $remoteAddr === '::1'
+            || $remoteAddr === 'localhost';
+    }
     
     public function getQuery(string $key, string $default = ''): string
     {

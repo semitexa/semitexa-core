@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Support;
 
-use Semitexa\Tenancy\Context\CoroutineContextStore;
+use Semitexa\Core\Tenant\TenantContextInterface;
 
 final class TenantModuleScopeResolver
 {
@@ -84,7 +84,7 @@ final class TenantModuleScopeResolver
     /**
      * @param array<string, mixed> $route
      */
-    public static function isRouteAllowedForCurrentTenant(array $route): bool
+    public static function isRouteAllowedForTenant(array $route, ?TenantContextInterface $context): bool
     {
         $rawTenantScopes = $route['tenantScopes'] ?? [];
         if (!is_array($rawTenantScopes)) {
@@ -100,7 +100,7 @@ final class TenantModuleScopeResolver
             return true;
         }
 
-        $tenantId = self::currentTenantId();
+        $tenantId = self::tenantId($context);
         if ($tenantId === null || $tenantId === '') {
             return false;
         }
@@ -112,7 +112,7 @@ final class TenantModuleScopeResolver
      * @param list<array<string, mixed>> $routes
      * @return list<array<string, mixed>>
      */
-    public static function selectRoutesForCurrentTenant(array $routes): array
+    public static function selectRoutesForTenant(array $routes, ?TenantContextInterface $context): array
     {
         if ($routes === []) {
             return [];
@@ -120,7 +120,7 @@ final class TenantModuleScopeResolver
 
         $scoped = array_values(array_filter(
             $routes,
-            static fn (array $route): bool => !empty($route['tenantScopes']) && self::isRouteAllowedForCurrentTenant($route),
+            static fn (array $route): bool => !empty($route['tenantScopes']) && self::isRouteAllowedForTenant($route, $context),
         ));
 
         if ($scoped !== []) {
@@ -133,10 +133,9 @@ final class TenantModuleScopeResolver
         ));
     }
 
-    private static function currentTenantId(): ?string
+    private static function tenantId(?TenantContextInterface $context): ?string
     {
-        $context = CoroutineContextStore::get();
-        if ($context === null) {
+        if ($context === null || $context->isDefault()) {
             return null;
         }
 

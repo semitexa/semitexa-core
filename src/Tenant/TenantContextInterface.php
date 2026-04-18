@@ -13,7 +13,7 @@ interface TenantContextInterface
 
     public function hasLayer(TenantLayerInterface $layer): bool;
 
-    public static function get(): ?self;
+    public function getTenantId(): string;
 
-    public static function getOrFail(): self;
+    public function isDefault(): bool;
 }

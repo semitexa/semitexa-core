@@ -6,6 +6,7 @@ namespace Semitexa\Core\Lifecycle;
 
 use Psr\Container\ContainerInterface;
 use Semitexa\Core\Auth\AuthContextInterface;
+use Semitexa\Core\Auth\GuestAuthContext;
 use Semitexa\Core\Container\RequestScopedContainer;
 use Semitexa\Core\Cookie\CookieJar;
 use Semitexa\Core\Cookie\CookieJarInterface;
@@ -21,11 +22,9 @@ use Semitexa\Core\Session\Session;
 use Semitexa\Core\Session\SessionHandlerInterface;
 use Semitexa\Core\Session\SessionInterface;
 use Semitexa\Core\Session\SwooleTableSessionHandler;
-use Semitexa\Core\Tenant\DefaultTenantContext;
 use Semitexa\Core\Tenant\TenantContextInterface;
-use Semitexa\Tenancy\Context\CoroutineContextStore;
-use Semitexa\Tenancy\Context\TenantContext as TenancyTenantContext;
-use Semitexa\Tenancy\TenancyBootstrapper;
+use Semitexa\Core\Tenant\TenantContextStoreInterface;
+use Semitexa\Core\Tenant\TenancyBootstrapperInterface;
 
 /**
  * @internal Initializes session, cookies, and context interfaces; finalizes session after response.
@@ -37,7 +36,8 @@ final class SessionPhase
     public function __construct(
         private readonly ContainerInterface $container,
         private readonly RequestScopedContainer $requestScopedContainer,
-        private readonly ?TenancyBootstrapper $tenancy,
+        private readonly TenantContextStoreInterface $tenantContextStore,
+        private readonly ?TenancyBootstrapperInterface $tenancy,
     ) {
         $this->sessionHandler = $this->createSessionHandler();
     }
@@ -161,21 +161,19 @@ final class SessionPhase
      */
     private function initContextInterfaces(): void
     {
-        if ($this->tenancy !== null && $this->tenancy->isEnabled()) {
-            $resolved = CoroutineContextStore::get();
-            if ($resolved !== null) {
-                TenancyTenantContext::set($resolved);
-                $this->requestScopedContainer->set(TenantContextInterface::class, $resolved);
-            } else {
-                TenancyTenantContext::clear();
-                $this->requestScopedContainer->set(TenantContextInterface::class, DefaultTenantContext::getInstance());
-            }
-        } else {
-            TenancyTenantContext::clear();
-            $this->requestScopedContainer->set(TenantContextInterface::class, DefaultTenantContext::getInstance());
+        if ($this->tenancy === null || !$this->tenancy->isEnabled()) {
+            $this->tenantContextStore->clear();
         }
 
-        $authContext = \Semitexa\Auth\Context\AuthManager::getInstance();
+        $this->requestScopedContainer->set(TenantContextInterface::class, $this->tenantContextStore->get());
+
+        // AuthContextInterface is supplied by semitexa-auth through a SatisfiesServiceContract
+        // binding. When the auth package is not installed, fall back to the Core-owned guest
+        // context so downstream consumers always receive a non-null auth context.
+        $authContext = $this->container->has(AuthContextInterface::class)
+            ? $this->container->get(AuthContextInterface::class)
+            : GuestAuthContext::getInstance();
+        /** @var AuthContextInterface $authContext */
         $this->requestScopedContainer->set(AuthContextInterface::class, $authContext);
 
         $localeContext = DefaultLocaleContext::getInstance();
