@@ -69,7 +69,15 @@ final class LifecycleComponentRegistry
         }
 
         if (!$container->has(TenancyBootstrapperFactoryInterface::class)) {
-            return null;
+            $bootstrapperClass = 'Semitexa\\Tenancy\\TenancyBootstrapper';
+            if (!class_exists($bootstrapperClass)) {
+                return null;
+            }
+
+            $tenantContextStore = $container->get(\Semitexa\Core\Tenant\TenantContextStoreInterface::class);
+            $bootstrapper = new $bootstrapperClass($tenantContextStore, $classDiscovery, $events);
+
+            return $bootstrapper instanceof TenancyBootstrapperInterface ? $bootstrapper : null;
         }
 
         /** @var TenancyBootstrapperFactoryInterface $factory */
@@ -92,7 +100,30 @@ final class LifecycleComponentRegistry
         }
 
         if (!$container->has(AuthBootstrapperFactoryInterface::class)) {
-            return null;
+            $bootstrapperClass = 'Semitexa\\Auth\\AuthBootstrapper';
+            if (!class_exists($bootstrapperClass)) {
+                return null;
+            }
+
+            $classDiscovery = $container->has(ClassDiscovery::class)
+                ? $container->get(ClassDiscovery::class)
+                : null;
+            $authContext = $container->has(\Semitexa\Core\Auth\AuthContextInterface::class)
+                ? $container->get(\Semitexa\Core\Auth\AuthContextInterface::class)
+                : null;
+            $logger = $container->has(\Semitexa\Core\Log\LoggerInterface::class)
+                ? $container->get(\Semitexa\Core\Log\LoggerInterface::class)
+                : null;
+
+            $bootstrapper = new $bootstrapperClass(
+                container: $container,
+                requestScopedContainer: $requestScopedContainer,
+                classDiscovery: $classDiscovery,
+                authContext: $authContext,
+                logger: $logger,
+            );
+
+            return $bootstrapper instanceof AuthBootstrapperInterface ? $bootstrapper : null;
         }
 
         /** @var AuthBootstrapperFactoryInterface $factory */
