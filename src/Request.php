@@ -6,9 +6,22 @@ namespace Semitexa\Core;
 
 /**
  * HTTP Request representation
+ *
+ * @phpstan-type Headers array<string, string>
+ * @phpstan-type QueryArray array<string, string|array<mixed>>
+ * @phpstan-type PostArray array<string, string|array<mixed>>
+ * @phpstan-type ServerArray array<string, mixed>
+ * @phpstan-type CookieArray array<string, string>
  */
 readonly class Request
 {
+    /**
+     * @param Headers     $headers
+     * @param QueryArray  $query
+     * @param PostArray   $post
+     * @param ServerArray $server
+     * @param CookieArray $cookies
+     */
     public function __construct(
         public string $method,
         public string $uri,
@@ -55,7 +68,7 @@ readonly class Request
         if (isset($this->headers[$name])) {
             return $this->headers[$name];
         }
-        
+
         // Try case-insensitive match
         $nameLower = strtolower($name);
         foreach ($this->headers as $key => $value) {
@@ -63,7 +76,7 @@ readonly class Request
                 return $value;
             }
         }
-        
+
         return null;
     }
 
@@ -135,12 +148,14 @@ readonly class Request
     
     public function getQuery(string $key, string $default = ''): string
     {
-        return $this->query[$key] ?? $default;
+        $value = $this->query[$key] ?? null;
+        return is_string($value) ? $value : $default;
     }
-    
+
     public function getPost(string $key, string $default = ''): string
     {
-        return $this->post[$key] ?? $default;
+        $value = $this->post[$key] ?? null;
+        return is_string($value) ? $value : $default;
     }
     
     public function getServer(string $key, string $default = ''): string
@@ -232,9 +247,9 @@ readonly class Request
     }
     
     /**
-     * Get parsed JSON body as array
-     * 
-     * @return array|null Parsed JSON data or null if not JSON or parse failed
+     * Get parsed JSON body as array (object → assoc, array → list).
+     *
+     * @return array<int|string, mixed>|null
      */
     public function getJsonBody(): ?array
     {

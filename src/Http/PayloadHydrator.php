@@ -199,7 +199,7 @@ class PayloadHydrator
         }
 
         foreach ($httpRequest->query as $key => $value) {
-            if (is_string($key) && !array_key_exists($key, $data)) {
+            if (!array_key_exists($key, $data)) {
                 $data[$key] = $value;
             }
         }

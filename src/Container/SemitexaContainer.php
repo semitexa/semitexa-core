@@ -138,13 +138,32 @@ final class SemitexaContainer implements ContainerInterface
     public function captureExecutionContext(): ExecutionContext
     {
         $values = $this->readExecutionContextValues();
+
+        /** @var Request|null $request */
+        $request = $values[Request::class] ?? null;
+
+        /** @var SessionInterface|null $session */
+        $session = $values[SessionInterface::class] ?? null;
+
+        /** @var CookieJarInterface|null $cookieJar */
+        $cookieJar = $values[CookieJarInterface::class] ?? null;
+
+        /** @var TenantContextInterface|null $tenantContext */
+        $tenantContext = $values[TenantContextInterface::class] ?? null;
+
+        /** @var AuthContextInterface|null $authContext */
+        $authContext = $values[AuthContextInterface::class] ?? null;
+
+        /** @var LocaleContextInterface|null $localeContext */
+        $localeContext = $values[LocaleContextInterface::class] ?? null;
+
         return new ExecutionContext(
-            request: $values[Request::class] ?? null,
-            session: $values[SessionInterface::class] ?? null,
-            cookieJar: $values[CookieJarInterface::class] ?? null,
-            tenantContext: $values[TenantContextInterface::class] ?? null,
-            authContext: $values[AuthContextInterface::class] ?? null,
-            localeContext: $values[LocaleContextInterface::class] ?? null,
+            request: $request,
+            session: $session,
+            cookieJar: $cookieJar,
+            tenantContext: $tenantContext,
+            authContext: $authContext,
+            localeContext: $localeContext,
         );
     }
 
@@ -178,18 +197,26 @@ final class SemitexaContainer implements ContainerInterface
     /**
      * Read execution context values for the current coroutine.
      *
-     * @return array<string, object>
+     * Storage is opaque to PHPStan (CoroutineLocal returns mixed); the only writer is
+     * writeExecutionContextValues() which guarantees the array<class-string, object> shape,
+     * so the narrowing assertion below is invariant-safe.
+     *
+     * @return array<class-string, object>
      */
     private function readExecutionContextValues(): array
     {
         $values = CoroutineLocal::get(self::EXECUTION_CONTEXT_KEY, []);
-        return is_array($values) ? $values : [];
+        if (!is_array($values)) {
+            return [];
+        }
+        /** @var array<class-string, object> $values */
+        return $values;
     }
 
     /**
      * Write execution context values for the current coroutine only.
      *
-     * @param array<string, object> $values
+     * @param array<class-string, object> $values
      */
     private function writeExecutionContextValues(array $values): void
     {

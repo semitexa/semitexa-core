@@ -113,11 +113,10 @@ class LintTemplatesCommand extends BaseCommand
         $modules = $this->moduleRegistry->getModules();
 
         foreach ($modules as $module) {
-            $moduleName = $module['name'] ?? '';
-            $modulePath = $module['path'] ?? '';
-            $type       = $module['type'] ?? '';
+            $moduleName = $module['name'];
+            $modulePath = $module['path'];
 
-            if ($type === 'local' || $moduleName === '' || $modulePath === '') {
+            if ($module['type'] === 'local' || $moduleName === '' || $modulePath === '') {
                 continue;
             }
 

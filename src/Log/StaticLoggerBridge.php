@@ -21,7 +21,7 @@ final class StaticLoggerBridge
     }
 
     /**
-     * @param array<array-key, mixed> $context
+     * @param array<string, mixed> $context
      */
     public static function error(string $channel, string $message, array $context = []): void
     {
@@ -37,7 +37,7 @@ final class StaticLoggerBridge
     }
 
     /**
-     * @param array<array-key, mixed> $context
+     * @param array<string, mixed> $context
      */
     public static function warning(string $channel, string $message, array $context = []): void
     {
@@ -53,7 +53,7 @@ final class StaticLoggerBridge
     }
 
     /**
-     * @param array<array-key, mixed> $context
+     * @param array<string, mixed> $context
      */
     public static function debug(string $channel, string $message, array $context = []): void
     {
@@ -81,8 +81,8 @@ final class StaticLoggerBridge
     }
 
     /**
-     * @param array<array-key, mixed> $context
-     * @return array<array-key, mixed>
+     * @param array<string, mixed> $context
+     * @return array<string, mixed>
      */
     private static function withChannelContext(string $channel, array $context): array
     {

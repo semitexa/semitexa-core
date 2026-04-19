@@ -22,7 +22,7 @@ final class AsyncJsonLogger implements LoggerInterface
 
     private ?int $minLevel = null;
     private ?string $logFile = null;
-    /** @var list<array{level: string, message: string, context: array, timestamp: string}> */
+    /** @var list<array<string, mixed>> */
     private array $buffer = [];
     private bool $deferScheduled = false;
 
@@ -40,36 +40,43 @@ final class AsyncJsonLogger implements LoggerInterface
         $this->logFile = $logFile !== null && $logFile !== '' ? $logFile : self::DEFAULT_LOG_FILE;
     }
 
+    /** @param array<string, mixed> $context */
     public function error(string $message, array $context = []): void
     {
         $this->log('error', $message, $context);
     }
 
+    /** @param array<string, mixed> $context */
     public function critical(string $message, array $context = []): void
     {
         $this->log('critical', $message, $context);
     }
 
+    /** @param array<string, mixed> $context */
     public function warning(string $message, array $context = []): void
     {
         $this->log('warning', $message, $context);
     }
 
+    /** @param array<string, mixed> $context */
     public function info(string $message, array $context = []): void
     {
         $this->log('info', $message, $context);
     }
 
+    /** @param array<string, mixed> $context */
     public function notice(string $message, array $context = []): void
     {
         $this->log('notice', $message, $context);
     }
 
+    /** @param array<string, mixed> $context */
     public function debug(string $message, array $context = []): void
     {
         $this->log('debug', $message, $context);
     }
 
+    /** @param array<string, mixed> $context */
     private function log(string $level, string $message, array $context): void
     {
         $this->ensureConfig();
