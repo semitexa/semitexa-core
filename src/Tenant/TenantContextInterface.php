@@ -12,8 +12,4 @@ interface TenantContextInterface
     public function getLayer(TenantLayerInterface $layer): ?TenantLayerValueInterface;
 
     public function hasLayer(TenantLayerInterface $layer): bool;
-
-    public function getTenantId(): string;
-
-    public function isDefault(): bool;
 }

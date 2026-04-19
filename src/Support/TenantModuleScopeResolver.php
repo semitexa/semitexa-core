@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Semitexa\Core\Support;
 
 use Semitexa\Core\Tenant\TenantContextInterface;
+use Semitexa\Core\Tenant\Layer\OrganizationLayer;
 
 final class TenantModuleScopeResolver
 {
@@ -120,7 +121,7 @@ final class TenantModuleScopeResolver
     private static function currentTenantContext(): ?TenantContextInterface
     {
         $store = '\\Semitexa\\Tenancy\\Context\\CoroutineContextStore';
-        if (class_exists($store) && method_exists($store, 'get')) {
+        if (class_exists($store)) {
             $context = $store::get();
             if ($context instanceof TenantContextInterface) {
                 return $context;
@@ -157,13 +158,46 @@ final class TenantModuleScopeResolver
 
     private static function tenantId(?TenantContextInterface $context): ?string
     {
-        if ($context === null || $context->isDefault()) {
+        if ($context === null || self::isDefaultContext($context)) {
             return null;
         }
 
-        $tenantId = $context->getTenantId();
+        $tenantId = self::resolveTenantId($context);
 
         return $tenantId !== '' && $tenantId !== 'default' ? $tenantId : null;
+    }
+
+    private static function isDefaultContext(TenantContextInterface $context): bool
+    {
+        if (method_exists($context, 'isDefault')) {
+            $isDefault = $context->isDefault();
+            if (is_bool($isDefault)) {
+                return $isDefault;
+            }
+        }
+
+        return self::resolveTenantId($context) === 'default';
+    }
+
+    private static function resolveTenantId(TenantContextInterface $context): string
+    {
+        if (method_exists($context, 'getTenantId')) {
+            $tenantId = $context->getTenantId();
+            if (is_string($tenantId) && $tenantId !== '') {
+                return $tenantId;
+            }
+
+            return 'default';
+        }
+
+        $organization = $context->getLayer(new OrganizationLayer());
+        if ($organization === null) {
+            return 'default';
+        }
+
+        $tenantId = trim($organization->rawValue());
+
+        return $tenantId !== '' ? $tenantId : 'default';
     }
 
     /**

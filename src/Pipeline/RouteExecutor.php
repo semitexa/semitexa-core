@@ -157,7 +157,15 @@ class RouteExecutor
             : new ExceptionMapper();
 
         /** @var ExceptionResponseMapperInterface $mapper */
-        return $mapper->withErrorRouteDispatcher($this->getErrorRouteDispatcher());
+        if (method_exists($mapper, 'withErrorRouteDispatcher')) {
+            $configuredMapper = $mapper->withErrorRouteDispatcher($this->getErrorRouteDispatcher());
+
+            if ($configuredMapper instanceof ExceptionResponseMapperInterface) {
+                return $configuredMapper;
+            }
+        }
+
+        return $mapper;
     }
 
     private function getErrorRouteDispatcher(): ErrorRouteDispatcher
