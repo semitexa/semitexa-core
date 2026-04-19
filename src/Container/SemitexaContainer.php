@@ -289,6 +289,20 @@ final class SemitexaContainer implements ContainerInterface
     }
 
     /**
+     * Apply #[InjectAsReadonly] property injection to an instance created
+     * outside the container's readonly graph (for example Symfony Console
+     * commands, which Symfony Application owns but which still declare
+     * their dependencies with the same attribute as services).
+     *
+     * This is the runtime entry point that makes #[InjectAsReadonly] work
+     * everywhere it is declared, without a parallel DI contract.
+     */
+    public function injectInto(object $instance): void
+    {
+        PropertyInjector::inject($instance, $this);
+    }
+
+    /**
      * Auto-wire and create a class instance that is not pre-registered in the container.
      * Constructor dependencies are resolved from readonly/execution-scoped pools.
      *

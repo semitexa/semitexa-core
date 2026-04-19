@@ -8,7 +8,8 @@ use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Psr\Container\ContainerInterface;
 use Semitexa\Core\Container\RequestScopedContainer;
-use Semitexa\Core\Discovery\AttributeDiscovery;
+use Semitexa\Core\Discovery\DiscoveredRoute;
+use Semitexa\Core\Discovery\RouteRegistry;
 use Semitexa\Core\Environment;
 use Semitexa\Core\Error\ErrorPageContext;
 use Semitexa\Core\Error\ErrorRouteDispatcher;
@@ -20,13 +21,13 @@ final class ErrorRouteDispatcherTest extends TestCase
     #[Test]
     public function html_404_without_custom_route_returns_fallback_html(): void
     {
-        $discovery = $this->createMock(AttributeDiscovery::class);
-        $discovery->expects($this->once())
-            ->method('findRouteByName')
+        $routes = $this->createMock(RouteRegistry::class);
+        $routes->expects($this->once())
+            ->method('findByNameTyped')
             ->with(ErrorRouteDispatcher::ROUTE_NAME_404)
             ->willReturn(null);
 
-        $dispatcher = $this->makeDispatcher($discovery);
+        $dispatcher = $this->makeDispatcher($routes);
         $request = $this->makeHtmlRequest('/missing');
 
         $response = $dispatcher->dispatchStatus(404, $request);
@@ -40,27 +41,25 @@ final class ErrorRouteDispatcherTest extends TestCase
     #[Test]
     public function html_500_uses_named_error_route_and_exposes_error_context(): void
     {
-        $discovery = $this->createMock(AttributeDiscovery::class);
-        $discovery->expects($this->once())
-            ->method('findRouteByName')
+        $errorRoute = $this->makeDiscoveredRoute(ErrorRouteDispatcher::ROUTE_NAME_500);
+        $routes = $this->createMock(RouteRegistry::class);
+        $routes->expects($this->once())
+            ->method('findByNameTyped')
             ->with(ErrorRouteDispatcher::ROUTE_NAME_500)
-            ->willReturn([
-                'name' => ErrorRouteDispatcher::ROUTE_NAME_500,
-                'type' => 'http-request',
-            ]);
+            ->willReturn($errorRoute);
 
         $container = new InMemoryContainer();
         $requestScopedContainer = new RequestScopedContainer($container);
         $dispatcher = new ErrorRouteDispatcher(
-            attributeDiscovery: $discovery,
+            routeRegistry: $routes,
             requestScopedContainer: $requestScopedContainer,
             container: $container,
             authBootstrapper: null,
             environment: $this->makeEnvironment(debug: true),
-            routeExecutor: function (array $route, Request $_request) use ($requestScopedContainer): HttpResponse {
+            routeExecutor: function (DiscoveredRoute $route, Request $_request) use ($requestScopedContainer): HttpResponse {
                 /** @var ErrorPageContext $context */
                 $context = $requestScopedContainer->get(ErrorPageContext::class);
-                $routeName = $route['name'] ?? null;
+                $routeName = $route->name;
                 if (!is_string($routeName)) {
                     throw new \RuntimeException('Error route name must be a string.');
                 }
@@ -87,10 +86,10 @@ final class ErrorRouteDispatcherTest extends TestCase
     #[Test]
     public function recursion_guard_falls_back_to_plain_500_html(): void
     {
-        $discovery = $this->createMock(AttributeDiscovery::class);
-        $discovery->expects($this->never())->method('findRouteByName');
+        $routes = $this->createMock(RouteRegistry::class);
+        $routes->expects($this->never())->method('findByNameTyped');
 
-        $dispatcher = $this->makeDispatcher($discovery, debug: true);
+        $dispatcher = $this->makeDispatcher($routes, debug: true);
 
         $response = $dispatcher->dispatchThrowable(
             new \RuntimeException('Broken error page'),
@@ -107,10 +106,10 @@ final class ErrorRouteDispatcherTest extends TestCase
     #[Test]
     public function non_html_request_keeps_existing_non_html_flow(): void
     {
-        $discovery = $this->createMock(AttributeDiscovery::class);
-        $discovery->expects($this->never())->method('findRouteByName');
+        $routes = $this->createMock(RouteRegistry::class);
+        $routes->expects($this->never())->method('findByNameTyped');
 
-        $dispatcher = $this->makeDispatcher($discovery);
+        $dispatcher = $this->makeDispatcher($routes);
         $request = new Request('GET', '/missing', ['Accept' => 'application/json'], [], [], [], []);
 
         self::assertNull($dispatcher->dispatchStatus(404, $request));
@@ -119,13 +118,13 @@ final class ErrorRouteDispatcherTest extends TestCase
     #[Test]
     public function wildcard_accept_header_prefers_html_error_flow(): void
     {
-        $discovery = $this->createMock(AttributeDiscovery::class);
-        $discovery->expects($this->once())
-            ->method('findRouteByName')
+        $routes = $this->createMock(RouteRegistry::class);
+        $routes->expects($this->once())
+            ->method('findByNameTyped')
             ->with(ErrorRouteDispatcher::ROUTE_NAME_404)
             ->willReturn(null);
 
-        $dispatcher = $this->makeDispatcher($discovery);
+        $dispatcher = $this->makeDispatcher($routes);
         $request = new Request('GET', '/missing', ['Accept' => '*/*'], [], [], [], []);
 
         $response = $dispatcher->dispatchStatus(404, $request);
@@ -135,14 +134,31 @@ final class ErrorRouteDispatcherTest extends TestCase
         self::assertSame('text/html; charset=utf-8', $response->getHeaders()['Content-Type']);
     }
 
-    private function makeDispatcher(AttributeDiscovery $discovery, bool $debug = false): ErrorRouteDispatcher
+    private function makeDispatcher(RouteRegistry $routes, bool $debug = false): ErrorRouteDispatcher
     {
         return new ErrorRouteDispatcher(
-            attributeDiscovery: $discovery,
+            routeRegistry: $routes,
             requestScopedContainer: new RequestScopedContainer(new InMemoryContainer()),
             container: new InMemoryContainer(),
             authBootstrapper: null,
             environment: $this->makeEnvironment($debug),
+        );
+    }
+
+    private function makeDiscoveredRoute(string $name): DiscoveredRoute
+    {
+        return new DiscoveredRoute(
+            path: '/__error__',
+            methods: ['GET'],
+            name: $name,
+            requestClass: '',
+            responseClass: null,
+            handlers: [],
+            type: 'http_request',
+            transport: null,
+            produces: null,
+            consumes: null,
+            module: '',
         );
     }
 

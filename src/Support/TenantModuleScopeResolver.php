@@ -112,6 +112,28 @@ final class TenantModuleScopeResolver
      * @param list<array<string, mixed>> $routes
      * @return list<array<string, mixed>>
      */
+    public static function selectRoutesForCurrentTenant(array $routes): array
+    {
+        return self::selectRoutesForTenant($routes, self::currentTenantContext());
+    }
+
+    private static function currentTenantContext(): ?TenantContextInterface
+    {
+        $store = '\\Semitexa\\Tenancy\\Context\\CoroutineContextStore';
+        if (class_exists($store) && method_exists($store, 'get')) {
+            $context = $store::get();
+            if ($context instanceof TenantContextInterface) {
+                return $context;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @param list<array<string, mixed>> $routes
+     * @return list<array<string, mixed>>
+     */
     public static function selectRoutesForTenant(array $routes, ?TenantContextInterface $context): array
     {
         if ($routes === []) {

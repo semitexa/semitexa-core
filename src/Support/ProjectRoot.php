@@ -20,12 +20,16 @@ class ProjectRoot
             return self::$root;
         }
 
-        // 1. Try known candidates (Docker, CWD)
-        $candidates = ['/var/www/html'];
+        // 1. Try known candidates. CWD is checked before /var/www/html so tests
+        //    can chdir() into a throwaway fixture root + ProjectRoot::reset()
+        //    to isolate state. Production hosts set SEMITEXA_PROJECT_ROOT
+        //    explicitly (see step 0), so this ordering only affects CLI/tests.
+        $candidates = [];
         $cwd = getcwd();
         if (is_string($cwd)) {
             $candidates[] = $cwd;
         }
+        $candidates[] = '/var/www/html';
         foreach ($candidates as $dir) {
             if (is_file($dir . '/composer.json') && is_dir($dir . '/src/modules')) {
                 self::$root = $dir;

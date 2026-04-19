@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Semitexa\Core\Console\Command;
 
 use Semitexa\Core\Attribute\AsCommand;
+use Semitexa\Core\Attribute\InjectAsReadonly;
 use Semitexa\Core\Container\ServiceContractRegistry;
 use Semitexa\Core\Discovery\ClassDiscovery;
 use Semitexa\Core\ModuleRegistry;
@@ -36,12 +37,11 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 )]
 class ContractsListCommand extends BaseCommand
 {
-    public function __construct(
-        private readonly ClassDiscovery $classDiscovery,
-        private readonly ModuleRegistry $moduleRegistry,
-    ) {
-        parent::__construct();
-    }
+    #[InjectAsReadonly]
+    protected ClassDiscovery $classDiscovery;
+
+    #[InjectAsReadonly]
+    protected ModuleRegistry $moduleRegistry;
 
     protected function configure(): void
     {

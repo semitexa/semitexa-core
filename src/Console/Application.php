@@ -6,7 +6,8 @@ namespace Semitexa\Core\Console;
 
 use Semitexa\Core\Attribute\AsCommand;
 use Semitexa\Core\Container\ContainerFactory;
-use Semitexa\Core\Container\NotFoundException;
+use Semitexa\Core\Container\Exception\InjectionException;
+use Semitexa\Core\Container\SemitexaContainer;
 use Semitexa\Core\Discovery\BootDiagnostics;
 use Semitexa\Core\Discovery\ClassDiscovery;
 use Symfony\Component\Console\Command\Command;
@@ -66,56 +67,43 @@ class Application extends SymfonyApplication
     }
 
     /**
+     * Instantiate a #[AsCommand] class and hand it to the container for
+     * property injection. Commands declare their dependencies exactly like
+     * services — via #[InjectAsReadonly] on protected properties — so the
+     * construction path is trivial:
+     *
+     *   1. Constructor must have zero required parameters. Commands are not
+     *      container-managed framework objects (they live on Symfony's
+     *      Application), so we cannot do constructor DI on them the way the
+     *      container does for #[AsService]. Required constructor params are
+     *      therefore a signal that a command is still using the pre-attribute
+     *      DI style and is skipped with a diagnostic.
+     *   2. Plain `new $className()`.
+     *   3. Container applies #[InjectAsReadonly] property injection.
+     *
      * @param class-string<Command> $className
-     * @return Command|null null if dependencies are not available (e.g. optional package)
+     * @return Command|null null if dependencies are not available
      */
-    private function instantiateCommand(string $className, \Psr\Container\ContainerInterface $container): ?Command
+    private function instantiateCommand(string $className, SemitexaContainer $container): ?Command
     {
         $ref = new ReflectionClass($className);
         $ctor = $ref->getConstructor();
-        if ($ctor === null || $ctor->getNumberOfRequiredParameters() === 0) {
-            return new $className();
+        if ($ctor !== null && $ctor->getNumberOfRequiredParameters() > 0) {
+            BootDiagnostics::current()->skip(
+                'Console',
+                "Skip {$className}: command constructor must have no required parameters. "
+                . 'Declare dependencies as #[InjectAsReadonly] properties instead.',
+            );
+            return null;
         }
 
-        $args = [];
-        foreach ($ctor->getParameters() as $param) {
-            $type = $param->getType();
-            if (!$type instanceof \ReflectionNamedType || $type->isBuiltin()) {
-                return null;
-            }
-            $typeName = $type->getName();
-            try {
-                $args[] = $container->get($typeName);
-            } catch (NotFoundException $e) {
-                $resolved = $this->tryAutoInstantiate($typeName);
-                if ($resolved === null) {
-                    BootDiagnostics::current()->skip('Console', "Skip {$className}, container has no {$typeName}");
-                    return null;
-                }
-                $args[] = $resolved;
-            }
-        }
-
-        return new $className(...$args);
-    }
-
-    /**
-     * Try to instantiate a concrete class that is not registered in the container.
-     * Only works for classes with no required constructor parameters.
-     */
-    private function tryAutoInstantiate(string $className): ?object
-    {
         try {
-            $ref = new ReflectionClass($className);
-            if ($ref->isAbstract() || $ref->isInterface()) {
-                return null;
-            }
-            $ctor = $ref->getConstructor();
-            if ($ctor !== null && $ctor->getNumberOfRequiredParameters() > 0) {
-                return null;
-            }
-            return new $className();
-        } catch (\Throwable) {
+            /** @var Command $command */
+            $command = new $className();
+            $container->injectInto($command);
+            return $command;
+        } catch (InjectionException $e) {
+            BootDiagnostics::current()->skip('Console', "Skip {$className}: " . $e->getMessage(), $e);
             return null;
         }
     }
