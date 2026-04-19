@@ -51,6 +51,16 @@ final class PropertyInjector
                     message: "Cannot inject {$class}::\${$propName}: container has no binding for {$typeName}.",
                 );
             }
+            if ($container instanceof SemitexaContainer && $container->isExecutionScoped($typeName)) {
+                throw new InjectionException(
+                    targetClass: $class,
+                    propertyName: $propName,
+                    propertyType: $typeName,
+                    injectionKind: 'readonly',
+                    message: "Cannot inject execution-scoped {$typeName} into {$class}::\${$propName} with #[InjectAsReadonly]. "
+                        . 'Use #[InjectAsMutable] on container-managed objects instead.',
+                );
+            }
             $value = $container->get($typeName);
             $prop = $ref->getProperty($propName);
             $prop->setAccessible(true);

@@ -80,12 +80,16 @@ readonly class Request
             return '';
         }
 
+        if (preg_match('/[\s@\/\\\\?#]/', $host) === 1) {
+            return '';
+        }
+
         $parsedHost = parse_url('http://' . $host, PHP_URL_HOST);
         if (is_string($parsedHost) && $parsedHost !== '') {
             return strtolower($parsedHost);
         }
 
-        return strtolower(explode(':', $host, 2)[0]);
+        return '';
     }
 
     public function getScheme(): string

@@ -89,12 +89,9 @@ class Application extends SymfonyApplication
         $ref = new ReflectionClass($className);
         $ctor = $ref->getConstructor();
         if ($ctor !== null && $ctor->getNumberOfRequiredParameters() > 0) {
-            BootDiagnostics::current()->skip(
-                'Console',
-                "Skip {$className}: command constructor must have no required parameters. "
-                . 'Declare dependencies as #[InjectAsReadonly] properties instead.',
-            );
-            return null;
+            $resolved = $container->get($className);
+
+            return $resolved instanceof Command ? $resolved : null;
         }
 
         try {

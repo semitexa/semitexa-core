@@ -172,11 +172,23 @@ final class SessionPhase
         // context so downstream consumers always receive a non-null auth context.
         $authContext = $this->container->has(AuthContextInterface::class)
             ? $this->container->get(AuthContextInterface::class)
-            : GuestAuthContext::getInstance();
+            : $this->resolveLegacyAuthContext();
         /** @var AuthContextInterface $authContext */
         $this->requestScopedContainer->set(AuthContextInterface::class, $authContext);
 
         $localeContext = DefaultLocaleContext::getInstance();
         $this->requestScopedContainer->set(LocaleContextInterface::class, $localeContext);
+    }
+
+    private function resolveLegacyAuthContext(): AuthContextInterface
+    {
+        if ($this->container->has(\Semitexa\Auth\Context\AuthManager::class)) {
+            $legacyAuthContext = $this->container->get(\Semitexa\Auth\Context\AuthManager::class);
+            if ($legacyAuthContext instanceof AuthContextInterface) {
+                return $legacyAuthContext;
+            }
+        }
+
+        return GuestAuthContext::getInstance();
     }
 }

@@ -126,12 +126,16 @@ final class LifecycleComponentRegistry
             $logger = $container->has(LoggerInterface::class)
                 ? $container->get(\Semitexa\Core\Log\LoggerInterface::class)
                 : null;
+            $events = $container->has(EventDispatcherInterface::class)
+                ? $container->get(EventDispatcherInterface::class)
+                : null;
 
             $bootstrapper = $this->instantiateLifecycleComponent($bootstrapperClass, [
                 'container' => $container,
                 'requestScopedContainer' => $requestScopedContainer,
                 'classDiscovery' => $classDiscovery,
                 'authContext' => $authContext,
+                'events' => $events,
                 'logger' => $logger,
             ]);
 
@@ -182,7 +186,17 @@ final class LifecycleComponentRegistry
         foreach ($constructor->getParameters() as $parameter) {
             $name = $parameter->getName();
             if (array_key_exists($name, $namedArgs)) {
-                $args[] = $namedArgs[$name];
+                $value = $namedArgs[$name];
+                if ($value === null && !$parameter->allowsNull()) {
+                    if ($parameter->isDefaultValueAvailable()) {
+                        $args[] = $parameter->getDefaultValue();
+                        continue;
+                    }
+
+                    return null;
+                }
+
+                $args[] = $value;
                 continue;
             }
 
@@ -208,7 +222,7 @@ final class LifecycleComponentRegistry
             return $bootstrapper;
         }
 
-        if (!method_exists($bootstrapper, 'isEnabled') || !method_exists($bootstrapper, 'resolve')) {
+        if (!is_callable([$bootstrapper, 'isEnabled']) || !is_callable([$bootstrapper, 'resolve'])) {
             return null;
         }
 
@@ -244,7 +258,7 @@ final class LifecycleComponentRegistry
             return $bootstrapper;
         }
 
-        if (!method_exists($bootstrapper, 'isEnabled') || !method_exists($bootstrapper, 'handle')) {
+        if (!is_callable([$bootstrapper, 'isEnabled']) || !is_callable([$bootstrapper, 'handle'])) {
             return null;
         }
 
