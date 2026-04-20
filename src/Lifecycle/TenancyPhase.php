@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Lifecycle;
 
-use Semitexa\Tenancy\TenancyBootstrapper;
+use Semitexa\Core\Tenant\TenancyBootstrapperInterface;
 
 /**
  * @internal Resolves the tenant for the current request. May produce an early response (e.g. redirect).
@@ -12,7 +12,7 @@ use Semitexa\Tenancy\TenancyBootstrapper;
 final class TenancyPhase
 {
     public function __construct(
-        private readonly ?TenancyBootstrapper $tenancy,
+        private readonly ?TenancyBootstrapperInterface $tenancy,
     ) {}
 
     public function execute(RequestLifecycleContext $context): void
@@ -21,7 +21,7 @@ final class TenancyPhase
             return;
         }
 
-        $response = $this->tenancy->getHandler()->handle($context->request);
+        $response = $this->tenancy->resolve($context->request);
         if ($response !== null) {
             $context->setEarlyResponse($response);
         }

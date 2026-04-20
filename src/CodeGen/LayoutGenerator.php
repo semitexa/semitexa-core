@@ -89,10 +89,7 @@ class LayoutGenerator
         $projectRoot = ProjectRoot::get();
 
         foreach ($this->moduleRegistry->getModules() as $module) {
-            $modulePath = $module['path'] ?? null;
-            if ($modulePath === null) {
-                continue;
-            }
+            $modulePath = $module['path'];
             $layoutDir = rtrim($modulePath, '/') . '/src/Application/View/templates/layout';
             if (!is_dir($layoutDir)) {
                 $layoutDir = rtrim($modulePath, '/') . '/Application/View/templates/layout';
@@ -106,15 +103,14 @@ class LayoutGenerator
                 continue;
             }
 
-            $moduleName = $module['name'] ?? 'module';
-            $studly = Str::toStudly($moduleName);
+            $studly = Str::toStudly($module['name']);
 
             foreach ($files as $file) {
                 $handle = basename($file, '.html.twig');
                 $result[] = [
                     'id' => $studly . '/' . $handle,
                     'handle' => $handle,
-                    'module' => $moduleName,
+                    'module' => $module['name'],
                     'moduleStudly' => $studly,
                     'source' => $file,
                     'destination' => $projectRoot . '/src/modules/' . $studly . '/Application/View/templates/layout/' . basename($file),

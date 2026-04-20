@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Semitexa\Core\Console\Command;
 
 use Semitexa\Core\Attribute\AsCommand;
+use Semitexa\Core\Attribute\InjectAsReadonly;
 use Semitexa\Core\Container\ServiceContractRegistry;
 use Semitexa\Core\Discovery\ClassDiscovery;
 use Semitexa\Core\ModuleRegistry;
@@ -22,7 +23,6 @@ use Symfony\Component\Console\Style\SymfonyStyle;
  * Helps developers and AI agents see contract → implementation binding and debug DI.
  */
 #[AsCommand(name: 'contracts:list', description: 'List service contracts (interfaces) and their active implementation. Use when debugging which class is bound to an interface.')]
-// @phpstan-ignore-next-line Optional AI metadata comes from the semitexa/llm package.
 #[AsAiSkill(
     allowed: true,
     summary: 'List registered service contracts and their active implementations.',
@@ -36,12 +36,11 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 )]
 class ContractsListCommand extends BaseCommand
 {
-    public function __construct(
-        private readonly ClassDiscovery $classDiscovery,
-        private readonly ModuleRegistry $moduleRegistry,
-    ) {
-        parent::__construct();
-    }
+    #[InjectAsReadonly]
+    protected ClassDiscovery $classDiscovery;
+
+    #[InjectAsReadonly]
+    protected ModuleRegistry $moduleRegistry;
 
     protected function configure(): void
     {

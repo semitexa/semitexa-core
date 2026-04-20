@@ -15,6 +15,7 @@ use Semitexa\Core\Lifecycle\RequestLifecycleContext;
 use Semitexa\Core\Lifecycle\RoutePhase;
 use Semitexa\Core\Lifecycle\SessionPhase;
 use Semitexa\Core\Lifecycle\TenancyPhase;
+use Semitexa\Core\Tenant\TenantContextStoreInterface;
 use Semitexa\Core\Support\CoroutineLocal;
 
 /**
@@ -69,6 +70,7 @@ class Application
         $classDiscovery = $this->container->getOrNull(ClassDiscovery::class);
 
         $tenancy = $componentRegistry->createTenancyBootstrapper(
+            container: $this->container,
             classDiscovery: $classDiscovery,
             events: $events instanceof EventDispatcherInterface ? $events : null,
         );
@@ -76,18 +78,24 @@ class Application
         $authBootstrapper = $componentRegistry->createAuthBootstrapper(
             container: $this->container,
             requestScopedContainer: $this->requestScopedContainer,
-            classDiscovery: $classDiscovery,
-            events: $events instanceof EventDispatcherInterface ? $events : null,
         );
 
         $localeBootstrapper = $componentRegistry->createLocaleBootstrapper(
             events: $events instanceof EventDispatcherInterface ? $events : null,
         );
 
+        /** @var TenantContextStoreInterface $tenantContextStore */
+        $tenantContextStore = $this->container->get(TenantContextStoreInterface::class);
+
         $this->tenancyPhase = new TenancyPhase($tenancy);
-        $this->sessionPhase = new SessionPhase($this->container, $this->requestScopedContainer, $tenancy);
+        $this->sessionPhase = new SessionPhase($this->container, $this->requestScopedContainer, $tenantContextStore, $tenancy);
         $this->localePhase = new LocalePhase($this->requestScopedContainer, $localeBootstrapper);
         $this->routePhase = new RoutePhase($this->container, $this->requestScopedContainer, $authBootstrapper, $this->environment);
+
+        $routeRegistry = $this->container->getOrNull(\Semitexa\Core\Discovery\RouteRegistry::class);
+        if ($routeRegistry instanceof \Semitexa\Core\Discovery\RouteRegistry) {
+            $routeRegistry->setTenantContextProvider(static fn () => $tenantContextStore->get());
+        }
     }
 
     public function handleRequest(Request $request): HttpResponse

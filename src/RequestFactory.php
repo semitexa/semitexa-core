@@ -58,7 +58,7 @@ class RequestFactory
             $cookies = array_merge($parsed, $cookies);
         }
 
-        $server = $swooleRequest->server ?? [];
+        $server = self::normalizeServerArray($swooleRequest->server ?? []);
         $uri = $server['request_uri'] ?? $server['REQUEST_URI'] ?? $server['path_info'] ?? '/';
         if ($uri === '' || $uri === false) {
             $uri = '/';
@@ -67,44 +67,54 @@ class RequestFactory
         return new Request(
             method: $method,
             uri: $uri,
-            headers: $swooleRequest->header ?? [],
-            query: $swooleRequest->get ?? [],
-            post: $post,
-            server: array_merge($swooleRequest->server ?? [], ['SWOOLE_SERVER' => '1']),
-            cookies: $cookies,
+            headers: self::normalizeStringMap($swooleRequest->header ?? []),
+            query: self::normalizeFormMap($swooleRequest->get ?? []),
+            post: self::normalizeFormMap($post),
+            server: array_merge($server, ['swoole_server' => '1']),
+            cookies: self::normalizeStringMap($cookies),
             content: $content
         );
     }
-    
+
     /**
      * Create Request from array data
+     *
+     * @param array<string, mixed> $data
      */
     public static function fromArray(array $data): Request
     {
         return new Request(
-            method: $data['method'] ?? 'GET',
-            uri: $data['uri'] ?? '/',
-            headers: $data['headers'] ?? [],
-            query: $data['query'] ?? [],
-            post: $data['post'] ?? [],
-            server: $data['server'] ?? [],
-            cookies: $data['cookies'] ?? [],
-            content: $data['content'] ?? null
+            method: is_string($data['method'] ?? null) ? $data['method'] : 'GET',
+            uri: is_string($data['uri'] ?? null) ? $data['uri'] : '/',
+            headers: self::normalizeStringMap($data['headers'] ?? []),
+            query: self::normalizeFormMap($data['query'] ?? []),
+            post: self::normalizeFormMap($data['post'] ?? []),
+            server: self::normalizeServerArray($data['server'] ?? []),
+            cookies: self::normalizeStringMap($data['cookies'] ?? []),
+            content: is_string($data['content'] ?? null) ? $data['content'] : null
         );
     }
-    
+
     /**
      * Parse application/x-www-form-urlencoded body (e.g. form POST).
+     *
+     * @return array<string, string|array<mixed>>
      */
     private static function parseFormUrlEncoded(string $body): array
     {
         $decoded = [];
         parse_str($body, $decoded);
-        return is_array($decoded) ? $decoded : [];
+        return self::normalizeFormMap($decoded);
     }
 
-    private static function getHeader(array $headers, string $name): ?string
+    /**
+     * @param mixed $headers
+     */
+    private static function getHeader(mixed $headers, string $name): ?string
     {
+        if (!is_array($headers)) {
+            return null;
+        }
         $nameLower = strtolower($name);
         foreach ($headers as $k => $v) {
             if (strtolower((string) $k) === $nameLower) {
@@ -115,7 +125,70 @@ class RequestFactory
     }
 
     /**
+     * Coerce an opaque map (Swoole property, JSON, etc.) into array<string, string>.
+     * Non-scalar values are dropped; non-string keys are stringified.
+     *
+     * @return array<string, string>
+     */
+    private static function normalizeStringMap(mixed $value): array
+    {
+        if (!is_array($value)) {
+            return [];
+        }
+        $out = [];
+        foreach ($value as $k => $v) {
+            if (is_string($v)) {
+                $out[(string) $k] = $v;
+            } elseif (is_scalar($v)) {
+                $out[(string) $k] = (string) $v;
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * Coerce an opaque map into the parse_str-style shape: scalar → string, array → array<mixed>.
+     *
+     * @return array<string, string|array<mixed>>
+     */
+    private static function normalizeFormMap(mixed $value): array
+    {
+        if (!is_array($value)) {
+            return [];
+        }
+        $out = [];
+        foreach ($value as $k => $v) {
+            if (is_array($v)) {
+                $out[(string) $k] = $v;
+            } elseif (is_scalar($v)) {
+                $out[(string) $k] = (string) $v;
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * @param mixed $server
+     * @return array<string, mixed>
+     */
+    private static function normalizeServerArray(mixed $server): array
+    {
+        if (!is_array($server)) {
+            return [];
+        }
+
+        $normalized = [];
+        foreach ($server as $key => $value) {
+            $normalized[strtolower((string) $key)] = $value;
+        }
+
+        return $normalized;
+    }
+
+    /**
      * Parse Cookie header into [name => value, ...]. Used when Swoole ->cookie is empty.
+     *
+     * @return array<string, string>
      */
     private static function parseCookieHeader(string $header): array
     {

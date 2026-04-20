@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Semitexa\Core\Lifecycle;
 
 use Psr\Container\ContainerInterface;
-use Semitexa\Auth\AuthBootstrapper;
+use Semitexa\Core\Auth\AuthBootstrapperInterface;
 use Semitexa\Core\Container\RequestScopedContainer;
 use Semitexa\Core\Discovery\DiscoveredRoute;
 use Semitexa\Core\Discovery\HandlerRegistry;
@@ -34,7 +34,7 @@ final class RoutePhase
     public function __construct(
         private readonly ContainerInterface $container,
         private readonly RequestScopedContainer $requestScopedContainer,
-        private readonly ?AuthBootstrapper $authBootstrapper,
+        private readonly ?AuthBootstrapperInterface $authBootstrapper,
         private readonly Environment $environment,
     ) {
         /** @var RouteRegistry $routeRegistry */

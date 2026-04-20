@@ -14,25 +14,25 @@ use Semitexa\Core\Support\Str;
  * - Local modules (src/modules/)
  * - Composer modules (src/packages/)
  * - Vendor modules (vendor/)
+ *
+ * @phpstan-type ModuleEntry array{
+ *   path: string,
+ *   name: string,
+ *   type: string,
+ *   namespace: string,
+ *   composerType: ?string,
+ *   aliases: list<string>,
+ *   templatePaths: list<string>,
+ *   extends: ?string,
+ *   controllers: list<string>,
+ *   routes: list<mixed>,
+ *   autoloadPsr4: array<string, list<string>>,
+ *   config: array<string, mixed>
+ * }
  */
 class ModuleRegistry
 {
-    /**
-     * @var list<array{
-     *   path: string,
-     *   name: string,
-     *   type: string,
-     *   namespace: string,
-     *   composerType: ?string,
-     *   aliases: list<string>,
-     *   templatePaths: list<string>,
-     *   extends: ?string,
-     *   controllers: list<string>,
-     *   routes: list<mixed>,
-     *   autoloadPsr4: array<string, list<string>>,
-     *   config: array<string, mixed>
-     * }>
-     */
+    /** @var list<ModuleEntry> */
     private array $modules = [];
     private bool $initialized = false;
 
@@ -47,16 +47,19 @@ class ModuleRegistry
         $this->initialized = true;
     }
 
+    /** @return list<ModuleEntry> */
     public function getModules(): array
     {
         $this->initialize();
         return $this->modules;
     }
 
+    /** @return array<string, list<string>> */
     public function getModuleAutoloadMappings(): array
     {
         $this->initialize();
 
+        /** @var array<string, list<string>> $mappings */
         $mappings = [];
         foreach ($this->modules as $module) {
             $psr4 = $module['autoloadPsr4'];
@@ -74,22 +77,26 @@ class ModuleRegistry
         return $mappings;
     }
 
+    /** @return list<ModuleEntry> */
     public function getModulesByType(string $type): array
     {
         $this->initialize();
-        return array_filter($this->modules, fn($module) => $module['type'] === $type);
+        return array_values(array_filter($this->modules, fn($module) => $module['type'] === $type));
     }
 
+    /** @return list<ModuleEntry> */
     public function getLocalModules(): array
     {
         return $this->getModulesByType('local');
     }
 
+    /** @return list<ModuleEntry> */
     public function getComposerModules(): array
     {
         return $this->getModulesByType('composer');
     }
 
+    /** @return list<ModuleEntry> */
     public function getVendorModules(): array
     {
         return $this->getModulesByType('vendor');
@@ -293,6 +300,9 @@ class ModuleRegistry
         }
         try {
             $json = json_decode((string)file_get_contents($composerJson), true, 512, JSON_THROW_ON_ERROR);
+            if (!is_array($json)) {
+                return null;
+            }
             return is_string($json['type'] ?? null) ? $json['type'] : null;
         } catch (\Throwable) {
             return null;
@@ -321,7 +331,13 @@ class ModuleRegistry
         }
         try {
             $json = json_decode((string)file_get_contents($composerJson), true, 512, JSON_THROW_ON_ERROR);
-            $extra = $json['extra']['semitexa-module'] ?? [];
+            if (!is_array($json)) {
+                return $meta;
+            }
+            $extraRoot = $json['extra'] ?? null;
+            $extra = is_array($extraRoot) && is_array($extraRoot['semitexa-module'] ?? null)
+                ? $extraRoot['semitexa-module']
+                : [];
             if (!empty($extra['template_alias']) && is_string($extra['template_alias'])) {
                 $meta['template_alias'] = $extra['template_alias'];
             }
@@ -334,9 +350,11 @@ class ModuleRegistry
             if (isset($extra['extends']) && is_string($extra['extends']) && $extra['extends'] !== '') {
                 $meta['extends'] = $extra['extends'];
             }
-            if (!empty($json['autoload']['psr-4']) && is_array($json['autoload']['psr-4'])) {
+            $autoload = $json['autoload'] ?? null;
+            $autoloadPsr4Raw = is_array($autoload) ? ($autoload['psr-4'] ?? null) : null;
+            if (is_array($autoloadPsr4Raw) && $autoloadPsr4Raw !== []) {
                 $autoloadPsr4 = [];
-                foreach ($json['autoload']['psr-4'] as $prefix => $paths) {
+                foreach ($autoloadPsr4Raw as $prefix => $paths) {
                     if (!is_string($prefix)) {
                         continue;
                     }
@@ -491,7 +509,8 @@ class ModuleRegistry
 
         try {
             $json = json_decode((string)file_get_contents($composerJson), true, 512, JSON_THROW_ON_ERROR);
-            $psr4 = $json['autoload']['psr-4'] ?? null;
+            $autoload = is_array($json) ? ($json['autoload'] ?? null) : null;
+            $psr4 = is_array($autoload) ? ($autoload['psr-4'] ?? null) : null;
             if (!is_array($psr4) || empty($psr4)) {
                 return null;
             }

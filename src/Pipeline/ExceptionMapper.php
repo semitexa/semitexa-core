@@ -28,7 +28,7 @@ final class ExceptionMapper implements ExceptionResponseMapperInterface
 {
     private ?ErrorRouteDispatcher $errorRouteDispatcher = null;
 
-    public function withErrorRouteDispatcher(ErrorRouteDispatcher $errorRouteDispatcher): self
+    public function withErrorRouteDispatcher(ErrorRouteDispatcher $errorRouteDispatcher): static
     {
         $clone = clone $this;
         $clone->errorRouteDispatcher = $errorRouteDispatcher;

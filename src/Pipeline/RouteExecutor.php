@@ -21,12 +21,12 @@ use Semitexa\Core\Http\ContentNegotiator;
 use Semitexa\Core\Http\HttpStatus;
 use Semitexa\Core\Exception\DomainException;
 use Semitexa\Core\Exception\PipelineException;
+use Semitexa\Core\Auth\AuthBootstrapperInterface;
 use Semitexa\Core\Contract\ExceptionResponseMapperInterface;
 use Semitexa\Core\Contract\RouteResponseDecoratorInterface;
 use Semitexa\Core\Contract\RouteMetadataResolverInterface;
 use Psr\Container\ContainerInterface;
 use Semitexa\Core\Container\RequestScopedContainer;
-use Semitexa\Api\Pipeline\ExternalApiExceptionMapper;
 
 class RouteExecutor
 {
@@ -35,8 +35,7 @@ class RouteExecutor
     public function __construct(
         private readonly RequestScopedContainer $requestScopedContainer,
         private readonly ContainerInterface $container,
-        /** @var \Semitexa\Auth\AuthBootstrapper|null */
-        private readonly ?object $authBootstrapper = null,
+        private readonly ?AuthBootstrapperInterface $authBootstrapper = null,
     ) {}
 
     private function getAttributeDiscovery(): AttributeDiscovery
@@ -145,25 +144,28 @@ class RouteExecutor
     /**
      * Resolve the exception mapper through the container.
      * Falls back to a bare ExceptionMapper when the container has no binding.
+     *
+     * Core interacts only with ExceptionResponseMapperInterface. The request-scoped
+     * ErrorRouteDispatcher is handed to the mapper through the contract seam; any
+     * decorator in a downstream package is responsible for forwarding the dispatcher
+     * into whatever it wraps.
      */
     private function resolveExceptionMapper(): ExceptionResponseMapperInterface
     {
-        $dispatcher = $this->getErrorRouteDispatcher();
-        $coreMapper = (new ExceptionMapper())->withErrorRouteDispatcher($dispatcher);
+        $mapper = $this->container->has(ExceptionResponseMapperInterface::class)
+            ? $this->container->get(ExceptionResponseMapperInterface::class)
+            : new ExceptionMapper();
 
-        if ($this->container->has(ExceptionResponseMapperInterface::class)) {
-            /** @var ExceptionResponseMapperInterface $mapper */
-            $mapper = $this->container->get(ExceptionResponseMapperInterface::class);
-            if ($mapper instanceof ExceptionMapper) {
-                return $mapper->withErrorRouteDispatcher($dispatcher);
+        /** @var ExceptionResponseMapperInterface $mapper */
+        if (is_callable([$mapper, 'withErrorRouteDispatcher'])) {
+            $configuredMapper = $mapper->withErrorRouteDispatcher($this->getErrorRouteDispatcher());
+
+            if ($configuredMapper instanceof ExceptionResponseMapperInterface) {
+                return $configuredMapper;
             }
-            if ($mapper instanceof ExternalApiExceptionMapper) {
-                return $mapper->withCoreMapper($coreMapper);
-            }
-            return $mapper;
         }
 
-        return $coreMapper;
+        return $mapper;
     }
 
     private function getErrorRouteDispatcher(): ErrorRouteDispatcher
@@ -183,7 +185,7 @@ class RouteExecutor
             $routeRegistry,
             $this->requestScopedContainer,
             $this->container,
-            $this->authBootstrapper instanceof \Semitexa\Auth\AuthBootstrapper ? $this->authBootstrapper : null,
+            $this->authBootstrapper,
             $environment,
         );
 

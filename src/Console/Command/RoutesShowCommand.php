@@ -58,6 +58,10 @@ class RoutesShowCommand extends BaseCommand
         return Command::SUCCESS;
     }
 
+    /**
+     * @param  list<array<string, mixed>> $routes
+     * @return array<string, mixed>|null
+     */
     private function findRoute(array $routes, string $id): ?array
     {
         // Try numeric index first
@@ -82,6 +86,10 @@ class RoutesShowCommand extends BaseCommand
         return null;
     }
 
+    /**
+     * @param  array<string, mixed> $route
+     * @return array<string, mixed>
+     */
     private function buildDebugInfo(array $route): array
     {
         $payloadClass = is_string($route['class'] ?? null) ? $route['class'] : '';
@@ -106,7 +114,8 @@ class RoutesShowCommand extends BaseCommand
         }
 
         $responseClass = is_string($enriched['responseClass'] ?? null) ? $enriched['responseClass'] : null;
-        $handlers = $enriched['handlers'] ?? [];
+        $handlersRaw = $enriched['handlers'] ?? [];
+        $handlers = is_array($handlersRaw) ? $handlersRaw : [];
         $responseAttrs = $responseClass ? $this->attributeDiscovery->getResolvedResponseAttributes($responseClass) : null;
 
         $info = [
@@ -184,6 +193,9 @@ class RoutesShowCommand extends BaseCommand
         return is_int($priority) ? $priority : (is_numeric($priority) ? (int) $priority : 0);
     }
 
+    /**
+     * @param array<string, mixed> $info
+     */
     private function renderHuman(SymfonyStyle $io, array $info): void
     {
         $io->title($info['path']);

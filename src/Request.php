@@ -6,9 +6,22 @@ namespace Semitexa\Core;
 
 /**
  * HTTP Request representation
+ *
+ * @phpstan-type Headers array<string, string>
+ * @phpstan-type QueryArray array<array-key, string|array<mixed>>
+ * @phpstan-type PostArray array<array-key, string|array<mixed>>
+ * @phpstan-type ServerArray array<string, mixed>
+ * @phpstan-type CookieArray array<string, string>
  */
 readonly class Request
 {
+    /**
+     * @param Headers     $headers
+     * @param QueryArray  $query
+     * @param PostArray   $post
+     * @param ServerArray $server
+     * @param CookieArray $cookies
+     */
     public function __construct(
         public string $method,
         public string $uri,
@@ -55,7 +68,7 @@ readonly class Request
         if (isset($this->headers[$name])) {
             return $this->headers[$name];
         }
-        
+
         // Try case-insensitive match
         $nameLower = strtolower($name);
         foreach ($this->headers as $key => $value) {
@@ -63,23 +76,120 @@ readonly class Request
                 return $value;
             }
         }
-        
+
         return null;
+    }
+
+    public function getHost(): string
+    {
+        $hostHeader = trim($this->getHeader('Host') ?? '');
+        if ($hostHeader === '') {
+            return '';
+        }
+
+        $hostParts = explode(',', $hostHeader);
+        $host = trim($hostParts[0]);
+        if ($host === '') {
+            return '';
+        }
+
+        if (preg_match('/[\s@\/\\\\?#]/', $host) === 1) {
+            return '';
+        }
+
+        $parsedHost = parse_url('http://' . $host, PHP_URL_HOST);
+        if (is_string($parsedHost) && $parsedHost !== '') {
+            return strtolower($parsedHost);
+        }
+
+        return '';
+    }
+
+    public function getScheme(): string
+    {
+        $schemeHeader = trim($this->getHeader('X-Forwarded-Proto') ?? '');
+        if ($schemeHeader !== '' && $this->isTrustedForwardedRequest()) {
+            $schemeParts = array_values(array_filter(array_map(
+                static fn (string $value): string => strtolower(trim($value)),
+                explode(',', $schemeHeader)
+            )));
+            $forwardedScheme = $schemeParts[0] ?? '';
+            if ($forwardedScheme === 'http' || $forwardedScheme === 'https') {
+                return $forwardedScheme;
+            }
+        }
+
+        $https = strtolower($this->getServer('https'));
+        if ($https === 'on' || $https === '1') {
+            return 'https';
+        }
+
+        return 'http';
+    }
+
+    public function getOrigin(): string
+    {
+        $host = $this->getHost();
+        if ($host === '') {
+            return '';
+        }
+
+        return $this->getScheme() . '://' . $host;
+    }
+
+    private function isTrustedForwardedRequest(): bool
+    {
+        $remoteAddr = strtolower(trim($this->getServer('remote_addr')));
+
+        return $remoteAddr === '127.0.0.1'
+            || $remoteAddr === '::1'
+            || $remoteAddr === 'localhost';
     }
     
     public function getQuery(string $key, string $default = ''): string
     {
-        return $this->query[$key] ?? $default;
+        $value = $this->query[$key] ?? null;
+        return is_string($value) ? $value : $default;
     }
-    
+
     public function getPost(string $key, string $default = ''): string
     {
-        return $this->post[$key] ?? $default;
+        $value = $this->post[$key] ?? null;
+        return is_string($value) ? $value : $default;
     }
     
     public function getServer(string $key, string $default = ''): string
     {
-        return $this->server[$key] ?? $default;
+        $normalizedKey = strtolower($key);
+
+        if (isset($this->server[$normalizedKey])) {
+            return $this->normalizeServerValue($this->server[$normalizedKey], $default);
+        }
+
+        if (isset($this->server[$key])) {
+            return $this->normalizeServerValue($this->server[$key], $default);
+        }
+
+        foreach ($this->server as $serverKey => $value) {
+            if (strtolower((string) $serverKey) === $normalizedKey) {
+                return $this->normalizeServerValue($value, $default);
+            }
+        }
+
+        return $default;
+    }
+
+    private function normalizeServerValue(mixed $value, string $default): string
+    {
+        if (is_scalar($value)) {
+            return (string) $value;
+        }
+
+        if ($value instanceof \Stringable) {
+            return (string) $value;
+        }
+
+        return $default;
     }
     
     public function getCookie(string $key, string $default = ''): string
@@ -137,9 +247,9 @@ readonly class Request
     }
     
     /**
-     * Get parsed JSON body as array
-     * 
-     * @return array|null Parsed JSON data or null if not JSON or parse failed
+     * Get parsed JSON body as array (object → assoc, array → list).
+     *
+     * @return array<int|string, mixed>|null
      */
     public function getJsonBody(): ?array
     {

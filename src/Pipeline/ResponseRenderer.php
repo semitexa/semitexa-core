@@ -32,8 +32,7 @@ final class ResponseRenderer
                         $redirectUrl = '/';
                     } else {
                         // Normalize: strip port from request host before comparison
-                        $requestHost = $request->getHeader('Host') ?? '';
-                        $requestHost = parse_url("http://{$requestHost}")['host'] ?? $requestHost;
+                        $requestHost = $request->getHost();
                         $redirectHost = strtolower($parsed['host']);
                         $requestHost = strtolower($requestHost);
                         // Allow same-host, localhost, and known OAuth provider domains

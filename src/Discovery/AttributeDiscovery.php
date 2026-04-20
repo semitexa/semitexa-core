@@ -27,13 +27,22 @@ use Semitexa\Core\Exception\ConfigurationException;
  * This class scans the src/ directory for classes with specific attributes
  * and builds a registry of controllers and routes.
  */
+/**
+ * @phpstan-type Route        array<string, mixed>
+ * @phpstan-type AttrMap      array<string, mixed>
+ * @phpstan-type HandlerEntry array{class: string, for?: string, payload?: string, resource?: string, execution: string, transport: ?string, queue: ?string, priority: int}
+ */
 class AttributeDiscovery
 {
+    /** @var array<string, AttrMap> */
     private array $httpRequests = [];
+    /** @var array<string, AttrMap> */
     private array $httpHandlers = [];
-    /** @var array<string, list<array{class: string, for?: string, payload?: string, resource?: string, execution: string, transport: ?string, queue: ?string, priority: int}>> key: payload . "\0" . resource */
+    /** @var array<string, list<HandlerEntry>> key: payload . "\0" . resource */
     private array $handlersByPayloadAndResource = [];
+    /** @var array<string, AttrMap> */
     private array $resolvedResponseAttrs = [];
+    /** @var array<string, string> */
     private array $responseClassAliases = [];
     /** @var array<string, list<string>> baseClass => [traitFQN, ...] */
     private array $payloadParts = [];
@@ -103,6 +112,8 @@ class AttributeDiscovery
 
     /**
      * Get all discovered routes
+     *
+     * @return list<Route>
      */
     public function getRoutes(): array
     {
@@ -112,7 +123,7 @@ class AttributeDiscovery
     /**
      * Get all discovered routes with responseClass and handlers populated.
      *
-     * @return list<array>
+     * @return list<Route>
      */
     public function getEnrichedRoutes(): array
     {
@@ -134,6 +145,8 @@ class AttributeDiscovery
     /**
      * Find a route by path and method.
      * Delegates to RouteRegistry for indexed lookup, then enriches with handler/response data.
+     *
+     * @return Route|null
      */
     public function findRoute(string $path, string $method = 'GET'): ?array
     {
@@ -146,6 +159,8 @@ class AttributeDiscovery
 
     /**
      * Find a route by its name (e.g. error.404 for custom 404 page).
+     *
+     * @return Route|null
      */
     public function findRouteByName(string $name): ?array
     {
@@ -158,6 +173,9 @@ class AttributeDiscovery
 
     /**
      * Enrich route with handlers and response class.
+     *
+     * @param  Route $route
+     * @return Route
      */
     private function enrichRoute(array $route): array
     {
@@ -531,7 +549,7 @@ class AttributeDiscovery
                             $handle,
                             $slot,
                             $template,
-                            is_array($context) ? $context : [],
+                            self::coerceStringMap($context),
                             $meta->priority,
                             $meta->deferred,
                             $meta->cacheTtl,
@@ -611,7 +629,7 @@ class AttributeDiscovery
                             handle: $meta->handle,
                             slot: $meta->slot,
                             template: $template,
-                            context: is_array($context) ? $context : [],
+                            context: self::coerceStringMap($context),
                             priority: $meta->priority,
                             deferred: $meta->deferred,
                             cacheTtl: $meta->cacheTtl,
@@ -659,6 +677,11 @@ class AttributeDiscovery
         }
     }
 
+    /**
+     * @param array<string, array{class: string, short: string, attr: AttrMap}> $metaMap
+     * @param array<string, AttrMap>                                             $cache
+     * @return AttrMap
+     */
     private function resolveRequestAttributes(string $className, array $metaMap, array &$cache = []): array
     {
         if (isset($cache[$className])) {
@@ -683,6 +706,11 @@ class AttributeDiscovery
         return $cache[$className] = $merged;
     }
 
+    /**
+     * @param  AttrMap $base
+     * @param  AttrMap $override
+     * @return AttrMap
+     */
     private static function mergeRequestAttributes(array $base, array $override): array
     {
         $result = $base;
@@ -694,6 +722,10 @@ class AttributeDiscovery
         return $result;
     }
 
+    /**
+     * @param  AttrMap $attr
+     * @return AttrMap
+     */
     private static function applyRequestDefaults(array $attr, string $shortName, string $className): array
     {
         if ($attr['path'] === null) {
@@ -785,6 +817,11 @@ class AttributeDiscovery
         }
     }
 
+    /**
+     * @param array<string, array{class: string, short: string, attr: AttrMap, file: string, priority: int}> $metaMap
+     * @param array<string, AttrMap>                                                                          $cache
+     * @return AttrMap
+     */
     private static function resolveResponseAttributes(string $className, array $metaMap, array &$cache = []): array
     {
         if (isset($cache[$className])) {
@@ -795,8 +832,9 @@ class AttributeDiscovery
         }
         $meta = $metaMap[$className];
         $attr = $meta['attr'];
-        if (!empty($attr['base'])) {
-            $baseAttr = self::resolveResponseAttributes($attr['base'], $metaMap, $cache);
+        $base = is_string($attr['base'] ?? null) ? $attr['base'] : null;
+        if ($base !== null && $base !== '') {
+            $baseAttr = self::resolveResponseAttributes($base, $metaMap, $cache);
             $merged = self::mergeResponseAttributes($baseAttr, $attr);
         } else {
             $merged = self::applyResponseDefaults($attr, $meta['short'], $className);
@@ -804,6 +842,11 @@ class AttributeDiscovery
         return $cache[$className] = $merged;
     }
 
+    /**
+     * @param  AttrMap $base
+     * @param  AttrMap $override
+     * @return AttrMap
+     */
     private static function mergeResponseAttributes(array $base, array $override): array
     {
         $result = $base;
@@ -818,6 +861,10 @@ class AttributeDiscovery
         return $result;
     }
 
+    /**
+     * @param  AttrMap $attr
+     * @return AttrMap
+     */
     private static function applyResponseDefaults(array $attr, string $shortName, string $className): array
     {
         $handle = $attr['handle'] ?? self::defaultLayoutHandleFromShortName($shortName);
@@ -851,6 +898,9 @@ class AttributeDiscovery
         return $this->responseClassAliases[$class] ?? $class;
     }
 
+    /**
+     * @return AttrMap|null
+     */
     public function getResolvedResponseAttributes(string $class): ?array
     {
         $canonical = $this->responseClassAliases[$class] ?? $class;
@@ -984,6 +1034,26 @@ class AttributeDiscovery
     }
 
     /**
+     * Coerce an opaque value (typically a resolved attribute argument) into a string-keyed map.
+     * Non-array inputs collapse to []; non-string keys are dropped.
+     *
+     * @return array<string, mixed>
+     */
+    private static function coerceStringMap(mixed $value): array
+    {
+        if (!is_array($value)) {
+            return [];
+        }
+        $out = [];
+        foreach ($value as $k => $v) {
+            if (is_string($k)) {
+                $out[$k] = $v;
+            }
+        }
+        return $out;
+    }
+
+    /**
      * Discover traits marked with #[AsPayloadPart] from active modules.
      */
     private function discoverPayloadParts(BootDiagnostics $diagnostics): void
@@ -1077,7 +1147,8 @@ class AttributeDiscovery
     /**
      * Walk the attribute base chain for a class.
      *
-     * @return list<string> The class itself and all ancestors via attribute base
+     * @param  array<string, string> $baseMap class => parent class
+     * @return list<string>          The class itself and all ancestors via attribute base
      */
     private static function buildBaseChain(string $className, array $baseMap): array
     {

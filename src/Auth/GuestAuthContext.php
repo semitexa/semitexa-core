@@ -31,6 +31,19 @@ final class GuestAuthContext implements AuthContextInterface
     {
     }
 
+    public function resetToGuest(): void
+    {
+    }
+
+    public function setAuthResult(AuthResult $result): void
+    {
+    }
+
+    public function getLastResult(): ?AuthResult
+    {
+        return null;
+    }
+
     public static function get(): ?self
     {
         return self::getInstance();

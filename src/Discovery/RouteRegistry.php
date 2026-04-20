@@ -14,6 +14,9 @@ use Semitexa\Core\Support\TenantModuleScopeResolver;
  */
 class RouteRegistry
 {
+    /** @var null|\Closure(): ?\Semitexa\Core\Tenant\TenantContextInterface */
+    private ?\Closure $tenantContextProvider = null;
+
     /** @var list<array<string, mixed>> All raw routes (flat list) */
     private array $routes = [];
 
@@ -102,7 +105,7 @@ class RouteRegistry
             return null;
         }
 
-        $selected = TenantModuleScopeResolver::selectRoutesForCurrentTenant($matches);
+        $selected = TenantModuleScopeResolver::selectRoutesForTenant($matches, $this->currentTenantContext());
         $selectedRoute = $selected[0] ?? null;
         return is_array($selectedRoute) ? $selectedRoute : null;
     }
@@ -119,7 +122,7 @@ class RouteRegistry
             return null;
         }
 
-        $selected = TenantModuleScopeResolver::selectRoutesForCurrentTenant($matches);
+        $selected = TenantModuleScopeResolver::selectRoutesForTenant($matches, $this->currentTenantContext());
         $selectedRoute = $selected[0] ?? null;
         return is_array($selectedRoute) ? $selectedRoute : null;
     }
@@ -185,6 +188,11 @@ class RouteRegistry
         $this->namedIndex = [];
     }
 
+    public function setTenantContextProvider(\Closure $provider): void
+    {
+        $this->tenantContextProvider = $provider;
+    }
+
     /**
      * Compile a route path pattern into a regex string.
      *
@@ -215,5 +223,16 @@ class RouteRegistry
         }
 
         return '#^' . $pattern . '$#';
+    }
+
+    private function currentTenantContext(): ?\Semitexa\Core\Tenant\TenantContextInterface
+    {
+        if ($this->tenantContextProvider === null) {
+            return null;
+        }
+
+        $context = ($this->tenantContextProvider)();
+
+        return $context instanceof \Semitexa\Core\Tenant\TenantContextInterface ? $context : null;
     }
 }

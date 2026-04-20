@@ -27,4 +27,5 @@ interface ExceptionResponseMapperInterface
      * route-level contract information without touching discovery internals.
      */
     public function map(\Throwable $e, Request $request, ResolvedRouteMetadata $metadata): HttpResponse;
+
 }

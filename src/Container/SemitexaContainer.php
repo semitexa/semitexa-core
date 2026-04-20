@@ -16,6 +16,7 @@ use Semitexa\Core\Cookie\CookieJarInterface;
 use Semitexa\Core\Locale\LocaleContextInterface;
 use Semitexa\Core\Request;
 use Semitexa\Core\Session\SessionInterface;
+use Semitexa\Core\Support\CoroutineLocal;
 use Semitexa\Core\Tenant\TenantContextInterface;
 use Psr\Container\ContainerInterface;
 use ReflectionClass;
@@ -45,8 +46,16 @@ final class SemitexaContainer implements ContainerInterface
     private TypeMap $typeMap;
     private InjectionMap $injectionMap;
 
-    /** @var array<string, object> type => execution context value (Request, Session, etc.) */
-    private array $executionContextValues = [];
+    /**
+     * CoroutineLocal key for per-coroutine execution context values.
+     *
+     * Storage is coroutine-local (Swoole) or a CLI fallback static array — it is NEVER
+     * held on this container as an instance property, because the container is a
+     * worker-wide singleton shared across every concurrent coroutine.
+     *
+     * @internal
+     */
+    private const EXECUTION_CONTEXT_KEY = 'semitexa.container.execution_context';
 
     /** @var bool Whether the container is sealed (after BootPhase::Ready) */
     private bool $sealed = false;
@@ -69,35 +78,149 @@ final class SemitexaContainer implements ContainerInterface
     }
 
     /**
-     * Set execution-scoped context values. Called once per execution before handler resolution.
-     * These are resolved by #[InjectAsMutable] during clone-time injection.
+     * Set execution-scoped context values for the current coroutine. Called once per
+     * execution before handler resolution. These are resolved by #[InjectAsMutable]
+     * during clone-time injection.
+     *
+     * Storage is coroutine-local: writes here only affect the calling coroutine, so
+     * concurrent requests running on the same worker cannot observe each other's
+     * Request/Session/Auth/Tenant/Locale values.
      */
     public function setExecutionContext(ExecutionContext $context): void
     {
-        $this->executionContextValues = [];
+        $values = [];
         if ($context->request !== null) {
-            $this->executionContextValues[Request::class] = $context->request;
+            $values[Request::class] = $context->request;
         }
         if ($context->session !== null) {
-            $this->executionContextValues[SessionInterface::class] = $context->session;
+            $values[SessionInterface::class] = $context->session;
         }
         if ($context->cookieJar !== null) {
-            $this->executionContextValues[CookieJarInterface::class] = $context->cookieJar;
+            $values[CookieJarInterface::class] = $context->cookieJar;
         }
         if ($context->tenantContext !== null) {
-            $this->executionContextValues[TenantContextInterface::class] = $context->tenantContext;
+            $values[TenantContextInterface::class] = $context->tenantContext;
         }
         if ($context->authContext !== null) {
-            $this->executionContextValues[AuthContextInterface::class] = $context->authContext;
+            $values[AuthContextInterface::class] = $context->authContext;
         }
         if ($context->localeContext !== null) {
-            $this->executionContextValues[LocaleContextInterface::class] = $context->localeContext;
+            $values[LocaleContextInterface::class] = $context->localeContext;
+        }
+        $this->writeExecutionContextValues($values);
+    }
+
+    /**
+     * Clear execution context for the current coroutine only. Sibling coroutines
+     * keep their own values.
+     */
+    public function clearExecutionContext(): void
+    {
+        CoroutineLocal::remove(self::EXECUTION_CONTEXT_KEY);
+    }
+
+    /**
+     * Capture the current coroutine's execution context so it can be replayed in a
+     * child coroutine that needs to see the same Request/Session/Auth/Tenant/Locale.
+     *
+     * This is the ONLY sanctioned way to carry request-scoped context into a child
+     * coroutine. Child coroutines do NOT inherit the parent's context automatically.
+     *
+     * Typical usage at a call site that spawns a child coroutine:
+     *
+     *     $snapshot = $container->captureExecutionContext();
+     *     Swoole\Coroutine::create(function () use ($snapshot, $container, ...) {
+     *         $container->runWithExecutionContext($snapshot, function () use (...) {
+     *             // resolve services that depend on execution context here
+     *         });
+     *     });
+     */
+    public function captureExecutionContext(): ExecutionContext
+    {
+        $values = $this->readExecutionContextValues();
+
+        /** @var Request|null $request */
+        $request = $values[Request::class] ?? null;
+
+        /** @var SessionInterface|null $session */
+        $session = $values[SessionInterface::class] ?? null;
+
+        /** @var CookieJarInterface|null $cookieJar */
+        $cookieJar = $values[CookieJarInterface::class] ?? null;
+
+        /** @var TenantContextInterface|null $tenantContext */
+        $tenantContext = $values[TenantContextInterface::class] ?? null;
+
+        /** @var AuthContextInterface|null $authContext */
+        $authContext = $values[AuthContextInterface::class] ?? null;
+
+        /** @var LocaleContextInterface|null $localeContext */
+        $localeContext = $values[LocaleContextInterface::class] ?? null;
+
+        return new ExecutionContext(
+            request: $request,
+            session: $session,
+            cookieJar: $cookieJar,
+            tenantContext: $tenantContext,
+            authContext: $authContext,
+            localeContext: $localeContext,
+        );
+    }
+
+    /**
+     * Run $callback with $context applied to the current coroutine, restoring any
+     * previously-set context on exit. Use in a freshly-spawned child coroutine to
+     * replay a snapshot from the parent.
+     *
+     * @template T
+     * @param callable():T $callback
+     * @return T
+     */
+    public function runWithExecutionContext(ExecutionContext $context, callable $callback): mixed
+    {
+        $previous = CoroutineLocal::has(self::EXECUTION_CONTEXT_KEY)
+            ? CoroutineLocal::get(self::EXECUTION_CONTEXT_KEY, [])
+            : null;
+
+        $this->setExecutionContext($context);
+        try {
+            return $callback();
+        } finally {
+            if ($previous === null) {
+                CoroutineLocal::remove(self::EXECUTION_CONTEXT_KEY);
+            } else {
+                CoroutineLocal::set(self::EXECUTION_CONTEXT_KEY, $previous);
+            }
         }
     }
 
-    public function clearExecutionContext(): void
+    /**
+     * Read execution context values for the current coroutine.
+     *
+     * Storage is opaque to PHPStan (CoroutineLocal returns mixed); the only writer is
+     * writeExecutionContextValues() which guarantees the array<class-string, object> shape,
+     * so the narrowing assertion below is invariant-safe.
+     *
+     * @return array<class-string, object>
+     */
+    private function readExecutionContextValues(): array
     {
-        $this->executionContextValues = [];
+        $values = CoroutineLocal::get(self::EXECUTION_CONTEXT_KEY, []);
+        if (!is_array($values)) {
+            return [];
+        }
+        /** @var array<class-string, object> $values */
+        return $values;
+    }
+
+    /**
+     * Write execution context values for the current coroutine only.
+     *
+     * @param array<class-string, object> $values
+     */
+    private function writeExecutionContextValues(array $values): void
+    {
+        CoroutineLocal::set(self::EXECUTION_CONTEXT_KEY, $values);
     }
 
     /**
@@ -193,6 +316,20 @@ final class SemitexaContainer implements ContainerInterface
     }
 
     /**
+     * Apply #[InjectAsReadonly] property injection to an instance created
+     * outside the container's readonly graph (for example Symfony Console
+     * commands, which Symfony Application owns but which still declare
+     * their dependencies with the same attribute as services).
+     *
+     * This is the runtime entry point that makes #[InjectAsReadonly] work
+     * everywhere it is declared, without a parallel DI contract.
+     */
+    public function injectInto(object $instance): void
+    {
+        PropertyInjector::inject($instance, $this);
+    }
+
+    /**
      * Auto-wire and create a class instance that is not pre-registered in the container.
      * Constructor dependencies are resolved from readonly/execution-scoped pools.
      *
@@ -244,6 +381,7 @@ final class SemitexaContainer implements ContainerInterface
     {
         $injections = $this->injectionMap->injections[$class] ?? [];
         $ref = new ReflectionClass($instance);
+        $executionContextValues = $this->readExecutionContextValues();
 
         foreach ($injections as $propName => $info) {
             if ($info['kind'] !== 'mutable') {
@@ -253,10 +391,10 @@ final class SemitexaContainer implements ContainerInterface
             $typeName = $info['type'];
 
             // Try execution context first (Request, Session, etc.)
-            if (isset($this->executionContextValues[$typeName])) {
+            if (isset($executionContextValues[$typeName])) {
                 $prop = $ref->getProperty($propName);
                 $prop->setAccessible(true);
-                $prop->setValue($instance, $this->executionContextValues[$typeName]);
+                $prop->setValue($instance, $executionContextValues[$typeName]);
                 continue;
             }
 

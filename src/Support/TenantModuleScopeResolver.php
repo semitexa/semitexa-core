@@ -4,7 +4,8 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Support;
 
-use Semitexa\Tenancy\Context\CoroutineContextStore;
+use Semitexa\Core\Tenant\TenantContextInterface;
+use Semitexa\Core\Tenant\Layer\OrganizationLayer;
 
 final class TenantModuleScopeResolver
 {
@@ -84,7 +85,7 @@ final class TenantModuleScopeResolver
     /**
      * @param array<string, mixed> $route
      */
-    public static function isRouteAllowedForCurrentTenant(array $route): bool
+    public static function isRouteAllowedForTenant(array $route, ?TenantContextInterface $context): bool
     {
         $rawTenantScopes = $route['tenantScopes'] ?? [];
         if (!is_array($rawTenantScopes)) {
@@ -100,7 +101,7 @@ final class TenantModuleScopeResolver
             return true;
         }
 
-        $tenantId = self::currentTenantId();
+        $tenantId = self::tenantId($context);
         if ($tenantId === null || $tenantId === '') {
             return false;
         }
@@ -114,13 +115,35 @@ final class TenantModuleScopeResolver
      */
     public static function selectRoutesForCurrentTenant(array $routes): array
     {
+        return self::selectRoutesForTenant($routes, self::currentTenantContext());
+    }
+
+    private static function currentTenantContext(): ?TenantContextInterface
+    {
+        $store = '\\Semitexa\\Tenancy\\Context\\CoroutineContextStore';
+        if (class_exists($store)) {
+            $context = $store::get();
+            if ($context instanceof TenantContextInterface) {
+                return $context;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @param list<array<string, mixed>> $routes
+     * @return list<array<string, mixed>>
+     */
+    public static function selectRoutesForTenant(array $routes, ?TenantContextInterface $context): array
+    {
         if ($routes === []) {
             return [];
         }
 
         $scoped = array_values(array_filter(
             $routes,
-            static fn (array $route): bool => !empty($route['tenantScopes']) && self::isRouteAllowedForCurrentTenant($route),
+            static fn (array $route): bool => !empty($route['tenantScopes']) && self::isRouteAllowedForTenant($route, $context),
         ));
 
         if ($scoped !== []) {
@@ -133,16 +156,48 @@ final class TenantModuleScopeResolver
         ));
     }
 
-    private static function currentTenantId(): ?string
+    private static function tenantId(?TenantContextInterface $context): ?string
     {
-        $context = CoroutineContextStore::get();
-        if ($context === null) {
+        if ($context === null || self::isDefaultContext($context)) {
             return null;
         }
 
-        $tenantId = $context->getTenantId();
+        $tenantId = self::resolveTenantId($context);
 
         return $tenantId !== '' && $tenantId !== 'default' ? $tenantId : null;
+    }
+
+    private static function isDefaultContext(TenantContextInterface $context): bool
+    {
+        if (method_exists($context, 'isDefault')) {
+            $isDefault = $context->isDefault();
+            if (is_bool($isDefault)) {
+                return $isDefault;
+            }
+        }
+
+        return self::resolveTenantId($context) === 'default';
+    }
+
+    private static function resolveTenantId(TenantContextInterface $context): string
+    {
+        if (method_exists($context, 'getTenantId')) {
+            $tenantId = $context->getTenantId();
+            if (is_string($tenantId) && $tenantId !== '') {
+                return $tenantId;
+            }
+
+            return 'default';
+        }
+
+        $organization = $context->getLayer(new OrganizationLayer());
+        if ($organization === null) {
+            return 'default';
+        }
+
+        $tenantId = trim($organization->rawValue());
+
+        return $tenantId !== '' ? $tenantId : 'default';
     }
 
     /**
