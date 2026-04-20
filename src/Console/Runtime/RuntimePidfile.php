@@ -101,6 +101,8 @@ final class RuntimePidfile
                     return true;
                 }
             }
+
+            return false;
         }
 
         foreach ($fields as $field) {

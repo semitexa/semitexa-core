@@ -384,12 +384,11 @@ final class SemitexaContainer implements ContainerInterface
      * Re-inject all #[InjectAsMutable] properties from the current execution context
      * and execution-scoped service pool. Called on each clone at execution time.
      *
-     * @param array<int, true> $visited
+     * @param array<string, true> $visited
      */
     private function injectMutableProperties(object $instance, string $class, array &$visited = []): void
     {
-        $instanceId = spl_object_id($instance);
-        if (isset($visited[$instanceId])) {
+        if (isset($visited[$class])) {
             throw new InjectionException(
                 targetClass: $class,
                 propertyName: '',
@@ -398,7 +397,7 @@ final class SemitexaContainer implements ContainerInterface
                 message: "Cyclic mutable injection detected for {$class}.",
             );
         }
-        $visited[$instanceId] = true;
+        $visited[$class] = true;
 
         try {
             $injections = $this->injectionMap->injections[$class] ?? [];
@@ -461,7 +460,7 @@ final class SemitexaContainer implements ContainerInterface
                 }
             }
         } finally {
-            unset($visited[$instanceId]);
+            unset($visited[$class]);
         }
     }
 }
