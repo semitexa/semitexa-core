@@ -91,6 +91,10 @@ final class RuntimePidfile
 
         $cookie = self::readCookie($projectRoot);
         if ($cookie !== null && $cookie['script'] !== '') {
+            if ($cookie['pid'] !== $pid) {
+                return false;
+            }
+
             $cookieScript = self::normalizeScriptPath($cookie['script'], $projectRoot);
             foreach ($fields as $field) {
                 $normalizedField = self::normalizeScriptPath($field, $projectRoot);
