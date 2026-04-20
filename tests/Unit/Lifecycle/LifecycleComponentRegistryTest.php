@@ -87,7 +87,7 @@ final class LifecycleComponentRegistryTest extends TestCase
     }
 
     #[Test]
-    public function auth_adapter_skips_mode_when_second_parameter_type_is_incompatible(): void
+    public function auth_adapter_translates_optional_string_mode_parameter(): void
     {
         $registry = $this->makeRegistry();
         /** @var AuthBootstrapperInterface|null $adapter */
@@ -113,7 +113,67 @@ final class LifecycleComponentRegistryTest extends TestCase
 
         self::assertNotNull($result);
         self::assertFalse($result->success);
-        self::assertSame('legacy', $result->reason);
+        self::assertSame('BestEffort', $result->reason);
+    }
+
+    #[Test]
+    public function auth_adapter_translates_required_string_mode_parameter(): void
+    {
+        $registry = $this->makeRegistry();
+        /** @var AuthBootstrapperInterface|null $adapter */
+        $adapter = $this->invokePrivate(
+            $registry,
+            'adaptAuthBootstrapper',
+            new class {
+                public function isEnabled(): bool
+                {
+                    return true;
+                }
+
+                public function handle(object $payload, string $mode): AuthResult
+                {
+                    return AuthResult::failed($mode);
+                }
+            },
+        );
+
+        self::assertNotNull($adapter);
+
+        $result = $adapter->handle(new \stdClass(), AuthenticationMode::BestEffort);
+
+        self::assertNotNull($result);
+        self::assertFalse($result->success);
+        self::assertSame('BestEffort', $result->reason);
+    }
+
+    #[Test]
+    public function auth_adapter_translates_required_legacy_enum_mode_parameter(): void
+    {
+        $registry = $this->makeRegistry();
+        /** @var AuthBootstrapperInterface|null $adapter */
+        $adapter = $this->invokePrivate(
+            $registry,
+            'adaptAuthBootstrapper',
+            new class {
+                public function isEnabled(): bool
+                {
+                    return true;
+                }
+
+                public function handle(object $payload, LegacyAuthenticationMode $mode): AuthResult
+                {
+                    return AuthResult::failed($mode->name);
+                }
+            },
+        );
+
+        self::assertNotNull($adapter);
+
+        $result = $adapter->handle(new \stdClass(), AuthenticationMode::BestEffort);
+
+        self::assertNotNull($result);
+        self::assertFalse($result->success);
+        self::assertSame('BestEffort', $result->reason);
     }
 
     private function makeRegistry(): LifecycleComponentRegistry
@@ -131,4 +191,10 @@ final class LifecycleComponentRegistryTest extends TestCase
 
         return $reflection->invoke($target, $argument);
     }
+}
+
+enum LegacyAuthenticationMode
+{
+    case Mandatory;
+    case BestEffort;
 }

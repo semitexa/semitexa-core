@@ -99,9 +99,10 @@ final class LifecycleComponentRegistry
     }
 
     /**
-     * Create an AuthBootstrapperInterface via the factory binding contributed by
-     * semitexa-auth. Returns null if the auth package is not active, or if the
-     * factory binding is not registered in the container.
+     * Create an AuthBootstrapperInterface via the factory binding when present,
+     * otherwise fall back to a compatible Semitexa\Auth\AuthBootstrapper class.
+     * Returns null if the auth package is not active or no compatible
+     * bootstrapper can be constructed.
      */
     public function createAuthBootstrapper(
         ContainerInterface $container,
@@ -291,14 +292,20 @@ final class LifecycleComponentRegistry
 
         $isEnabled = \Closure::fromCallable([$bootstrapper, 'isEnabled']);
         $handle = \Closure::fromCallable([$bootstrapper, 'handle']);
-        $handleAcceptsMode = $this->callableAcceptsAuthenticationMode($handle);
+        $handleModeStrategy = $this->resolveAuthHandleModeStrategy($handle);
 
-        return new class($isEnabled, $handle, $handleAcceptsMode) implements AuthBootstrapperInterface
+        return new class(
+            $isEnabled,
+            $handle,
+            $handleModeStrategy['kind'],
+            $handleModeStrategy['translate'] ?? null,
+        ) implements AuthBootstrapperInterface
         {
             public function __construct(
                 private readonly \Closure $isEnabled,
                 private readonly \Closure $handle,
-                private readonly bool $handleAcceptsMode,
+                private readonly string $handleModeStrategy,
+                private readonly ?\Closure $translateMode,
             )
             {
             }
@@ -310,35 +317,67 @@ final class LifecycleComponentRegistry
 
             public function handle(object $payload, \Semitexa\Core\Auth\AuthenticationMode $mode = \Semitexa\Core\Auth\AuthenticationMode::Mandatory): ?\Semitexa\Core\Auth\AuthResult
             {
-                $result = $this->handleAcceptsMode
-                    ? ($this->handle)($payload, $mode)
-                    : ($this->handle)($payload);
+                if ($this->handleModeStrategy === 'with_translated_mode') {
+                    $translateMode = $this->translateMode;
+                    if ($translateMode === null) {
+                        return null;
+                    }
+
+                    $translatedMode = $translateMode($mode);
+                    if ($translatedMode === null) {
+                        return null;
+                    }
+
+                    $result = ($this->handle)($payload, $translatedMode);
+                } else {
+                    $result = match ($this->handleModeStrategy) {
+                        'with_mode' => ($this->handle)($payload, $mode),
+                        'without_mode' => ($this->handle)($payload),
+                        default => null,
+                    };
+                }
 
                 return $result instanceof \Semitexa\Core\Auth\AuthResult ? $result : null;
             }
         };
     }
 
-    private function callableAcceptsAuthenticationMode(\Closure $callable): bool
+    /**
+     * @return array{kind: 'with_mode'|'with_translated_mode'|'without_mode'|'unsupported', translate?: \Closure(\Semitexa\Core\Auth\AuthenticationMode): mixed}
+     */
+    private function resolveAuthHandleModeStrategy(\Closure $callable): array
     {
         $reflection = new \ReflectionFunction($callable);
         $parameters = $reflection->getParameters();
         $secondParameter = $parameters[1] ?? null;
 
         if ($secondParameter === null) {
-            return false;
+            return ['kind' => 'without_mode'];
         }
 
         if ($secondParameter->isVariadic()) {
-            return true;
+            return ['kind' => 'with_mode'];
         }
 
         $type = $secondParameter->getType();
         if ($type === null) {
-            return true;
+            return ['kind' => 'with_mode'];
         }
 
-        return $this->typeAcceptsAuthenticationMode($type);
+        if ($this->typeAcceptsAuthenticationMode($type)) {
+            return ['kind' => 'with_mode'];
+        }
+
+        $translator = $this->buildAuthenticationModeTranslator($type);
+        if ($translator !== null) {
+            return ['kind' => 'with_translated_mode', 'translate' => $translator];
+        }
+
+        if ($secondParameter->isOptional()) {
+            return ['kind' => 'without_mode'];
+        }
+
+        return ['kind' => 'unsupported'];
     }
 
     private function typeAcceptsAuthenticationMode(\ReflectionType $type): bool
@@ -372,5 +411,52 @@ final class LifecycleComponentRegistry
         }
 
         return false;
+    }
+
+    /**
+     * @return \Closure(\Semitexa\Core\Auth\AuthenticationMode): mixed|null
+     */
+    private function buildAuthenticationModeTranslator(\ReflectionType $type): ?\Closure
+    {
+        if ($type instanceof \ReflectionNamedType) {
+            $name = $type->getName();
+
+            return match ($name) {
+                'string' => static fn (\Semitexa\Core\Auth\AuthenticationMode $mode): string => $mode->name,
+                default => $this->buildNamedAuthenticationModeTranslator($type),
+            };
+        }
+
+        if ($type instanceof \ReflectionUnionType) {
+            foreach ($type->getTypes() as $innerType) {
+                $translator = $this->buildAuthenticationModeTranslator($innerType);
+                if ($translator !== null) {
+                    return $translator;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @return \Closure(\Semitexa\Core\Auth\AuthenticationMode): mixed|null
+     */
+    private function buildNamedAuthenticationModeTranslator(\ReflectionNamedType $type): ?\Closure
+    {
+        if ($type->isBuiltin()) {
+            return null;
+        }
+
+        $name = $type->getName();
+        if (!enum_exists($name)) {
+            return null;
+        }
+
+        return static function (\Semitexa\Core\Auth\AuthenticationMode $mode) use ($name): mixed {
+            $case = $name . '::' . $mode->name;
+
+            return defined($case) ? constant($case) : null;
+        };
     }
 }
