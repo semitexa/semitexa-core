@@ -8,14 +8,14 @@ Attributes can optionally reference a documentation file via the `doc` parameter
 
 ```php
 #[AsPayload(
-    doc: 'packages/semitexa-core/docs/attributes/AsPayload.md',
+    doc: 'docs/attributes/AsPayload.md',
     path: '/api/users',
     methods: ['GET']
 )]
 final class UserListPayload {}
 ```
 
-When framework docs live in `packages/`, use a path relative to the application root (for example `packages/semitexa-core/docs/attributes/AsPayload.md`).
+Within this package repository, use an in-package path such as `docs/attributes/AsPayload.md`. In installed projects, the corresponding package docs live under `vendor/semitexa/core/docs/attributes/AsPayload.md`.
 
 ## Available attributes
 
@@ -42,7 +42,7 @@ Request/Handler classes must be in **modules** (`src/modules/`, `packages/`, or 
 
 When creating a new attribute:
 
-1. Create a documentation file in `docs/attributes/` (or `packages/semitexa/core/docs/attributes/` in monorepo).
+1. Create a documentation file in `docs/attributes/` (or the installed package docs path under `vendor/semitexa/core/docs/attributes/`).
 2. Optionally add a `doc` parameter to the attribute constructor to reference the file.
 3. Fill the documentation with usage and examples.
 

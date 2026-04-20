@@ -13,8 +13,6 @@ use Semitexa\Core\Attribute\AsService;
  *
  * Each class below uses __construct(...) parameters as a DI channel on a
  * container-managed class. The rule must reject all of them.
- *
- * @phpstan-ignore-file
  */
 
 /**

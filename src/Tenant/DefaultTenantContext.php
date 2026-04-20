@@ -56,10 +56,7 @@ final class DefaultTenantContext implements TenantContextInterface
         return $this->getTenantId() === 'default';
     }
 
-    /**
-     * @return null
-     */
-    public static function get(): mixed
+    public static function get(): ?self
     {
         return null;
     }

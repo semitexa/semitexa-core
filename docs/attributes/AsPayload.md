@@ -15,7 +15,7 @@ use Semitexa\Core\Attribute\AsPayload;
 use Semitexa\Core\Http\Response\ResourceResponse;
 
 #[AsPayload(
-    doc: 'packages/semitexa-core/docs/attributes/AsPayload.md',
+    doc: 'docs/attributes/AsPayload.md',
     path: '/api/users',
     methods: ['GET'],
     name: 'api.users.list',

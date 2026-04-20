@@ -39,7 +39,7 @@ final class GuestAuthContext implements AuthContextInterface
     {
     }
 
-    public function getLastResult(): mixed
+    public function getLastResult(): ?AuthResult
     {
         return null;
     }

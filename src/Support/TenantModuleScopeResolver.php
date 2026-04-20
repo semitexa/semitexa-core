@@ -170,7 +170,10 @@ final class TenantModuleScopeResolver
     private static function isDefaultContext(TenantContextInterface $context): bool
     {
         if (method_exists($context, 'isDefault')) {
-            return $context->isDefault();
+            $isDefault = $context->isDefault();
+            if (is_bool($isDefault)) {
+                return $isDefault;
+            }
         }
 
         return self::resolveTenantId($context) === 'default';
@@ -179,12 +182,20 @@ final class TenantModuleScopeResolver
     private static function resolveTenantId(TenantContextInterface $context): string
     {
         if (method_exists($context, 'getTenantId')) {
-            return $context->getTenantId();
+            $tenantId = trim((string) $context->getTenantId());
+
+            return $tenantId !== '' ? $tenantId : 'default';
         }
 
         $organization = $context->getLayer(new OrganizationLayer());
 
-        return $organization !== null ? $organization->rawValue() : 'default';
+        if ($organization === null) {
+            return 'default';
+        }
+
+        $tenantId = trim($organization->rawValue());
+
+        return $tenantId !== '' ? $tenantId : 'default';
     }
 
     /**

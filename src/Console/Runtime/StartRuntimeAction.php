@@ -25,7 +25,7 @@ final class StartRuntimeAction
             $this->io->error('docker-compose.yml not found.');
             $this->io->text([
                 'Run <comment>semitexa init</comment> to generate project structure including docker-compose.yml.',
-                'See packages/semitexa-core/docs/RUNNING.md (or vendor/semitexa/core/docs/RUNNING.md when installed) for the supported way to run the app (Docker only).',
+                'See docs/RUNNING.md (or vendor/semitexa/core/docs/RUNNING.md when installed) for the supported way to run the app (Docker only).',
             ]);
             return false;
         }

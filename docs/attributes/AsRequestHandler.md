@@ -7,7 +7,7 @@ Request handlers are classes that process a specific Request (Payload). They are
 **Placement:** Handler classes must live in **modules** (`src/modules/`, `packages/`, or `vendor/`).  
 Classes in project `src/` (namespace `App\`) are **not discovered** for routes — do not put new routes there. See [ADDING_ROUTES.md](../ADDING_ROUTES.md).
 
-**DI:** Handlers are **mutable** services. Dependencies are injected via **protected** properties with **#[InjectAsReadonly]**, **#[InjectAsMutable]**, or **#[InjectAsFactory]**. The constructor is not used as a DI channel on handlers — declaring `__construct` with parameters is rejected — but a parameterless `__construct` for local initialization remains allowed. Session, CookieJar, and Request are filled from **RequestContext** on the handler clone. See [Container README](../src/Container/README.md) and [DI_ONE_WAY](../../../semitexa-docs/docs/workspace/DI_ONE_WAY.md).
+**DI:** Handlers are **mutable** services. Dependencies are injected via **protected** properties with **#[InjectAsReadonly]**, **#[InjectAsMutable]**, or **#[InjectAsFactory]**. The constructor is not used as a DI channel on handlers — declaring `__construct` with parameters is rejected — but a parameterless `__construct` for local initialization remains allowed. Session, CookieJar, and Request are filled from **RequestContext** on the handler clone. See [Container README](../../src/Container/README.md) and [DI_ONE_WAY](../DI_ONE_WAY.md).
 
 ## Usage
 
@@ -118,7 +118,7 @@ class UserProcessingHandler implements TypedHandlerInterface { ... }
 
 ## Dependency Injection
 
-Handlers get dependencies via **property injection** only; the constructor is not the DI channel. Use **#[InjectAsReadonly]** for shared services, **#[InjectAsMutable]** for request-scoped clones, **#[InjectAsFactory]** for a factory of a contract. Constructors are not globally banned — a parameterless `__construct` for local initialization is still allowed on handlers, and constructors are unrestricted on the non-container-managed types handlers interact with (payloads, resources, DTOs, value objects). Session, CookieJar, and Request are **not** in the DI graph; the container sets them on the handler clone from **RequestContext** (see [Container README](../src/Container/README.md) and [SESSIONS_AND_COOKIES.md](../SESSIONS_AND_COOKIES.md)).
+Handlers get dependencies via **property injection** only; the constructor is not the DI channel. Use **#[InjectAsReadonly]** for shared services, **#[InjectAsMutable]** for request-scoped clones, **#[InjectAsFactory]** for a factory of a contract. Constructors are not globally banned — a parameterless `__construct` for local initialization is still allowed on handlers, and constructors are unrestricted on the non-container-managed types handlers interact with (payloads, resources, DTOs, value objects). Session, CookieJar, and Request are **not** in the DI graph; the container sets them on the handler clone from **RequestContext** (see [Container README](../../src/Container/README.md) and [SESSIONS_AND_COOKIES.md](../SESSIONS_AND_COOKIES.md)).
 
 ```php
 use Semitexa\Core\Attribute\AsPayloadHandler;

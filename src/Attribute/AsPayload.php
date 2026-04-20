@@ -22,7 +22,7 @@ use Attribute;
  * Example:
  * ```php
  * #[AsPayload(
- *     doc: 'packages/semitexa-core/docs/attributes/AsPayload.md',
+ *     doc: 'docs/attributes/AsPayload.md',
  *     path: 'env::API_LOGIN_PATH::/api/login',
  *     methods: ['POST'],
  *     name: 'env::API_LOGIN_ROUTE_NAME::api.login',

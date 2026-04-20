@@ -1,6 +1,6 @@
 # Semitexa DI Container
 
-Semitexa uses a **custom DI container** (no PHP-DI). It is built once per worker. There is one way to register services (contract attributes) and one way to inject (property attributes). The canonical DI policy is **packages/semitexa-docs/docs/workspace/DI_ONE_WAY.md**; container mechanics (what gets registered, how resolution works, request scoping) are documented here.
+Semitexa uses a **custom DI container** (no PHP-DI). It is built once per worker. There is one way to register services (contract attributes) and one way to inject (property attributes). The canonical DI policy is documented in `docs/DI_ONE_WAY.md` inside this package (or `vendor/semitexa/docs/workspace/DI_ONE_WAY.md` when installed); container mechanics (what gets registered, how resolution works, request scoping) are documented here.
 
 ## Who gets into the container
 
@@ -87,7 +87,7 @@ $handler = $requestScoped->get(MyHandler::class);   // mutable: clone + RequestC
 - **Resolver (optional):** If `App\Registry\Contracts\{InterfaceShortName}Resolver` exists, the container uses it to get the active implementation; otherwise it uses the active implementation from the registry (module order).
 - **Factory*:** For contracts with a Factory* interface (e.g. `FactoryItemListProviderInterface`), the container binds it either to a generated factory class (when present) or to a generic `ContractFactory` implementation. Inject the Factory* interface to use `getDefault()`, `get($key)`, `keys()`.
 
-See **packages/semitexa-core/docs/SERVICE_CONTRACTS.md** for contracts, `contracts:list`, and resolver/factory conventions.
+See **docs/SERVICE_CONTRACTS.md** for contracts, `contracts:list`, and resolver/factory conventions.
 
 ## Swoole
 
