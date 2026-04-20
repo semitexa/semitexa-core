@@ -11,6 +11,7 @@ use Semitexa\Core\Environment;
 use Semitexa\Core\ErrorHandler;
 use Semitexa\Core\Http\HttpStatus;
 use Semitexa\Core\Http\SwooleResponseEmitter;
+use Semitexa\Core\Console\Runtime\RuntimePidfile;
 use Semitexa\Core\Request;
 use Semitexa\Core\HttpResponse;
 use Semitexa\Core\Discovery\ClassDiscovery;
@@ -131,6 +132,19 @@ class SwooleBootstrap
         });
 
         $server->on(SwooleEvent::Start->value, function (Server $server) use ($bootstrapState, $lifecycleInvoker) {
+            // Write the identity cookie so server:reload / server:stop can verify the
+            // pidfile PID before signalling; without this the PID can be recycled to
+            // an unrelated process and the signal delivered to the wrong target.
+            $rawScript = $_SERVER['SCRIPT_FILENAME'] ?? '';
+            $scriptPath = is_string($rawScript) ? $rawScript : '';
+            /** @var int $masterPid */
+            $masterPid = $server->master_pid;
+            RuntimePidfile::writeCookie(
+                \Semitexa\Core\Support\ProjectRoot::get(),
+                $masterPid,
+                $scriptPath,
+            );
+
             $context = new ServerLifecycleContext(
                 server: $server,
                 workerId: null,

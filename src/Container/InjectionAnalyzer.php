@@ -328,7 +328,7 @@ final class InjectionAnalyzer
     /**
      * Resolve an environment variable value, casting to the target type.
      */
-    public function resolveEnvValue(string $envKey, int|float|string|bool|null $default, string $targetType): int|float|string|bool|null
+    public function resolveEnvValue(string $envKey, int|float|string|bool|\BackedEnum|null $default, string $targetType): int|float|string|bool|\BackedEnum|null
     {
         $raw = Environment::getEnvValue($envKey);
         if ($raw === null) {
@@ -347,14 +347,15 @@ final class InjectionAnalyzer
     private function resolveEnvBackedEnum(
         string $raw,
         string $enumClass,
-        int|float|string|bool|null $default
-    ): int|float|string|bool|null
+        int|float|string|bool|\BackedEnum|null $default
+    ): int|float|string|bool|\BackedEnum|null
     {
         if (!enum_exists($enumClass) || !is_subclass_of($enumClass, \BackedEnum::class)) {
             return $default;
         }
-        $value = $enumClass::tryFrom($raw);
-        return $value instanceof \BackedEnum ? $value->value : $default;
+        // Return the enum instance itself; the target property is enum-typed and
+        // setValue() with the scalar ->value would raise a TypeError.
+        return $enumClass::tryFrom($raw) ?? $default;
     }
 
     /**

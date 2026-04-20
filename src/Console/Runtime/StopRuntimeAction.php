@@ -53,12 +53,20 @@ final class StopRuntimeAction
             if (file_exists($pidFile)) {
                 $pid = trim((string) file_get_contents($pidFile));
                 if ($pid !== '' && ctype_digit($pid)) {
-                    $this->io->text("Stopping process from PID file: {$pid}");
-                    $this->killPid((int) $pid);
+                    $pidInt = (int) $pid;
+                    if (RuntimePidfile::verifyProcess($pidInt, $projectRoot)) {
+                        $this->io->text("Stopping process from PID file: {$pidInt}");
+                        $this->killPid($pidInt);
+                    } else {
+                        $this->io->warning(
+                            "Ignoring stale PID file {$pidFile}: PID {$pidInt} is not a live Semitexa server process."
+                        );
+                    }
                 }
                 @unlink($pidFile);
             }
         }
+        @unlink($projectRoot . RuntimePidfile::COOKIE_RELATIVE_PATH);
 
         // 3. Port-based cleanup
         $port = $this->resolveSwoolePort();

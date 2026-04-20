@@ -29,10 +29,10 @@ use PHPStan\Rules\RuleErrorBuilder;
 final class ExecutionScopedWithoutAttributeRule implements Rule
 {
     private const SCOPING_ATTRIBUTES = [
-        'Semitexa\\Core\\Attributes\\ExecutionScoped',
-        'Semitexa\\Core\\Attributes\\AsPayloadHandler',
-        'Semitexa\\Core\\Attributes\\AsEventListener',
-        'Semitexa\\Core\\Attributes\\AsPipelineListener',
+        'Semitexa\\Core\\Attribute\\ExecutionScoped',
+        'Semitexa\\Core\\Attribute\\AsPayloadHandler',
+        'Semitexa\\Core\\Attribute\\AsEventListener',
+        'Semitexa\\Core\\Attribute\\AsPipelineListener',
         'ExecutionScoped',
         'AsPayloadHandler',
         'AsEventListener',
@@ -40,15 +40,19 @@ final class ExecutionScopedWithoutAttributeRule implements Rule
     ];
 
     private const MUTABLE_INJECTION_ATTRIBUTES = [
-        'Semitexa\\Core\\Attributes\\InjectAsMutable',
+        'Semitexa\\Core\\Attribute\\InjectAsMutable',
         'InjectAsMutable',
     ];
 
     private const CONTAINER_MANAGED_ATTRIBUTES = [
-        'Semitexa\\Core\\Attributes\\AsService',
+        'Semitexa\\Core\\Attribute\\AsService',
+        'Semitexa\\Core\\Attribute\\SatisfiesServiceContract',
+        'Semitexa\\Core\\Attribute\\SatisfiesRepositoryContract',
         'Semitexa\\Orm\\Attribute\\AsRepository',
-        'Semitexa\\Core\\Attributes\\SatisfiesServiceContract',
-        'Semitexa\\Core\\Attributes\\SatisfiesRepositoryContract',
+        'AsService',
+        'SatisfiesServiceContract',
+        'SatisfiesRepositoryContract',
+        'AsRepository',
     ];
 
     public function getNodeType(): string

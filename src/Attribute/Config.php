@@ -20,6 +20,6 @@ final class Config
 {
     public function __construct(
         public readonly ?string $env = null,
-        public readonly int|float|string|bool|null $default = null,
+        public readonly int|float|string|bool|\BackedEnum|null $default = null,
     ) {}
 }

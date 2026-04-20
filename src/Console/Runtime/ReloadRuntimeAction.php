@@ -109,22 +109,12 @@ final class ReloadRuntimeAction
                 }
 
                 $pid = (int) trim($pidRaw);
-                if ($pid > 0 && function_exists('posix_kill') && posix_kill($pid, 0) && $this->isSwooleProcess($pid)) {
+                if ($pid > 0 && RuntimePidfile::verifyProcess($pid, $root)) {
                     return $pid;
                 }
             }
         }
 
         return null;
-    }
-
-    private function isSwooleProcess(int $pid): bool
-    {
-        $cmdlineFile = "/proc/{$pid}/cmdline";
-        if (!is_readable($cmdlineFile)) {
-            return false;
-        }
-        $cmdline = @file_get_contents($cmdlineFile);
-        return $cmdline !== false && str_contains($cmdline, 'server.php');
     }
 }

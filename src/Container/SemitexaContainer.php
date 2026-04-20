@@ -383,61 +383,84 @@ final class SemitexaContainer implements ContainerInterface
     /**
      * Re-inject all #[InjectAsMutable] properties from the current execution context
      * and execution-scoped service pool. Called on each clone at execution time.
+     *
+     * @param array<string, true> $visited
      */
-    private function injectMutableProperties(object $instance, string $class): void
+    private function injectMutableProperties(object $instance, string $class, array &$visited = []): void
     {
-        $injections = $this->injectionMap->injections[$class] ?? [];
-        $ref = new ReflectionClass($instance);
-        $executionContextValues = $this->readExecutionContextValues();
-
-        foreach ($injections as $propName => $info) {
-            if ($info['kind'] !== 'mutable') {
-                continue;
-            }
-
-            $typeName = $info['type'];
-
-            // Try execution context first (Request, Session, etc.)
-            if (isset($executionContextValues[$typeName])) {
-                $prop = $ref->getProperty($propName);
-                $prop->setAccessible(true);
-                $prop->setValue($instance, $executionContextValues[$typeName]);
-                continue;
-            }
-
-            // Try execution-scoped prototypes (clone them)
-            $protoClass = $this->typeMap->resolveClass($typeName) ?? $typeName;
-            $proto = $this->instanceStore->prototypes[$protoClass]
-                ?? $this->instanceStore->prototypes[$typeName]
-                ?? null;
-            if ($proto !== null) {
-                $prop = $ref->getProperty($propName);
-                $prop->setAccessible(true);
-                $prop->setValue($instance, clone $proto);
-                continue;
-            }
-
+        if (isset($visited[$class])) {
             throw new InjectionException(
                 targetClass: $class,
-                propertyName: $propName,
-                propertyType: $typeName,
+                propertyName: '',
+                propertyType: $class,
                 injectionKind: 'mutable',
-                message: "Cannot inject {$class}::\${$propName} (type: {$typeName}) "
-                    . "at execution time. No execution context value or prototype found.",
+                message: "Cyclic mutable injection detected for {$class}.",
             );
         }
+        $visited[$class] = true;
 
-        // Also inject factories into cloned instances
-        foreach ($injections as $propName => $info) {
-            if ($info['kind'] !== 'factory') {
-                continue;
+        try {
+            $injections = $this->injectionMap->injections[$class] ?? [];
+            $ref = new ReflectionClass($instance);
+            $executionContextValues = $this->readExecutionContextValues();
+
+            foreach ($injections as $propName => $info) {
+                if ($info['kind'] !== 'mutable') {
+                    continue;
+                }
+
+                $typeName = $info['type'];
+
+                // Try execution context first (Request, Session, etc.)
+                if (isset($executionContextValues[$typeName])) {
+                    $prop = $ref->getProperty($propName);
+                    $prop->setAccessible(true);
+                    $prop->setValue($instance, $executionContextValues[$typeName]);
+                    continue;
+                }
+
+                // Try execution-scoped prototypes (clone them)
+                $protoClass = $this->typeMap->resolveClass($typeName) ?? $typeName;
+                $proto = $this->instanceStore->prototypes[$protoClass]
+                    ?? $this->instanceStore->prototypes[$typeName]
+                    ?? null;
+                if ($proto !== null) {
+                    $nestedClass = isset($this->instanceStore->prototypes[$protoClass]) ? $protoClass : $typeName;
+                    $nestedClone = clone $proto;
+                    // A nested execution-scoped dependency also declares #[InjectAsMutable]
+                    // properties; skipping this recursion would leave its typed properties
+                    // uninitialized and trigger "must not be accessed before initialization".
+                    $this->injectMutableProperties($nestedClone, $nestedClass, $visited);
+                    $prop = $ref->getProperty($propName);
+                    $prop->setAccessible(true);
+                    $prop->setValue($instance, $nestedClone);
+                    continue;
+                }
+
+                throw new InjectionException(
+                    targetClass: $class,
+                    propertyName: $propName,
+                    propertyType: $typeName,
+                    injectionKind: 'mutable',
+                    message: "Cannot inject {$class}::\${$propName} (type: {$typeName}) "
+                        . "at execution time. No execution context value or prototype found.",
+                );
             }
-            $factory = $this->instanceStore->factories[$info['type']] ?? null;
-            if ($factory !== null) {
-                $prop = $ref->getProperty($propName);
-                $prop->setAccessible(true);
-                $prop->setValue($instance, $factory);
+
+            // Also inject factories into cloned instances
+            foreach ($injections as $propName => $info) {
+                if ($info['kind'] !== 'factory') {
+                    continue;
+                }
+                $factory = $this->instanceStore->factories[$info['type']] ?? null;
+                if ($factory !== null) {
+                    $prop = $ref->getProperty($propName);
+                    $prop->setAccessible(true);
+                    $prop->setValue($instance, $factory);
+                }
             }
+        } finally {
+            unset($visited[$class]);
         }
     }
 }
