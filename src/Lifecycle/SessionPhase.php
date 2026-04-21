@@ -10,6 +10,7 @@ use Semitexa\Core\Auth\GuestAuthContext;
 use Semitexa\Core\Container\RequestScopedContainer;
 use Semitexa\Core\Cookie\CookieJar;
 use Semitexa\Core\Cookie\CookieJarInterface;
+use Semitexa\Core\Csrf\CsrfToken;
 use Semitexa\Core\Environment;
 use Semitexa\Core\Locale\DefaultLocaleContext;
 use Semitexa\Core\Locale\LocaleContextInterface;
@@ -54,6 +55,17 @@ final class SessionPhase
         }
         $sessionLifetime = (int) (Environment::getEnvValue('SESSION_LIFETIME') ?? '3600');
         $session = new Session($sessionId, $this->sessionHandler, $cookieName, $sessionLifetime);
+
+        // Ensure a CSRF token exists on this session. Generated once, then stable
+        // for the session lifetime. The matching XSRF-TOKEN cookie is emitted in
+        // finalize() so browser JS can copy it into the X-CSRF-Token header.
+        /** @var CsrfToken $csrf */
+        $csrf = $session->getPayload(CsrfToken::class);
+        if ($csrf->getValue() === '') {
+            $csrf = CsrfToken::generate();
+            $session->setPayload($csrf);
+        }
+
         $this->requestScopedContainer->set(SessionInterface::class, $session);
         $this->requestScopedContainer->set(CookieJarInterface::class, new CookieJar($request));
         $this->requestScopedContainer->set(Request::class, $request);
@@ -97,12 +109,30 @@ final class SessionPhase
         if ($sessionPersisted) {
             $cookieName = $session->getCookieName();
             $sessionLifetime = (int) (Environment::getEnvValue('SESSION_LIFETIME') ?? '3600');
+            $isHttps = $request->getScheme() === 'https';
             $cookieJar->set($cookieName, $session->getSessionIdForCookie(), [
                 'path' => '/',
                 'httpOnly' => true,
+                'secure' => $isHttps,
                 'sameSite' => 'lax',
                 'maxAge' => $sessionLifetime,
             ]);
+
+            // XSRF-TOKEN cookie for the double-submit CSRF flow. Must NOT be
+            // HttpOnly — browser JS has to read it to populate X-CSRF-Token.
+            // The session-stored CsrfToken remains the authoritative value; the
+            // cookie is only a transport so AJAX clients can echo it back.
+            /** @var CsrfToken $csrf */
+            $csrf = $session->getPayload(CsrfToken::class);
+            if ($csrf->getValue() !== '') {
+                $cookieJar->set('XSRF-TOKEN', $csrf->getValue(), [
+                    'path' => '/',
+                    'httpOnly' => false,
+                    'secure' => $isHttps,
+                    'sameSite' => 'lax',
+                    'maxAge' => $sessionLifetime,
+                ]);
+            }
         }
 
         $lines = $cookieJar->getSetCookieLines();
