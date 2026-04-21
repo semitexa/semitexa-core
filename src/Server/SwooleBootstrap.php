@@ -135,13 +135,34 @@ class SwooleBootstrap
             // Write the identity cookie so server:reload / server:stop can verify the
             // pidfile PID before signalling; without this the PID can be recycled to
             // an unrelated process and the signal delivered to the wrong target.
-            $rawScript = $_SERVER['SCRIPT_FILENAME'] ?? '';
-            $scriptPath = is_string($rawScript) ? $rawScript : '';
+            //
+            // The cookie MUST align with Swoole's own pidfile (the `pid_file` config
+            // option), because that is the PID the reload/stop verifier reads and the
+            // target of SIGUSR1/SIGTERM. Using `$server->master_pid` drifts in the
+            // Docker-PID-1 case: Swoole daemonises, the original process is stuck as
+            // PID 1 (container init cannot exit), so Swoole treats PID 1 as manager
+            // and the forked child as master. The pidfile is written pre-fork (PID 1),
+            // but `$server->master_pid` is the post-fork child — they disagree and
+            // verifyProcess rejects the signal.
+            $projectRoot = \Semitexa\Core\Support\ProjectRoot::get();
+            $pidfilePath = $projectRoot . '/var/run/semitexa.pid';
+            $pidfilePid = 0;
+            if (is_readable($pidfilePath)) {
+                $pidfileRaw = @file_get_contents($pidfilePath);
+                if ($pidfileRaw !== false) {
+                    $pidfilePid = (int) trim($pidfileRaw);
+                }
+            }
             /** @var int $masterPid */
             $masterPid = $server->master_pid;
+            $cookiePid = $pidfilePid > 0 ? $pidfilePid : $masterPid;
+
+            $rawScript = $_SERVER['SCRIPT_FILENAME'] ?? '';
+            $scriptPath = is_string($rawScript) ? $rawScript : '';
+
             RuntimePidfile::writeCookie(
-                \Semitexa\Core\Support\ProjectRoot::get(),
-                $masterPid,
+                $projectRoot,
+                $cookiePid,
                 $scriptPath,
             );
 

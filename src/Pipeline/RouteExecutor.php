@@ -80,8 +80,21 @@ class RouteExecutor
                 ], HttpStatus::UnsupportedMediaType->value), $request, $metadata);
             }
 
-            // 1. Hydrate and Validate
-            [$reqDto, $validationResponse] = $this->hydrateRequest($route, $request);
+            // 1a. Create a bare payload instance (no request data yet).
+            $reqDto = $this->createBarePayload($route);
+
+            // 1b. Pre-hydration auth gate. When an authorization layer registers
+            //     a PreHydrationAuthGateInterface, it runs here so that protected
+            //     routes reject unauthenticated requests BEFORE hydration or
+            //     validation touches the request body. Public routes are a no-op.
+            if ($this->container->has(PreHydrationAuthGateInterface::class)) {
+                /** @var PreHydrationAuthGateInterface $gate */
+                $gate = $this->container->get(PreHydrationAuthGateInterface::class);
+                $gate->gate($reqDto, $request, $this->authBootstrapper);
+            }
+
+            // 1c. Hydrate and Validate
+            [$reqDto, $validationResponse] = $this->fillAndValidatePayload($reqDto, $request);
             if ($validationResponse) {
                 return $this->decorateResponse($validationResponse, $request, $metadata);
             }
@@ -204,9 +217,10 @@ class RouteExecutor
     }
 
     /**
-     * @return array{0: object, 1: ?HttpResponse}
+     * Build a bare payload instance (no request data) suitable for attribute
+     * resolution. Used by the pre-hydration auth gate before hydration.
      */
-    private function hydrateRequest(DiscoveredRoute $route, Request $request): array
+    private function createBarePayload(DiscoveredRoute $route): object
     {
         $requestClass = $route->requestClass;
         if ($requestClass === '') {
@@ -219,6 +233,18 @@ class RouteExecutor
             throw new PipelineException("Cannot instantiate request class: {$requestClass}");
         }
 
+        return $reqDto;
+    }
+
+    /**
+     * Fill the bare payload from the request and run validation. The payload
+     * instance is returned in both success and failure cases so validation
+     * errors can reference the class the request was routed to.
+     *
+     * @return array{0: object, 1: ?HttpResponse}
+     */
+    private function fillAndValidatePayload(object $reqDto, Request $request): array
+    {
         try {
             $reqDto = PayloadHydrator::hydrate($reqDto, $request);
             if (method_exists($reqDto, 'setHttpRequest')) {
