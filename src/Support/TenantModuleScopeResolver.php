@@ -6,7 +6,6 @@ namespace Semitexa\Core\Support;
 
 use Semitexa\Core\Tenant\TenantContextInterface;
 use Semitexa\Core\Tenant\TenantContextAccess;
-use Semitexa\Core\Tenant\Layer\OrganizationLayer;
 
 final class TenantModuleScopeResolver
 {

@@ -10,6 +10,10 @@ final class TenantContextAccess
 {
     public static function tenantId(?TenantContextInterface $context): ?string
     {
+        if (self::isDefault($context)) {
+            return null;
+        }
+
         $tenantId = self::tenantIdOrDefault($context);
 
         return $tenantId !== '' && $tenantId !== 'default' ? $tenantId : null;
@@ -31,6 +35,12 @@ final class TenantContextAccess
             }
 
             if ($tenantId instanceof \Stringable) {
+                $normalizedTenantId = trim((string) $tenantId);
+
+                return $normalizedTenantId !== '' ? $normalizedTenantId : 'default';
+            }
+
+            if (is_scalar($tenantId) && !is_bool($tenantId)) {
                 $normalizedTenantId = trim((string) $tenantId);
 
                 return $normalizedTenantId !== '' ? $normalizedTenantId : 'default';
