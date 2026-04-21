@@ -12,6 +12,8 @@ use PHPStan\Rules\Rule;
 /**
  * @deprecated Kept as a backwards-compatible alias for older phpstan.neon files.
  *             Use {@see InjectionViaConstructorRule} directly.
+ *
+ * @implements Rule<ClassMethod>
  */
 final class ForbiddenConstructorRule implements Rule
 {
