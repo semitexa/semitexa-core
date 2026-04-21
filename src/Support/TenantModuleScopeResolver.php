@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Semitexa\Core\Support;
 
 use Semitexa\Core\Tenant\TenantContextInterface;
-use Semitexa\Core\Tenant\Layer\OrganizationLayer;
+use Semitexa\Core\Tenant\TenantContextAccess;
 
 final class TenantModuleScopeResolver
 {
@@ -158,44 +158,7 @@ final class TenantModuleScopeResolver
 
     private static function tenantId(?TenantContextInterface $context): ?string
     {
-        if ($context === null || self::isDefaultContext($context)) {
-            return null;
-        }
-
-        $tenantId = self::resolveTenantId($context);
-
-        return $tenantId !== '' && $tenantId !== 'default' ? $tenantId : null;
-    }
-
-    private static function isDefaultContext(TenantContextInterface $context): bool
-    {
-        if (method_exists($context, 'isDefault')) {
-            $isDefault = $context->isDefault();
-            if (is_bool($isDefault)) {
-                return $isDefault;
-            }
-        }
-
-        return self::resolveTenantId($context) === 'default';
-    }
-
-    private static function resolveTenantId(TenantContextInterface $context): string
-    {
-        if (method_exists($context, 'getTenantId')) {
-            $tenantId = trim((string) $context->getTenantId());
-
-            return $tenantId !== '' ? $tenantId : 'default';
-        }
-
-        $organization = $context->getLayer(new OrganizationLayer());
-
-        if ($organization === null) {
-            return 'default';
-        }
-
-        $tenantId = trim($organization->rawValue());
-
-        return $tenantId !== '' ? $tenantId : 'default';
+        return TenantContextAccess::tenantId($context);
     }
 
     /**
