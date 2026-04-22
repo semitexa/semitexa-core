@@ -8,7 +8,7 @@ This is the canonical Semitexa module layout for request payloads, handlers, and
 
 | Subfolder | Purpose | Attribute / usage |
 |-----------|---------|-------------------|
-| **Request** | HTTP request DTOs (route + methods) | `#[AsPayload(path, methods, responseWith)]`; require entry in `src/Registry/Payloads/` |
+| **Request** | HTTP request DTOs (route + methods) | `#[AsPayload(path, methods, responseWith)]`; require entry in `src/registry/Payloads/` |
 | **Session** | Session segment DTOs | `#[SessionSegment('name')]`; `SessionInterface::getPayload()` / `setPayload()` |
 | **Event** | Event DTOs for dispatch | Used with `EventDispatcher::create(EventClass::class, [...])` and `dispatch()` |
 

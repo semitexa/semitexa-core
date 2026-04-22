@@ -16,10 +16,10 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 
 /**
  * Discover service contracts with 2+ implementations, generate resolver classes
- * in src/Registry/Contracts/. Single-implementation contracts are not generated
+ * in src/registry/Contracts/. Single-implementation contracts are not generated
  * (container binds interface to that implementation directly).
  */
-#[AsCommand(name: 'registry:sync:contracts', description: 'Generate contract resolvers in src/Registry/Contracts/ for interfaces with 2+ implementations.')]
+#[AsCommand(name: 'registry:sync:contracts', description: 'Generate contract resolvers in src/registry/Contracts/ for interfaces with 2+ implementations.')]
 class RegistrySyncContractsCommand extends BaseCommand
 {
     public function __construct(
@@ -32,7 +32,7 @@ class RegistrySyncContractsCommand extends BaseCommand
     protected function configure(): void
     {
         $this->setName('registry:sync:contracts')
-            ->setDescription('Generate contract resolvers in src/Registry/Contracts/ for interfaces with 2+ implementations.');
+            ->setDescription('Generate contract resolvers in src/registry/Contracts/ for interfaces with 2+ implementations.');
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
@@ -54,7 +54,7 @@ class RegistrySyncContractsCommand extends BaseCommand
         if (count($generatedFactories) > 0) {
             $msg .= ', ' . count($generatedFactories) . ' factory(ies)';
         }
-        $io->success('Registry contract resolvers synced: ' . $msg . ' in src/Registry/Contracts/.');
+        $io->success('Registry contract resolvers synced: ' . $msg . ' in src/registry/Contracts/.');
         return Command::SUCCESS;
     }
 

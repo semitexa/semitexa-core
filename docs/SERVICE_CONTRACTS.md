@@ -32,7 +32,7 @@ Output is JSON: `contracts[]` with `contract`, `active`, and `implementations` (
 
 - Implementations are discovered via **#[AsServiceContract(of: SomeInterface::class)]** on classes (in modules).
 - **Single implementation:** the container binds the interface directly to that class.
-- **Multiple implementations:** a **registry resolver** is generated in `src/Registry/Contracts/` (e.g. `ItemListProviderResolver`). The resolver receives all implementations via constructor and exposes `getContract()`; the container uses it to obtain the chosen implementation. By default the resolver returns the implementation chosen by module "extends" order; you can edit `getContract()` to pick another. Resolver is **optional**: if the class does not exist, the container uses the registry’s active implementation directly.
+- **Multiple implementations:** a **registry resolver** is generated in `src/registry/Contracts/` (e.g. `ItemListProviderResolver`). The resolver receives all implementations via constructor and exposes `getContract()`; the container uses it to obtain the chosen implementation. By default the resolver returns the implementation chosen by module "extends" order; you can edit `getContract()` to pick another. Resolver is **optional**: if the class does not exist, the container uses the registry’s active implementation directly.
 - **Generate resolvers:** run **`bin/semitexa registry:sync:contracts`** (or **`bin/semitexa registry:sync`** to sync payloads and contracts together). Only interfaces with **2+ implementations** get a resolver; single-implementation contracts are not generated. The container discovers resolvers by convention (`App\Registry\Contracts\{InterfaceShortName}Resolver`), no manifest needed.
 - See `ServiceContractRegistry`, `RegistryContractResolverGenerator`, and `ModuleRegistry::getModuleOrderByExtends()` in the core package.
 
@@ -51,7 +51,7 @@ There is no separate “Factory” pattern in Semitexa: service contracts with m
 When you need to **choose** an implementation at runtime (e.g. by module name) instead of always using the active one, define an interface whose short name **starts with `Factory`** in the same namespace as the base contract.
 
 - **Example:** For `ItemListProviderInterface`, define `FactoryItemListProviderInterface` extending `Semitexa\Core\Contract\ContractFactoryInterface`, with `getDefault()`, `get(string $key)`, and `keys()` returning the base contract type.
-- **Keys** are composite: `Module::ShortClassName` (e.g. `Website::WebsiteItemListProvider`). This allows multiple implementations per module. Lookup in `get($key)` is **case-insensitive** (e.g. `website::websiteitemlistprovider` is the same). Run **`bin/semitexa registry:sync:contracts`** to generate the implementation in `src/Registry/Contracts/{ContractShortName}Factory.php`.
+- **Keys** are composite: `Module::ShortClassName` (e.g. `Website::WebsiteItemListProvider`). This allows multiple implementations per module. Lookup in `get($key)` is **case-insensitive** (e.g. `website::websiteitemlistprovider` is the same). Run **`bin/semitexa registry:sync:contracts`** to generate the implementation in `src/registry/Contracts/{ContractShortName}Factory.php`.
 - **Usage:** Inject the Factory* interface where you need to pick; use `getDefault()` for the active implementation or `get('Website::WebsiteItemListProvider')` for a specific one.
 
 See `Semitexa\Core\Contract\ContractFactoryInterface` for the base interface.

@@ -8,7 +8,7 @@ use ReflectionClass;
 use Semitexa\Core\Support\ProjectRoot;
 
 /**
- * Generates contract resolver classes in src/Registry/Contracts/ when an interface
+ * Generates contract resolver classes in src/registry/Contracts/ when an interface
  * has 2+ implementations. Resolver receives all implementations via constructor (DI)
  * and exposes getContract() for the container to obtain the chosen implementation.
  *
@@ -19,7 +19,7 @@ use Semitexa\Core\Support\ProjectRoot;
 class RegistryContractResolverGenerator
 {
     public const REGISTRY_NAMESPACE = 'App\\Registry\\Contracts';
-    public const REGISTRY_CONTRACTS_DIR = 'src/Registry/Contracts';
+    public const REGISTRY_CONTRACTS_DIR = 'src/registry/Contracts';
 
     /**
      * Generate resolver classes for interfaces with multiple implementations.
