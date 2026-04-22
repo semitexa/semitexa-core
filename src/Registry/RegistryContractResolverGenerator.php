@@ -8,9 +8,10 @@ use ReflectionClass;
 use Semitexa\Core\Support\ProjectRoot;
 
 /**
- * Generates contract resolver classes in src/Registry/Contracts/ when an interface
- * has 2+ implementations. Resolver receives all implementations via constructor (DI)
- * and exposes getContract() for the container to obtain the chosen implementation.
+ * Generates contract resolver classes in the canonical contracts directory when
+ * an interface has 2+ implementations. Resolver receives all implementations via
+ * constructor (DI) and exposes getContract() for the container to obtain the
+ * chosen implementation.
  *
  * When a "Factory" interface exists (same namespace, name starts with "Factory",
  * e.g. FactoryItemListProviderInterface for ItemListProviderInterface), generates
@@ -18,9 +19,6 @@ use Semitexa\Core\Support\ProjectRoot;
  */
 class RegistryContractResolverGenerator
 {
-    public const REGISTRY_NAMESPACE = 'App\\Registry\\Contracts';
-    public const REGISTRY_CONTRACTS_DIR = 'src/Registry/Contracts';
-
     /**
      * Generate resolver classes for interfaces with multiple implementations.
      *
@@ -30,7 +28,7 @@ class RegistryContractResolverGenerator
     public static function generateAll(array $contractDetails): array
     {
         $root = ProjectRoot::get();
-        $outDir = $root . '/' . self::REGISTRY_CONTRACTS_DIR;
+        $outDir = $root . '/' . CanonicalRegistryPaths::REGISTRY_CONTRACTS;
         if (!is_dir($outDir)) {
             mkdir($outDir, 0755, true);
         }
@@ -59,7 +57,7 @@ class RegistryContractResolverGenerator
     public static function generateAllFactories(array $contractDetails): array
     {
         $root = ProjectRoot::get();
-        $outDir = $root . '/' . self::REGISTRY_CONTRACTS_DIR;
+        $outDir = $root . '/' . CanonicalRegistryPaths::REGISTRY_CONTRACTS;
         if (!is_dir($outDir)) {
             mkdir($outDir, 0755, true);
         }
@@ -108,7 +106,7 @@ class RegistryContractResolverGenerator
         if ($baseShort === $short) {
             $baseShort = $short;
         }
-        return self::REGISTRY_NAMESPACE . '\\' . $baseShort . 'Factory';
+        return CanonicalRegistryPaths::REGISTRY_NAMESPACE . '\\Contracts' . '\\' . $baseShort . 'Factory';
     }
 
     /**
@@ -126,13 +124,13 @@ class RegistryContractResolverGenerator
         if ($resolverShortName === $baseRef->getShortName()) {
             $resolverShortName = $baseRef->getShortName() . 'Resolver';
         }
-        $resolverClass = self::REGISTRY_NAMESPACE . '\\' . $resolverShortName;
+        $resolverClass = CanonicalRegistryPaths::REGISTRY_NAMESPACE . '\\Contracts' . '\\' . $resolverShortName;
         $factoryShortName = preg_replace('/Interface$/', '', $baseRef->getShortName());
         if ($factoryShortName === $baseRef->getShortName()) {
             $factoryShortName = $baseRef->getShortName();
         }
         $factoryShortName .= 'Factory';
-        $outPath = $root . '/' . self::REGISTRY_CONTRACTS_DIR . '/' . $factoryShortName . '.php';
+        $outPath = $root . '/' . CanonicalRegistryPaths::REGISTRY_CONTRACTS . '/' . $factoryShortName . '.php';
 
         /** @var array<string, string> $imports */
         $imports = [];
@@ -219,7 +217,7 @@ final class {$factoryShortName} implements {$factoryInterfaceTypeHint}
 PHP;
 
         file_put_contents($outPath, $content);
-        return self::REGISTRY_NAMESPACE . '\\' . $factoryShortName;
+        return CanonicalRegistryPaths::REGISTRY_NAMESPACE . '\\Contracts' . '\\' . $factoryShortName;
     }
 
     /**
@@ -267,7 +265,7 @@ PHP;
         if ($resolverShortName === $shortName) {
             $resolverShortName = $shortName . 'Resolver';
         }
-        $outPath = $root . '/' . self::REGISTRY_CONTRACTS_DIR . '/' . $resolverShortName . '.php';
+        $outPath = $root . '/' . CanonicalRegistryPaths::REGISTRY_CONTRACTS . '/' . $resolverShortName . '.php';
 
         /** @var array<string, string> $imports */
         $imports = [];
@@ -355,7 +353,7 @@ final class {$resolverShortName}
 PHP;
 
         file_put_contents($outPath, $content);
-        return self::REGISTRY_NAMESPACE . '\\' . $resolverShortName;
+        return CanonicalRegistryPaths::REGISTRY_NAMESPACE . '\\Contracts' . '\\' . $resolverShortName;
     }
 
     private static function uniqueParamName(string $class, array $used): string
