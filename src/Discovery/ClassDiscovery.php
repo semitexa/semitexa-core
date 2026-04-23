@@ -19,6 +19,20 @@ class ClassDiscovery
         'App\\' => true,
     ];
 
+    /**
+     * FQCN substrings that mark a class as dev-only and therefore excluded from the
+     * runtime classmap. These classes typically extend interfaces that ship in
+     * require-dev dependencies (phpstan/phpstan, phpunit/phpunit), which are absent
+     * in consumer projects — scanning them triggers autoload errors and floods the
+     * boot log with [skip] warnings. Filtering at classmap-population time keeps
+     * them out of every downstream iteration.
+     */
+    private const RUNTIME_EXCLUDE_SUBSTRINGS = [
+        '\\PHPStan\\',
+        '\\Tests\\',
+        '\\Testing\\PhpUnit',
+    ];
+
     public function initialize(): void
     {
         if ($this->initialized) {
@@ -37,7 +51,7 @@ class ClassDiscovery
         $this->refreshComposerAutoloader($composerDir, $composerClassMap);
 
         foreach ($composerClassMap as $className => $filePath) {
-            if ($this->isNamespaceAllowed($className)) {
+            if ($this->isNamespaceAllowed($className) && !$this->isRuntimeExcluded($className)) {
                 $this->classMap[$className] = $filePath;
             }
         }
@@ -122,13 +136,6 @@ class ClassDiscovery
         $classes = [];
 
         foreach ($this->classMap as $className => $filePath) {
-            if (str_starts_with($className, 'Semitexa\\Core\\Composer\\')
-                || str_starts_with($className, 'App\\Tests\\')
-                || str_contains($className, '\\Tests\\')
-            ) {
-                continue;
-            }
-
             try {
                 $exists = class_exists($className, true) || interface_exists($className, true) || trait_exists($className, true);
             } catch (\Throwable $e) {
@@ -243,7 +250,10 @@ class ClassDiscovery
                     }
 
                     $className = self::extractDeclaredClassName($fileInfo->getPathname());
-                    if ($className === null || !$this->isNamespaceAllowed($className)) {
+                    if ($className === null
+                        || !$this->isNamespaceAllowed($className)
+                        || $this->isRuntimeExcluded($className)
+                    ) {
                         continue;
                     }
 
@@ -363,6 +373,20 @@ class ClassDiscovery
     {
         foreach (array_keys($this->allowedNamespacePrefixes) as $prefix) {
             if (str_starts_with($className, $prefix)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private function isRuntimeExcluded(string $className): bool
+    {
+        if (str_starts_with($className, 'Semitexa\\Core\\Composer\\')) {
+            return true;
+        }
+
+        foreach (self::RUNTIME_EXCLUDE_SUBSTRINGS as $needle) {
+            if (str_contains($className, $needle)) {
                 return true;
             }
         }
