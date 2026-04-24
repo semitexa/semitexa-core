@@ -44,10 +44,10 @@ final class CsrfListener implements PipelineListenerInterface
     private const HEADER_NAME = 'X-CSRF-Token';
     private const FORM_FIELD = '_csrf';
     #[InjectAsMutable]
-    protected ?SessionInterface $session = null;
+    protected SessionInterface $session;
 
     #[InjectAsMutable]
-    protected ?AuthContextInterface $authContext = null;
+    protected AuthContextInterface $authContext;
 
     public function handle(RequestPipelineContext $context): void
     {
@@ -58,7 +58,7 @@ final class CsrfListener implements PipelineListenerInterface
 
         // CSRF is a session-cookie attack; only apply when the authenticated request
         // actually presents the session cookie used by the browser flow.
-        if ($this->authContext === null || $this->authContext->isGuest()) {
+        if (!isset($this->authContext) || $this->authContext->isGuest()) {
             return;
         }
         if (!$this->hasSessionCookie($context)) {
@@ -71,7 +71,7 @@ final class CsrfListener implements PipelineListenerInterface
             return;
         }
 
-        if ($this->session === null) {
+        if (!isset($this->session)) {
             throw new AccessDeniedException('CSRF validation failed: no session.');
         }
 
