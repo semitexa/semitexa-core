@@ -58,7 +58,10 @@ final class CsrfListener implements PipelineListenerInterface
 
         // CSRF is a session-cookie attack; only apply when the authenticated request
         // actually presents the session cookie used by the browser flow.
-        if (!isset($this->authContext) || $this->authContext->isGuest()) {
+        if (!isset($this->authContext)) {
+            throw new AccessDeniedException('CSRF validation failed: no auth context.');
+        }
+        if ($this->authContext->isGuest()) {
             return;
         }
         if (!$this->hasSessionCookie($context)) {
