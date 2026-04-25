@@ -77,7 +77,7 @@ bin/semitexa entity:generate --all
 ```
 
 This automatically creates:
-- `src/infrastructure/Database/User.php` - Storage entity wrapper
+- `src/modules/{Module}/Application/Db/MySQL/Model/User.php` - Storage entity wrapper (ORM-owned location)
 - `src/modules/{Module}/Domain/User.php` - Domain model wrapper (extends base + uses domain parts)
 
 **Note:** If you only need domain wrappers, you can use:
@@ -169,8 +169,8 @@ trait UserMarketingProfileDomainTrait
 
 ## Differences from AsEntityPart
 
-- **AsEntityPart**: Extends storage entities (infrastructure layer) - can have ORM attributes
-- **AsDomainPart**: Extends domain models (domain layer) - no ORM attributes, only business logic
+- **AsEntityPart**: Extends ORM-owned storage entities — can have ORM attributes
+- **AsDomainPart**: Extends domain models (domain layer) — no ORM attributes, only business logic
 
 ## Related attributes
 
