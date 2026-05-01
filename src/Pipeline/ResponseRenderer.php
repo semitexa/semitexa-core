@@ -137,8 +137,8 @@ final class ResponseRenderer
         ?string $handle,
         array $context,
     ): object {
-        if ($handle && $this->wantsPageDocumentJson($request) && class_exists(\Semitexa\Ssr\Page\PageDocumentProjector::class)) {
-            $context = \Semitexa\Ssr\Page\PageDocumentProjector::project(
+        if ($handle && $this->wantsPageDocumentJson($request) && class_exists(\Semitexa\Ssr\Application\Service\Page\PageDocumentProjector::class)) {
+            $context = \Semitexa\Ssr\Application\Service\Page\PageDocumentProjector::project(
                 $resDto,
                 $request,
                 $handle,
@@ -193,7 +193,7 @@ final class ResponseRenderer
             return $resDto;
         }
 
-        $renderer = $rendererClass ?: 'Semitexa\\Ssr\\Layout\\LayoutRenderer';
+        $renderer = $rendererClass ?: 'Semitexa\\Ssr\\Application\\Service\\Layout\\LayoutRenderer';
         if (!class_exists($renderer)) {
             throw new \RuntimeException(
                 'LayoutRenderer not found. For HTML pages install semitexa/ssr: composer require semitexa/ssr. Do not implement a custom Twig renderer in the project.'

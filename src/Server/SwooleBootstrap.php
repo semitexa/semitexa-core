@@ -22,7 +22,7 @@ use Semitexa\Core\Server\Lifecycle\ServerLifecyclePhase;
 use Semitexa\Core\Server\Lifecycle\ServerLifecycleRegistry;
 use Semitexa\Core\Session\SwooleSessionTableHolder;
 use Semitexa\Core\ModuleRegistry;
-use Semitexa\Ssr\Asset\StaticAssetHandler;
+use Semitexa\Ssr\Application\Service\Asset\StaticAssetHandler;
 use Swoole\Coroutine;
 use Swoole\Http\Request as SwooleRequest;
 use Swoole\Http\Response as SwooleResponse;
@@ -240,8 +240,8 @@ class SwooleBootstrap
             } finally {
                 unset(Coroutine::getContext()[self::COROUTINE_CONTEXT_KEY]);
                 $app?->requestScopedContainer->reset();
-                if (class_exists(\Semitexa\Ssr\Asset\AssetCollectorStore::class)) {
-                    \Semitexa\Ssr\Asset\AssetCollectorStore::reset();
+                if (class_exists(\Semitexa\Ssr\Application\Service\Asset\AssetCollectorStore::class)) {
+                    \Semitexa\Ssr\Application\Service\Asset\AssetCollectorStore::reset();
                 }
                 if (!$sent) {
                     $ensureResponseSent();

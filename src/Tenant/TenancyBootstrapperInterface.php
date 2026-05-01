@@ -9,7 +9,7 @@ use Semitexa\Core\Request;
 
 /**
  * Contract for the per-request tenancy bootstrapper. Replaces Core's concrete
- * dependency on {@see \Semitexa\Tenancy\TenancyBootstrapper} so any tenancy
+ * dependency on {@see \Semitexa\Tenancy\Application\Service\TenancyBootstrapper} so any tenancy
  * integration (or a null implementation in tests) can participate in the
  * request lifecycle.
  *

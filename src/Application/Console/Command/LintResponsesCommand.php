@@ -77,8 +77,8 @@ final class LintResponsesCommand extends BaseCommand
                     // any package's Lifecycle/ directory — kernel lifecycle phases
                     || preg_match('#/packages/[^/]+/src/Lifecycle/#', $path)
                     // tenancy error responders + pre-handler guards (not TypedHandler implementations)
-                    || str_contains($path, 'semitexa-tenancy/src/Handler/DefaultTenantErrorResponder.php')
-                    || str_contains($path, 'semitexa-tenancy/src/Handler/TenantRequiredGuard.php')
+                    || str_contains($path, 'semitexa-tenancy/src/Application/Service/DefaultTenantErrorResponder.php')
+                    || str_contains($path, 'semitexa-tenancy/src/Application/Service/TenantRequiredGuard.php')
                 ) {
                     continue;
                 }

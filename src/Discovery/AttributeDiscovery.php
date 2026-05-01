@@ -540,7 +540,7 @@ class AttributeDiscovery
         // Discover layout slot contributions (optional)
         if (
             class_exists('Semitexa\\Ssr\\Attribute\\AsLayoutSlot')
-            && class_exists('Semitexa\\Ssr\\Layout\\LayoutSlotRegistry')
+            && class_exists('Semitexa\\Ssr\\Application\\Service\\Layout\\LayoutSlotRegistry')
         ) {
             $slotAttribute = 'Semitexa\\Ssr\\Attribute\\AsLayoutSlot';
             $slotClasses = $this->classDiscovery->findClassesWithAttribute($slotAttribute);
@@ -555,7 +555,7 @@ class AttributeDiscovery
                         $slot = $meta->slot;
                         $template = EnvValueResolver::resolve($meta->template);
                         $context = EnvValueResolver::resolve($meta->context);
-                        \Semitexa\Ssr\Layout\LayoutSlotRegistry::register(
+                        \Semitexa\Ssr\Application\Service\Layout\LayoutSlotRegistry::register(
                             $handle,
                             $slot,
                             $template,
@@ -614,7 +614,7 @@ class AttributeDiscovery
         // Discover AsSlotResource contributions (optional)
         if (
             class_exists('Semitexa\\Ssr\\Attribute\\AsSlotResource')
-            && class_exists('Semitexa\\Ssr\\Layout\\LayoutSlotRegistry')
+            && class_exists('Semitexa\\Ssr\\Application\\Service\\Layout\\LayoutSlotRegistry')
         ) {
             $slotResourceAttribute = 'Semitexa\\Ssr\\Attribute\\AsSlotResource';
             $slotResourceClasses = array_values(array_filter(
@@ -635,7 +635,7 @@ class AttributeDiscovery
                             $meta->clientModules,
                             static fn (string $module): bool => $module !== ''
                         ));
-                        \Semitexa\Ssr\Layout\LayoutSlotRegistry::register(
+                        \Semitexa\Ssr\Application\Service\Layout\LayoutSlotRegistry::register(
                             handle: $meta->handle,
                             slot: $meta->slot,
                             template: $template,
@@ -660,7 +660,7 @@ class AttributeDiscovery
         // Discover AsSlotHandler contributions (optional)
         if (
             class_exists('Semitexa\\Ssr\\Attribute\\AsSlotHandler')
-            && class_exists('Semitexa\\Ssr\\Layout\\SlotHandlerRegistry')
+            && class_exists('Semitexa\\Ssr\\Application\\Service\\Layout\\SlotHandlerRegistry')
         ) {
             $slotHandlerAttribute = 'Semitexa\\Ssr\\Attribute\\AsSlotHandler';
             $slotHandlerClasses = array_values(array_filter(
@@ -674,7 +674,7 @@ class AttributeDiscovery
                     foreach ($attrs as $attr) {
                         /** @var \Semitexa\Ssr\Attribute\AsSlotHandler $meta */
                         $meta = $attr->newInstance();
-                        \Semitexa\Ssr\Layout\SlotHandlerRegistry::register(
+                        \Semitexa\Ssr\Application\Service\Layout\SlotHandlerRegistry::register(
                             slotClass: $meta->slot,
                             handlerClass: $className,
                             priority: $meta->priority,
