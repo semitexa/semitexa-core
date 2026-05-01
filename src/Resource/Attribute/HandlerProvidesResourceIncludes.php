@@ -33,7 +33,7 @@ use Attribute;
  *         resource: CustomerResource::class,
  *         tokens: ['addresses', 'profile'],
  *     )]
- *     final class GetCustomerPayload implements ValidatablePayload, SupportsResourceIncludes {}
+ *     final class GetCustomerPayload implements SupportsResourceIncludes {}
  *
  * Pure metadata. Phase 6c never instantiates the handler from the
  * attribute; it only consults the registry to satisfy include validation.

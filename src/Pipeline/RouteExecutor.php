@@ -7,7 +7,6 @@ namespace Semitexa\Core\Pipeline;
 use Semitexa\Core\Request;
 use Semitexa\Core\HttpResponse;
 use Semitexa\Core\Http\PayloadHydrator;
-use Semitexa\Core\Http\PayloadValidator;
 use Semitexa\Core\Http\Response\ResourceResponse;
 use Semitexa\Core\Discovery\AttributeDiscovery;
 use Semitexa\Core\Discovery\DiscoveredRoute;
@@ -262,11 +261,6 @@ class RouteExecutor
                 ? $e->getMessage()
                 : 'Request body could not be processed';
             return [$reqDto, HttpResponse::json(['errors' => ['_body' => [$message]]], HttpStatus::UnprocessableEntity->value)];
-        }
-
-        $validationResult = PayloadValidator::validate($reqDto, $request);
-        if (!$validationResult->isValid()) {
-            return [$reqDto, HttpResponse::json(['errors' => $validationResult->getErrors()], HttpStatus::UnprocessableEntity->value)];
         }
 
         return [$reqDto, null];
