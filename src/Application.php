@@ -11,6 +11,7 @@ use Semitexa\Core\Discovery\ClassDiscovery;
 use Semitexa\Core\Event\EventDispatcherInterface;
 use Semitexa\Core\Lifecycle\LocalePhase;
 use Semitexa\Core\Lifecycle\LifecycleComponentRegistry;
+use Semitexa\Core\Lifecycle\PerRequestStateRegistry;
 use Semitexa\Core\Lifecycle\RequestLifecycleContext;
 use Semitexa\Core\Lifecycle\RoutePhase;
 use Semitexa\Core\Lifecycle\SessionPhase;
@@ -125,6 +126,27 @@ class Application
 
             return $this->sessionPhase->finalize($context, $response);
         } finally {
+            // Reset every registered per-request runtime cache
+            // (RbacDecisionCache, CurrentRequestStore, AuthContextStore,
+            // any future per-user authorization-decision caches). Runs FIRST
+            // so callbacks still have access to request-scoped services if
+            // they need them during cleanup.
+            PerRequestStateRegistry::resetAll();
+
+            // Dispose the request-scoped container — wipes cached
+            // Request / Session / CookieJar / Auth/Tenant/Locale context
+            // bindings AND clears the underlying SemitexaContainer's
+            // ExecutionContext. Without this, in CLI / queue / test mode
+            // (where the same Application instance handles many requests)
+            // the previous request's bindings stay observable via
+            // requestScopedContainer->get(). In Swoole HTTP mode each
+            // request gets a new Application(), so this is redundant
+            // there but still safe.
+            $this->requestScopedContainer->reset();
+
+            // Coroutine-local CLI fallback wipe — last because it covers
+            // generic cross-cutting state that may be touched by any of
+            // the above resets.
             CoroutineLocal::endRequest();
         }
     }

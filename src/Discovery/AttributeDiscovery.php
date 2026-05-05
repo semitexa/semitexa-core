@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Discovery;
 
-use Semitexa\Core\Attribute\AsPayload;
+use Semitexa\Core\Attribute\AbstractPayloadRoute;
 use Semitexa\Core\Attribute\AsPayloadHandler;
 use Semitexa\Core\Attribute\AsPayloadPart;
 use Semitexa\Core\Attribute\AsResource;
@@ -224,7 +224,7 @@ class AttributeDiscovery
             $list = implode(', ', array_unique($missing));
             throw new ConfigurationException(
                 "Payload(s) referenced by handlers have no discovered route. Missing: {$list}. " .
-                "Ensure the payload class has #[AsPayload] and belongs to an active module or project src/."
+                "Ensure the payload class declares one of #[AsPublicPayload], #[AsProtectedPayload], or #[AsServicePayload] and belongs to an active module or project src/."
             );
         }
     }
@@ -293,8 +293,11 @@ class AttributeDiscovery
 
     private function discoverPayloadsAndRoutes(BootDiagnostics $diagnostics): void
     {
-        // Runtime discovery: accept payloads from active modules and project src/
-        $allPayloadClasses = $this->classDiscovery->findClassesWithAttribute(AsPayload::class);
+        // Routable payloads carry one of #[AsPublicPayload]/#[AsProtectedPayload]/
+        // #[AsServicePayload], all of which extend AbstractPayloadRoute. Querying
+        // by the abstract base via IS_INSTANCEOF keeps semitexa-core decoupled
+        // from the concrete attribute classes (which live in semitexa-authorization).
+        $allPayloadClasses = $this->classDiscovery->findClassesWithAttributeInstanceof(AbstractPayloadRoute::class);
         $httpRequestClasses = array_values(array_filter(
             $allPayloadClasses,
             fn (string $class) => $this->moduleRegistry->isClassActive($class) || self::isProjectPayload($class)
@@ -304,11 +307,11 @@ class AttributeDiscovery
         foreach ($httpRequestClasses as $className) {
             try {
                 $class = new ReflectionClass($className);
-                $attrs = $class->getAttributes(AsPayload::class);
+                $attrs = $class->getAttributes(AbstractPayloadRoute::class, \ReflectionAttribute::IS_INSTANCEOF);
                 if (empty($attrs)) {
                     continue;
                 }
-                /** @var AsPayload $attr */
+                /** @var AbstractPayloadRoute $attr */
                 $attr = $attrs[0]->newInstance();
                 $meta = [
                     'class' => $className,
@@ -323,7 +326,7 @@ class AttributeDiscovery
                         'defaults' => EnvValueResolver::resolve($attr->defaults),
                         'options' => EnvValueResolver::resolve($attr->options),
                         'tags' => EnvValueResolver::resolve($attr->tags),
-                        'public' => $attr->public,
+                        'accessType' => $attr->getAccessType(),
                         'responseWith' => $attr->responseWith !== null ? EnvValueResolver::resolve($attr->responseWith) : null,
                         'base' => $attr->base ? ltrim($attr->base, '\\') : null,
                         'overrides' => $attr->overrides ? ltrim($attr->overrides, '\\') : null,
@@ -446,7 +449,7 @@ class AttributeDiscovery
                 'defaults' => $resolved['defaults'],
                 'options' => $resolved['options'],
                 'tags' => $resolved['tags'],
-                'public' => $resolved['public'],
+                'accessType' => $resolved['accessType'],
                 'type' => 'http-request',
                 'transport' => $transportValue,
                 'consumes' => $resolved['consumes'] ?? null,
@@ -724,7 +727,7 @@ class AttributeDiscovery
     private static function mergeRequestAttributes(array $base, array $override): array
     {
         $result = $base;
-        foreach (['path','methods','name','requirements','defaults','options','tags','public','responseWith','consumes','produces','transport','renderProfile','responsesByProfile'] as $key) {
+        foreach (['path','methods','name','requirements','defaults','options','tags','accessType','responseWith','consumes','produces','transport','renderProfile','responsesByProfile'] as $key) {
             if (($override[$key] ?? null) !== null) {
                 $result[$key] = $override[$key];
             }
@@ -749,7 +752,8 @@ class AttributeDiscovery
             'defaults' => $attr['defaults'] ?? [],
             'options' => $attr['options'] ?? [],
             'tags' => $attr['tags'] ?? [],
-            'public' => $attr['public'] ?? false,
+            'accessType' => $attr['accessType']
+                ?? throw new ConfigurationException("Request {$className} must declare an access attribute (#[AsPublicPayload], #[AsProtectedPayload], or #[AsServicePayload])."),
             'responseWith' => $attr['responseWith'],
             'consumes' => $attr['consumes'] ?? null,
             'produces' => $attr['produces'] ?? null,

@@ -24,6 +24,8 @@ use Semitexa\Core\Auth\AuthBootstrapperInterface;
 use Semitexa\Core\Contract\ExceptionResponseMapperInterface;
 use Semitexa\Core\Contract\RouteResponseDecoratorInterface;
 use Semitexa\Core\Contract\RouteMetadataResolverInterface;
+use Semitexa\Core\Contract\ValidatablePayloadInterface;
+use Semitexa\Core\Exception\ValidationException;
 use Psr\Container\ContainerInterface;
 use Semitexa\Core\Container\RequestScopedContainer;
 
@@ -248,6 +250,16 @@ class RouteExecutor
             $reqDto = PayloadHydrator::hydrate($reqDto, $request);
             if (method_exists($reqDto, 'setHttpRequest')) {
                 $reqDto->setHttpRequest($request);
+            }
+            // Cross-field validation hook — fires once, after every setter
+            // has run, before any route handler. Payloads opt in by
+            // implementing ValidatablePayloadInterface; everything else
+            // skips this step entirely.
+            if ($reqDto instanceof ValidatablePayloadInterface) {
+                $errors = $reqDto->validate();
+                if ($errors !== []) {
+                    throw new ValidationException($errors);
+                }
             }
         } catch (\Semitexa\Core\Exception\ValidationException $e) {
             return [$reqDto, HttpResponse::json(['errors' => $e->getErrorContext()['errors']], HttpStatus::UnprocessableEntity->value)];

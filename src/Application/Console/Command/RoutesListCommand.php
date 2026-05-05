@@ -45,7 +45,7 @@ class RoutesListCommand extends BaseCommand
                     'name' => $route['name'] ?? null,
                     'class' => $route['class'] ?? '',
                     'module' => $this->detectModule($route['class'] ?? ''),
-                    'public' => $route['public'] ?? false,
+                    'access' => self::stringifyAccessType($route['accessType'] ?? null),
                 ];
             }
             $output->writeln(json_encode($rows, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT));
@@ -70,14 +70,14 @@ class RoutesListCommand extends BaseCommand
                 $route['name'] ?? '-',
                 $route['class'] ?? '',
                 $this->detectModule($route['class'] ?? ''),
-                ($route['public'] ?? false) ? 'yes' : 'no',
+                self::stringifyAccessType($route['accessType'] ?? null),
             ];
         }
 
         usort($tableRows, fn ($a, $b) => $a[2] <=> $b[2]);
 
         $io->table(
-            ['#', 'Methods', 'Path', 'Name', 'Payload Class', 'Module', 'Public'],
+            ['#', 'Methods', 'Path', 'Name', 'Payload Class', 'Module', 'Access'],
             $tableRows
         );
 
@@ -89,5 +89,16 @@ class RoutesListCommand extends BaseCommand
     private function detectModule(string $className): string
     {
         return $this->moduleRegistry->getModuleNameForClass($className) ?? 'project';
+    }
+
+    private static function stringifyAccessType(mixed $value): string
+    {
+        if ($value instanceof \Semitexa\Core\Auth\PayloadAccessType) {
+            return $value->value;
+        }
+        if (is_string($value) && $value !== '') {
+            return $value;
+        }
+        return 'unknown';
     }
 }

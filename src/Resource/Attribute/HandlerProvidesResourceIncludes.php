@@ -28,7 +28,7 @@ use Attribute;
  *
  * Example:
  *
- *     #[AsPayload(...)]
+ *     #[AsProtectedPayload(...)]
  *     #[HandlerProvidesResourceIncludes(
  *         resource: CustomerResource::class,
  *         tokens: ['addresses', 'profile'],

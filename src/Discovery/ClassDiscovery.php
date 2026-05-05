@@ -33,6 +33,21 @@ class ClassDiscovery
         '\\Testing\\PhpUnit',
     ];
 
+    /**
+     * Path-segment substrings that mark a SOURCE FILE as test-only and therefore
+     * excluded from the runtime classmap, regardless of the class's namespace.
+     *
+     * Filtering by file path (rather than namespace alone) is required because
+     * test fixtures may declare production-shaped namespaces — e.g. a fixture
+     * under `packages/<pkg>/tests/Fixtures/...` declaring
+     * `Semitexa\Modules\Website\...` would otherwise be promoted to a real
+     * production route. Any class whose composer-classmap entry lives under
+     * `/tests/` is dev-only.
+     */
+    private const RUNTIME_EXCLUDE_PATH_SEGMENTS = [
+        '/tests/',
+    ];
+
     public function initialize(): void
     {
         if ($this->initialized) {
@@ -51,7 +66,10 @@ class ClassDiscovery
         $this->refreshComposerAutoloader($composerDir, $composerClassMap);
 
         foreach ($composerClassMap as $className => $filePath) {
-            if ($this->isNamespaceAllowed($className) && !$this->isRuntimeExcluded($className)) {
+            if ($this->isNamespaceAllowed($className)
+                && !$this->isRuntimeExcluded($className)
+                && !self::isRuntimeExcludedByPath($filePath)
+            ) {
                 $this->classMap[$className] = $filePath;
             }
         }
@@ -127,12 +145,40 @@ class ClassDiscovery
      */
     public function findClassesWithAttribute(string $attributeClass): array
     {
-        if (isset($this->attributeCache[$attributeClass])) {
-            return $this->attributeCache[$attributeClass];
+        return $this->findClassesWithAttributeInternal($attributeClass, false);
+    }
+
+    /**
+     * Same as findClassesWithAttribute but matches subclasses of $attributeClass too
+     * (uses ReflectionAttribute::IS_INSTANCEOF).
+     *
+     * Used by the routable-payload discovery path: AbstractPayloadRoute is the
+     * shared base class for AsPublicPayload, AsProtectedPayload, and
+     * AsServicePayload (all three live in semitexa-authorization). Querying by
+     * the abstract base lets the framework discover payloads without coupling
+     * semitexa-core to the concrete attribute classes.
+     *
+     * @return list<string>
+     */
+    public function findClassesWithAttributeInstanceof(string $attributeParentClass): array
+    {
+        return $this->findClassesWithAttributeInternal($attributeParentClass, true);
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function findClassesWithAttributeInternal(string $attributeClass, bool $instanceof): array
+    {
+        $cacheKey = $instanceof ? '@instanceof:' . $attributeClass : $attributeClass;
+
+        if (isset($this->attributeCache[$cacheKey])) {
+            return $this->attributeCache[$cacheKey];
         }
 
         $this->initialize();
 
+        $reflectionFlags = $instanceof ? \ReflectionAttribute::IS_INSTANCEOF : 0;
         $classes = [];
 
         foreach ($this->classMap as $className => $filePath) {
@@ -159,18 +205,17 @@ class ClassDiscovery
 
             try {
                 $reflection = new \ReflectionClass($className);
-                $attrs = $reflection->getAttributes($attributeClass);
+                $attrs = $reflection->getAttributes($attributeClass, $reflectionFlags);
 
                 if ($attrs) {
                     $classes[] = $className;
                 }
             } catch (\Throwable $e) {
-                BootDiagnostics::current()->skip('ClassDiscovery', "findClassesWithAttribute({$attributeClass}) failed for {$className}: " . $e->getMessage(), $e);
+                BootDiagnostics::current()->skip('ClassDiscovery', "findClassesWithAttribute({$attributeClass}, instanceof={$instanceof}) failed for {$className}: " . $e->getMessage(), $e);
             }
         }
 
-        /** @var class-string $attributeClass */
-        $this->attributeCache[$attributeClass] = $classes;
+        $this->attributeCache[$cacheKey] = $classes;
 
         return $classes;
     }
@@ -253,6 +298,7 @@ class ClassDiscovery
                     if ($className === null
                         || !$this->isNamespaceAllowed($className)
                         || $this->isRuntimeExcluded($className)
+                        || self::isRuntimeExcludedByPath($fileInfo->getPathname())
                     ) {
                         continue;
                     }
@@ -387,6 +433,27 @@ class ClassDiscovery
 
         foreach (self::RUNTIME_EXCLUDE_SUBSTRINGS as $needle) {
             if (str_contains($className, $needle)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Filters by the class's source file path. Closes the gap where a test
+     * fixture under `packages/<pkg>/tests/Fixtures/...` declares a non-test
+     * namespace (PSR-4 violation that composer warns about but still includes
+     * in the classmap). The namespace check would let it through — the path
+     * check rejects it because no production class lives under `/tests/`.
+     *
+     * Path normalization is permissive on direction so Windows backslashes
+     * and Unix forward slashes both match.
+     */
+    private static function isRuntimeExcludedByPath(string $filePath): bool
+    {
+        $normalized = str_replace('\\', '/', $filePath);
+        foreach (self::RUNTIME_EXCLUDE_PATH_SEGMENTS as $segment) {
+            if (str_contains($normalized, $segment)) {
                 return true;
             }
         }

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Semitexa\Core\Http;
 
 use Semitexa\Core\Http\Exception\TypeMismatchException;
+use Semitexa\Core\Http\UploadedFile;
 use Semitexa\Core\Request;
 use Semitexa\Core\Support\Str;
 use ReflectionClass;
@@ -102,7 +103,10 @@ class PayloadHydrator
     private static function extractPathParams(object $dto, Request $httpRequest): array
     {
         $reflection = new ReflectionClass($dto);
-        $requestAttrs = $reflection->getAttributes(\Semitexa\Core\Attribute\AsPayload::class);
+        $requestAttrs = $reflection->getAttributes(
+            \Semitexa\Core\Attribute\AbstractPayloadRoute::class,
+            \ReflectionAttribute::IS_INSTANCEOF,
+        );
         if (empty($requestAttrs)) {
             return [];
         }
@@ -202,6 +206,18 @@ class PayloadHydrator
             if (is_string($key) && !array_key_exists($key, $data)) {
                 $data[$key] = $value;
             }
+        }
+
+        // Multipart uploads ride alongside post/json data — the setter dispatch
+        // ('setX(UploadedFile $file)') expects the typed object, not raw bytes.
+        // A field name collision (file under the same key as a string field) is
+        // resolved in favor of the file: uploads only show up in actual
+        // multipart requests, where overlap is a clear bug in the client.
+        foreach ($httpRequest->files as $field => $upload) {
+            if (!is_string($field) || $field === '') {
+                continue;
+            }
+            $data[$field] = $upload;
         }
 
         return $data;

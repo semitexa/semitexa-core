@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Semitexa\Core;
 
+use Semitexa\Core\Http\UploadedFile;
+
 /**
  * Request Factory for creating Request objects from different sources
  */
@@ -72,7 +74,8 @@ class RequestFactory
             post: self::normalizeFormMap($post),
             server: array_merge($server, ['swoole_server' => '1']),
             cookies: self::normalizeStringMap($cookies),
-            content: $content
+            content: $content,
+            files: self::normalizeFiles($swooleRequest->files ?? []),
         );
     }
 
@@ -91,8 +94,131 @@ class RequestFactory
             post: self::normalizeFormMap($data['post'] ?? []),
             server: self::normalizeServerArray($data['server'] ?? []),
             cookies: self::normalizeStringMap($data['cookies'] ?? []),
-            content: is_string($data['content'] ?? null) ? $data['content'] : null
+            content: is_string($data['content'] ?? null) ? $data['content'] : null,
+            files: self::normalizeFiles($data['files'] ?? []),
         );
+    }
+
+    /**
+     * Convert the multi-shape Swoole / $_FILES array into a typed
+     * UploadedFile map. Supports three shapes:
+     *
+     *   1) Already-typed: ['avatar' => UploadedFile, ...] → pass through.
+     *   2) Single-file:   ['avatar' => ['name' => ..., 'tmp_name' => ..., ...]] → one UploadedFile.
+     *   3) Multi-file:    ['attachments' => [['name'=>...,'tmp_name'=>...], ...]]
+     *      OR             ['attachments' => ['name'=>[...], 'tmp_name'=>[...], ...]]
+     *      → list<UploadedFile>.
+     *
+     * Anything that doesn't match is dropped — RequestFactory must never
+     * pass random untyped data into Request::$files.
+     *
+     * @param mixed $files
+     * @return array<string, UploadedFile|list<UploadedFile>>
+     */
+    public static function normalizeFiles(mixed $files): array
+    {
+        if (!is_array($files)) {
+            return [];
+        }
+
+        $out = [];
+        foreach ($files as $field => $entry) {
+            if (!is_string($field) || $field === '') {
+                continue;
+            }
+
+            if ($entry instanceof UploadedFile) {
+                $out[$field] = $entry;
+                continue;
+            }
+
+            if (!is_array($entry)) {
+                continue;
+            }
+
+            // Already a list of UploadedFile — accept as-is.
+            if (array_is_list($entry) && self::isUploadedFileList($entry)) {
+                /** @var list<UploadedFile> $entry */
+                $out[$field] = $entry;
+                continue;
+            }
+
+            // Shape 2: single-file scalar entry from Swoole.
+            if (isset($entry['name']) && !is_array($entry['name'])) {
+                /** @var array<string, mixed> $entry */
+                $out[$field] = UploadedFile::fromSwooleEntry($field, $entry);
+                continue;
+            }
+
+            // Shape 3a: list of single-file entries.
+            if (array_is_list($entry)) {
+                $list = [];
+                foreach ($entry as $sub) {
+                    if (is_array($sub) && isset($sub['name']) && !is_array($sub['name'])) {
+                        /** @var array<string, mixed> $sub */
+                        $list[] = UploadedFile::fromSwooleEntry($field, $sub);
+                    }
+                }
+                if ($list !== []) {
+                    $out[$field] = $list;
+                }
+                continue;
+            }
+
+            // Shape 3b: $_FILES-style array of arrays — `name`, `type`, `tmp_name`, … all parallel lists.
+            if (isset($entry['name']) && is_array($entry['name'])) {
+                /** @var array<string, mixed> $entry */
+                $list = self::explodeParallelFileEntry($field, $entry);
+                if ($list !== []) {
+                    $out[$field] = $list;
+                }
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * @param array<int, mixed> $list
+     */
+    private static function isUploadedFileList(array $list): bool
+    {
+        foreach ($list as $item) {
+            if (!$item instanceof UploadedFile) {
+                return false;
+            }
+        }
+        return $list !== [];
+    }
+
+    /**
+     * @param array<string, mixed> $entry
+     * @return list<UploadedFile>
+     */
+    private static function explodeParallelFileEntry(string $field, array $entry): array
+    {
+        $names = is_array($entry['name'] ?? null) ? $entry['name'] : [];
+        $count = count($names);
+        if ($count === 0) {
+            return [];
+        }
+
+        $types = is_array($entry['type'] ?? null) ? $entry['type'] : [];
+        $tmps = is_array($entry['tmp_name'] ?? null) ? $entry['tmp_name'] : [];
+        $errors = is_array($entry['error'] ?? null) ? $entry['error'] : [];
+        $sizes = is_array($entry['size'] ?? null) ? $entry['size'] : [];
+
+        $list = [];
+        for ($i = 0; $i < $count; $i++) {
+            $list[] = UploadedFile::fromSwooleEntry($field, [
+                'name' => $names[$i] ?? '',
+                'type' => $types[$i] ?? '',
+                'tmp_name' => $tmps[$i] ?? '',
+                'error' => $errors[$i] ?? UPLOAD_ERR_OK,
+                'size' => $sizes[$i] ?? 0,
+            ]);
+        }
+        return $list;
     }
 
     /**

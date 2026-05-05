@@ -87,6 +87,20 @@ final class ExceptionMapper implements ExceptionResponseMapperInterface
 
     private function mapUnknownException(\Throwable $e, Request $request, ResolvedRouteMetadata $metadata): HttpResponse
     {
+        // Record the exception via the static logger bridge so silent 500s
+        // are at least visible in app.log. The response body still hides
+        // details (security: no leak in production); the log is the
+        // operator-facing channel.
+        \Semitexa\Core\Log\StaticLoggerBridge::error('pipeline', 'Unhandled exception during route execution', [
+            'route' => $metadata->name,
+            'path' => $request->getPath(),
+            'method' => $request->getMethod(),
+            'exception' => $e::class,
+            'message' => $e->getMessage(),
+            'file' => $e->getFile() . ':' . $e->getLine(),
+            'trace' => self::summarizeTrace($e),
+        ]);
+
         $format = $this->negotiateErrorFormat($request, $metadata->produces);
 
         if ($format === 'html' && $this->errorRouteDispatcher !== null) {
@@ -100,6 +114,17 @@ final class ExceptionMapper implements ExceptionResponseMapperInterface
             'error' => 'Internal Server Error',
             'message' => 'An unexpected error occurred.',
         ], HttpStatus::InternalServerError->value);
+    }
+
+    private static function summarizeTrace(\Throwable $e): string
+    {
+        $frames = [];
+        foreach (array_slice($e->getTrace(), 0, 6) as $frame) {
+            $location = ($frame['file'] ?? '?') . ':' . ($frame['line'] ?? '?');
+            $callable = ($frame['class'] ?? '') . ($frame['type'] ?? '') . ($frame['function'] ?? '');
+            $frames[] = $location . ' ' . $callable;
+        }
+        return implode(' | ', $frames);
     }
 
     private function negotiateErrorFormat(Request $request, ?array $produces): string

@@ -7,8 +7,9 @@ namespace Semitexa\Core\Tests\Unit\Discovery;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use ReflectionMethod;
-use Semitexa\Core\Attribute\AsPayload;
+use Semitexa\Authorization\Attribute\AsProtectedPayload;
 use Semitexa\Core\Attribute\TransportType;
+use Semitexa\Core\Auth\PayloadAccessType;
 use Semitexa\Core\Discovery\AttributeDiscovery;
 use Semitexa\Core\Discovery\DefaultRouteMetadataResolver;
 use Semitexa\Core\Discovery\DiscoveredRoute;
@@ -29,7 +30,7 @@ final class RouteTransportMetadataTest extends TestCase
                 'defaults' => [],
                 'options' => [],
                 'tags' => [],
-                'public' => true,
+                'accessType' => PayloadAccessType::Public,
                 'responseWith' => null,
                 'consumes' => null,
                 'produces' => ['text/event-stream'],
@@ -43,7 +44,7 @@ final class RouteTransportMetadataTest extends TestCase
                 'defaults' => null,
                 'options' => null,
                 'tags' => null,
-                'public' => null,
+                'accessType' => null,
                 'responseWith' => null,
                 'consumes' => null,
                 'produces' => null,
@@ -53,6 +54,7 @@ final class RouteTransportMetadataTest extends TestCase
 
         self::assertSame('/events/live', $merged['path']);
         self::assertSame(TransportType::Sse, $merged['transport']);
+        self::assertSame(PayloadAccessType::Public, $merged['accessType']);
     }
 
     #[Test]
@@ -69,7 +71,7 @@ final class RouteTransportMetadataTest extends TestCase
                 'defaults' => null,
                 'options' => null,
                 'tags' => null,
-                'public' => null,
+                'accessType' => PayloadAccessType::Public,
                 'responseWith' => null,
                 'consumes' => null,
                 'produces' => null,
@@ -81,33 +83,60 @@ final class RouteTransportMetadataTest extends TestCase
 
         self::assertSame(['GET'], $defaults['methods']);
         self::assertSame(TransportType::Http, $defaults['transport']);
+        self::assertSame(PayloadAccessType::Public, $defaults['accessType']);
     }
 
     #[Test]
-    public function as_payload_keeps_legacy_positional_arguments_compatible(): void
+    public function applying_defaults_to_payload_without_access_type_throws(): void
     {
-        $attribute = new AsPayload(
-            null,
-            null,
-            null,
-            '/docs',
-            ['GET'],
-            'docs.show',
-            null,
-            null,
-            null,
-            null,
-            true,
-            'http',
-            'App\\Response\\DocResponse',
-            ['application/json'],
-            ['text/html'],
+        $this->expectException(\Semitexa\Core\Exception\ConfigurationException::class);
+        $this->expectExceptionMessageMatches('/must declare an access attribute/');
+
+        $this->invokeAttributeDiscoveryStatic(
+            'applyRequestDefaults',
+            [
+                'path' => '/no-access',
+                'methods' => null,
+                'name' => null,
+                'requirements' => null,
+                'defaults' => null,
+                'options' => null,
+                'tags' => null,
+                'accessType' => null,
+                'responseWith' => null,
+                'consumes' => null,
+                'produces' => null,
+                'transport' => null,
+            ],
+            'NoAccessPayload',
+            'Semitexa\\Core\\Tests\\Fixture\\NoAccessPayload',
+        );
+    }
+
+    #[Test]
+    public function as_protected_payload_keeps_named_arguments_compatible(): void
+    {
+        $attribute = new AsProtectedPayload(
+            doc: null,
+            base: null,
+            overrides: null,
+            path: '/docs',
+            methods: ['GET'],
+            name: 'docs.show',
+            requirements: null,
+            defaults: null,
+            options: null,
+            tags: null,
+            responseWith: 'App\\Response\\DocResponse',
+            consumes: ['application/json'],
+            produces: ['text/html'],
         );
 
         self::assertSame('App\\Response\\DocResponse', $attribute->responseWith);
         self::assertSame(['application/json'], $attribute->consumes);
         self::assertSame(['text/html'], $attribute->produces);
         self::assertNull($attribute->transport);
+        self::assertSame(PayloadAccessType::Protected, $attribute->getAccessType());
     }
 
     #[Test]
@@ -129,13 +158,14 @@ final class RouteTransportMetadataTest extends TestCase
             'defaults' => [],
             'options' => [],
             'tags' => [],
-            'public' => true,
+            'accessType' => PayloadAccessType::Public,
             'tenantScopes' => [],
         ]);
 
         $metadata = (new DefaultRouteMetadataResolver())->resolve($route);
 
         self::assertSame('sse', $route->transport);
+        self::assertSame(PayloadAccessType::Public, $route->accessType);
         self::assertSame('sse', $metadata->extensions['transport'] ?? null);
     }
 

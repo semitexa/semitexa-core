@@ -123,7 +123,7 @@ class RoutesShowCommand extends BaseCommand
             'path' => $routePath,
             'methods' => $methods,
             'name' => is_string($route['name'] ?? null) ? $route['name'] : null,
-            'public' => $route['public'] ?? true,
+            'accessType' => $this->stringifyAccessType($route['accessType'] ?? null),
             'type' => is_string($route['type'] ?? null) ? $route['type'] : null,
             'payload' => [
                 'class' => $payloadClass,
@@ -206,7 +206,7 @@ class RoutesShowCommand extends BaseCommand
             ['Methods' => implode(', ', $info['methods'])],
             ['Path' => $info['path']],
             ['Name' => $info['name'] ?? '-'],
-            ['Public' => $info['public'] ? 'yes' : 'no'],
+            ['Access' => $info['accessType'] ?? 'unknown'],
         );
 
         $io->section('Payload');
@@ -296,5 +296,16 @@ class RoutesShowCommand extends BaseCommand
         } catch (\Throwable) {
             return null;
         }
+    }
+
+    private function stringifyAccessType(mixed $value): string
+    {
+        if ($value instanceof \Semitexa\Core\Auth\PayloadAccessType) {
+            return $value->value;
+        }
+        if (is_string($value) && $value !== '') {
+            return $value;
+        }
+        return 'unknown';
     }
 }
