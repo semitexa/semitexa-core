@@ -113,7 +113,7 @@ class LayoutGenerator
                     'module' => $module['name'],
                     'moduleStudly' => $studly,
                     'source' => $file,
-                    'destination' => $projectRoot . '/src/modules/' . $studly . '/Application/View/templates/layout/' . basename($file),
+                    'destination' => $projectRoot . '/src/modules/' . $studly . '/src/Application/View/templates/layout/' . basename($file),
                 ];
             }
         }

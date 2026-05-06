@@ -103,7 +103,9 @@ class LintTemplatesCommand extends BaseCommand
 
         foreach (glob($modulesRoot . '/*', GLOB_ONLYDIR) ?: [] as $moduleDir) {
             $module = basename($moduleDir);
-            $this->scanModuleDir($module, $moduleDir, $errors, $warnings);
+            // Local modules nest runtime PHP under `src/` (mirrors packages).
+            $appDir = is_dir($moduleDir . '/src') ? $moduleDir . '/src' : $moduleDir;
+            $this->scanModuleDir($module, $appDir, $errors, $warnings);
         }
     }
 

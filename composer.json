@@ -27,7 +27,8 @@
       "Semitexa\\Core\\": "src/"
     },
     "exclude-from-classmap": [
-      "src/PHPStan/"
+      "src/PHPStan/",
+      "tests/Unit/PHPStan/Fixtures/"
     ]
   },
   "autoload-dev": {

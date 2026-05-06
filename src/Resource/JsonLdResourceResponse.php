@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Resource;
 
+use Semitexa\Core\Attribute\InjectAsReadonly;
 use Semitexa\Core\Http\HttpStatus;
 use Semitexa\Core\Http\Response\ResourceResponse;
 use Semitexa\Core\Resource\Cursor\CollectionCursorPage;
@@ -33,12 +34,18 @@ use Semitexa\Core\Resource\Pagination\CollectionPage;
  */
 class JsonLdResourceResponse extends ResourceResponse
 {
-    private ?IncludeValidator $includeValidator = null;
+    #[InjectAsReadonly]
+    protected ?IncludeValidator $includeValidator = null;
 
     /** Phase 6d: optional expansion pipeline for resolver-backed includes. */
-    private ?ResourceExpansionPipeline $expansionPipeline = null;
-    private ?JsonLdResourceRenderer $renderer = null;
-    private ?ResourceMetadataRegistry $registry = null;
+    #[InjectAsReadonly]
+    protected ?ResourceExpansionPipeline $expansionPipeline = null;
+
+    #[InjectAsReadonly]
+    protected ?JsonLdResourceRenderer $renderer = null;
+
+    #[InjectAsReadonly]
+    protected ?ResourceMetadataRegistry $registry = null;
 
     public function bindServices(
         JsonLdResourceRenderer $renderer,

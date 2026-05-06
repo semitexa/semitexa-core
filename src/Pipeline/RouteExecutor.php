@@ -26,6 +26,7 @@ use Semitexa\Core\Contract\RouteResponseDecoratorInterface;
 use Semitexa\Core\Contract\RouteMetadataResolverInterface;
 use Semitexa\Core\Contract\ValidatablePayloadInterface;
 use Semitexa\Core\Exception\ValidationException;
+use Semitexa\Core\Container\PropertyInjector;
 use Psr\Container\ContainerInterface;
 use Semitexa\Core\Container\RequestScopedContainer;
 
@@ -234,6 +235,8 @@ class RouteExecutor
             throw new PipelineException("Cannot instantiate request class: {$requestClass}");
         }
 
+        PropertyInjector::inject($reqDto, $this->container);
+
         return $reqDto;
     }
 
@@ -330,6 +333,7 @@ class RouteExecutor
         if ($responseClass !== null) {
             $traits = $this->getPayloadPartRegistry()->getResourcePartsForClass($responseClass);
             $resDto = PayloadFactory::createInstance($responseClass, $traits);
+            PropertyInjector::inject($resDto, $this->container);
         } else {
             $resDto = null;
         }

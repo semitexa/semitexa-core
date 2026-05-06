@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Resource;
 
+use Semitexa\Core\Attribute\InjectAsReadonly;
 use Semitexa\Core\Http\HttpStatus;
 use Semitexa\Core\Http\Response\ResourceResponse;
 use Semitexa\Core\Resource\Cursor\CollectionCursorPage;
@@ -34,16 +35,20 @@ use Semitexa\Core\Resource\Pagination\CollectionPage;
 class JsonResourceResponse extends ResourceResponse
 {
     /** @var IncludeValidator|null Lazy-set in withResource() — kept on this slot for tests. */
-    private ?IncludeValidator $includeValidator = null;
+    #[InjectAsReadonly]
+    protected ?IncludeValidator $includeValidator = null;
 
     /** @var JsonResourceRenderer|null */
-    private ?JsonResourceRenderer $renderer = null;
+    #[InjectAsReadonly]
+    protected ?JsonResourceRenderer $renderer = null;
 
     /** @var ResourceMetadataRegistry|null */
-    private ?ResourceMetadataRegistry $registry = null;
+    #[InjectAsReadonly]
+    protected ?ResourceMetadataRegistry $registry = null;
 
     /** Phase 6d: optional expansion pipeline for resolver-backed includes. */
-    private ?ResourceExpansionPipeline $expansionPipeline = null;
+    #[InjectAsReadonly]
+    protected ?ResourceExpansionPipeline $expansionPipeline = null;
 
     /**
      * Wire the renderer + registry. The framework or the handler may call this;
