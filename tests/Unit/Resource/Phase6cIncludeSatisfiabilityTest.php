@@ -17,6 +17,7 @@ use Semitexa\Core\Resource\RelationResolverInterface;
 use Semitexa\Core\Tests\Unit\Resource\Fixtures\AddressResource;
 use Semitexa\Core\Tests\Unit\Resource\Fixtures\CustomerResource;
 use Semitexa\Core\Tests\Unit\Resource\Fixtures\ProfileResource;
+use Semitexa\Core\Tests\Unit\Resource\Fixtures\ResolvableCustomerResource;
 use Semitexa\Core\Tests\Unit\Resource\Fixtures\ResolvableProfileResource;
 use Semitexa\Core\Tests\Unit\Resource\Fixtures\StubRelationResolver;
 
@@ -53,6 +54,15 @@ final class Phase6cIncludeSatisfiabilityTest extends TestCase
         return $registry;
     }
 
+    private function nestedResolvableRegistry(): ResourceMetadataRegistry
+    {
+        $extractor = new ResourceMetadataExtractor();
+        $registry  = ResourceMetadataRegistry::forTesting($extractor);
+        $registry->register($extractor->extract(ProfileResource::class));
+        $registry->register($extractor->extract(ResolvableCustomerResource::class));
+        return $registry;
+    }
+
     #[Test]
     public function relation_with_resolve_with_passes_without_handler_provided_opt_in(): void
     {
@@ -63,7 +73,7 @@ final class Phase6cIncludeSatisfiabilityTest extends TestCase
         $validator->validate(
             IncludeSet::fromQueryString('profile'),
             $registry->require(ResolvableProfileResource::class),
-            'AnyPayload',
+            ResolvableProfileResource::class,
         );
 
         $this->expectNotToPerformAssertions();
@@ -80,7 +90,7 @@ final class Phase6cIncludeSatisfiabilityTest extends TestCase
             $validator->validate(
                 IncludeSet::fromQueryString('addresses'),
                 $registry->require(CustomerResource::class),
-                'NoDeclarationsPayload',
+                CustomerResource::class,
             );
             self::fail('Expected UnsatisfiedResourceIncludeException.');
         } catch (UnsatisfiedResourceIncludeException $e) {
@@ -98,7 +108,7 @@ final class Phase6cIncludeSatisfiabilityTest extends TestCase
     {
         $registry        = $this->resolvableRegistry();
         $handlerProvided = HandlerProvidedIncludeRegistry::withDeclarations([
-            'TestPayload' => [
+            ResolvableProfileResource::class => [
                 'resource' => ResolvableProfileResource::class,
                 'tokens'   => ['profile'],
             ],
@@ -108,7 +118,38 @@ final class Phase6cIncludeSatisfiabilityTest extends TestCase
         $validator->validate(
             IncludeSet::fromQueryString('profile'),
             $registry->require(ResolvableProfileResource::class),
-            'TestPayload',
+            ResolvableProfileResource::class,
+        );
+
+        $this->expectNotToPerformAssertions();
+    }
+
+    #[Test]
+    public function dotted_include_requires_intermediate_segment_to_be_satisfiable(): void
+    {
+        $registry        = $this->customerRegistry();
+        $handlerProvided = HandlerProvidedIncludeRegistry::withDeclarations([]);
+        $validator       = IncludeValidator::forTesting($registry, $handlerProvided);
+
+        $this->expectException(UnsatisfiedResourceIncludeException::class);
+        $validator->validate(
+            IncludeSet::fromQueryString('profile.preferences'),
+            $registry->require(CustomerResource::class),
+            CustomerResource::class,
+        );
+    }
+
+    #[Test]
+    public function dotted_include_passes_when_parent_and_leaf_are_satisfiable(): void
+    {
+        $registry        = $this->nestedResolvableRegistry();
+        $handlerProvided = HandlerProvidedIncludeRegistry::withDeclarations([]);
+        $validator       = IncludeValidator::forTesting($registry, $handlerProvided);
+
+        $validator->validate(
+            IncludeSet::fromQueryString('profile.preferences'),
+            $registry->require(ResolvableCustomerResource::class),
+            ResolvableCustomerResource::class,
         );
 
         $this->expectNotToPerformAssertions();
@@ -119,7 +160,7 @@ final class Phase6cIncludeSatisfiabilityTest extends TestCase
     {
         $registry        = $this->customerRegistry();
         $handlerProvided = HandlerProvidedIncludeRegistry::withDeclarations([
-            'TestPayload' => [
+            CustomerResource::class => [
                 'resource' => CustomerResource::class,
                 'tokens'   => ['addresses', 'profile'],
             ],
@@ -132,8 +173,8 @@ final class Phase6cIncludeSatisfiabilityTest extends TestCase
             $validator->validate(
                 IncludeSet::fromQueryString('orders'),
                 $registry->require(CustomerResource::class),
-                'TestPayload',
-            );
+            CustomerResource::class,
+        );
             self::fail('Expected UnknownIncludeException.');
         } catch (UnknownIncludeException $e) {
             self::assertSame(400, $e->getStatusCode()->value);
@@ -151,7 +192,7 @@ final class Phase6cIncludeSatisfiabilityTest extends TestCase
             $validator->validate(
                 IncludeSet::fromQueryString('profile'),
                 $registry->require(CustomerResource::class),
-                'BarePayload',
+                CustomerResource::class,
             );
             self::fail('Expected UnsatisfiedResourceIncludeException.');
         } catch (UnsatisfiedResourceIncludeException $e) {
@@ -189,7 +230,7 @@ final class Phase6cIncludeSatisfiabilityTest extends TestCase
         $rootMeta        = $registry->require(ResolvableProfileResource::class);
 
         for ($i = 0; $i < 50; $i++) {
-            $validator->validate(IncludeSet::fromQueryString('profile'), $rootMeta, 'AnyPayload');
+            $validator->validate(IncludeSet::fromQueryString('profile'), $rootMeta, ResolvableProfileResource::class);
         }
 
         // Type-check: the resolver type referenced by the fixture must be

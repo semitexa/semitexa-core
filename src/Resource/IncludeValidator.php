@@ -54,6 +54,9 @@ final class IncludeValidator
         return $v;
     }
 
+    /**
+     * @param class-string|null $payloadClass
+     */
     public function validate(
         IncludeSet $includes,
         ResourceObjectMetadata $rootMetadata,
@@ -86,13 +89,11 @@ final class IncludeValidator
     ): void {
         $segments = explode('.', $token);
         $current  = $metadata;
-        $rootType = $metadata->type;
-        /** @var ResourceFieldMetadata|null $leafField */
-        $leafField = null;
-        $leafResource = $rootType;
+        $pathSegments = [];
 
         foreach ($segments as $i => $segment) {
-            $field = $current->getField($segment);
+            $pathSegments[] = $segment;
+            $field = $this->findFieldByRequestedToken($current, $segment);
             if ($field === null) {
                 throw new UnknownIncludeException($token, $current->type);
             }
@@ -102,12 +103,26 @@ final class IncludeValidator
             if (!$field->expandable) {
                 throw new NonExpandableIncludeException($token, $current->type);
             }
+            $segmentToken = implode('.', $pathSegments);
 
-            // Last segment: capture leaf for the satisfiability check.
+            // Every traversed segment must be satisfiable. A dotted token
+            // implies its parent include, so handler-provided declarations for
+            // `profile.preferences` also satisfy the `profile` hop.
+            $hasResolver       = $field->resolverClass !== null;
+            $isHandlerProvided = $this->isHandlerProvidedToken($segmentToken, $handlerProvidedTokens);
+
+            if (!$hasResolver && !$isHandlerProvided) {
+                throw new UnsatisfiedResourceIncludeException(
+                    resourceType: $current->type,
+                    token: $token,
+                    relationName: $field->name,
+                    resolverMissing: true,
+                    handlerContractMissing: true,
+                );
+            }
+
             if ($i === count($segments) - 1) {
-                $leafField    = $field;
-                $leafResource = $current->type;
-                break;
+                return;
             }
 
             $next = $this->resolveTargetMetadata($field);
@@ -117,41 +132,61 @@ final class IncludeValidator
             }
             $current = $next;
         }
-
-        \assert($leafField !== null);
-
-        // Phase 6c satisfiability: a valid expandable relation must have
-        // either a resolver or be declared handler-provided. The same
-        // satisfiability rule applies to every render profile because
-        // the rule lives here, in the single chokepoint.
-        $hasResolver        = $leafField->resolverClass !== null;
-        $isHandlerProvided  = in_array($token, $handlerProvidedTokens, true);
-
-        if (!$hasResolver && !$isHandlerProvided) {
-            throw new UnsatisfiedResourceIncludeException(
-                resourceType: $leafResource,
-                token: $token,
-                relationName: $leafField->name,
-                resolverMissing: true,
-                handlerContractMissing: true,
-            );
-        }
     }
 
     private function resolveTargetMetadata(ResourceFieldMetadata $field): ?ResourceObjectMetadata
     {
         if ($field->target !== null) {
-            return $this->registry->get($field->target);
+            /** @var class-string $target */
+            $target = $field->target;
+            return $this->registry->get($target);
         }
 
         // Polymorphic union — for include validation we accept the token as long as ALL
         // declared targets agree on the next segment. Phase 2 keeps this conservative:
         // a nested include only validates against the first registered union target.
         if ($field->unionTargets !== null && $field->unionTargets !== []) {
-            return $this->registry->get($field->unionTargets[0]);
+            /** @var class-string $target */
+            $target = $field->unionTargets[0];
+            return $this->registry->get($target);
         }
 
         return null;
+    }
+
+    private function findFieldByRequestedToken(
+        ResourceObjectMetadata $metadata,
+        string $segment,
+    ): ?ResourceFieldMetadata {
+        $needle = strtolower($segment);
+
+        foreach ($metadata->fields as $field) {
+            $publicToken = strtolower($field->include ?? $field->name);
+            if ($publicToken === $needle) {
+                return $field;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @param list<string> $handlerProvidedTokens
+     */
+    private function isHandlerProvidedToken(string $token, array $handlerProvidedTokens): bool
+    {
+        if (in_array($token, $handlerProvidedTokens, true)) {
+            return true;
+        }
+
+        $prefix = $token . '.';
+        foreach ($handlerProvidedTokens as $providedToken) {
+            if (str_starts_with($providedToken, $prefix)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static function emptyHandlerProvidedRegistry(): HandlerProvidedIncludeRegistry
