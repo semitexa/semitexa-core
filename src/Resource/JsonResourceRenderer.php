@@ -121,8 +121,8 @@ final class JsonResourceRenderer
 
         return match ($field->kind) {
             ResourceFieldKind::Scalar       => $value,
-            ResourceFieldKind::EmbeddedOne  => $this->renderEmbeddedOne($value, $context, $includes->nested($field->name)),
-            ResourceFieldKind::EmbeddedMany => $this->renderEmbeddedMany($value, $context, $includes->nested($field->name)),
+            ResourceFieldKind::EmbeddedOne  => $this->renderEmbeddedOne($value, $context, $includes->nested($field->include ?? $field->name)),
+            ResourceFieldKind::EmbeddedMany => $this->renderEmbeddedMany($value, $context, $includes->nested($field->include ?? $field->name)),
             ResourceFieldKind::RefOne       => $this->renderRefOne($metadata, $field, $value, $context, $includes, $parentIdentity),
             ResourceFieldKind::RefMany      => $this->renderRefMany($metadata, $field, $value, $context, $includes, $parentIdentity),
             ResourceFieldKind::Union        => $this->renderUnion($metadata, $field, $value, $context, $includes, $parentIdentity),
@@ -210,7 +210,7 @@ final class JsonResourceRenderer
         ) {
             $resolvedDto = $context->resolved->lookup($parentIdentity, $field->name);
             if ($resolvedDto instanceof ResourceObjectInterface) {
-                $envelope['data'] = $this->renderObject($resolvedDto, $context, $includes->nested($field->name));
+                $envelope['data'] = $this->renderObject($resolvedDto, $context, $includes->nested($field->include));
             }
             return $envelope;
         }
@@ -220,7 +220,7 @@ final class JsonResourceRenderer
         }
 
         if ($value->data !== null) {
-            $envelope['data'] = $this->renderObject($value->data, $context, $includes->nested($field->name));
+            $envelope['data'] = $this->renderObject($value->data, $context, $includes->nested($field->include));
         }
 
         return $envelope;
@@ -257,7 +257,7 @@ final class JsonResourceRenderer
                 if ($value->href !== null && $value->href !== '') {
                     $envelope['href'] = $value->href;
                 }
-                $nested = $includes->nested($field->name);
+                $nested = $includes->nested($field->include);
                 $items  = [];
                 foreach ($resolvedList as $item) {
                     if ($item instanceof ResourceObjectInterface) {
@@ -289,7 +289,7 @@ final class JsonResourceRenderer
         }
 
         if ($value->data !== null) {
-            $nested = $includes->nested($field->name);
+            $nested = $includes->nested($field->include);
             $items  = [];
             foreach ($value->data as $item) {
                 if ($item instanceof ResourceObjectInterface) {
@@ -371,7 +371,7 @@ final class JsonResourceRenderer
         $envelope['data'] = $this->renderObject(
             $resolvedDto,
             $context,
-            $includes->nested($field->name),
+            $includes->nested($field->include),
         );
         return $envelope;
     }

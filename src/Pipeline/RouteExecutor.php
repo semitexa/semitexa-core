@@ -317,6 +317,10 @@ class RouteExecutor
                     acceptHeader:        $accept,
                     routeContext:        $route->path,
                 );
+
+                if ($responseClass !== null && $responseClass !== $route->responseClass) {
+                    $route = $this->registry->rebindHandlersForResponse($route, $responseClass);
+                }
             }
         }
 

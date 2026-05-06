@@ -30,8 +30,7 @@ final readonly class UploadedFile
     public function isOk(): bool
     {
         return $this->errorCode === UPLOAD_ERR_OK
-            && $this->tmpPath !== ''
-            && $this->size > 0;
+            && $this->tmpPath !== '';
     }
 
     public function hasError(): bool
