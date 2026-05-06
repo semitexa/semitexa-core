@@ -63,11 +63,12 @@ final class AcceptHeaderResolver
             return $declaredProfiles[0];
         }
 
-        // Build candidates: for each declared profile, the highest q the
-        // Accept header offers. q=0 excludes; absent → no candidate.
+        // Build candidates: for each declared profile, use the q-value from
+        // the most specific matching Accept entry (exact > type wildcard >
+        // */*). q=0 excludes; absent → no candidate.
         $candidates = [];
         foreach ($declaredProfiles as $declarationIndex => $profile) {
-            $q = $this->highestQForProfile($profile, $entries);
+            $q = $this->qualityForProfile($profile, $entries);
             if ($q === null || $q <= 0.0) {
                 continue;
             }
@@ -114,11 +115,21 @@ final class AcceptHeaderResolver
             }
 
             $q = 1.0;
+            $qWasInvalid = false;
             foreach ($tokens as $param) {
-                if (preg_match('/^q\s*=\s*([0-9](?:\.[0-9]{1,3})?)\s*$/i', $param, $m)) {
-                    $q = (float) $m[1];
+                if (preg_match('/^q\s*=\s*([0-9]+(?:\.[0-9]{1,3})?)\s*$/i', $param, $m)) {
+                    $candidateQ = (float) $m[1];
+                    if ($candidateQ < 0.0 || $candidateQ > 1.0) {
+                        $qWasInvalid = true;
+                        break;
+                    }
+                    $q = $candidateQ;
                 }
                 // other parameters (charset, version, …) are ignored for matching
+            }
+
+            if ($qWasInvalid) {
+                continue;
             }
 
             $slash = strpos($mediaType, '/');
@@ -140,16 +151,22 @@ final class AcceptHeaderResolver
     /**
      * @param list<array{type: string, subtype: string, q: float, originalIndex: int}> $entries
      */
-    private function highestQForProfile(RenderProfile $profile, array $entries): ?float
+    private function qualityForProfile(RenderProfile $profile, array $entries): ?float
     {
         $best = null;
+        $bestSpecificity = null;
 
         foreach ($entries as $entry) {
-            $matches = $this->entryMatchesProfile($profile, $entry);
-            if (!$matches) {
+            $specificity = $this->entrySpecificityForProfile($profile, $entry);
+            if ($specificity === null) {
                 continue;
             }
-            if ($best === null || $entry['q'] > $best) {
+
+            if ($bestSpecificity === null
+                || $specificity > $bestSpecificity
+                || ($specificity === $bestSpecificity && ($best === null || $entry['q'] > $best))
+            ) {
+                $bestSpecificity = $specificity;
                 $best = $entry['q'];
             }
         }
@@ -160,29 +177,29 @@ final class AcceptHeaderResolver
     /**
      * @param array{type: string, subtype: string, q: float, originalIndex: int} $entry
      */
-    private function entryMatchesProfile(RenderProfile $profile, array $entry): bool
+    private function entrySpecificityForProfile(RenderProfile $profile, array $entry): ?int
     {
         $entryType    = $entry['type'];
         $entrySubtype = $entry['subtype'];
 
         // */*  → matches anything.
         if ($entryType === '*' && $entrySubtype === '*') {
-            return true;
+            return 0;
         }
 
         $profileMediaType = self::profileMediaType($profile);
         if ($profileMediaType === null) {
-            return false;
+            return null;
         }
         [$pType, $pSubtype] = explode('/', $profileMediaType, 2);
 
         // application/*  → matches the same top-level type, any subtype.
         if ($entrySubtype === '*') {
-            return $entryType === $pType;
+            return $entryType === $pType ? 1 : null;
         }
 
         // exact match (case-insensitive on type/subtype).
-        return $entryType === $pType && $entrySubtype === $pSubtype;
+        return $entryType === $pType && $entrySubtype === $pSubtype ? 2 : null;
     }
 
     public static function profileMediaType(RenderProfile $profile): ?string

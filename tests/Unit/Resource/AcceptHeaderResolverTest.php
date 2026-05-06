@@ -125,6 +125,32 @@ final class AcceptHeaderResolverTest extends TestCase
     }
 
     #[Test]
+    public function most_specific_accept_match_overrides_wildcard_q(): void
+    {
+        $p = $this->r->resolve(
+            'application/json;q=0, */*;q=1',
+            [RenderProfile::Json, RenderProfile::JsonLd],
+        );
+        self::assertSame(RenderProfile::JsonLd, $p);
+    }
+
+    #[Test]
+    public function out_of_range_q_values_are_ignored(): void
+    {
+        $p = $this->r->resolve(
+            'application/json;q=9.5, application/ld+json;q=0.8',
+            [RenderProfile::Json, RenderProfile::JsonLd],
+        );
+        self::assertSame(RenderProfile::JsonLd, $p);
+
+        $p = $this->r->resolve(
+            'application/json;q=2, application/ld+json;q=0.1',
+            [RenderProfile::Json, RenderProfile::JsonLd],
+        );
+        self::assertSame(RenderProfile::JsonLd, $p);
+    }
+
+    #[Test]
     public function unsupported_specific_type_returns_null(): void
     {
         $p = $this->r->resolve('application/xml', [RenderProfile::Json, RenderProfile::JsonLd]);
