@@ -13,6 +13,7 @@ use Semitexa\Core\Discovery\DiscoveredRoute;
 use Semitexa\Core\Discovery\DefaultRouteMetadataResolver;
 use Semitexa\Core\Discovery\PayloadPartRegistry;
 use Semitexa\Core\Discovery\ResolvedRouteMetadata;
+use Semitexa\Core\Discovery\RouteRegistry;
 use Semitexa\Core\Environment;
 use Semitexa\Core\Error\ErrorRouteDispatcher;
 use Semitexa\Core\Http\PayloadFactory;
@@ -322,7 +323,9 @@ class RouteExecutor
                 );
 
                 if ($responseClass !== null && $responseClass !== $route->responseClass) {
-                    $route = $this->registry->rebindHandlersForResponse($route, $responseClass);
+                    /** @var RouteRegistry $routeRegistry */
+                    $routeRegistry = $this->container->get(RouteRegistry::class);
+                    $route = $routeRegistry->rebindHandlersForResponse($route, $responseClass);
                 }
             }
         }

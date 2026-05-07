@@ -77,8 +77,16 @@ final readonly class UploadedFile
      */
     public function sha256(): string
     {
-        $bytes = $this->getContents();
-        return $bytes === '' ? '' : hash('sha256', $bytes);
+        if (!$this->isOk() || !is_file($this->tmpPath)) {
+            return '';
+        }
+
+        $bytes = @file_get_contents($this->tmpPath);
+        if (!is_string($bytes)) {
+            return '';
+        }
+
+        return hash('sha256', $bytes);
     }
 
     /**
