@@ -6,6 +6,7 @@ namespace Semitexa\Core\Boot;
 
 use Composer\Autoload\ClassLoader;
 use Semitexa\Core\Support\ProjectRoot;
+use Semitexa\Core\Support\Str;
 
 /**
  * Registers PSR-4 autoload mappings for local modules under src/modules/<Name>/src.
@@ -59,9 +60,15 @@ final class LocalModuleAutoloadRegistrar
             if (!is_dir($srcDir)) {
                 continue;
             }
+            // Match ModuleRegistry::discoverLocalModules(): derive the namespace
+            // segment via Str::toStudly so a directory like `blog` or
+            // `user-profile` registers `Blog`/`UserProfile`. Composer's PSR-4
+            // matching is case-sensitive, so a raw `$entry` would silently
+            // mismatch the module's actual namespace.
+            $segment = Str::toStudly($entry);
             foreach ($classLoaders as $classLoader) {
-                $classLoader->addPsr4("App\\Modules\\{$entry}\\", $srcDir);
-                $classLoader->addPsr4("Semitexa\\Modules\\{$entry}\\", $srcDir);
+                $classLoader->addPsr4("App\\Modules\\{$segment}\\", $srcDir);
+                $classLoader->addPsr4("Semitexa\\Modules\\{$segment}\\", $srcDir);
             }
         }
     }
