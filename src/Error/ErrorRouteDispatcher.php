@@ -167,9 +167,18 @@ final class ErrorRouteDispatcher
         $normalizedStatus = $status->value;
         $debugEnabled = $this->environment->isDebug();
 
-        $publicMessage = $normalizedStatus === HttpStatus::NotFound->value
-            ? 'The requested resource was not found.'
-            : 'An unexpected error occurred.';
+        // DomainException messages are part of the framework's user-facing
+        // contract — exposing "Missing permission: users.manage" or
+        // "Article 42 not found" is the whole point of the type. Generic
+        // "An unexpected error occurred" stays reserved for non-domain
+        // throwables (5xx leaks we must not surface).
+        if ($throwable instanceof DomainException) {
+            $publicMessage = $throwable->getMessage();
+        } elseif ($normalizedStatus === HttpStatus::NotFound->value) {
+            $publicMessage = 'The requested resource was not found.';
+        } else {
+            $publicMessage = 'An unexpected error occurred.';
+        }
 
         $originalRouteName = is_array($currentRoute) && is_string($currentRoute['name'] ?? null)
             ? $currentRoute['name']

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Semitexa\Core\Queue;
 
 use Semitexa\Core\Contract\AsyncResultDeliveryInterface;
+use Semitexa\Core\Lifecycle\PerRequestStateRegistry;
 use Semitexa\Core\Queue\Message\QueuedEventListenerMessage;
 use Semitexa\Core\Queue\Message\QueuedHandlerMessage;
 use Semitexa\Core\Support\CoroutineLocal;
@@ -88,6 +89,10 @@ class QueueWorker
                 $this->processHandlerPayload($payload);
             }
         } finally {
+            // Per-message lifecycle reset — same contract as Application::handleRequest.
+            // Without this, a long-running queue worker carries authorization-decision
+            // state from one job to the next (real production leak in CLI mode).
+            PerRequestStateRegistry::resetAll();
             CoroutineLocal::endRequest();
         }
     }

@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Semitexa\Core;
 
+use Semitexa\Core\Http\UploadedFile;
+
 /**
  * HTTP Request representation
  *
@@ -12,6 +14,7 @@ namespace Semitexa\Core;
  * @phpstan-type PostArray array<array-key, string|array<mixed>>
  * @phpstan-type ServerArray array<string, mixed>
  * @phpstan-type CookieArray array<string, string>
+ * @phpstan-type FilesArray array<string, UploadedFile|list<UploadedFile>>
  */
 readonly class Request
 {
@@ -21,6 +24,7 @@ readonly class Request
      * @param PostArray   $post
      * @param ServerArray $server
      * @param CookieArray $cookies
+     * @param FilesArray  $files
      */
     public function __construct(
         public string $method,
@@ -30,7 +34,8 @@ readonly class Request
         public array $post,
         public array $server,
         public array $cookies,
-        public ?string $content = null
+        public ?string $content = null,
+        public array $files = [],
     ) {}
     
     /**
@@ -256,12 +261,58 @@ readonly class Request
         if (!$this->isJson() || !$this->content) {
             return null;
         }
-        
+
         $data = json_decode($this->content, true);
         if (json_last_error() !== JSON_ERROR_NONE) {
             return null;
         }
-        
+
         return is_array($data) ? $data : null;
+    }
+
+    public function hasFile(string $field): bool
+    {
+        return array_key_exists($field, $this->files);
+    }
+
+    /**
+     * Returns the first uploaded file at $field, or null when no file was sent.
+     * Use {@see getFiles} when the field is a multi-file input.
+     */
+    public function getFile(string $field): ?UploadedFile
+    {
+        $entry = $this->files[$field] ?? null;
+        if ($entry instanceof UploadedFile) {
+            return $entry;
+        }
+        if (is_array($entry) && $entry !== []) {
+            $first = $entry[0] ?? null;
+            return $first instanceof UploadedFile ? $first : null;
+        }
+        return null;
+    }
+
+    /**
+     * Returns every uploaded file at $field as a normalized list. Single-file
+     * fields collapse into a one-element list.
+     *
+     * @return list<UploadedFile>
+     */
+    public function getFiles(string $field): array
+    {
+        $entry = $this->files[$field] ?? null;
+        if ($entry instanceof UploadedFile) {
+            return [$entry];
+        }
+        if (is_array($entry)) {
+            $list = [];
+            foreach ($entry as $candidate) {
+                if ($candidate instanceof UploadedFile) {
+                    $list[] = $candidate;
+                }
+            }
+            return $list;
+        }
+        return [];
     }
 }

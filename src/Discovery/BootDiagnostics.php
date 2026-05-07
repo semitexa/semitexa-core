@@ -132,7 +132,9 @@ final class BootDiagnostics
      *   1. BOOT_VERBOSE env var (Swoole/FPM/CLI-safe, process-level, always honored)
      *   2. CLI argv flags (-v / --verbose / -q / --quiet) — checked only when argv
      *      is actually available and looks like CLI invocation args
-     *   3. SUMMARY (safe default)
+     *   3. PHPUnit / APP_ENV=test → SILENT (test runs stay clean by default; assertion
+     *      failures + strict mode still surface real issues)
+     *   4. SUMMARY (safe default)
      *
      * Swoole note: BootDiagnostics::begin() runs during ContainerBootstrapper::build(),
      * which happens at master-process boot BEFORE workers fork and BEFORE any HTTP
@@ -159,7 +161,7 @@ final class BootDiagnostics
         }
 
         if (PHP_SAPI !== 'cli') {
-            return self::VERBOSITY_SUMMARY;
+            return self::testDefault() ?? self::VERBOSITY_SUMMARY;
         }
 
         // Prefer $_SERVER['argv'] but fall back to $GLOBALS['argv'] — Swoole
@@ -171,22 +173,42 @@ final class BootDiagnostics
         } elseif (isset($GLOBALS['argv']) && is_array($GLOBALS['argv'])) {
             $argv = $GLOBALS['argv'];
         }
-        if ($argv === null) {
-            return self::VERBOSITY_SUMMARY;
-        }
-
-        foreach ($argv as $arg) {
-            if (!is_string($arg)) {
-                continue;
-            }
-            if (in_array($arg, ['-v', '-vv', '-vvv', '--verbose'], true)) {
-                return self::VERBOSITY_VERBOSE;
-            }
-            if (in_array($arg, ['-q', '--quiet', '--silent'], true)) {
-                return self::VERBOSITY_SILENT;
+        if ($argv !== null) {
+            foreach ($argv as $arg) {
+                if (!is_string($arg)) {
+                    continue;
+                }
+                if (in_array($arg, ['-v', '-vv', '-vvv', '--verbose'], true)) {
+                    return self::VERBOSITY_VERBOSE;
+                }
+                if (in_array($arg, ['-q', '--quiet', '--silent'], true)) {
+                    return self::VERBOSITY_SILENT;
+                }
             }
         }
 
-        return self::VERBOSITY_SUMMARY;
+        return self::testDefault() ?? self::VERBOSITY_SUMMARY;
+    }
+
+    /**
+     * Detect a PHPUnit / test-environment context.
+     *
+     * Returns SILENT when:
+     *   - PHPUnit's TestCase is loaded (the runner has booted its classes), OR
+     *   - APP_ENV=test (explicit signal from docker-compose.test.yml or CI).
+     *
+     * Returns null when no signal is detected, letting the caller fall back to
+     * its own default.
+     */
+    private static function testDefault(): ?int
+    {
+        if (class_exists(\PHPUnit\Framework\TestCase::class, false)) {
+            return self::VERBOSITY_SILENT;
+        }
+        $appEnv = getenv('APP_ENV');
+        if (is_string($appEnv) && strtolower(trim($appEnv)) === 'test') {
+            return self::VERBOSITY_SILENT;
+        }
+        return null;
     }
 }

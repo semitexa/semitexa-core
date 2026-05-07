@@ -7,13 +7,13 @@ namespace Semitexa\Core\Pipeline;
 use Semitexa\Core\Request;
 use Semitexa\Core\HttpResponse;
 use Semitexa\Core\Http\PayloadHydrator;
-use Semitexa\Core\Http\PayloadValidator;
 use Semitexa\Core\Http\Response\ResourceResponse;
 use Semitexa\Core\Discovery\AttributeDiscovery;
 use Semitexa\Core\Discovery\DiscoveredRoute;
 use Semitexa\Core\Discovery\DefaultRouteMetadataResolver;
 use Semitexa\Core\Discovery\PayloadPartRegistry;
 use Semitexa\Core\Discovery\ResolvedRouteMetadata;
+use Semitexa\Core\Discovery\RouteRegistry;
 use Semitexa\Core\Environment;
 use Semitexa\Core\Error\ErrorRouteDispatcher;
 use Semitexa\Core\Http\PayloadFactory;
@@ -25,6 +25,9 @@ use Semitexa\Core\Auth\AuthBootstrapperInterface;
 use Semitexa\Core\Contract\ExceptionResponseMapperInterface;
 use Semitexa\Core\Contract\RouteResponseDecoratorInterface;
 use Semitexa\Core\Contract\RouteMetadataResolverInterface;
+use Semitexa\Core\Contract\ValidatablePayloadInterface;
+use Semitexa\Core\Exception\ValidationException;
+use Semitexa\Core\Container\PropertyInjector;
 use Psr\Container\ContainerInterface;
 use Semitexa\Core\Container\RequestScopedContainer;
 
@@ -99,8 +102,8 @@ class RouteExecutor
                 return $this->decorateResponse($validationResponse, $request, $metadata);
             }
 
-            // 2. Resolve Response DTO
-            $resDto = $this->resolveResponseDto($route);
+            // 2. Resolve Response DTO (Phase 3e: Accept-driven for multi-profile routes)
+            $resDto = $this->resolveResponseDto($route, $request);
 
             // 3. Build Context
             $context = new RequestPipelineContext(
@@ -233,6 +236,8 @@ class RouteExecutor
             throw new PipelineException("Cannot instantiate request class: {$requestClass}");
         }
 
+        PropertyInjector::inject($reqDto, $this->container);
+
         return $reqDto;
     }
 
@@ -250,6 +255,16 @@ class RouteExecutor
             if (method_exists($reqDto, 'setHttpRequest')) {
                 $reqDto->setHttpRequest($request);
             }
+            // Cross-field validation hook — fires once, after every setter
+            // has run, before any route handler. Payloads opt in by
+            // implementing ValidatablePayloadInterface; everything else
+            // skips this step entirely.
+            if ($reqDto instanceof ValidatablePayloadInterface) {
+                $errors = $reqDto->validate();
+                if ($errors !== []) {
+                    throw new ValidationException($errors);
+                }
+            }
         } catch (\Semitexa\Core\Exception\ValidationException $e) {
             return [$reqDto, HttpResponse::json(['errors' => $e->getErrorContext()['errors']], HttpStatus::UnprocessableEntity->value)];
         } catch (\Semitexa\Core\Http\Exception\TypeMismatchException $e) {
@@ -264,23 +279,68 @@ class RouteExecutor
             return [$reqDto, HttpResponse::json(['errors' => ['_body' => [$message]]], HttpStatus::UnprocessableEntity->value)];
         }
 
-        $validationResult = PayloadValidator::validate($reqDto, $request);
-        if (!$validationResult->isValid()) {
-            return [$reqDto, HttpResponse::json(['errors' => $validationResult->getErrors()], HttpStatus::UnprocessableEntity->value)];
-        }
-
         return [$reqDto, null];
     }
 
-    private function resolveResponseDto(DiscoveredRoute $route): object
+    /**
+     * @return list<\Semitexa\Core\Resource\RenderProfile>
+     */
+    private function normalizeDeclaredProfiles(mixed $renderProfile): array
+    {
+        if ($renderProfile instanceof \Semitexa\Core\Resource\RenderProfile) {
+            return [$renderProfile];
+        }
+        if (is_array($renderProfile)) {
+            $profiles = [];
+            foreach ($renderProfile as $entry) {
+                if ($entry instanceof \Semitexa\Core\Resource\RenderProfile) {
+                    $profiles[] = $entry;
+                }
+            }
+            return $profiles;
+        }
+        return [];
+    }
+
+    private function resolveResponseDto(DiscoveredRoute &$route, ?Request $request = null): object
     {
         $responseClass = $route->responseClass;
+
+        // Phase 3e: when the route declares `responsesByProfile`, the
+        // CrossProfileDispatcher picks the response class from the request's
+        // Accept header. Single-profile routes keep the legacy path.
+        if ($route->responsesByProfile !== null && $route->responsesByProfile !== []) {
+            $declaredProfiles = $this->normalizeDeclaredProfiles($route->renderProfile);
+            if ($declaredProfiles !== []) {
+                $accept = $request !== null ? $request->getHeader('accept') : null;
+                /** @var \Semitexa\Core\Resource\CrossProfileDispatcher $dispatcher */
+                $dispatcher = $this->container->get(\Semitexa\Core\Resource\CrossProfileDispatcher::class);
+                $responseClass = $dispatcher->resolveResponseClass(
+                    declaredProfiles:    $declaredProfiles,
+                    responsesByProfile:  $route->responsesByProfile,
+                    acceptHeader:        $accept,
+                    routeContext:        $route->path,
+                );
+
+                if ($responseClass !== null && $responseClass !== $route->responseClass) {
+                    /** @var RouteRegistry $routeRegistry */
+                    $routeRegistry = $this->container->get(RouteRegistry::class);
+                    /** @var \Semitexa\Core\Discovery\HandlerRegistry|null $handlerRegistry */
+                    $handlerRegistry = $this->container->has(\Semitexa\Core\Discovery\HandlerRegistry::class)
+                        ? $this->container->get(\Semitexa\Core\Discovery\HandlerRegistry::class)
+                        : null;
+                    $route = $routeRegistry->rebindHandlersForResponse($route, $responseClass, $handlerRegistry);
+                }
+            }
+        }
+
         if ($responseClass !== null && !class_exists($responseClass)) {
             throw new PipelineException("Cannot instantiate response class: {$responseClass}");
         }
         if ($responseClass !== null) {
             $traits = $this->getPayloadPartRegistry()->getResourcePartsForClass($responseClass);
             $resDto = PayloadFactory::createInstance($responseClass, $traits);
+            PropertyInjector::inject($resDto, $this->container);
         } else {
             $resDto = null;
         }

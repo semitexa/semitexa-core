@@ -10,7 +10,7 @@ use Semitexa\Core\Http\HttpStatus;
 use Semitexa\Core\Locale\LocaleContextInterface;
 use Semitexa\Core\HttpResponse;
 use Semitexa\Locale\Context\LocaleContextStore;
-use Semitexa\Locale\LocaleBootstrapper;
+use Semitexa\Locale\Application\Service\LocaleBootstrapper;
 
 /**
  * @internal Resolves locale from request, sets LocaleContextInterface, may produce a redirect.

@@ -61,40 +61,53 @@ final class HandlerReflectionCache
             }
         }
 
-        // Validate parameter 0: must be a concrete class type (not built-in)
-        $payloadType = $params[0]->getType();
-        if (!$payloadType instanceof \ReflectionNamedType || $payloadType->isBuiltin()) {
+        // Validate parameter 0 (payload): one or more concrete class types.
+        $payloadNames = self::namedTypes($params[0]->getType());
+        if ($payloadNames === [] || self::anyBuiltin($payloadNames)) {
             throw new ConfigurationException("{$handlerClass}::handle() parameter 0 must be a concrete class type.");
         }
 
-        // Validate parameter 1: concrete ResourceInterface
-        $resourceType = $params[1]->getType();
-        if (!$resourceType instanceof \ReflectionNamedType || $resourceType->isBuiltin()) {
+        // Validate parameter 1 (resource): one or more concrete ResourceInterface types.
+        // Union types are accepted to support Accept-negotiation handlers that
+        // declare e.g. `JsonResourceResponse|JsonLdResourceResponse|GraphqlResourceResponse`;
+        // every member must implement ResourceInterface.
+        $resourceNames = self::namedTypes($params[1]->getType());
+        if ($resourceNames === [] || self::anyBuiltin($resourceNames)) {
             throw new ConfigurationException("{$handlerClass}::handle() parameter 1 must be a concrete ResourceInterface type.");
         }
-        if (!is_subclass_of($resourceType->getName(), ResourceInterface::class) && $resourceType->getName() !== ResourceInterface::class) {
-            throw new ConfigurationException(
-                "{$handlerClass}::handle() parameter 1 type {$resourceType->getName()} must implement ResourceInterface."
-            );
+        foreach ($resourceNames as $name) {
+            if ($name === ResourceInterface::class) {
+                continue;
+            }
+            if (!is_a($name, ResourceInterface::class, true)) {
+                throw new ConfigurationException(
+                    "{$handlerClass}::handle() parameter 1 type {$name} must implement ResourceInterface."
+                );
+            }
         }
 
-        // Validate return type: must not be HttpResponse and should be ResourceInterface
+        // Validate return type: must not be HttpResponse and should be ResourceInterface (or a union of them).
         $returnType = $method->getReturnType();
-        if ($returnType instanceof \ReflectionNamedType) {
-            if ($returnType->getName() === HttpResponse::class) {
+        if ($returnType === null) {
+            throw new ConfigurationException(
+                "{$handlerClass}::handle() must declare a return type implementing ResourceInterface."
+            );
+        }
+        $returnNames = self::namedTypes($returnType);
+        foreach ($returnNames as $name) {
+            if ($name === HttpResponse::class) {
                 throw new ConfigurationException(
                     "{$handlerClass}::handle() must return a ResourceInterface, not a HttpResponse object."
                 );
             }
-            if ($returnType->getName() !== 'object' && !is_a($returnType->getName(), ResourceInterface::class, true)) {
+            if ($name === 'object') {
+                continue;
+            }
+            if (!is_a($name, ResourceInterface::class, true)) {
                 throw new ConfigurationException(
-                    "{$handlerClass}::handle() return type must implement ResourceInterface, got {$returnType->getName()}."
+                    "{$handlerClass}::handle() return type must implement ResourceInterface, got {$name}."
                 );
             }
-        } elseif ($returnType === null) {
-            throw new ConfigurationException(
-                "{$handlerClass}::handle() must declare a return type implementing ResourceInterface."
-            );
         }
 
         self::$methods[$handlerClass] = $method;
@@ -130,5 +143,42 @@ final class HandlerReflectionCache
     public static function reset(): void
     {
         self::$methods = [];
+    }
+
+    /**
+     * Flatten a parameter / return type into the list of concrete named types it accepts.
+     * Returns [] for `null`/intersection types we cannot reason about. `?Foo` is
+     * treated as `Foo` (nullability is irrelevant to the class-conformance check).
+     *
+     * @return list<string>
+     */
+    private static function namedTypes(?\ReflectionType $type): array
+    {
+        if ($type instanceof \ReflectionNamedType) {
+            return [$type->getName()];
+        }
+        if ($type instanceof \ReflectionUnionType) {
+            $names = [];
+            foreach ($type->getTypes() as $member) {
+                if ($member instanceof \ReflectionNamedType && $member->getName() !== 'null') {
+                    $names[] = $member->getName();
+                }
+            }
+            return $names;
+        }
+        return [];
+    }
+
+    /**
+     * @param list<string> $names
+     */
+    private static function anyBuiltin(array $names): bool
+    {
+        foreach ($names as $name) {
+            if (in_array($name, ['int', 'float', 'string', 'bool', 'array', 'iterable', 'mixed', 'callable', 'void', 'never', 'null', 'false', 'true'], true)) {
+                return true;
+            }
+        }
+        return false;
     }
 }

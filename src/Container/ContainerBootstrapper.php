@@ -13,6 +13,7 @@ use Semitexa\Core\Container\BuildPhase\CycleDetectionPhase;
 use Semitexa\Core\Container\BuildPhase\ExecutionScopedBuildPhase;
 use Semitexa\Core\Container\BuildPhase\FactoryBuildPhase;
 use Semitexa\Core\Container\BuildPhase\InjectionAnalysisPhase;
+use Semitexa\Core\Container\BuildPhase\LocalModuleAutoloadPhase;
 use Semitexa\Core\Container\BuildPhase\ModuleDiscoveryPhase;
 use Semitexa\Core\Container\BuildPhase\ReadonlyBuildPhase;
 use Semitexa\Core\Container\BuildPhase\RegistryBuildPhase;
@@ -48,6 +49,7 @@ final class ContainerBootstrapper
 
         /** @var list<BuildPhaseInterface> $phases */
         $phases = [
+            new LocalModuleAutoloadPhase(),
             new ClassmapLoadPhase(),
             new ModuleDiscoveryPhase(),
             new AttributeScanPhase(),

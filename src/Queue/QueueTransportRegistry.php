@@ -91,8 +91,18 @@ class QueueTransportRegistry
             return;
         }
 
-        $clusterRegistryClass = 'Semitexa\\Ledger\\Nats\\ClusterRegistry';
-        $transportFactoryClass = 'Semitexa\\Ledger\\Queue\\NatsTransportFactory';
+        // Canonical locations in semitexa-ledger v2 layout:
+        //   Application/Service/Nats/ClusterRegistry
+        //   Application/Service/Queue/NatsTransportFactory
+        // The legacy `Semitexa\Ledger\{Nats,Queue}` paths predate the
+        // canonical-tree refactor and are kept as fallbacks only.
+        $clusterRegistryClass = 'Semitexa\\Ledger\\Application\\Service\\Nats\\ClusterRegistry';
+        $transportFactoryClass = 'Semitexa\\Ledger\\Application\\Service\\Queue\\NatsTransportFactory';
+
+        if (!class_exists($clusterRegistryClass) || !class_exists($transportFactoryClass)) {
+            $clusterRegistryClass = 'Semitexa\\Ledger\\Nats\\ClusterRegistry';
+            $transportFactoryClass = 'Semitexa\\Ledger\\Queue\\NatsTransportFactory';
+        }
 
         if (!class_exists($clusterRegistryClass) || !class_exists($transportFactoryClass)) {
             return;

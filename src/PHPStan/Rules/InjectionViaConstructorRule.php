@@ -6,9 +6,11 @@ namespace Semitexa\Core\PHPStan\Rules;
 
 use PhpParser\Node;
 use PhpParser\Node\Stmt\ClassMethod;
+use Semitexa\Core\Attribute\AsCommand;
 use Semitexa\Core\Attribute\AsEventListener;
 use Semitexa\Core\Attribute\AsPipelineListener;
 use Semitexa\Core\Attribute\AsPayloadHandler;
+use Semitexa\Core\Attribute\AsServerLifecycleListener;
 use Semitexa\Core\Attribute\AsService;
 use Semitexa\Core\Attribute\SatisfiesRepositoryContract;
 use Semitexa\Core\Attribute\SatisfiesServiceContract;
@@ -20,9 +22,9 @@ use PHPStan\Rules\RuleErrorBuilder;
  * semitexa.injectionViaConstructor
  *
  * Enforces the Semitexa "One Way" DI policy on container-managed framework
- * objects (classes annotated with #[AsService], #[AsPayloadHandler],
- * #[AsEventListener], #[AsPipelineListener], #[SatisfiesServiceContract],
- * #[SatisfiesRepositoryContract], or #[AsRepository]).
+ * objects (classes annotated with #[AsService], #[AsCommand], #[AsPayloadHandler],
+ * #[AsEventListener], #[AsPipelineListener], #[AsServerLifecycleListener],
+ * #[SatisfiesServiceContract], #[SatisfiesRepositoryContract], or #[AsRepository]).
  *
  * On those classes, dependencies must flow through *properties* annotated with
  * #[InjectAsReadonly] / #[InjectAsMutable] / #[InjectAsFactory] / #[Config].
@@ -49,6 +51,8 @@ final class InjectionViaConstructorRule implements Rule
         AsPayloadHandler::class,
         AsEventListener::class,
         AsPipelineListener::class,
+        AsServerLifecycleListener::class,
+        AsCommand::class,
         SatisfiesServiceContract::class,
         SatisfiesRepositoryContract::class,
     ];

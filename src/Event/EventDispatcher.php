@@ -129,7 +129,18 @@ final class EventDispatcher implements EventDispatcherInterface
     /** Run listener after response is sent (Swoole defer). Falls back to sync if Swoole not available. */
     private function runListenerDefer(array $meta, object $event): void
     {
-        if (extension_loaded('swoole') && class_exists(\Swoole\Event::class) && method_exists(\Swoole\Event::class, 'defer')) {
+        // In CLI (queue worker, console command, PHPUnit) there is no Swoole
+        // event loop driving deferred callbacks — and queueing callbacks via
+        // Swoole\Event::defer leaves the reactor "dirty", which triggers the
+        // `swoole_event_rshutdown(): Event::wait() in shutdown function is
+        // deprecated` notice at PHP shutdown. Run sync in CLI to keep the
+        // reactor untouched.
+        $useDefer = PHP_SAPI !== 'cli'
+            && extension_loaded('swoole')
+            && class_exists(\Swoole\Event::class)
+            && method_exists(\Swoole\Event::class, 'defer');
+
+        if ($useDefer) {
             \Swoole\Event::defer(function () use ($meta, $event): void {
                 $this->runListenerSync($meta, $event);
             });

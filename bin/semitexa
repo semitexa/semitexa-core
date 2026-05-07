@@ -81,10 +81,10 @@ function semitexaIsLifecycleCommand(string $command): bool
 function semitexaRunLifecycleCommand(array $argv): int
 {
     $map = [
-        'server:start' => \Semitexa\Core\Console\Command\ServerStartCommand::class,
-        'server:restart' => \Semitexa\Core\Console\Command\ServerRestartCommand::class,
-        'server:reload' => \Semitexa\Core\Console\Command\ServerReloadCommand::class,
-        'server:stop' => \Semitexa\Core\Console\Command\ServerStopCommand::class,
+        'server:start' => \Semitexa\Core\Application\Console\Command\ServerStartCommand::class,
+        'server:restart' => \Semitexa\Core\Application\Console\Command\ServerRestartCommand::class,
+        'server:reload' => \Semitexa\Core\Application\Console\Command\ServerReloadCommand::class,
+        'server:stop' => \Semitexa\Core\Application\Console\Command\ServerStopCommand::class,
     ];
 
     $commandName = $argv[1] ?? '';

@@ -13,6 +13,7 @@ use Semitexa\Core\Discovery\RouteRegistry;
 use Semitexa\Core\Environment;
 use Semitexa\Core\Error\ErrorPageContext;
 use Semitexa\Core\Error\ErrorRouteDispatcher;
+use Semitexa\Core\Exception\AccessDeniedException;
 use Semitexa\Core\Request;
 use Semitexa\Core\HttpResponse;
 
@@ -113,6 +114,57 @@ final class ErrorRouteDispatcherTest extends TestCase
         $request = new Request('GET', '/missing', ['Accept' => 'application/json'], [], [], [], []);
 
         self::assertNull($dispatcher->dispatchStatus(404, $request));
+    }
+
+    #[Test]
+    public function domain_exception_message_is_surfaced_as_public_error_text(): void
+    {
+        $routes = $this->createMock(RouteRegistry::class);
+        // 403 has no named error route, so the dispatcher renders directly.
+        $routes->expects($this->never())->method('findByNameTyped');
+
+        $dispatcher = $this->makeDispatcher($routes);
+        $request = $this->makeHtmlRequest('/playground/rbac/action/users-manage');
+
+        $response = $dispatcher->dispatchThrowable(
+            new AccessDeniedException('Missing permission: users.manage'),
+            $request,
+            ['name' => 'Playground.RbacAction.usersManage'],
+        );
+
+        self::assertNotNull($response);
+        self::assertSame(403, $response->getStatusCode());
+
+        $body = $response->getContent();
+        self::assertStringContainsString('403 Forbidden', $body);
+        self::assertStringContainsString('Missing permission: users.manage', $body);
+        // Pin the regression: the generic placeholder must never replace
+        // a domain exception's user-facing message.
+        self::assertStringNotContainsString('An unexpected error occurred', $body);
+    }
+
+    #[Test]
+    public function unknown_exception_keeps_generic_public_message(): void
+    {
+        $routes = $this->createMock(RouteRegistry::class);
+        $routes->expects($this->once())
+            ->method('findByNameTyped')
+            ->with(ErrorRouteDispatcher::ROUTE_NAME_500)
+            ->willReturn(null);
+
+        $dispatcher = $this->makeDispatcher($routes);
+
+        $response = $dispatcher->dispatchThrowable(
+            new \RuntimeException('Database password is "hunter2"'),
+            $this->makeHtmlRequest('/broken'),
+            ['name' => 'demo.page'],
+        );
+
+        self::assertNotNull($response);
+        self::assertSame(500, $response->getStatusCode());
+        self::assertStringContainsString('An unexpected error occurred', $response->getContent());
+        // Sensitive raw exception text must NOT leak through the public message.
+        self::assertStringNotContainsString('hunter2', $response->getContent());
     }
 
     #[Test]

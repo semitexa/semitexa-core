@@ -168,6 +168,56 @@ class RouteRegistry
     }
 
     /**
+     * Rebuild a typed route with a different responseClass and re-resolve
+     * its handlers against the new (request, response) pair.
+     *
+     * Cross-profile dispatch: a route declared with `responsesByProfile`
+     * (e.g. JSON + JSON-LD + GraphQL variants on the same path) is built
+     * once with the legacy `responseClass`. At request time
+     * `CrossProfileDispatcher` picks the actual response class from the
+     * Accept header; the registered handler list — which is keyed on
+     * (requestClass, responseClass) — must then be re-resolved or the
+     * pipeline ends up trying to instantiate the wrong DTO.
+     *
+     * Returns a fresh `DiscoveredRoute` with `responseClass` swapped in
+     * and `handlers` re-resolved when a `HandlerRegistry` is supplied.
+     * Without a `HandlerRegistry` the original handler list is preserved
+     * — callers that don't have one still get a route with the right
+     * `responseClass`, which is enough for the response-DTO factory.
+     */
+    public function rebindHandlersForResponse(
+        DiscoveredRoute $route,
+        string $responseClass,
+        ?HandlerRegistry $handlerRegistry = null,
+    ): DiscoveredRoute {
+        $handlers = $handlerRegistry !== null
+            ? $handlerRegistry->findHandlers($route->requestClass, $responseClass)
+            : $route->handlers;
+
+        return new DiscoveredRoute(
+            path: $route->path,
+            methods: $route->methods,
+            name: $route->name,
+            requestClass: $route->requestClass,
+            responseClass: $responseClass,
+            handlers: $handlers,
+            type: $route->type,
+            transport: $route->transport,
+            produces: $route->produces,
+            consumes: $route->consumes,
+            module: $route->module,
+            requirements: $route->requirements,
+            defaults: $route->defaults,
+            options: $route->options,
+            tags: $route->tags,
+            accessType: $route->accessType,
+            tenantScopes: $route->tenantScopes,
+            renderProfile: $route->renderProfile,
+            responsesByProfile: $route->responsesByProfile,
+        );
+    }
+
+    /**
      * Get all raw routes.
      *
      * @return list<array<string, mixed>>

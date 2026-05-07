@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Discovery;
 
+use Semitexa\Core\Auth\PayloadAccessType;
+
 /**
  * Immutable, typed representation of a discovered route.
  *
@@ -39,8 +41,24 @@ final readonly class DiscoveredRoute
         public array $defaults = [],
         public array $options = [],
         public array $tags = [],
-        public bool $public = false,
+        public PayloadAccessType $accessType = PayloadAccessType::Protected,
         public array $tenantScopes = [],
+        /**
+         * Phase 3e: declared render profile(s).
+         * `RenderProfile` for single-profile routes,
+         * `list<RenderProfile>` for multi-profile routes,
+         * `null` when the route uses the legacy `responseWith`-only path.
+         *
+         * @var \Semitexa\Core\Resource\RenderProfile|list<\Semitexa\Core\Resource\RenderProfile>|null
+         */
+        public mixed $renderProfile = null,
+        /**
+         * Phase 3e: profile-value → response class map for Accept-driven dispatch.
+         * Keys are `RenderProfile::value` (e.g. `'json'`, `'json-ld'`).
+         *
+         * @var array<string, class-string>|null
+         */
+        public ?array $responsesByProfile = null,
     ) {}
 
     /**
@@ -110,8 +128,10 @@ final readonly class DiscoveredRoute
             defaults: $defaults,
             options: $options,
             tags: $tags,
-            public: (bool) ($route['public'] ?? false),
+            accessType: self::resolveAccessType($route['accessType'] ?? null),
             tenantScopes: $tenantScopes,
+            renderProfile: $route['renderProfile'] ?? null,
+            responsesByProfile: is_array($route['responsesByProfile'] ?? null) ? $route['responsesByProfile'] : null,
         );
     }
 
@@ -138,9 +158,27 @@ final readonly class DiscoveredRoute
             'defaults' => $this->defaults,
             'options' => $this->options,
             'tags' => $this->tags,
-            'public' => $this->public,
+            'accessType' => $this->accessType,
             'tenantScopes' => $this->tenantScopes,
         ];
+    }
+
+    private static function resolveAccessType(mixed $value): PayloadAccessType
+    {
+        if ($value instanceof PayloadAccessType) {
+            return $value;
+        }
+        if (is_string($value) && $value !== '') {
+            $resolved = PayloadAccessType::tryFrom($value);
+            if ($resolved !== null) {
+                return $resolved;
+            }
+        }
+        // Discovery is the single producer of route arrays and always emits
+        // an access type. Reaching this branch means a hand-built route
+        // metadata array — treat as Protected by default (the safer choice
+        // than Public) and let assertions in tests catch construction errors.
+        return PayloadAccessType::Protected;
     }
 
     /**

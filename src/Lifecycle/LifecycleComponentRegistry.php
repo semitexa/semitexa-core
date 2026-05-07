@@ -19,7 +19,7 @@ use Semitexa\Core\Tenant\TenancyBootstrapperInterface;
 use Semitexa\Core\Request;
 use Semitexa\Core\HttpResponse;
 use Semitexa\Locale\Context\LocaleManager;
-use Semitexa\Locale\LocaleBootstrapper;
+use Semitexa\Locale\Application\Service\LocaleBootstrapper;
 
 /**
  * Centralizes detection and creation of optional lifecycle bootstrappers.
@@ -100,7 +100,7 @@ final class LifecycleComponentRegistry
 
     /**
      * Create an AuthBootstrapperInterface via the factory binding when present,
-     * otherwise fall back to a compatible Semitexa\Auth\AuthBootstrapper class.
+     * otherwise fall back to a compatible Semitexa\Auth\Application\Service\AuthBootstrapper class.
      * Returns null if the auth package is not active or no compatible
      * bootstrapper can be constructed.
      */
