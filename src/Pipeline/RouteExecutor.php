@@ -302,7 +302,7 @@ class RouteExecutor
         return [];
     }
 
-    private function resolveResponseDto(DiscoveredRoute $route, ?Request $request = null): object
+    private function resolveResponseDto(DiscoveredRoute &$route, ?Request $request = null): object
     {
         $responseClass = $route->responseClass;
 
