@@ -323,6 +323,38 @@ final class SemitexaContainer implements ContainerInterface
     }
 
     /**
+     * Return every registered implementation of an additive contract
+     * (interface) — active winner first, remaining impls in module-rank
+     * order. Built from `SatisfiesServiceContract` discovery and meant for
+     * contracts whose semantic is "every implementation contributes"
+     * (PermissionProviderInterface, CapabilityProviderInterface). For
+     * single-binding contracts this returns either one element or zero.
+     *
+     * @template T of object
+     * @param class-string<T> $interface
+     * @return list<T>
+     */
+    public function getAllImplementationsOf(string $interface): array
+    {
+        $classes = $this->typeMap->allContractImplementations[$interface] ?? null;
+        if ($classes === null || $classes === []) {
+            $single = $this->getOrNull($interface);
+            /** @var list<T> */
+            return $single instanceof $interface ? [$single] : [];
+        }
+
+        $instances = [];
+        foreach ($classes as $class) {
+            $instance = $this->getOrNull($class);
+            if ($instance instanceof $interface) {
+                $instances[] = $instance;
+            }
+        }
+        /** @var list<T> $instances */
+        return $instances;
+    }
+
+    /**
      * Apply #[InjectAsReadonly] property injection to an instance created
      * outside the container's readonly graph (for example Symfony Console
      * commands, which Symfony Application owns but which still declare

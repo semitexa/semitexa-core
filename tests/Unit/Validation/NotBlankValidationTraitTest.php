@@ -85,7 +85,7 @@ final class NotBlankValidationTraitTest extends TestCase
 
             public function run(string $field, string $value, string $message = 'Must not be blank.'): string
             {
-                return self::requireNotBlank($field, $value, $message);
+                return $this->requireNotBlank($field, $value, $message);
             }
         };
     }

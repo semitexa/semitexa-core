@@ -26,25 +26,43 @@ final class TypeMap
     public array $executionScoped = [];
 
     /**
+     * Interface → every registered concrete impl (in module-rank order, active first).
+     *
+     * Mirrors the existing `contractBindings` map but preserves the full chain
+     * for additive contracts whose semantics are "every implementation
+     * contributes" (PermissionProviderInterface, CapabilityProviderInterface).
+     * The active winner of `SatisfiesServiceContract` election is index 0;
+     * remaining impls are recorded in declaration order so consumers can
+     * iterate without losing the deterministic ranking.
+     *
+     * @var array<string, list<class-string>>
+     */
+    public array $allContractImplementations = [];
+
+    /**
      * Populate from the legacy idToClass array used during build.
      * Splits entries: self-mappings → registeredClasses, others → contractBindings.
      *
      * @param array<string, class-string> $idToClass
      * @param array<class-string, true> $executionScopedClasses
      * @param array<string, class-string> $interfaceToResolver
+     * @param array<string, list<class-string>> $allContractImplementations
      */
     public function populateFromBuildArrays(
         array $idToClass,
         array $executionScopedClasses,
         array $interfaceToResolver,
+        array $allContractImplementations = [],
     ): void {
         $this->contractBindings = [];
         $this->registeredClasses = [];
         $this->interfaceToResolver = [];
         $this->executionScoped = [];
+        $this->allContractImplementations = [];
 
         $this->interfaceToResolver = $interfaceToResolver;
         $this->executionScoped = $executionScopedClasses;
+        $this->allContractImplementations = $allContractImplementations;
 
         foreach ($idToClass as $id => $class) {
             if ($id === $class) {

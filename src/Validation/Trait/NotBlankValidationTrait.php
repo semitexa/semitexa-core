@@ -10,7 +10,7 @@ use Semitexa\Core\Exception\ValidationException;
  * Setter-time "must not be blank" assertion.
  *
  * Drop the trait into a Payload DTO (or any object whose setters validate
- * at assignment time) and call `self::requireNotBlank('field', $value)` —
+ * at assignment time) and call `$this->requireNotBlank('field', $value)` —
  * or `$this->requireNotBlank(...)` — from the relevant `setX()`. Returns
  * the trimmed value on success; throws
  * `Semitexa\Core\Exception\ValidationException` keyed by `$field` on a
@@ -30,7 +30,7 @@ use Semitexa\Core\Exception\ValidationException;
  *
  *         public function setName(string $name): void
  *         {
- *             $this->name = self::requireNotBlank('name', $name);
+ *             $this->name = $this->requireNotBlank('name', $name);
  *         }
  *     }
  */
@@ -39,7 +39,7 @@ trait NotBlankValidationTrait
     /**
      * @throws ValidationException when the trimmed value is empty.
      */
-    protected static function requireNotBlank(
+    protected function requireNotBlank(
         string $field,
         string $value,
         string $message = 'Must not be blank.',

@@ -28,12 +28,24 @@ use ReflectionProperty;
  */
 final class PropertyInjector
 {
-    /** @var array<class-string, array<string, class-string>> */
+    /**
+     * @var array<class-string, array<string, array{type: class-string, optional: bool}>>
+     */
     private static array $metadataCache = [];
 
     /**
      * Resolve and assign every #[InjectAsReadonly] property on $instance
-     * from $container. Throws if a declared dependency is missing.
+     * from $container.
+     *
+     * Required (non-nullable) properties throw when the container lacks a
+     * binding. Optional (nullable) properties are best-effort: injected
+     * when a binding exists, left at their declared default otherwise —
+     * this matches the dual-mode pattern used by resource response DTOs
+     * (`?IncludeValidator $includeValidator = null;` lazy-bound by
+     * `bindServices()` in tests / by the container at runtime). Without
+     * this tolerance any subclass of those response classes 500s during
+     * `RouteExecutor::resolveResponseDto()` because PropertyInjector
+     * walks inherited nullable properties.
      */
     public static function inject(object $instance, ContainerInterface $container): void
     {
@@ -41,8 +53,14 @@ final class PropertyInjector
         $metadata = self::metadata($class);
 
         $ref = new ReflectionClass($instance);
-        foreach ($metadata as $propName => $typeName) {
+        foreach ($metadata as $propName => $info) {
+            $typeName = $info['type'];
+            $optional = $info['optional'];
+
             if (!$container->has($typeName)) {
+                if ($optional) {
+                    continue;
+                }
                 throw new InjectionException(
                     targetClass: $class,
                     propertyName: $propName,
@@ -69,13 +87,16 @@ final class PropertyInjector
     }
 
     /**
-     * Return the property → class-name map for a class, validating each
-     * #[InjectAsReadonly] site against the same rules that apply to
-     * graph-managed services (protected visibility, non-builtin class
-     * or interface type, non-nullable).
+     * Return the property → injection descriptor map for a class.
+     *
+     * Each descriptor is `{type: class-string, optional: bool}`. Nullable
+     * property types are recorded as optional (best-effort injection); the
+     * other rules (protected visibility, named class/interface type) still
+     * throw, since those are structural mistakes a default-null cannot
+     * paper over.
      *
      * @param class-string $class
-     * @return array<string, class-string>
+     * @return array<string, array{type: class-string, optional: bool}>
      */
     public static function metadata(string $class): array
     {
@@ -116,20 +137,12 @@ final class PropertyInjector
                 );
             }
 
-            if ($type->allowsNull()) {
-                throw new InjectionException(
-                    targetClass: $class,
-                    propertyName: $prop->getName(),
-                    propertyType: (string) $type,
-                    injectionKind: 'readonly',
-                    message: "#[InjectAsReadonly] property {$class}::\${$prop->getName()} "
-                        . "must not be nullable. Dependencies are required contracts, not optional.",
-                );
-            }
-
             /** @var class-string $typeName */
             $typeName = $type->getName();
-            $out[$prop->getName()] = $typeName;
+            $out[$prop->getName()] = [
+                'type' => $typeName,
+                'optional' => $type->allowsNull(),
+            ];
         }
 
         return self::$metadataCache[$class] = $out;

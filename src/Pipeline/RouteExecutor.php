@@ -325,7 +325,11 @@ class RouteExecutor
                 if ($responseClass !== null && $responseClass !== $route->responseClass) {
                     /** @var RouteRegistry $routeRegistry */
                     $routeRegistry = $this->container->get(RouteRegistry::class);
-                    $route = $routeRegistry->rebindHandlersForResponse($route, $responseClass);
+                    /** @var \Semitexa\Core\Discovery\HandlerRegistry|null $handlerRegistry */
+                    $handlerRegistry = $this->container->has(\Semitexa\Core\Discovery\HandlerRegistry::class)
+                        ? $this->container->get(\Semitexa\Core\Discovery\HandlerRegistry::class)
+                        : null;
+                    $route = $routeRegistry->rebindHandlersForResponse($route, $responseClass, $handlerRegistry);
                 }
             }
         }

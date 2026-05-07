@@ -100,10 +100,23 @@ final class BuildContext
      */
     public function transferToStores(): void
     {
+        $allImpls = [];
+        foreach ($this->contractDetails as $interface => $data) {
+            $active = $data['active'];
+            $rest = [];
+            foreach ($data['implementations'] as $impl) {
+                if ($impl['class'] !== $active) {
+                    $rest[] = $impl['class'];
+                }
+            }
+            $allImpls[$interface] = array_values(array_unique(array_merge([$active], $rest)));
+        }
+
         $this->typeMap->populateFromBuildArrays(
             $this->idToClass,
             $this->executionScopedClasses,
             $this->interfaceToResolver,
+            $allImpls,
         );
         $this->injectionMap->injections = $this->injections;
     }
