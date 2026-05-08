@@ -48,5 +48,6 @@
         "runtime",
         "console",
         "composer-plugin"
-    ]
+    ],
+    "version": "v1.1.61"
 }
