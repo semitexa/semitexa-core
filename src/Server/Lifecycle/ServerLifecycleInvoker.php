@@ -70,9 +70,18 @@ final class ServerLifecycleInvoker
                 return $container->get($meta['class']);
             }
 
-            return $container instanceof \Semitexa\Core\Container\SemitexaContainer
-                ? $container->resolve($meta['class'])
-                : null;
+            if (!$container instanceof \Semitexa\Core\Container\SemitexaContainer) {
+                return null;
+            }
+
+            $listener = $container->resolve($meta['class']);
+            // resolve() wires constructor params only; lifecycle listeners
+            // commonly use #[InjectAsReadonly] property injection, so apply
+            // the property channel here as well — same pattern as
+            // Semitexa\Core\Console\Application::instantiateCommand().
+            $container->injectInto($listener);
+
+            return $listener;
         }
 
         return $this->instantiateWithoutContainer($meta['class']);
