@@ -49,9 +49,31 @@ class ResourceResponse implements ResourceInterface, LayoutRenderableInterface
         return $this;
     }
 
+    private bool $alreadySent = false;
+
+    /**
+     * Mark this response as fully delivered to the transport.
+     *
+     * Used by handlers that take exclusive ownership of the raw Swoole
+     * Response (e.g. SseKissHandler streams headers + chunks + end() before
+     * returning). SwooleResponseEmitter sees this flag and skips its own
+     * status/header/end emission — preventing a double-end SIGSEGV on the
+     * same underlying Swoole Response.
+     */
+    public function markAsAlreadySent(): self
+    {
+        $this->alreadySent = true;
+        return $this;
+    }
+
+    public function isAlreadySent(): bool
+    {
+        return $this->alreadySent;
+    }
+
     public function toCoreResponse(): CoreResponse
     {
-        return new CoreResponse($this->content, $this->statusCode, $this->headers);
+        return new CoreResponse($this->content, $this->statusCode, $this->headers, $this->alreadySent);
     }
 
     // Redirect support
