@@ -17,6 +17,14 @@ final class SwooleResponseEmitter implements ResponseEmitterInterface
             );
         }
 
+        // alreadySent ⇒ a handler already took exclusive ownership of the raw
+        // Swoole Response (e.g. SSE streaming) and produced status, headers,
+        // body, and end() itself. Touching the Response again would race the
+        // freed connection state and SIGSEGV on Swoole 6.2.1.
+        if ($response->isAlreadySent()) {
+            return;
+        }
+
         $transport->status($response->getStatusCode());
 
         foreach ($response->getHeaders() as $name => $value) {
@@ -33,9 +41,7 @@ final class SwooleResponseEmitter implements ResponseEmitterInterface
             }
         }
 
-        if (!$response->isAlreadySent()) {
-            $transport->end($response->getContent());
-        }
+        $transport->end($response->getContent());
     }
 
     /**
