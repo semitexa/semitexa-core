@@ -12,17 +12,25 @@ if (in_array($argv[1] ?? '', ['server:start', 'server:restart'], true)) {
     semitexaPrebuildAutoload();
 }
 
-$dir = __DIR__;
+// Prefer the autoload path set by Composer's bin proxy. Required when this
+// script is reached via a symlink (path-repo, canonical or otherwise) — PHP's
+// __DIR__ resolves through symlinks and the walk-up below would otherwise
+// anchor in the package's source tree rather than the consuming project.
 $autoload = null;
-for ($i = 0; $i < 5; $i++) {
-    $candidate = $dir . '/vendor/autoload.php';
-    if (file_exists($candidate)) {
-        $autoload = $candidate;
-        break;
-    }
-    $dir = dirname($dir);
-    if ($dir === '/' || $dir === '') {
-        break;
+if (isset($GLOBALS['_composer_autoload_path']) && is_string($GLOBALS['_composer_autoload_path']) && file_exists($GLOBALS['_composer_autoload_path'])) {
+    $autoload = $GLOBALS['_composer_autoload_path'];
+} else {
+    $dir = __DIR__;
+    for ($i = 0; $i < 5; $i++) {
+        $candidate = $dir . '/vendor/autoload.php';
+        if (file_exists($candidate)) {
+            $autoload = $candidate;
+            break;
+        }
+        $dir = dirname($dir);
+        if ($dir === '/' || $dir === '') {
+            break;
+        }
     }
 }
 if ($autoload === null || !file_exists($autoload)) {
