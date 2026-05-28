@@ -48,7 +48,13 @@ class TestHandlerCommand extends BaseCommand
 
             // Test 2: RequestScopedContainer get()
             $io->section('Test 2: RequestScopedContainer->get()');
-            $requestScoped = ContainerFactory::getRequestScoped();
+            // Diagnostic-only: createRequestScoped() builds a fresh scope per
+            // call, which matches what runtime request handlers do (one scope
+            // per request). The previous getRequestScoped() API returned a
+            // memoized instance and was removed; for this diagnostic the
+            // distinction does not matter — we just need to resolve through
+            // the request-scoped path and inspect the result.
+            $requestScoped = ContainerFactory::createRequestScoped();
             try {
                 $handler2 = $requestScoped->get($handlerClass);
                 $io->success('✅ RequestScopedContainer->get() succeeded');
