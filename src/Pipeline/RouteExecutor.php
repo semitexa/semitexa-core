@@ -83,6 +83,12 @@ class RouteExecutor
                 ], HttpStatus::UnsupportedMediaType->value), $request, $metadata);
             }
 
+            // Multi-Modal API — Mode 4: an OPTIONS request to a payload route is
+            // a metadata probe, not an invocation. It runs the SAME pipeline
+            // (same payload, same auth) but skips body hydration/validation and
+            // is served by the generic OptionsMetadataHandler (see below).
+            $isOptions = strtoupper($request->getMethod()) === 'OPTIONS';
+
             // 1a. Create a bare payload instance (no request data yet).
             $reqDto = $this->createBarePayload($route);
 
@@ -90,16 +96,33 @@ class RouteExecutor
             //     a PreHydrationAuthGateInterface, it runs here so that protected
             //     routes reject unauthenticated requests BEFORE hydration or
             //     validation touches the request body. Public routes are a no-op.
+            //     OPTIONS is gated identically — its access model is inherited,
+            //     not bypassed.
             if ($this->container->has(PreHydrationAuthGateInterface::class)) {
                 /** @var PreHydrationAuthGateInterface $gate */
                 $gate = $this->container->get(PreHydrationAuthGateInterface::class);
                 $gate->gate($reqDto, $request, $this->authBootstrapper);
             }
 
-            // 1c. Hydrate and Validate
-            [$reqDto, $validationResponse] = $this->fillAndValidatePayload($reqDto, $request);
-            if ($validationResponse) {
-                return $this->decorateResponse($validationResponse, $request, $metadata);
+            // 1c. Hydrate and Validate — skipped for OPTIONS. The endpoint is
+            //     only being described, so the request body is irrelevant and a
+            //     payload's ValidatablePayloadInterface::validate() business
+            //     rules must not reject an (empty) OPTIONS probe. OPTIONS reports
+            //     type-level shape only; validate() is not reflected.
+            if (!$isOptions) {
+                [$reqDto, $validationResponse] = $this->fillAndValidatePayload($reqDto, $request);
+                if ($validationResponse) {
+                    return $this->decorateResponse($validationResponse, $request, $metadata);
+                }
+            }
+
+            // For OPTIONS, swap the resolved route for a variant whose sole
+            // handler is the generic OptionsMetadataHandler and whose response
+            // class is dropped (the handler writes the metadata JSON directly).
+            // requestClass + accessType are preserved so the AuthCheck phase
+            // still enforces this endpoint's own access model.
+            if ($isOptions) {
+                $route = $this->buildOptionsRoute($route);
             }
 
             // 2. Resolve Response DTO (Phase 3e: Accept-driven for multi-profile routes)
@@ -217,6 +240,41 @@ class RouteExecutor
         }
 
         return (new DefaultRouteResponseDecorator())->decorate($response, $request, $metadata);
+    }
+
+    /**
+     * Build the OPTIONS variant of a payload route (Multi-Modal API — Mode 4).
+     *
+     * Keeps the route's identity — `path`, `requestClass`, `accessType`,
+     * tenant scopes — so auth and routing behave exactly as the endpoint's
+     * other methods, but replaces the handler list with the single generic
+     * {@see OptionsMetadataHandler} and drops the response class + any
+     * multi-profile dispatch (the handler emits the metadata JSON itself).
+     */
+    private function buildOptionsRoute(DiscoveredRoute $route): DiscoveredRoute
+    {
+        return new DiscoveredRoute(
+            path: $route->path,
+            methods: $route->methods,
+            name: $route->name,
+            requestClass: $route->requestClass,
+            responseClass: null,
+            // 'execution' omitted → defaults to Sync in PipelineExecutor.
+            handlers: [['class' => OptionsMetadataHandler::class]],
+            type: $route->type,
+            transport: $route->transport,
+            produces: $route->produces,
+            consumes: $route->consumes,
+            module: $route->module,
+            requirements: $route->requirements,
+            defaults: $route->defaults,
+            options: $route->options,
+            tags: $route->tags,
+            accessType: $route->accessType,
+            tenantScopes: $route->tenantScopes,
+            renderProfile: null,
+            responsesByProfile: null,
+        );
     }
 
     /**
