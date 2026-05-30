@@ -21,6 +21,9 @@ use Semitexa\Core\Http\ContentNegotiator;
 use Semitexa\Core\Http\HttpStatus;
 use Semitexa\Core\Exception\DomainException;
 use Semitexa\Core\Exception\PipelineException;
+use Semitexa\Core\Exception\AccessDeniedException;
+use Semitexa\Core\Exception\AuthenticationException;
+use Semitexa\Core\Pipeline\ReRun\ReRunResult;
 use Semitexa\Core\Auth\AuthBootstrapperInterface;
 use Semitexa\Core\Contract\ExceptionResponseMapperInterface;
 use Semitexa\Core\Contract\RouteResponseDecoratorInterface;
@@ -162,6 +165,86 @@ class RouteExecutor
                 throw $e;
             }
             return $this->decorateResponse($exceptionMapper->map($e, $request, $metadata), $request, $metadata);
+        }
+    }
+
+    /**
+     * Re-run the full handler chain for an already-hydrated, cached request DTO
+     * (Track R · R2; design phase2 §B.3, track-r §B.2/§B.4). This is the heart of
+     * Shape 1 "re-run self-authorization": a frozen authorized request is replayed
+     * on demand, AUTH-FIRST, re-querying data under the recipient's *current*
+     * authorization, and either yields a freshly-resolved frame or TERMINATEs.
+     *
+     * It is {@see execute()} minus `createBarePayload()` + `fillAndValidatePayload()`
+     * (the DTO is already hydrated and validated — unchanged input is not re-parsed),
+     * but it KEEPS, in order:
+     *   1. the pre-hydration auth gate — fed the cached DTO, run BEFORE any data
+     *      resolution. Identity is resolved from $request (the rebuilt live session),
+     *      NEVER from $cachedDto (the anti-poisoning invariant);
+     *   2. a fresh {@see resolveResponseDto()} — a new Resource instance per run;
+     *   3. {@see PipelineExecutor::execute()} (AuthCheck → HandleRequest) — so the
+     *      AuthCheck-phase authorization listener re-authorizes the re-established
+     *      subject every run, before the route handlers (the data resolvers) run.
+     *
+     * A de-authorization on this tick — the pre-hydration gate or the AuthCheck phase
+     * throwing {@see AuthenticationException} / {@see AccessDeniedException} (logout,
+     * identity change, permission revoke) — short-circuits to TERMINATE: NO data
+     * frame is produced for a subject that just lost access, and because the gate
+     * runs first and the handlers run last, the data resolvers are never reached
+     * after a denial.
+     *
+     * Headless by construction: no HTTP, no SSE loop, no connect coordinator — the
+     * caller ({@see \Semitexa\Core\Pipeline\ReRun\ReRunnerInterface}) re-establishes
+     * the execution context and hands in the rebuilt request + cached DTO.
+     */
+    public function reExecute(DiscoveredRoute $route, Request $request, object $cachedDto): ReRunResult
+    {
+        try {
+            $metadata = $this->resolveRouteMetadata($route);
+
+            // 1. Pre-hydration auth gate — AUTH-FIRST, before any data resolution.
+            //    Fed the cached DTO for attribute resolution only; the subject is
+            //    resolved from $request (the live session), never from the DTO.
+            if ($this->container->has(PreHydrationAuthGateInterface::class)) {
+                /** @var PreHydrationAuthGateInterface $gate */
+                $gate = $this->container->get(PreHydrationAuthGateInterface::class);
+                $gate->gate($cachedDto, $request, $this->authBootstrapper);
+            }
+
+            // 2. Fresh response DTO (a new Resource instance per run). Hydration and
+            //    validation are intentionally skipped — the cached DTO already holds
+            //    the unchanged, validated request shape.
+            $resDto = $this->resolveResponseDto($route, $request);
+
+            // 3. Build context with the cached request DTO + fresh resource DTO.
+            $context = new RequestPipelineContext(
+                requestDto: $cachedDto,
+                route: $route,
+                request: $request,
+                resourceDto: $resDto,
+                authBootstrapper: $this->authBootstrapper,
+                resolvedMetadata: $metadata,
+            );
+
+            // 4. Execute the pipeline (AuthCheck → HandleRequest). The AuthCheck
+            //    phase re-authorizes the re-established subject before the route
+            //    handlers (data resolvers) run.
+            $pipelineExecutor = new PipelineExecutor($this->requestScopedContainer, $this->container);
+            $pipelineExecutor->execute($context);
+            $resDto = $context->resourceDto;
+            if (!is_object($resDto)) {
+                throw new PipelineException('Re-run pipeline did not produce a response DTO.');
+            }
+
+            // 5. Render the freshly-resolved Resource into the frame body.
+            $renderer = new ResponseRenderer();
+            $resDto = $renderer->render($resDto, $cachedDto, $request, $route);
+
+            return ReRunResult::frame($this->adaptResponse($resDto));
+        } catch (AuthenticationException|AccessDeniedException $e) {
+            // The subject is no longer authorized on this tick (logout / identity
+            // change / permission revoke). Terminate the stream — no data frame.
+            return ReRunResult::terminate($e->getMessage());
         }
     }
 
