@@ -36,11 +36,12 @@ enum SseGateModel
     case Subject;
 
     /**
-     * Gated in-handler by a signed channel token (platform-ui's HMAC
-     * `UiSseChannelToken`, verified before any stream lifecycle starts). The
-     * token carries authenticity + scope but no subject, so this is valid on a
-     * public route — the gate lives in the handler, not the auth pipeline.
-     * Used by `/__ui/stream`.
+     * Gated in-handler by a signed channel token that carries authenticity +
+     * scope but no subject, so it is valid on a public route — the gate lives in
+     * the handler, not the auth pipeline. Currently unused: the historical
+     * in-handler channel-token stream was retired when all UI streaming unified
+     * on the shared bearer/session SSE endpoint. Retained as a declarable gate
+     * model for any future in-handler-token stream.
      */
     case ChannelToken;
 
@@ -49,7 +50,7 @@ enum SseGateModel
      * `AsyncResourceSseServer::handleSse` (authenticated session OR safe bearer
      * session id OR the guest-safe deferred door, plus same-origin and
      * connection caps). Valid on a public route — the gate is in-server. Used by
-     * `/sse` and `/__semitexa_kiss`, which share one code path.
+     * `/__semitexa_kiss`.
      */
     case BearerSession;
 }

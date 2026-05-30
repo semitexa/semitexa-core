@@ -118,9 +118,9 @@ final class PayloadMetadataReflector
      * assertSseGateCoherence) does NOT force `access != Public` for SSE — a
      * public stream is legal when it declares an in-handler gate model
      * (SseGateModel::ChannelToken / ::BearerSession); only a Subject-gated stream
-     * must be non-public. Real SSE endpoints exist today and several are public:
-     * `/__ui/stream` (ChannelToken), `/sse` and `/__semitexa_kiss` (BearerSession).
-     * So this `sse` branch is live, not dormant. The `sse-update` sub-branch
+     * must be non-public. A real SSE endpoint exists today and is public:
+     * `/__semitexa_kiss` (BearerSession). So this `sse` branch is live, not
+     * dormant. The `sse-update` sub-branch
      * additionally depends on the (not-yet-existing) `#[LiveFilterParam]` marker
      * and is guarded accordingly.
      *

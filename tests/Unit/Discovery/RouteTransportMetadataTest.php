@@ -143,7 +143,7 @@ final class RouteTransportMetadataTest extends TestCase
     public function typed_route_metadata_keeps_transport_extension(): void
     {
         $route = DiscoveredRoute::fromArray([
-            'path' => '/sse',
+            'path' => '/events/stream',
             'methods' => ['GET'],
             'name' => 'events.stream',
             'class' => 'App\\Payload\\SsePayload',

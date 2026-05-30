@@ -55,7 +55,6 @@ final class AllRoutesRuntimeSmokeTest extends TestCase
      * @var array<string,string> path => reason
      */
     private const SKIP = [
-        '/sse'                => 'long-lived SSE stream; blocks the smoke loop. Covered by SsrPolygon deferred-render tests.',
         '/__semitexa_kiss'    => 'long-lived SSE keep-alive stream; would block.',
         '/__semitexa_hug'     => 'SSR fallback streamed via TransportType::Sse; would block.',
     ];
