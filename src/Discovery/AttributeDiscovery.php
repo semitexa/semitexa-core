@@ -9,7 +9,9 @@ use Semitexa\Core\Attribute\AsPayloadHandler;
 use Semitexa\Core\Attribute\AsPayloadPart;
 use Semitexa\Core\Attribute\AsResource;
 use Semitexa\Core\Attribute\AsResourcePart;
+use Semitexa\Core\Attribute\SseGateModel;
 use Semitexa\Core\Attribute\TransportType;
+use Semitexa\Core\Auth\PayloadAccessType;
 use Semitexa\Core\Config\EnvValueResolver;
 use Semitexa\Core\Environment;
 use Semitexa\Core\ModuleRegistry;
@@ -333,6 +335,10 @@ class AttributeDiscovery
                         'consumes' => $attr->consumes,
                         'produces' => $attr->produces,
                         'transport' => $attr->transport,
+                        // SSE gate-model axis (boot guard, see assertSseGateCoherence).
+                        // Read in this same IS_INSTANCEOF pass; threaded through the
+                        // override-merge so the selected route carries it.
+                        'sseGateModel' => $attr->sseGateModel,
                         // Phase 3e: multi-profile dispatch metadata. Both fields
                         // pass through unchanged — RouteExecutor + dispatcher
                         // consume them at request time.
@@ -423,7 +429,7 @@ class AttributeDiscovery
             }
 
             // Framework-reserved path validation
-            $reservedPaths = ['/__semitexa_kiss', '/__semitexa_hug', '/__semitexa_sse'];
+            $reservedPaths = ['/__semitexa_kiss', '/__semitexa_hug'];
             $normalizedPath = rtrim($resolved['path'], '/');
             if (in_array($normalizedPath, $reservedPaths, true)
                 && !str_starts_with($class, 'Semitexa\\Ssr\\')
@@ -438,6 +444,21 @@ class AttributeDiscovery
             $transportValue = $transport instanceof TransportType
                 ? $transport->value
                 : (is_string($transport) && $transport !== '' ? $transport : TransportType::Http->value);
+
+            // SSE boot guard — keys on the transport: Sse declaration. Thrown
+            // here (the override-resolved, routed candidate, outside any
+            // try/catch) it propagates as a hard boot failure, alongside the
+            // adjacent reserved-path ConflictException.
+            $accessType = $resolved['accessType'] ?? null;
+            if ($accessType instanceof PayloadAccessType) {
+                self::assertSseGateCoherence(
+                    $transportValue,
+                    $resolved['sseGateModel'] ?? null,
+                    $accessType,
+                    $class,
+                );
+            }
+
             $this->routeRegistry->register([
                 'path' => $resolved['path'],
                 'methods' => $resolved['methods'],
@@ -462,6 +483,59 @@ class AttributeDiscovery
                 'renderProfile' => $resolved['renderProfile'] ?? null,
                 'responsesByProfile' => $resolved['responsesByProfile'] ?? null,
             ]);
+        }
+    }
+
+    /**
+     * SSE boot guard (discovery-time, not runtime).
+     *
+     * Reformulated rule (PROMPTs 16–20): an SSE endpoint must declare a provable
+     * authorization gate model. The discriminator is the *presence* of a declared
+     * fact, not inference of behavior — so the guard is neither theater (an
+     * ungated public stream declares nothing → fails) nor false-fail (a legitimate
+     * token/bearer-gated public stream declares its in-handler model → passes).
+     *
+     * It keys on `transport: TransportType::Sse` (broader `produces` would still
+     * miss `/__semitexa_kiss`, which therefore must also declare the flag). Both
+     * inputs beyond the gate model are core types — no authorization dependency.
+     *
+     *  - SSE + no gate model            → boot-fail (the coverage hole).
+     *  - SseGateModel::Subject + Public → boot-fail (a Subject gate re-authorizes
+     *                                     the session subject; a public endpoint
+     *                                     has none).
+     *  - ChannelToken / BearerSession on a public route → pass (gate is in-handler).
+     *
+     * @throws ConfigurationException
+     */
+    private static function assertSseGateCoherence(
+        string $transportValue,
+        ?SseGateModel $sseGateModel,
+        PayloadAccessType $accessType,
+        string $className,
+    ): void {
+        $isSse = $transportValue === TransportType::Sse->value;
+
+        if ($isSse && $sseGateModel === null) {
+            throw new ConfigurationException(sprintf(
+                'Payload %s declares transport: TransportType::Sse but no sseGateModel. '
+                . 'Every SSE endpoint must declare a provable authorization gate model '
+                . '(sseGateModel: SseGateModel::Subject, ::ChannelToken, or ::BearerSession) '
+                . 'so the boot guard can prove the stream is gated rather than silently ungated. '
+                . 'Use ::Subject for a subject-re-authorized stream, or ::ChannelToken / '
+                . '::BearerSession for an in-handler-gated public stream.',
+                $className,
+            ));
+        }
+
+        if ($sseGateModel === SseGateModel::Subject && $accessType === PayloadAccessType::Public) {
+            throw new ConfigurationException(sprintf(
+                'Payload %s declares sseGateModel: SseGateModel::Subject but is #[AsPublicPayload]. '
+                . 'A Subject gate re-authorizes the session subject on every tick and a public '
+                . 'endpoint has no subject to re-authorize. Use #[AsProtectedPayload] or '
+                . '#[AsServicePayload], or declare an in-handler gate model '
+                . '(SseGateModel::ChannelToken / ::BearerSession).',
+                $className,
+            ));
         }
     }
 
@@ -727,7 +801,7 @@ class AttributeDiscovery
     private static function mergeRequestAttributes(array $base, array $override): array
     {
         $result = $base;
-        foreach (['path','methods','name','requirements','defaults','options','tags','accessType','responseWith','consumes','produces','transport','renderProfile','responsesByProfile'] as $key) {
+        foreach (['path','methods','name','requirements','defaults','options','tags','accessType','responseWith','consumes','produces','transport','sseGateModel','renderProfile','responsesByProfile'] as $key) {
             if (($override[$key] ?? null) !== null) {
                 $result[$key] = $override[$key];
             }
@@ -758,6 +832,9 @@ class AttributeDiscovery
             'consumes' => $attr['consumes'] ?? null,
             'produces' => $attr['produces'] ?? null,
             'transport' => $attr['transport'] ?? TransportType::Http,
+            // SSE gate-model axis — passed through unchanged (null when unset).
+            // The boot guard (assertSseGateCoherence) reads it off the resolved route.
+            'sseGateModel' => $attr['sseGateModel'] ?? null,
             // Phase 3e: forwarded as-is from the source attribute. null when
             // unset (single-profile / no negotiation).
             'renderProfile' => $attr['renderProfile'] ?? null,

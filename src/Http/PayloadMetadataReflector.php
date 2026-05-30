@@ -109,16 +109,20 @@ final class PayloadMetadataReflector
      * hard-coded:
      *
      *   modes = ["plain"]                  // every routable payload supports Mode 1
-     *   if transport === Sse:              // boot guard guarantees access != Public here
+     *   if transport === Sse:
      *       modes += ["sse"]               // Mode 2 connect
      *       if any field carries #[LiveFilterParam]:
      *           modes += ["sse-update"]    // Mode 3 filter-update
      *
-     * Today no endpoint declares `transport: Sse`, so the `sse` branch is
-     * dormant but present and correct — it lights up the moment a Phase 2
-     * endpoint declares SSE. The `sse-update` sub-branch additionally depends
-     * on the (not-yet-existing) `#[LiveFilterParam]` marker and is guarded
-     * accordingly.
+     * The SSE boot guard ({@see \Semitexa\Core\Discovery\AttributeDiscovery}
+     * assertSseGateCoherence) does NOT force `access != Public` for SSE — a
+     * public stream is legal when it declares an in-handler gate model
+     * (SseGateModel::ChannelToken / ::BearerSession); only a Subject-gated stream
+     * must be non-public. Real SSE endpoints exist today and several are public:
+     * `/__ui/stream` (ChannelToken), `/sse` and `/__semitexa_kiss` (BearerSession).
+     * So this `sse` branch is live, not dormant. The `sse-update` sub-branch
+     * additionally depends on the (not-yet-existing) `#[LiveFilterParam]` marker
+     * and is guarded accordingly.
      *
      * @return list<string>
      */
