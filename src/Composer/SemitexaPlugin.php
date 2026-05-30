@@ -43,7 +43,97 @@ final class SemitexaPlugin implements PluginInterface, EventSubscriberInterface
         return [
             ScriptEvents::POST_INSTALL_CMD => ['onPostInstallOrUpdate', 0],
             ScriptEvents::POST_UPDATE_CMD => ['onPostInstallOrUpdate', 0],
+            ScriptEvents::PRE_AUTOLOAD_DUMP => ['onPreAutoloadDump', 0],
         ];
+    }
+
+    /**
+     * Single source of truth for test PSR-4 namespaces.
+     *
+     * Derives the `Semitexa\<Module>\Tests\ → packages/semitexa-<module>/tests/`
+     * dev-autoload map from on-disk `packages/*\/tests` at every autoload dump,
+     * so it tracks reality and cannot drift like a hand-maintained list. Runs on
+     * install, update, AND bare `composer dump-autoload`.
+     *
+     * Fixture-gated: a package gets a PSR-4 entry ONLY when its tests dir holds a
+     * non-`*Test.php` PHP class (a Fixture / shared base class loaded by FQCN).
+     * Packages whose tests are only `*Test.php` need no PSR-4 — PHPUnit's
+     * directory scan requires those files directly — so they are intentionally
+     * omitted. This drops the vestigial/stale entries (e.g. ssr, blockchain,
+     * ledger) and auto-includes any package the moment it grows a real fixture.
+     */
+    public function onPreAutoloadDump(Event $event): void
+    {
+        $root = \dirname($this->composer->getConfig()->get('vendor-dir'));
+        $packagesDir = $root . '/packages';
+        if (!\is_dir($packagesDir)) {
+            return;
+        }
+
+        $map = [];
+        $dirs = glob($packagesDir . '/semitexa-*/tests', GLOB_ONLYDIR) ?: [];
+        foreach ($dirs as $testsDir) {
+            if (!$this->testsDirHasFixtures($testsDir)) {
+                continue;
+            }
+            $packageDir = \basename(\dirname($testsDir));
+            $namespace = 'Semitexa\\' . $this->studlyModule($packageDir) . '\\Tests\\';
+            $map[$namespace] = 'packages/' . $packageDir . '/tests/';
+        }
+
+        if ($map === []) {
+            return;
+        }
+
+        ksort($map);
+
+        $package = $this->composer->getPackage();
+        $devAutoload = $package->getDevAutoload();
+        $devAutoload['psr-4'] = array_merge($devAutoload['psr-4'] ?? [], $map);
+        $package->setDevAutoload($devAutoload);
+
+        $this->io->write(sprintf(
+            '<info>Semitexa: generated %d test PSR-4 namespace(s) from packages/*/tests</info>',
+            \count($map),
+        ));
+    }
+
+    /**
+     * True when the tests dir contains at least one PHP file that is NOT a
+     * `*Test.php` test case — i.e. a Fixture or shared base class that can only
+     * be loaded by FQCN and therefore needs a PSR-4 entry.
+     */
+    private function testsDirHasFixtures(string $testsDir): bool
+    {
+        $iterator = new \RecursiveIteratorIterator(
+            new \RecursiveDirectoryIterator($testsDir, \FilesystemIterator::SKIP_DOTS),
+        );
+        foreach ($iterator as $file) {
+            if (!$file->isFile()) {
+                continue;
+            }
+            $name = $file->getFilename();
+            if (\substr($name, -4) !== '.php') {
+                continue;
+            }
+            if (\substr($name, -8) === 'Test.php') {
+                continue;
+            }
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * `semitexa-project-graph` → `ProjectGraph`, `semitexa-api` → `Api`.
+     */
+    private function studlyModule(string $packageDir): string
+    {
+        $module = \substr($packageDir, \strlen('semitexa-'));
+        $parts = explode('-', $module);
+
+        return implode('', array_map('ucfirst', $parts));
     }
 
     public function onPostInstallOrUpdate(Event $event): void
