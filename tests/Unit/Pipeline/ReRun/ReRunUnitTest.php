@@ -30,6 +30,10 @@ use Semitexa\Core\Tenant\Layer\TenantLayerInterface;
 use Semitexa\Core\Tenant\Layer\TenantLayerValueInterface;
 use Semitexa\Core\Tenant\TenantContextInterface;
 use Semitexa\Core\Tenant\TenantContextStoreInterface;
+use Semitexa\Core\Tenant\DefaultTenantContextStore;
+use Semitexa\Core\Tenant\TenancyBootstrapperInterface;
+use Semitexa\Core\Container\ExecutionContext;
+use Semitexa\Core\Container\ExecutionContextAwareContainerInterface;
 
 /**
  * Track R · R2 — the core re-run unit, proven HEADLESS (no HTTP, no SSE loop, no
@@ -41,6 +45,26 @@ use Semitexa\Core\Tenant\TenantContextStoreInterface;
  */
 final class ReRunUnitTest extends TestCase
 {
+    private string|false $redisHostBefore = false;
+
+    protected function setUp(): void
+    {
+        // Force SessionPhase's no-Redis branch so the re-run's execution-context
+        // establishment (Track R · R8c-2 / Gap A) uses the SwooleTable session
+        // handler, which reads as an empty session when no table is set — i.e. a
+        // headless establish with no Redis dependency in the unit.
+        $this->redisHostBefore = getenv('REDIS_HOST');
+        putenv('REDIS_HOST=');
+    }
+
+    protected function tearDown(): void
+    {
+        if ($this->redisHostBefore === false) {
+            putenv('REDIS_HOST');
+        } else {
+            putenv('REDIS_HOST=' . $this->redisHostBefore);
+        }
+    }
     /**
      * Proof 1 — a cached DTO re-executed re-runs the chain and returns a FRESHLY
      * re-queried frame, not the stale cached value. Re-running again yields a new
@@ -235,13 +259,83 @@ final class ReRunUnitTest extends TestCase
         [$reRunner] = $this->makeReRunner(
             handler: new ReRunSpyHandler(new ReRunCounter()),
             sessionSubjects: ['sid-alice' => 'alice'],
-            extraBindings: [TenantContextStoreInterface::class => $store],
+            // Tenancy ENABLED models production: the re-run's execution-context
+            // establishment (SessionPhase) then re-reads the immutable-block tenant
+            // RouteReRunner primed into the store rather than clearing it (the
+            // clear only happens for a genuinely tenancy-disabled app).
+            extraBindings: [
+                TenantContextStoreInterface::class    => $store,
+                TenancyBootstrapperInterface::class   => new ReRunFakeEnabledTenancy(),
+            ],
         );
 
         $context = $this->makeContext(cookies: ['sid' => 'sid-alice'], tenant: $tenant);
         $reRunner->reRun($context);
 
         $this->assertSame($tenant, $store->lastSet, 'Tenant context is re-established from the immutable block.');
+    }
+
+    /**
+     * Track R · R8c-2 / Gap A regression — the re-run must ESTABLISH the request-scoped
+     * execution context before the pipeline runs, so an execution-scoped pipeline
+     * listener (the live regression was platform-ui's ResetPlatformUiSseSessionListener
+     * on the AuthCheck phase) resolves instead of throwing
+     * {@see \Semitexa\Core\Container\Exception\ExecutionContextNotReadyException}.
+     *
+     * This test closes BOTH blind spots that hid the bug from the original R2 suite:
+     *
+     *  1. It uses an execution-scope-AWARE container ({@see ReRunExecutionScopeAwareContainer})
+     *     so {@see RequestScopedContainer}'s readiness guard actually fires in a unit —
+     *     the old fakes were plain PSR containers, so the guard (which used to hard-bind
+     *     to the concrete SemitexaContainer) never triggered.
+     *  2. It registers a genuinely execution-scoped AuthCheck listener — the old suite
+     *     only ever registered plain non-scoped listeners, so nothing demanded the
+     *     execution context.
+     *
+     * Without the fix, resolving the listener throws before SessionPhase establishes the
+     * context and the whole re-run aborts (no frame); with the fix, reExecute establishes
+     * the context (after the auth gate, never from the cached DTO) and the listener
+     * resolves and runs.
+     */
+    public function testReRunEstablishesExecutionContextSoExecutionScopedListenersResolve(): void
+    {
+        $listener = new ReRunExecScopedAuthCheckListener();
+        $handler = new ReRunSpyHandler(new ReRunCounter());
+
+        $bindings = [
+            PreHydrationAuthGateInterface::class       => new ReRunFakeAuthGate(['sid-alice' => 'alice']),
+            PipelineListenerRegistry::class            => new ReRunStubListenerRegistry([
+                AuthCheck::class => [[
+                    'class'    => ReRunExecScopedAuthCheckListener::class,
+                    'phase'    => AuthCheck::class,
+                    'priority' => -1000,
+                ]],
+            ]),
+            AttributeDiscovery::class                  => new AttributeDiscovery(new ClassDiscovery(), new ModuleRegistry(), new RouteRegistry()),
+            PayloadPartRegistry::class                 => new PayloadPartRegistry(),
+            ReRunSpyHandler::class                     => $handler,
+            ReRunExecScopedAuthCheckListener::class    => $listener,
+            // Present so reExecute's establish-only SessionPhase can be built.
+            TenantContextStoreInterface::class         => new DefaultTenantContextStore(),
+        ];
+
+        $inner = new ReRunExecutionScopeAwareContainer(
+            $bindings,
+            [ReRunExecScopedAuthCheckListener::class => true], // <- the listener is execution-scoped
+        );
+        $rsc = new RequestScopedContainer($inner);
+        $reRunner = new RouteReRunner(new RouteExecutor($rsc, $inner), $inner);
+
+        // Sanity: the context is NOT ready before the re-run (no trio set yet).
+        $this->assertFalse($rsc->isExecutionContextReady());
+
+        $result = $reRunner->reRun($this->makeContext(cookies: ['sid' => 'sid-alice']));
+
+        // The fix established the execution context, so the execution-scoped listener
+        // resolved and ran, and a fresh frame was produced (not aborted).
+        $this->assertTrue($rsc->isExecutionContextReady(), 'Re-run must establish the request-scoped execution context.');
+        $this->assertTrue($listener->ran, 'The execution-scoped AuthCheck listener must resolve and run after establishment.');
+        $this->assertInstanceOf(HttpResponse::class, $result->getFrame(), 'A fresh frame is produced after establishment.');
     }
 
     // ---- harness ---------------------------------------------------------------
@@ -353,6 +447,78 @@ final class ReRunArrayContainer implements ContainerInterface
         }
 
         return $this->bindings[$id];
+    }
+}
+
+/** A tenancy bootstrapper that reports tenancy ENABLED (models production). */
+final class ReRunFakeEnabledTenancy implements TenancyBootstrapperInterface
+{
+    public function isEnabled(): bool
+    {
+        return true;
+    }
+
+    public function resolve(Request $request): ?HttpResponse
+    {
+        return null;
+    }
+}
+
+/**
+ * An execution-scoped AuthCheck-phase listener. Resolving it through a
+ * {@see RequestScopedContainer} before the execution context is established throws
+ * {@see \Semitexa\Core\Container\Exception\ExecutionContextNotReadyException} — it
+ * models platform-ui's ResetPlatformUiSseSessionListener (the live Gap A regression)
+ * without the platform-ui dependency.
+ */
+final class ReRunExecScopedAuthCheckListener
+{
+    public bool $ran = false;
+
+    public function handle(RequestPipelineContext $context): void
+    {
+        $this->ran = true;
+    }
+}
+
+/**
+ * Like {@see ReRunArrayContainer} but execution-scope-AWARE: it implements
+ * {@see ExecutionContextAwareContainerInterface} so {@see RequestScopedContainer}'s
+ * readiness guard fires in a unit (a plain PSR fake could never trigger it — the
+ * original blind spot that hid Track R · Gap A from the R2 suite).
+ */
+final class ReRunExecutionScopeAwareContainer implements ContainerInterface, ExecutionContextAwareContainerInterface
+{
+    private ?ExecutionContext $executionContext = null;
+
+    /**
+     * @param array<string, object> $bindings
+     * @param array<string, bool>   $executionScoped
+     */
+    public function __construct(private array $bindings = [], private array $executionScoped = []) {}
+
+    public function has(string $id): bool
+    {
+        return isset($this->bindings[$id]);
+    }
+
+    public function get(string $id): mixed
+    {
+        if (!isset($this->bindings[$id])) {
+            throw new class ("No binding for {$id}") extends \RuntimeException implements NotFoundExceptionInterface {};
+        }
+
+        return $this->bindings[$id];
+    }
+
+    public function setExecutionContext(ExecutionContext $context): void
+    {
+        $this->executionContext = $context;
+    }
+
+    public function isExecutionScoped(string $id): bool
+    {
+        return $this->executionScoped[$id] ?? false;
     }
 }
 

@@ -24,6 +24,11 @@ use Semitexa\Core\Exception\PipelineException;
 use Semitexa\Core\Exception\AccessDeniedException;
 use Semitexa\Core\Exception\AuthenticationException;
 use Semitexa\Core\Pipeline\ReRun\ReRunResult;
+use Semitexa\Core\Lifecycle\SessionPhase;
+use Semitexa\Core\Lifecycle\RequestLifecycleContext;
+use Semitexa\Core\Log\FallbackErrorLogger;
+use Semitexa\Core\Tenant\TenantContextStoreInterface;
+use Semitexa\Core\Tenant\TenancyBootstrapperInterface;
 use Semitexa\Core\Auth\AuthBootstrapperInterface;
 use Semitexa\Core\Contract\ExceptionResponseMapperInterface;
 use Semitexa\Core\Contract\RouteResponseDecoratorInterface;
@@ -195,7 +200,11 @@ class RouteExecutor
      *
      * Headless by construction: no HTTP, no SSE loop, no connect coordinator — the
      * caller ({@see \Semitexa\Core\Pipeline\ReRun\ReRunnerInterface}) re-establishes
-     * the execution context and hands in the rebuilt request + cached DTO.
+     * the immutable tenant block and hands in the rebuilt request + cached DTO; the
+     * request-scoped execution context (Session / CookieJar / Request trio + live
+     * tenant/auth/locale) is re-established HERE via {@see establishReRunExecutionContext()},
+     * after the auth gate and before the pipeline, so execution-scoped pipeline
+     * listeners resolve (Track R · R8c-2 / Gap A).
      */
     public function reExecute(DiscoveredRoute $route, Request $request, object $cachedDto): ReRunResult
     {
@@ -210,6 +219,21 @@ class RouteExecutor
                 $gate = $this->container->get(PreHydrationAuthGateInterface::class);
                 $gate->gate($cachedDto, $request, $this->authBootstrapper);
             }
+
+            // 1b. Re-establish the execution context (Track R · R8c-2 / Gap A).
+            //     The held-open re-run skips the normal lifecycle SessionPhase, so the
+            //     request-scoped trio (Request / Session / CookieJar) is never set into
+            //     the RequestScopedContainer and `isExecutionContextReady()` stays
+            //     false — any execution-scoped pipeline listener resolved during the
+            //     AuthCheck/HandleRequest phases (e.g. ResetPlatformUiSseSessionListener)
+            //     then throws ExecutionContextNotReadyException and the whole re-run
+            //     aborts with no frame. Run SessionPhase's establish-only path here —
+            //     AFTER the auth gate (so the session it loads carries the freshly
+            //     re-resolved live subject, never the cached DTO) and BEFORE the
+            //     pipeline. SessionPhase::finalize() (session persist + Set-Cookie) is
+            //     intentionally NOT run: a re-run tick is headless and must not mutate
+            //     the stored session or emit cookies.
+            $this->establishReRunExecutionContext($request);
 
             // 2. Fresh response DTO (a new Resource instance per run). Hydration and
             //    validation are intentionally skipped — the cached DTO already holds
@@ -245,6 +269,54 @@ class RouteExecutor
             // The subject is no longer authorized on this tick (logout / identity
             // change / permission revoke). Terminate the stream — no data frame.
             return ReRunResult::terminate($e->getMessage());
+        }
+    }
+
+    /**
+     * Establish the execution context for a re-run tick by running SessionPhase's
+     * establish-only path (its `execute()`, NOT `finalize()`) against the rebuilt
+     * request. SessionPhase sets the request-scoped trio (Session / CookieJar /
+     * Request) — which flips {@see RequestScopedContainer::isExecutionContextReady()}
+     * to true — plus the live tenant / auth / locale contexts (auth resolved fresh
+     * from the session, never the cached DTO; this runs AFTER the pre-hydration auth
+     * gate has already re-resolved the live subject). Without it, execution-scoped
+     * pipeline listeners throw {@see \Semitexa\Core\Container\Exception\ExecutionContextNotReadyException}.
+     *
+     * Fail-soft by design: when the container cannot supply a tenant store (a minimal
+     * / no-tenancy / unit container) or SessionPhase cannot build a session handler,
+     * establishment is skipped and logged rather than thrown — the re-run then behaves
+     * exactly as it did before this method existed (it may still trip an
+     * execution-scoped listener, but is never made WORSE), so this can never turn a
+     * working re-run into a failing one. Production (a real session handler +
+     * DefaultTenantContextStore bound) takes the success path.
+     */
+    private function establishReRunExecutionContext(Request $request): void
+    {
+        if (!$this->container->has(TenantContextStoreInterface::class)) {
+            return;
+        }
+
+        try {
+            /** @var TenantContextStoreInterface $tenantStore */
+            $tenantStore = $this->container->get(TenantContextStoreInterface::class);
+            $tenancy = $this->container->has(TenancyBootstrapperInterface::class)
+                ? $this->container->get(TenancyBootstrapperInterface::class)
+                : null;
+
+            $sessionPhase = new SessionPhase(
+                $this->container,
+                $this->requestScopedContainer,
+                $tenantStore,
+                $tenancy instanceof TenancyBootstrapperInterface ? $tenancy : null,
+            );
+            // execute() only — NEVER finalize() (no session persist, no Set-Cookie).
+            $sessionPhase->execute(new RequestLifecycleContext($request));
+        } catch (\Throwable $e) {
+            FallbackErrorLogger::log('Track R re-run execution-context establishment failed', [
+                'path' => $request->getPath(),
+                'exception' => $e::class,
+                'message' => $e->getMessage(),
+            ]);
         }
     }
 

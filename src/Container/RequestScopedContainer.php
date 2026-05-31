@@ -42,7 +42,7 @@ class RequestScopedContainer implements ContainerInterface
 
     private function updateExecutionContext(): void
     {
-        if (!$this->container instanceof SemitexaContainer) {
+        if (!$this->container instanceof ExecutionContextAwareContainerInterface) {
             return;
         }
         $request = $this->requestScopedCache[Request::class] ?? null;
@@ -112,7 +112,7 @@ class RequestScopedContainer implements ContainerInterface
             throw new ContainerException("{$id} is not set. Ensure Application initializes session, cookies, and request at request start.");
         }
 
-        if (!$this->executionContextSet && $this->container instanceof SemitexaContainer
+        if (!$this->executionContextSet && $this->container instanceof ExecutionContextAwareContainerInterface
             && $this->container->isExecutionScoped($id)) {
             throw new ExecutionContextNotReadyException($id);
         }
