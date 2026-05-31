@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Semitexa\Core\Container;
 
 use Psr\Container\ContainerInterface;
+use Semitexa\Core\Event\EventDispatcherInterface;
 use Semitexa\Core\Redis\RedisConnectionPool;
 
 /**
@@ -48,6 +49,23 @@ class ContainerFactory
 
         $connectionRegistry = new \Semitexa\Orm\Application\Service\Connection\ConnectionRegistry();
         $container->set(\Semitexa\Orm\Application\Service\Connection\ConnectionRegistry::class, $connectionRegistry);
+
+        // Track R origin-half: wire the real EventDispatcher into EVERY default OrmManager.
+        // The dispatcher is a discovered service that only resolves after build(), but the
+        // default OrmManager is constructed here (pre-build) — so we register a LAZY resolver
+        // that is invoked at first-write-engine construction (post-build). This single seam
+        // covers both the explicit ConnectionRegistry::manager() instance below AND any bare
+        // `new OrmManager()` repository fallback, so no default write path is a silent no-op.
+        \Semitexa\Orm\OrmManager::setDefaultEventDispatcherResolver(
+            static function () use ($container): ?EventDispatcherInterface {
+                if (!$container->has(EventDispatcherInterface::class)) {
+                    return null;
+                }
+                $dispatcher = $container->get(EventDispatcherInterface::class);
+
+                return $dispatcher instanceof EventDispatcherInterface ? $dispatcher : null;
+            },
+        );
 
         // Default connection — backward compatible with existing OrmManager injection
         $orm = $connectionRegistry->manager('default');
