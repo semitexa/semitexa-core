@@ -36,7 +36,7 @@ final class RouteReRunner implements ReRunnerInterface
         private readonly ContainerInterface $container,
     ) {}
 
-    public function reRun(ReRunContext $context): ReRunResult
+    public function reRun(ReRunContext $context, array $filterOverride = []): ReRunResult
     {
         // 1. Re-establish tenant context from the IMMUTABLE block (never the DTO).
         //    No-op when the stream ran under the default/guest tenant or no tenant
@@ -59,13 +59,17 @@ final class RouteReRunner implements ReRunnerInterface
         }
 
         // 3. Rebuild the auth-bearing request from the connect-time snapshot and
-        //    re-run the chain auth-first with the cached DTO (Strategy A).
+        //    re-run the chain auth-first with the cached DTO (Strategy A). The
+        //    view-change filter override (if any) is forwarded to reExecute, which
+        //    applies it FILTER-ONLY (marker-gated) AFTER the auth gate — never here,
+        //    so identity re-resolution cannot see it.
         $request = $context->rebuildRequest();
 
         return $this->routeExecutor->reExecute(
             $context->getRoute(),
             $request,
             $context->getCachedDto(),
+            $filterOverride,
         );
     }
 }

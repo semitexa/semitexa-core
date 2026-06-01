@@ -24,9 +24,20 @@ interface ReRunnerInterface
     /**
      * Re-run the frozen authorized request described by $context.
      *
+     * @param array<string, mixed> $filterOverride a view-change command's new view
+     *                     params (page / limit / sort / filter). FILTER-ONLY by
+     *                     construction: only fields the cached DTO marks
+     *                     {@see \Semitexa\Core\Attribute\LiveFilterParam} can be
+     *                     overridden ({@see LiveFilterParamOverride}); identity /
+     *                     session / tenant fields are not marked and are therefore
+     *                     structurally un-overridable — identity still resolves from
+     *                     the live session (the R2 anti-poisoning invariant). Empty
+     *                     (the default, a mutation-driven re-run) means "no override —
+     *                     re-run the cached DTO verbatim", byte-identical to before
+     *                     a view-change command existed.
      * @return ReRunResult a fresh frame when the subject is still authorized, or a
      *                     TERMINATE signal when it is not (no data frame is produced
      *                     for a de-authorized subject).
      */
-    public function reRun(ReRunContext $context): ReRunResult;
+    public function reRun(ReRunContext $context, array $filterOverride = []): ReRunResult;
 }

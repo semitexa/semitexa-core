@@ -206,7 +206,7 @@ class RouteExecutor
      * after the auth gate and before the pipeline, so execution-scoped pipeline
      * listeners resolve (Track R · R8c-2 / Gap A).
      */
-    public function reExecute(DiscoveredRoute $route, Request $request, object $cachedDto): ReRunResult
+    public function reExecute(DiscoveredRoute $route, Request $request, object $cachedDto, array $filterOverride = []): ReRunResult
     {
         try {
             $metadata = $this->resolveRouteMetadata($route);
@@ -234,6 +234,26 @@ class RouteExecutor
             //     intentionally NOT run: a re-run tick is headless and must not mutate
             //     the stored session or emit cookies.
             $this->establishReRunExecutionContext($request);
+
+            // 1c. FILTER-ONLY view-change override (Intended Grid Model · Phase 2).
+            //     A view-change command's new view params are merged onto the cached
+            //     DTO HERE — AFTER the auth gate (step 1) and the execution-context
+            //     re-establishment (step 1b) have already re-resolved identity from
+            //     the live session, so the override can never influence WHO the
+            //     re-run authorizes as. The merge is structurally filter-only: only
+            //     fields the DTO marks #[LiveFilterParam] are writable; identity /
+            //     session / tenant fields are unmarked and therefore un-overridable
+            //     by construction (the R2 anti-poisoning invariant). Empty override
+            //     (a mutation-driven re-run) is a no-op — the cached DTO is used
+            //     verbatim, byte-identical to before view-change commands existed.
+            if ($filterOverride !== []) {
+                $applied = ReRun\LiveFilterParamOverride::apply($cachedDto, $filterOverride);
+                FallbackErrorLogger::log('Track R view-change filter override applied', [
+                    'path' => $request->getPath(),
+                    'applied' => $applied['applied'],
+                    'ignored' => $applied['ignored'],
+                ]);
+            }
 
             // 2. Fresh response DTO (a new Resource instance per run). Hydration and
             //    validation are intentionally skipped — the cached DTO already holds
