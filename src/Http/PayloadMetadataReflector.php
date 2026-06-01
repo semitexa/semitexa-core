@@ -8,6 +8,7 @@ use ReflectionAttribute;
 use ReflectionClass;
 use ReflectionNamedType;
 use Semitexa\Core\Attribute\AbstractPayloadRoute;
+use Semitexa\Core\Attribute\SseGateModel;
 use Semitexa\Core\Attribute\TransportType;
 
 /**
@@ -36,12 +37,13 @@ use Semitexa\Core\Attribute\TransportType;
 final class PayloadMetadataReflector
 {
     /**
-     * Phase 2 anchor: the property/parameter marker that names Mode-3-mutable
-     * filter fields. It does not exist yet (Phase 1 is OPTIONS-only). The
-     * `modes`/`fields` derivations below guard on `class_exists` against this
-     * FQCN, so the `sse-update` mode and the per-field `filter` flag stay
-     * dormant today and light up automatically when Phase 2 ships the
-     * attribute — no edit to this reflector required.
+     * The property/parameter marker that names Mode-3-mutable filter fields
+     * ({@see \Semitexa\Core\Attribute\LiveFilterParam}). Introduced in Phase 1
+     * (advertisement only — the view-change command intake + filter-only re-run
+     * that HONOR it are Phase 2). The `modes`/`fields` derivations below still
+     * guard on `class_exists` against this FQCN, so the `sse-update` mode and the
+     * per-field `filter` flag light up only for payloads that actually carry the
+     * marker, and the reflector stays decoupled from where the marker is applied.
      */
     private const LIVE_FILTER_PARAM_ATTRIBUTE = 'Semitexa\\Core\\Attribute\\LiveFilterParam';
 
@@ -94,6 +96,15 @@ final class PayloadMetadataReflector
             // fields simply do not appear.
         ];
 
+        // `sseGateModel` — surfaced so an SSE client can read, on init, HOW the
+        // held-open stream is gated (BearerSession / ChannelToken / Subject). The
+        // field is a non-backed enum; advertise its case name. Present only when
+        // the route declares it (i.e. SSE routes); forward-compatible — a route
+        // without a gate model simply omits the key.
+        if ($route?->sseGateModel instanceof SseGateModel) {
+            $document['sseGateModel'] = $route->sseGateModel->name;
+        }
+
         self::$cache[$payloadClass] = $document;
 
         return $document;
@@ -120,9 +131,9 @@ final class PayloadMetadataReflector
      * (SseGateModel::ChannelToken / ::BearerSession); only a Subject-gated stream
      * must be non-public. A real SSE endpoint exists today and is public:
      * `/__semitexa_kiss` (BearerSession). So this `sse` branch is live, not
-     * dormant. The `sse-update` sub-branch
-     * additionally depends on the (not-yet-existing) `#[LiveFilterParam]` marker
-     * and is guarded accordingly.
+     * dormant. The `sse-update` sub-branch additionally depends on the
+     * `#[LiveFilterParam]` marker being present on at least one field, and is
+     * guarded accordingly — so it is advertised only for payloads that opt in.
      *
      * @return list<string>
      */
@@ -181,8 +192,10 @@ final class PayloadMetadataReflector
      *   2. Public properties — for DTOs exposing fields directly.
      *
      * `required = !nullable && !hasDefault` (Phase 0 design §3.2). The
-     * `filter` flag (driven by the Phase 2 `#[LiveFilterParam]` marker) is
-     * omitted entirely while that marker does not exist — forward-compatible.
+     * `filter` flag (driven by the `#[LiveFilterParam]` marker) is added per
+     * field once that marker class is loadable, reporting `true` for fields that
+     * carry it and `false` otherwise; it is omitted entirely if the marker class
+     * is absent — forward-compatible either way.
      *
      * @return list<array<string, mixed>>
      */
@@ -267,8 +280,9 @@ final class PayloadMetadataReflector
     }
 
     /**
-     * Whether the Phase 2 `#[LiveFilterParam]` marker class exists yet.
-     * False in Phase 1 — keeps `sse-update` and `fields[].filter` dormant.
+     * Whether the `#[LiveFilterParam]` marker class is loadable. The
+     * `modes`/`fields` derivations guard on this so the reflector never hard
+     * depends on the marker's presence.
      */
     private static function liveFilterParamExists(): bool
     {
