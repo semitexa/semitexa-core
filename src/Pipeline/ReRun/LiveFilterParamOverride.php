@@ -78,8 +78,17 @@ final class LiveFilterParamOverride
                 continue;
             }
 
-            $property->setValue($dto, self::coerce($property, $value));
-            $applied[] = $name;
+            try {
+                $property->setValue($dto, self::coerce($property, $value));
+                $applied[] = $name;
+            } catch (\TypeError) {
+                // A marked field whose declared type coerce() cannot shape
+                // (array / object / union) fed a mismatched command value. The
+                // command is client-controlled, so a shape mismatch must be an
+                // IGNORED param — never an uncaught TypeError inside the
+                // held-open re-run tick.
+                $ignored[] = $name;
+            }
         }
 
         return ['applied' => $applied, 'ignored' => $ignored];

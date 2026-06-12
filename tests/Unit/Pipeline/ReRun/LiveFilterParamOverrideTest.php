@@ -116,6 +116,48 @@ final class LiveFilterParamOverrideTest extends TestCase
 
         self::assertNull($dto->getQ(), 'an empty value on a nullable string filter clears it');
     }
+
+    #[Test]
+    public function a_shape_mismatch_on_a_non_scalar_marked_field_is_ignored_not_a_type_error(): void
+    {
+        // coerce() only shapes scalars; an array-typed marked field fed a
+        // string would otherwise throw TypeError out of setValue() — and a
+        // view-change command is client-controlled, so that TypeError would
+        // escape into the held-open re-run tick. It must bucket as `ignored`.
+        $dto = new NonScalarLiveFilterFixtureDto();
+
+        $result = LiveFilterParamOverride::apply($dto, [
+            'tags' => 'not-an-array',
+            'q'    => 'acme',
+        ]);
+
+        self::assertSame(['q'], $result['applied']);
+        self::assertSame(['tags'], $result['ignored']);
+        self::assertSame([], $dto->getTags(), 'the mismatched value never reached the property');
+        self::assertSame('acme', $dto->getQ(), 'scalar overrides in the same command still apply');
+    }
+}
+
+/** A marked non-scalar field — the coerce() pass-through shape. */
+final class NonScalarLiveFilterFixtureDto
+{
+    /** @var list<string> */
+    #[LiveFilterParam]
+    protected array $tags = [];
+
+    #[LiveFilterParam]
+    protected ?string $q = null;
+
+    /** @return list<string> */
+    public function getTags(): array
+    {
+        return $this->tags;
+    }
+
+    public function getQ(): ?string
+    {
+        return $this->q;
+    }
 }
 
 /**
