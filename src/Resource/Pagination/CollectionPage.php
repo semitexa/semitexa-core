@@ -25,6 +25,13 @@ namespace Semitexa\Core\Resource\Pagination;
  */
 final readonly class CollectionPage
 {
+    /**
+     * One Way Phase 2: `$mode` is the explicit pagination-mode
+     * discriminator (`meta.pagination.mode`) for routes with a declared
+     * `#[CollectionPaginated]` policy. `null` omits the key entirely,
+     * keeping the Phase 6i envelope byte-identical for every route
+     * that does not declare a policy.
+     */
     public function __construct(
         public int $page,
         public int $perPage,
@@ -32,6 +39,7 @@ final readonly class CollectionPage
         public int $pageCount,
         public bool $hasNext,
         public bool $hasPrevious,
+        public ?string $mode = null,
     ) {
     }
 
@@ -41,7 +49,7 @@ final readonly class CollectionPage
      * collection (e.g. the in-memory catalog's row count); slicing
      * happens elsewhere.
      */
-    public static function compute(CollectionPageRequest $request, int $total): self
+    public static function compute(CollectionPageRequest $request, int $total, ?string $mode = null): self
     {
         $total     = max(0, $total);
         $pageCount = $total > 0 ? (int) ceil($total / $request->perPage) : 0;
@@ -53,6 +61,7 @@ final readonly class CollectionPage
             pageCount:   $pageCount,
             hasNext:     $request->page < $pageCount,
             hasPrevious: $request->page > 1,
+            mode:        $mode,
         );
     }
 
@@ -61,6 +70,7 @@ final readonly class CollectionPage
      * `meta.pagination` of a collection response.
      *
      * @return array{
+     *   mode?: string,
      *   page: int,
      *   perPage: int,
      *   total: int,
@@ -71,13 +81,19 @@ final readonly class CollectionPage
      */
     public function toArray(): array
     {
-        return [
-            'page'        => $this->page,
-            'perPage'     => $this->perPage,
-            'total'       => $this->total,
-            'pageCount'   => $this->pageCount,
-            'hasNext'     => $this->hasNext,
-            'hasPrevious' => $this->hasPrevious,
-        ];
+        $out = [];
+        if ($this->mode !== null) {
+            // Mirrors CollectionCursorPage::toArray(), where `mode`
+            // leads the envelope. Key absent when no policy declared.
+            $out['mode'] = $this->mode;
+        }
+        $out['page']        = $this->page;
+        $out['perPage']     = $this->perPage;
+        $out['total']       = $this->total;
+        $out['pageCount']   = $this->pageCount;
+        $out['hasNext']     = $this->hasNext;
+        $out['hasPrevious'] = $this->hasPrevious;
+
+        return $out;
     }
 }

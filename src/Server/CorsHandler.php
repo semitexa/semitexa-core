@@ -34,7 +34,14 @@ readonly class CorsHandler
             $response->header('Access-Control-Allow-Credentials', 'true');
         }
 
-        if (($request->server['request_method'] ?? '') === 'OPTIONS') {
+        // A CORS preflight is OPTIONS + Access-Control-Request-Method (the
+        // fetch spec always sends that header on preflights). An explicit
+        // application-level `fetch(url, {method: 'OPTIONS'})` carries Origin
+        // but NOT Access-Control-Request-Method — it must fall through to
+        // routing, where OptionsMetadataHandler serves the route contract.
+        if (($request->server['request_method'] ?? '') === 'OPTIONS'
+            && isset($request->header['access-control-request-method'])
+        ) {
             $response->header('Access-Control-Allow-Methods', $this->env->corsAllowMethods);
             $response->header('Access-Control-Allow-Headers', $this->env->corsAllowHeaders);
             $response->header('Access-Control-Max-Age', '7200');
