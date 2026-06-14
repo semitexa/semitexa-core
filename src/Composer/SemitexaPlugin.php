@@ -81,15 +81,30 @@ final class SemitexaPlugin implements PluginInterface, EventSubscriberInterface
             $map[$namespace] = 'packages/' . $packageDir . '/tests/';
         }
 
-        if ($map === []) {
-            return;
-        }
-
         ksort($map);
 
         $package = $this->composer->getPackage();
         $devAutoload = $package->getDevAutoload();
-        $devAutoload['psr-4'] = array_merge($devAutoload['psr-4'] ?? [], $map);
+        $existing = $devAutoload['psr-4'] ?? [];
+
+        // Prune the entries THIS plugin previously generated so the result is
+        // fully derived from current on-disk state — a package that lost its
+        // fixtures (or was removed) must not leave a stale mapping behind. We
+        // own exactly the `Semitexa\*\Tests\ -> packages/*/tests/` shape; do this
+        // even when $map is empty (every managed package's fixtures went away).
+        foreach ($existing as $namespace => $dir) {
+            if (
+                \is_string($namespace)
+                && \preg_match('#^Semitexa\\\\.+\\\\Tests\\\\$#', $namespace) === 1
+                && \is_string($dir)
+                && \str_starts_with($dir, 'packages/')
+                && \str_ends_with($dir, '/tests/')
+            ) {
+                unset($existing[$namespace]);
+            }
+        }
+
+        $devAutoload['psr-4'] = array_merge($existing, $map);
         $package->setDevAutoload($devAutoload);
 
         $this->io->write(sprintf(

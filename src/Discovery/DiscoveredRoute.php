@@ -84,7 +84,12 @@ final readonly class DiscoveredRoute
         /** @var list<array<string, mixed>> $handlers */
         $handlers = self::normalizeHandlerList($route['handlers'] ?? []);
         /** @var string $type */
-        $type = is_string($route['type'] ?? null) ? $route['type'] : 'http_request';
+        // Canonical default is the RouteType::HttpRequest value ('http-request',
+        // hyphen) — the same spelling AttributeDiscovery, RouteRegistry and
+        // RoutePhase key on. The previous 'http_request' (underscore) default
+        // meant a type-less route was never recognised as an HTTP route (e.g.
+        // RouteRegistry skipped implicit OPTIONS for it).
+        $type = is_string($route['type'] ?? null) ? $route['type'] : 'http-request';
         /** @var list<string> $produces */
         $produces = self::normalizeStringList($route['produces'] ?? null);
         /** @var list<string> $consumes */

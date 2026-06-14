@@ -55,6 +55,10 @@ abstract class AbstractPayloadRoute
         /** @var list<string>|null */
         public ?array $produces = null,
         public ?TransportType $transport = null,
+        /** @var RenderProfile|list<RenderProfile>|null */
+        public RenderProfile|array|null $renderProfile = null,
+        /** @var array<string, class-string>|null */
+        public ?array $responsesByProfile = null,
         /**
          * The provable authorization-gate model for an SSE endpoint. Required
          * (non-null) whenever `transport` is {@see TransportType::Sse}: the boot
@@ -62,12 +66,11 @@ abstract class AbstractPayloadRoute
          * no gate model. Orthogonal to access + transport; read in the same
          * IS_INSTANCEOF discovery pass (same precedent as a route field, no
          * upward dependency on semitexa-authorization).
+         *
+         * Declared LAST so adding it never shifts the positional argument order
+         * of the pre-existing `renderProfile` / `responsesByProfile` parameters.
          */
         public ?SseGateModel $sseGateModel = null,
-        /** @var RenderProfile|list<RenderProfile>|null */
-        public RenderProfile|array|null $renderProfile = null,
-        /** @var array<string, class-string>|null */
-        public ?array $responsesByProfile = null,
     ) {
         $this->doc = $doc;
         if ($this->consumes !== null) {

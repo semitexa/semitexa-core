@@ -26,9 +26,14 @@ use Attribute;
  * a view-change override touches filter setters only, never identity).
  *
  * Lives in semitexa-core and references no authorization type, preserving
- * `semitexa-core → (no upward dep on) semitexa-authorization`. Allowed on both
- * properties and constructor parameters so a DTO may declare its filter fields
- * either way; the reflector scans properties.
+ * `semitexa-core → (no upward dep on) semitexa-authorization`.
+ *
+ * Detection is PROPERTY-based: {@see \Semitexa\Core\Http\PayloadMetadataReflector}
+ * and the view-change override scan a DTO's properties. The attribute targets
+ * `TARGET_PROPERTY | TARGET_PARAMETER` so it may sit on a plain property OR on a
+ * PROMOTED constructor parameter (which also becomes a property) — both are
+ * detected. A non-promoted constructor parameter is NOT a property and is NOT
+ * detected; declare filter fields as properties (promoted or plain).
  */
 #[Attribute(Attribute::TARGET_PROPERTY | Attribute::TARGET_PARAMETER)]
 final class LiveFilterParam
