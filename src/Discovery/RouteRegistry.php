@@ -53,6 +53,22 @@ class RouteRegistry
             $this->namedIndex[$name][] = $route;
         }
 
+        // Multi-Modal API — Mode 4: every routable payload endpoint also answers
+        // OPTIONS, served by the generic OptionsMetadataHandler. We add OPTIONS
+        // only to the lookup index (`$indexMethods`); the route's own `methods`
+        // are left untouched so the emitted metadata document and every other
+        // consumer keep reporting the declared verbs (e.g. ["GET"]). Auth is
+        // inherited for free: an OPTIONS request resolves to this same route
+        // (same `class`/payload + accessType), so AuthorizationListener enforces
+        // identically. Gated to discovered HTTP payload routes (those carry a
+        // non-empty request class); routes that already declare OPTIONS keep it.
+        $type = is_string($route['type'] ?? null) ? $route['type'] : '';
+        $class = is_string($route['class'] ?? null) ? $route['class'] : '';
+        $indexMethods = $methods;
+        if ($type === 'http-request' && $class !== '' && !in_array('OPTIONS', $methods, true)) {
+            $indexMethods = [...$methods, 'OPTIONS'];
+        }
+
         if (str_contains($path, '{')) {
             /** @var array<string, mixed> $requirements */
             $requirements = is_array($route['requirements'] ?? null) ? $route['requirements'] : [];
@@ -60,10 +76,10 @@ class RouteRegistry
             $this->patternIndex[] = [
                 'route' => $route,
                 'regex' => $regex,
-                'methods' => $methods,
+                'methods' => $indexMethods,
             ];
         } else {
-            foreach ($methods as $method) {
+            foreach ($indexMethods as $method) {
                 $key = $method . ':' . ($path === '' ? '/' : $path);
                 $this->exactIndex[$key][] = $route;
             }

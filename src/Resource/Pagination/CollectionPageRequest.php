@@ -33,12 +33,13 @@ final readonly class CollectionPageRequest
     public function __construct(
         public int $page,
         public int $perPage,
+        int $maxPerPage = self::MAX_PER_PAGE,
     ) {
         // Defensive: the constructor is public for the test factory
         // path, so re-validate here. Production code uses
         // `fromQueryParams()`.
-        self::guard('page',    (string) $page,    $page);
-        self::guard('perPage', (string) $perPage, $perPage);
+        self::guard('page',    (string) $page,    $page,    $maxPerPage);
+        self::guard('perPage', (string) $perPage, $perPage, $maxPerPage);
     }
 
     /**
@@ -47,15 +48,23 @@ final readonly class CollectionPageRequest
      * apply. Empty string is treated as omitted (matches PHP's
      * convention for missing-but-set query keys).
      *
+     * One Way Phase 2: routes that declare `#[CollectionPaginated]`
+     * feed their per-route bounds in here; the parameter defaults keep
+     * every existing call site on the documented static constants.
+     *
      * Throws {@see InvalidPaginationException} for any non-integer
      * value or out-of-range integer.
      */
-    public static function fromQueryParams(?string $rawPage, ?string $rawPerPage): self
-    {
-        $page    = self::parseOrDefault('page',    $rawPage,    self::DEFAULT_PAGE);
-        $perPage = self::parseOrDefault('perPage', $rawPerPage, self::DEFAULT_PER_PAGE);
+    public static function fromQueryParams(
+        ?string $rawPage,
+        ?string $rawPerPage,
+        int $defaultPerPage = self::DEFAULT_PER_PAGE,
+        int $maxPerPage = self::MAX_PER_PAGE,
+    ): self {
+        $page    = self::parseOrDefault('page',    $rawPage,    self::DEFAULT_PAGE,  $maxPerPage);
+        $perPage = self::parseOrDefault('perPage', $rawPerPage, $defaultPerPage,     $maxPerPage);
 
-        return new self($page, $perPage);
+        return new self($page, $perPage, $maxPerPage);
     }
 
     /**
@@ -86,7 +95,7 @@ final readonly class CollectionPageRequest
         return array_values($slice);
     }
 
-    private static function parseOrDefault(string $name, ?string $raw, int $default): int
+    private static function parseOrDefault(string $name, ?string $raw, int $default, int $maxPerPage): int
     {
         if ($raw === null || $raw === '') {
             return $default;
@@ -97,11 +106,11 @@ final readonly class CollectionPageRequest
             throw new InvalidPaginationException($name, $raw, 'must be an integer');
         }
         $value = (int) $raw;
-        self::guard($name, $raw, $value);
+        self::guard($name, $raw, $value, $maxPerPage);
         return $value;
     }
 
-    private static function guard(string $name, string $raw, int $value): void
+    private static function guard(string $name, string $raw, int $value, int $maxPerPage): void
     {
         if ($name === 'page' && $value < 1) {
             throw new InvalidPaginationException($name, $raw, 'must be >= 1');
@@ -110,11 +119,11 @@ final readonly class CollectionPageRequest
             if ($value < 1) {
                 throw new InvalidPaginationException($name, $raw, 'must be >= 1');
             }
-            if ($value > self::MAX_PER_PAGE) {
+            if ($value > $maxPerPage) {
                 throw new InvalidPaginationException(
                     $name,
                     $raw,
-                    sprintf('must be <= %d', self::MAX_PER_PAGE),
+                    sprintf('must be <= %d', $maxPerPage),
                 );
             }
         }

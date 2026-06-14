@@ -59,6 +59,18 @@ abstract class AbstractPayloadRoute
         public RenderProfile|array|null $renderProfile = null,
         /** @var array<string, class-string>|null */
         public ?array $responsesByProfile = null,
+        /**
+         * The provable authorization-gate model for an SSE endpoint. Required
+         * (non-null) whenever `transport` is {@see TransportType::Sse}: the boot
+         * guard in AttributeDiscovery fails boot for an SSE route that declares
+         * no gate model. Orthogonal to access + transport; read in the same
+         * IS_INSTANCEOF discovery pass (same precedent as a route field, no
+         * upward dependency on semitexa-authorization).
+         *
+         * Declared LAST so adding it never shifts the positional argument order
+         * of the pre-existing `renderProfile` / `responsesByProfile` parameters.
+         */
+        public ?SseGateModel $sseGateModel = null,
     ) {
         $this->doc = $doc;
         if ($this->consumes !== null) {

@@ -13,6 +13,7 @@ enum HttpStatus: int
     case NoContent           = 204;
 
     // 3xx Redirection
+    case MultipleChoices     = 300;
     case MovedPermanently    = 301;
     case Found               = 302;
     case SeeOther            = 303;

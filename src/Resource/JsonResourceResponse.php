@@ -119,10 +119,17 @@ class JsonResourceResponse extends ResourceResponse
      * handler slices the source collection before calling this
      * method so resolvers only fire for the visible parents.
      *
+     * One Way Phase 2: `$filterOptions` carries server-fed select
+     * options for declared filterable fields —
+     * `meta.filterOptions: { field: [{value, label}] }`. Supplied by
+     * the handler; only routes that opt in pay the query cost. Null
+     * (the default) keeps the envelope byte-identical.
+     *
      * @param list<ResourceObjectInterface> $resources
      * @param class-string                  $resourceClass canonical Resource class for include
      *                                                      validation; required so empty
      *                                                      collections can still validate.
+     * @param array<string, list<array{value: string, label: string}>>|null $filterOptions
      */
     public function withResources(
         array $resources,
@@ -130,6 +137,7 @@ class JsonResourceResponse extends ResourceResponse
         string $resourceClass,
         ?CollectionPage $page = null,
         ?CollectionCursorPage $cursorPage = null,
+        ?array $filterOptions = null,
     ): self {
         $this->ensureWired();
         \assert($this->registry !== null && $this->renderer !== null && $this->includeValidator !== null);
@@ -162,6 +170,10 @@ class JsonResourceResponse extends ResourceResponse
             $envelope['meta'] = ['pagination' => $page->toArray()];
         } elseif ($cursorPage !== null) {
             $envelope['meta'] = ['pagination' => $cursorPage->toArray()];
+        }
+        if ($filterOptions !== null && $filterOptions !== []) {
+            $envelope['meta'] ??= [];
+            $envelope['meta']['filterOptions'] = $filterOptions;
         }
 
         $body = json_encode(

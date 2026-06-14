@@ -55,7 +55,6 @@ final class AllRoutesRuntimeSmokeTest extends TestCase
      * @var array<string,string> path => reason
      */
     private const SKIP = [
-        '/sse'                => 'long-lived SSE stream; blocks the smoke loop. Covered by SsrPolygon deferred-render tests.',
         '/__semitexa_kiss'    => 'long-lived SSE keep-alive stream; would block.',
         '/__semitexa_hug'     => 'SSR fallback streamed via TransportType::Sse; would block.',
     ];
@@ -108,6 +107,21 @@ final class AllRoutesRuntimeSmokeTest extends TestCase
         /** @var AttributeDiscovery $discovery */
         $discovery = $container->get(AttributeDiscovery::class);
         $discovery->initialize();
+
+        // One Way Phase 2: the production worker also warms
+        // ResourceMetadataRegistry at WorkerStartFinalize
+        // (WarmResourceMetadataListener); the in-process boot has no Swoole
+        // lifecycle, so warm it here the same way DumpOpenApiCommand does for
+        // its non-Swoole context. Without this, every route that renders
+        // through the Resource registry 500s in the smoke env regardless of
+        // fixtures — an environment under-boot, not a route defect.
+        /** @var \Semitexa\Core\Resource\Metadata\ResourceMetadataRegistry $registry */
+        $registry = $container->get(\Semitexa\Core\Resource\Metadata\ResourceMetadataRegistry::class);
+        $registry->ensureWarmed(
+            discovery:  $container->get(ClassDiscovery::class),
+            cache:      $container->get(\Semitexa\Core\Resource\Metadata\ResourceMetadataCacheFile::class),
+            production: false,
+        );
 
         $this->routes = $discovery->getRoutes();
         AuthContextStore::clear();

@@ -206,7 +206,7 @@ final class ErrorRouteDispatcherTest extends TestCase
             requestClass: '',
             responseClass: null,
             handlers: [],
-            type: 'http_request',
+            type: 'http-request',
             transport: null,
             produces: null,
             consumes: null,

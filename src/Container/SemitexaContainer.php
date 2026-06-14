@@ -47,7 +47,7 @@ use ReflectionNamedType;
  * - TypeMap: contract bindings, registered classes, resolver mappings, scope detection
  * - InjectionMap: per-class property injection metadata
  */
-final class SemitexaContainer implements ContainerInterface
+final class SemitexaContainer implements ContainerInterface, ExecutionContextAwareContainerInterface
 {
     private InstanceStore $instanceStore;
     private TypeMap $typeMap;
