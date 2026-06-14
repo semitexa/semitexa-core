@@ -406,7 +406,7 @@ final class ReRunUnitTest extends TestCase
                 requestClass: ReRunFakePayload::class,
                 responseClass: ReRunSpyResource::class,
                 handlers: [['class' => ReRunSpyHandler::class]],
-                type: 'http_request',
+                type: 'http-request',
                 transport: 'sse',
                 produces: null,
                 consumes: null,
