@@ -29,12 +29,31 @@ final readonly class RouteContract
     /**
      * @param array<string, mixed> $base   the legacy OPTIONS document, unchanged
      * @param array<string, array<string, mixed>> $blocks contributed named blocks
+     * @param bool $isCollection whether the route returns a collection of
+     *        resources. A reliable cardinality signal even for bare collections
+     *        that emit no `collection` block — see
+     *        {@see \Semitexa\Core\Contract\CollectionAwareContributorInterface}.
+     *
+     *        DELIBERATELY NOT serialized into {@see self::toDocument()} (and so
+     *        absent from the ETag). Trade-off, decided explicitly:
+     *          - keeps the served OPTIONS document + ETag byte-stable, so the
+     *            api OpenAPI/contract snapshots and any document-caching client
+     *            are untouched by adding this flag;
+     *          - a RICH collection is already wire-visible through its
+     *            `collection` block (pagination/sort/filter), so the ONLY thing
+     *            invisible on the wire is a *bare* collection's cardinality — a
+     *            low-impact gap (a bare collection drives no grid/pagination).
+     *        It is an in-process convenience for consumers like the GraphQL
+     *        schema builder, which reads the RouteContract object directly. If a
+     *        wire client ever needs bare-collection cardinality, surface it then
+     *        (and accept the ETag/snapshot churn) rather than pre-emptively.
      */
     public function __construct(
         public array $base,
         public ResolvedPayloadContract $input,
         public ?ResolvedResourceContract $output,
         public array $blocks,
+        public bool $isCollection = false,
     ) {
     }
 

@@ -12,6 +12,7 @@ use Semitexa\Core\Attribute\AsService;
 use Semitexa\Core\Attribute\InjectAsReadonly;
 use Semitexa\Core\Attribute\SatisfiesServiceContract;
 use Semitexa\Core\Container\SemitexaContainer;
+use Semitexa\Core\Contract\CollectionAwareContributorInterface;
 use Semitexa\Core\Contract\RouteContractAssemblerInterface;
 use Semitexa\Core\Contract\RouteContractBlockContributorInterface;
 use Semitexa\Core\Resource\Metadata\ResourceMetadataRegistry;
@@ -90,9 +91,13 @@ final class DefaultRouteContractAssembler implements RouteContractAssemblerInter
 
         $blocks = [];
         $resourceClass = null;
+        $isCollection = false;
         foreach ($this->contributors() as $contributor) {
             if ($resourceClass === null) {
                 $resourceClass = $contributor->resolveResourceClass($responseClass);
+            }
+            if (!$isCollection && $contributor instanceof CollectionAwareContributorInterface) {
+                $isCollection = $contributor->resolvesCollection($responseClass);
             }
             foreach ($contributor->contributeBlocks($payloadClass, $responseClass) as $key => $block) {
                 if (in_array($key, self::RESERVED_KEYS, true) || isset($blocks[$key])) {
@@ -127,7 +132,7 @@ final class DefaultRouteContractAssembler implements RouteContractAssemblerInter
             is_string($searchParam) ? $searchParam : null,
         );
 
-        return $this->cache[$cacheKey] = new RouteContract($base, $input, $output, $blocks);
+        return $this->cache[$cacheKey] = new RouteContract($base, $input, $output, $blocks, $isCollection);
     }
 
     /** @return list<RouteContractBlockContributorInterface> */
