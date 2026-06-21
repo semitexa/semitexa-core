@@ -14,9 +14,9 @@ use Semitexa\Core\Resource\ResourceRef;
 use Semitexa\Core\Resource\ResourceRefList;
 
 /**
- * Phase 6e fixture: both relations resolver-backed.
- *   - profile      → RecordingProfileResolver (Phase 6d fixture)
- *   - addresses    → RecordingAddressesResolver (Phase 6e fixture)
+ * Fixture: both relations resolver-backed.
+ *   - profile      → RecordingProfileResolver (to-one fixture)
+ *   - addresses    → RecordingAddressesResolver (to-many fixture)
  * Self-contained test double for the cross-profile renderer behaviour;
  * does not depend on any application module.
  */

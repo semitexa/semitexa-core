@@ -11,7 +11,7 @@ use Semitexa\Core\Resource\Sort\CollectionSortRequest;
 use Semitexa\Core\Resource\Sort\SortDirection;
 
 /**
- * Phase 6j: deterministic `?sort=` parser + comparator.
+ * Deterministic `?sort=` parser + comparator.
  *
  * The parser is the only place where raw `?sort=` strings turn into
  * resolved `(field, direction)` pairs. Validation rejects every

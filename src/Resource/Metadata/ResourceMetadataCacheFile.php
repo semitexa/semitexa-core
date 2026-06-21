@@ -37,7 +37,7 @@ final class ResourceMetadataCacheFile
     }
 
     /**
-     * Phase 3d.5: hydrate a registry from the cache file when present, valid,
+     * Hydrate a registry from the cache file when present, valid,
      * and matching the supplied fingerprint. Returns a structured result so
      * callers can distinguish:
      *
@@ -98,16 +98,16 @@ final class ResourceMetadataCacheFile
         return CacheLoadResult::Hit;
     }
 
-    // Phase 6m: the pre-3d.5 boolean `load()` shim was removed for the
+    // The pre-3d.5 boolean `load()` shim was removed for the
     // v1 release. Callers must use `loadWithResult(...)` so they can
     // distinguish Hit / Miss / Stale / Corrupt and act on each outcome
-    // explicitly. Phase 6m's audit confirmed no production call site
+    // explicitly. An audit confirmed no production call site
     // relied on the boolean shim.
 
     /**
      * Dump the registry's contents into a deterministic PHP file.
      *
-     * @param string|null $fingerprint Phase 3d.5: source fingerprint that the
+     * @param string|null $fingerprint source fingerprint that the
      *                                  cache content was built from. Stored in
      *                                  the payload so a later load can detect
      *                                  source drift. Pass null only when the

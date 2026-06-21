@@ -26,8 +26,8 @@ use Semitexa\Core\Tests\Unit\Resource\Fixtures\RecordingPreferencesResolver;
 use Semitexa\Core\Tests\Unit\Resource\Fixtures\RecordingProfileResolver;
 
 /**
- * Phase 7 runtime-safety guards. The expansion-scoped resolver memo
- * must NOT loosen the Phase 6f / 6g / 6l invariants and must satisfy
+ * Runtime-safety guards. The expansion-scoped resolver memo
+ * must NOT loosen the batching / nested / cursor invariants and must satisfy
  * its own Swoole-safety contract:
  *
  *   - `ResolverMemoStore` source is pure: no DB / ORM / HTTP /
@@ -38,7 +38,7 @@ use Semitexa\Core\Tests\Unit\Resource\Fixtures\RecordingProfileResolver;
  *   - `ResourceExpansionPipeline` is still the only Resource-layer
  *     file that calls `->resolveBatch(`.
  *   - The pipeline still contains at most TWO `->resolveBatch(` call
- *     sites (Phase 6f top-level + Phase 6g nested). Phase 7 wraps the
+ *     sites (top-level + nested). The memo wraps the
  *     existing dispatch sites with a memo split — it does NOT add a
  *     third call site.
  *   - The pipeline instantiates the memo exactly ONCE per
@@ -196,7 +196,7 @@ final class Phase7RuntimeSafetyTest extends TestCase
         self::assertLessThanOrEqual(
             2,
             $occurrences,
-            'Phase 7 wraps the existing top-level + nested resolveBatch() sites with a memo split. '
+            'The memo wraps the existing top-level + nested resolveBatch() sites with a memo split. '
             . 'A third call site indicates a regressed per-parent loop or a broken memo path.',
         );
     }
@@ -211,7 +211,7 @@ final class Phase7RuntimeSafetyTest extends TestCase
         // Property declarations match `<visibility> ResolverMemoStore $name`
         // or `<visibility> readonly ResolverMemoStore $name`. A
         // long-lived property would mean the memo persists across
-        // requests on Swoole — the exact bug Phase 7 must not introduce.
+        // requests on Swoole — the exact bug the memo must not introduce.
         $propertyPatterns = [
             '/(public|protected|private)(\s+(?:readonly|static))*\s+\??ResolverMemoStore\s+\$/',
         ];

@@ -10,7 +10,7 @@ use Semitexa\Core\Resource\Attribute\ResourceObject;
 use Semitexa\Core\Resource\ResourceObjectInterface;
 
 /**
- * Phase 6g test fixture: leaf Resource DTO of the
+ * Test fixture: leaf Resource DTO of the
  * `customer.profile.preferences` nested vertical slice.
  */
 #[ResourceObject(type: 'phase6g_preferences')]

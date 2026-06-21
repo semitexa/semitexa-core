@@ -8,7 +8,7 @@ use Semitexa\Core\Exception\DomainException;
 use Semitexa\Core\Http\HttpStatus;
 
 /**
- * Phase 6d: thrown when the live container produces something for the
+ * Thrown when the live container produces something for the
  * configured resolver class FQCN but the value does not implement
  * `RelationResolverInterface`.
  *

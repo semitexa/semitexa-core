@@ -8,7 +8,7 @@ use Semitexa\Core\Exception\DomainException;
 use Semitexa\Core\Http\HttpStatus;
 
 /**
- * Phase 6k: thrown when the `?filter=` query parameter fails parsing
+ * Thrown when the `?filter=` query parameter fails parsing
  * or validation. Covers:
  *
  *   - malformed expression (`?filter=bad`, `?filter=name:eq`,

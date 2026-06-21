@@ -25,7 +25,7 @@ use Semitexa\Core\Tests\Unit\Resource\Fixtures\RecordingPreferencesResolver;
 use Semitexa\Core\Tests\Unit\Resource\Fixtures\RecordingProfileResolver;
 
 /**
- * Phase 6g runtime-safety guards. The nested expansion change must
+ * Runtime-safety guards. The nested expansion change must
  * NOT loosen existing invariants:
  *
  *   - `ResourceExpansionPipeline` remains the only Resource-layer
@@ -36,7 +36,7 @@ use Semitexa\Core\Tests\Unit\Resource\Fixtures\RecordingProfileResolver;
  *   - Pipeline source remains free of DB / ORM / HTTP / IriBuilder /
  *     renderer concerns.
  *   - The pipeline contains at most two `->resolveBatch(` call sites
- *     (Phase 6f top-level + Phase 6g nested). A third would signal a
+ *     (top-level + nested). A third would signal a
  *     regressed per-parent loop or unbounded recursion.
  *   - Nested resolvers fire only when a dotted include token is
  *     requested.
@@ -91,7 +91,7 @@ final class Phase6gRuntimeSafetyTest extends TestCase
         self::assertLessThanOrEqual(
             2,
             $occurrences,
-            'Phase 6g introduced one nested call site on top of Phase 6f. A third site indicates '
+            'The nested expansion introduced one call site on top of the batching pass. A third site indicates '
             . 'a regressed per-parent loop or unbounded recursion.',
         );
     }

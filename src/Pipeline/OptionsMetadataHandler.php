@@ -14,7 +14,7 @@ use Semitexa\Core\HttpResponse;
  * Generic OPTIONS metadata handler (Multi-Modal API — Mode 4).
  *
  * A single, payload-agnostic handler that emits the canonical metadata
- * document (Phase 0 design §3.2) for ANY routable payload, rather than
+ * document for ANY routable payload, rather than
  * per-payload hooks. It is wired by {@see \Semitexa\Core\Pipeline\RouteExecutor}
  * as the sole handler of an OPTIONS request to a payload route: that request
  * resolves to the SAME `AbstractPayloadRoute` as the endpoint's other methods,
@@ -24,7 +24,7 @@ use Semitexa\Core\HttpResponse;
  * a protected endpoint's OPTIONS requires authentication exactly like its GET,
  * a public endpoint's OPTIONS is anonymous.
  *
- * One Way Pattern — Phase 1: the document is now the FULL route contract
+ * One Way Pattern: the document is now the FULL route contract
  * assembled by {@see RouteContractAssemblerInterface} — the legacy
  * PayloadMetadataReflector projection byte-for-byte (additive only: no key
  * is removed or renamed, so the grid runtime's existing OPTIONS negotiation

@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Semitexa\Core\Resource;
 
 /**
- * Phase 5c: minimal AST node for the bounded GraphQL selection parser.
+ * Minimal AST node for the bounded GraphQL selection parser.
  *
  * Each node carries a field name and a list of nested children. The
  * implicit `<root>` node wraps the root field declared by the client
@@ -43,7 +43,7 @@ final class GraphqlSelectionNode
     /**
      * Returns the single child of an `<root>` node — i.e. the root field
      * declared by the client. Throws if the root has zero or multiple
-     * children, since Phase 5c targets one root field per query.
+     * children, since the bridge targets one root field per query.
      */
     public function singleRootField(): GraphqlSelectionNode
     {
@@ -53,7 +53,7 @@ final class GraphqlSelectionNode
         }
         if ($count > 1) {
             throw new \RuntimeException(sprintf(
-                'GraphQL query has %d root fields; Phase 5c expects exactly one.',
+                'GraphQL query has %d root fields; this bounded selection bridge expects exactly one.',
                 $count,
             ));
         }

@@ -8,7 +8,7 @@ use Semitexa\Core\Exception\DomainException;
 use Semitexa\Core\Http\HttpStatus;
 
 /**
- * Phase 6d: thrown when the runtime container cannot produce an
+ * Thrown when the runtime container cannot produce an
  * instance of a `#[ResolveWith]` resolver class that
  * `lint:resources` had previously validated.
  *

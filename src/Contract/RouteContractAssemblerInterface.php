@@ -7,7 +7,7 @@ namespace Semitexa\Core\Contract;
 use Semitexa\Core\Http\RouteContract;
 
 /**
- * One Way Pattern — Phase 1 (G1 keystone): assembles the full field-level
+ * One Way Pattern: assembles the full field-level
  * route contract for a single route by JOINING the two metadata halves that
  * already exist — the input side (PayloadMetadataReflector's OPTIONS
  * document) and the output side (ResourceMetadataRegistry's

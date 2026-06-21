@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Semitexa\Core\Resource\Cursor;
 
 /**
- * Phase 6l: opaque cursor payload, decoded.
+ * Opaque cursor payload, decoded.
  *
  * The cursor binds a deterministic position in a filtered+sorted
  * collection stream to a context (sort signature + filter

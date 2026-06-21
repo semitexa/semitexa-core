@@ -35,7 +35,7 @@ use Semitexa\Core\Tests\Unit\Resource\Fixtures\RecordingPreferencesResolver;
 use Semitexa\Core\Tests\Unit\Resource\Fixtures\RecordingProfileResolver;
 
 /**
- * Phase 6j: sort happens before pagination, and the resolver
+ * Sort happens before pagination, and the resolver
  * pipeline only sees the visible sorted slice.
  *
  * The tests mirror a typical handler flow on synthetic input:

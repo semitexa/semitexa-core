@@ -5,14 +5,14 @@ declare(strict_types=1);
 namespace Semitexa\Core\Resource;
 
 /**
- * Phase 6b: contract for lazy relation resolvers.
+ * Contract for lazy relation resolvers.
  *
  * A resolver loads a single declared relation across many parents in
- * one batched call. The future Phase 6d `ResourceExpansionPipeline`
+ * one batched call. The future `ResourceExpansionPipeline`
  * collects parents that share a `(field, target_class, resolver_class)`
  * tuple and dispatches one `resolveBatch()` per bucket.
  *
- * Phase 6b only ships the contract — there is no runtime caller yet.
+ * This interface only ships the contract — there is no runtime caller yet.
  *
  * Implementations must:
  *   - be `#[AsService]` so the readonly container can resolve them per

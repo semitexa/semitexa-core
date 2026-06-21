@@ -11,7 +11,7 @@ use Semitexa\Core\Discovery\ClassDiscovery;
 use Semitexa\Core\Resource\Attribute\HandlerProvidesResourceIncludes;
 
 /**
- * Phase 6c: worker-scoped registry of payload-class →
+ * Worker-scoped registry of payload-class →
  * `#[HandlerProvidesResourceIncludes]` declarations.
  *
  * Built lazily on first lookup (or eagerly via `ensureBuilt()`) by

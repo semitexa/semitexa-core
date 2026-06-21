@@ -8,7 +8,7 @@ use Semitexa\Core\Exception\DomainException;
 use Semitexa\Core\Http\HttpStatus;
 
 /**
- * Phase 6g: thrown when a `?include=` token nests deeper than
+ * Thrown when a `?include=` token nests deeper than
  * `ResourceExpansionPipeline::MAX_NESTED_DEPTH`. Aligned with
  * `GraphqlSelectionToIncludeSet::MAX_DEPTH = 1`. A two-segment dotted
  * token (e.g. `profile.preferences`) is permitted; three or more

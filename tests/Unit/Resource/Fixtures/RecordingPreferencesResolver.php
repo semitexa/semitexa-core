@@ -10,7 +10,7 @@ use Semitexa\Core\Resource\RenderContext;
 use Semitexa\Core\Resource\ResourceIdentity;
 
 /**
- * Phase 6g test fixture: nested resolver. Receives `ProfileResource`
+ * Test fixture: nested resolver. Receives `ProfileResource`
  * identities (NOT root customer identities) and returns a
  * `PreferencesResource` per profile.
  */

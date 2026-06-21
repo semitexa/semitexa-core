@@ -8,7 +8,7 @@ use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 
 /**
- * Phase 6d runtime-safety guards.
+ * Runtime-safety guards.
  *
  * `ResourceExpansionPipeline` is the **only** class that calls
  * `RelationResolverInterface::resolveBatch()`. Renderers stay pure;

@@ -8,7 +8,7 @@ use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 
 /**
- * Phase 3e: the Accept resolver and the dispatcher must be pure functions.
+ * The Accept resolver and the dispatcher must be pure functions.
  * Static source check confirms neither imports a runtime renderer, IriBuilder,
  * Request, DB, ORM, or HTTP client.
  */
@@ -42,7 +42,7 @@ final class AcceptDispatchIsolationTest extends TestCase
                 self::assertStringNotContainsString(
                     $needle,
                     $content,
-                    sprintf('Phase 3e file %s must not import %s', basename($path), $needle),
+                    sprintf('file %s must not import %s', basename($path), $needle),
                 );
             }
         }

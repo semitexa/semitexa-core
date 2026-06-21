@@ -8,7 +8,7 @@ use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 
 /**
- * Phase 6k runtime-safety guards. The filter baseline must not
+ * Runtime-safety guards. The filter baseline must not
  * weaken the resolver / pipeline invariants:
  *
  *   - Filter source files do not import DB / ORM / HTTP / framework

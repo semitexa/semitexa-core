@@ -19,7 +19,7 @@ use Semitexa\Core\Tests\Unit\Resource\Fixtures\InMemoryDiscoveryFor3d5;
 use Semitexa\Core\Tests\Unit\Resource\Fixtures\ProfileResource;
 
 /**
- * Phase 3d.5: stale-cache protection. The cache file records the source
+ * Stale-cache protection. The cache file records the source
  * fingerprint at write time; load returns Stale when it diverges.
  */
 final class StaleCacheProtectionTest extends TestCase
@@ -227,7 +227,7 @@ final class StaleCacheProtectionTest extends TestCase
         self::assertSame($hash1, $hash2);
     }
 
-    // Phase 6m: the pre-3d.5 boolean `ResourceMetadataCacheFile::load()`
+    // The pre-3d.5 boolean `ResourceMetadataCacheFile::load()`
     // shim was removed for the v1 release. Tests that exercised the
     // shim path went with it; the equivalent semantics
     // (`loadWithResult($r, null) === CacheLoadResult::Hit`) live in

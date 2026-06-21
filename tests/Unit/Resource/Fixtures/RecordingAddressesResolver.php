@@ -10,11 +10,11 @@ use Semitexa\Core\Resource\RenderContext;
 use Semitexa\Core\Resource\ResourceIdentity;
 
 /**
- * Phase 6e test fixture for the to-many resolver overlay path.
+ * Test fixture for the to-many resolver overlay path.
  * Records every `resolveBatch()` call and returns a deterministic list
  * of `AddressResource` items per parent identity.
  *
- * Phase 6f: each call entry now carries the full `parents` list (not
+ * Each call entry now carries the full `parents` list (not
  * just the count) so multi-parent batching tests can assert on the
  * exact identities the pipeline batched together.
  */

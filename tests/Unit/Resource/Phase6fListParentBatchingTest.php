@@ -27,13 +27,13 @@ use Semitexa\Core\Tests\Unit\Resource\Fixtures\RecordingAddressesResolver;
 use Semitexa\Core\Tests\Unit\Resource\Fixtures\RecordingProfileResolver;
 
 /**
- * Phase 6f: list-parent batching in `ResourceExpansionPipeline`.
+ * List-parent batching in `ResourceExpansionPipeline`.
  *
  * The pipeline groups parents that share a resolver-backed relation
  * into a bucket and dispatches exactly one `resolveBatch()` per
  * bucket, regardless of parent count. Single-parent expansion routes
  * through the same machinery as a one-entry bucket and stays
- * byte-identical to Phase 6e.
+ * byte-identical to the single-parent path.
  */
 final class Phase6fListParentBatchingTest extends TestCase
 {
@@ -608,11 +608,11 @@ final class Phase6fListParentBatchingTest extends TestCase
         $includes = IncludeSet::fromQueryString('profile,addresses');
         $ctx      = new RenderContext(profile: RenderProfile::Json, includes: $includes);
 
-        // Single-parent path via expand() — Phase 6e behaviour.
+        // Single-parent path via expand().
         $graph1 = $pipeline->expand($root, $includes, $ctx);
         $out1   = $renderer->render($root, $ctx->withResolved($graph1));
 
-        // Same single parent through expandMany() — Phase 6f path.
+        // Same single parent through expandMany().
         $graph2 = $pipeline->expandMany([$root], $includes, $ctx);
         $out2   = $renderer->render($root, $ctx->withResolved($graph2));
 

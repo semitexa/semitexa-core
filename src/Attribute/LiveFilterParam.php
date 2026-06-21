@@ -16,9 +16,9 @@ use Attribute;
  * ({@see \Semitexa\Core\Http\PayloadMetadataReflector}) already looks for: its
  * presence on any field flips `hasLiveFilterParam()` true, so `deriveModes()`
  * adds `sse-update` to the advertised `modes` and each marked field is reported
- * with `filter: true`. Phase 1 introduces the marker and the advertisement; the
+ * with `filter: true`. This declaration introduces the marker and the advertisement; the
  * runtime that HONORS a view-change command (the inbound command intake + the
- * filter-only re-run override) is Phase 2 — nothing here changes serving.
+ * filter-only re-run override) lives elsewhere — nothing here changes serving.
  *
  * Only filter-shaped inputs carry this marker. Transport / identity metadata
  * (e.g. a held-open stream's session id) must NOT be marked: it is not a filter

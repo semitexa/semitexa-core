@@ -7,7 +7,7 @@ namespace Semitexa\Core\Attribute;
 use Attribute;
 
 /**
- * One Way Pattern · Phase 4 — declares the invalidation scope keys a
+ * One Way Pattern — declares the invalidation scope keys a
  * collection feed's held-open SSE stream subscribes to.
  *
  * Placed on a feed PAYLOAD class (the route declaration carrier), it is the

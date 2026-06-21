@@ -12,7 +12,7 @@ use Swoole\Http\Request as SwooleRequest;
 use Swoole\Http\Response as SwooleResponse;
 
 /**
- * Pins the preflight/actual-OPTIONS distinction (One Way Phase 3 regression).
+ * Pins the preflight/actual-OPTIONS distinction (One Way regression).
  *
  * Browsers attach an `Origin` header to EVERY non-GET fetch — including a
  * same-origin explicit `fetch(url, {method: 'OPTIONS'})`, which is the route

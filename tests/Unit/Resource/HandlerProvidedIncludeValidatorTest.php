@@ -15,7 +15,7 @@ use Semitexa\Core\Tests\Unit\Resource\Fixtures\CustomerResource;
 use Semitexa\Core\Tests\Unit\Resource\Fixtures\ProfileResource;
 
 /**
- * Phase 6c: static lint-time validation of
+ * Static lint-time validation of
  * `#[HandlerProvidesResourceIncludes]` declarations against the
  * Resource metadata graph.
  */

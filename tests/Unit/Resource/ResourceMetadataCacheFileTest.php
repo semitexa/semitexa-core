@@ -115,7 +115,7 @@ final class ResourceMetadataCacheFileTest extends TestCase
         $cache->dump($original);
 
         $rehydrated = ResourceMetadataRegistry::forTesting($extractor);
-        // Phase 6c hygiene: prefer the non-deprecated `loadWithResult()`.
+        // Hygiene: prefer the non-deprecated `loadWithResult()`.
         self::assertSame(CacheLoadResult::Hit, $cache->loadWithResult($rehydrated));
 
         $customer = $rehydrated->get(ResolvableCustomerResource::class);

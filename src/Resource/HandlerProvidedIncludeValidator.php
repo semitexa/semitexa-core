@@ -12,7 +12,7 @@ use Semitexa\Core\Resource\Metadata\ResourceMetadataRegistry;
 use Semitexa\Core\Resource\Metadata\ResourceObjectMetadata;
 
 /**
- * Phase 6c: static-only validator for `#[HandlerProvidesResourceIncludes]`
+ * Static-only validator for `#[HandlerProvidesResourceIncludes]`
  * declarations. Run from `lint:resources` after the Resource metadata
  * registry has been populated.
  *
@@ -25,7 +25,7 @@ use Semitexa\Core\Resource\Metadata\ResourceObjectMetadata;
  *        - each segment exists as a field on the current metadata,
  *        - each segment is a relation (RefOne / RefMany / Union),
  *        - each segment is `expandable=true`.
- *   3. Polymorphic-union targets follow the existing Phase 5c
+ *   3. Polymorphic-union targets follow the existing
  *      conservative rule: nested validation walks the first declared
  *      union target.
  *
@@ -160,7 +160,7 @@ final class HandlerProvidedIncludeValidator
         }
 
         if ($field->unionTargets !== null && $field->unionTargets !== []) {
-            // Phase 5c parity: walk the first declared union target.
+            // Union parity: walk the first declared union target.
             return $this->registry->get($field->unionTargets[0]);
         }
 

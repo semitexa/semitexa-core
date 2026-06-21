@@ -7,7 +7,7 @@ namespace Semitexa\Core\Resource\Cursor;
 use Semitexa\Core\Resource\Exception\InvalidCursorException;
 
 /**
- * Phase 6l: encode / decode opaque collection cursor tokens.
+ * Encode / decode opaque collection cursor tokens.
  *
  * Wire shape:
  *

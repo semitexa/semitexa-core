@@ -18,7 +18,7 @@ use Semitexa\Core\Resource\Metadata\ResourceObjectMetadata;
 use Semitexa\Core\Resource\RenderProfile;
 
 /**
- * One Way Pattern — Phase 1: the default assembler joins the reflector's
+ * One Way Pattern: the default assembler joins the reflector's
  * document, the resource registry, and contributed blocks — additively,
  * with the design's degradation rules.
  */

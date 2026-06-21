@@ -16,7 +16,7 @@ use Semitexa\Core\Resource\Metadata\ResourceMetadataRegistry;
 use Semitexa\Core\Resource\Metadata\ResourceObjectMetadata;
 
 /**
- * One Way Pattern — Phase 1: the contract DTOs and the joined document.
+ * One Way Pattern: the contract DTOs and the joined document.
  *
  * The DTOs WRAP existing truth: ResolvedPayloadContract carries the
  * reflector's field list verbatim plus the `role` enrichment;
@@ -65,7 +65,7 @@ final class RouteContractTest extends TestCase
         self::assertSame('pagination', $byName['cursor']['role']);
         self::assertSame('sort', $byName['sort']['role']);
         self::assertSame('filter', $byName['filter']['role']);
-        // `q` (search) is Phase 2 — no role yet; `query` only roles on
+        // `q` (search) has no role yet; `query` only roles on
         // GraphQL-profile routes.
         self::assertArrayNotHasKey('role', $byName['q']);
         self::assertArrayNotHasKey('role', $byName['query']);

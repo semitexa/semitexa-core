@@ -105,7 +105,7 @@ final class ResourceMetadataRegistry
     }
 
     /**
-     * Phase 3d / 3d.5: idempotent worker-boot warmup with stale-cache
+     * Idempotent worker-boot warmup with stale-cache
      * protection.
      *
      * Production (`$production === true`):
@@ -137,7 +137,7 @@ final class ResourceMetadataRegistry
         if ($production) {
             // Compute fingerprint *before* loading so we can detect drift.
             // If no service was injected (legacy callers), pass null and the
-            // cache load will skip the fingerprint check — Phase 3d behavior.
+            // cache load will skip the fingerprint check — the pre-fingerprint behavior.
             $expectedFingerprint = $fingerprint?->compute();
 
             $result = $cache->loadWithResult($this, $expectedFingerprint);

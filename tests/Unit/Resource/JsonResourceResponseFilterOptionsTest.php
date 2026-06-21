@@ -24,7 +24,7 @@ use Semitexa\Core\Tests\Unit\Resource\Fixtures\CustomerResource;
 use Semitexa\Core\Tests\Unit\Resource\Fixtures\ProfileResource;
 
 /**
- * One Way Phase 2: server-fed `meta.filterOptions` on the collection
+ * One Way: server-fed `meta.filterOptions` on the collection
  * envelope — present only when the handler supplies it, so every
  * existing caller stays byte-identical.
  */

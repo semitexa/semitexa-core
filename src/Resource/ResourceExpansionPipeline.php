@@ -19,7 +19,7 @@ use Semitexa\Core\Resource\Metadata\ResourceMetadataRegistry;
 use Semitexa\Core\Resource\Metadata\ResourceObjectMetadata;
 
 /**
- * Phase 6d/6e/6f/6g: the runtime skeleton of the lazy resolver pipeline.
+ * The runtime skeleton of the lazy resolver pipeline.
  *
  * The pipeline runs **once per response**, between
  * `IncludeValidator::validate()` and `Renderer::render()`. It walks
@@ -30,16 +30,16 @@ use Semitexa\Core\Resource\Metadata\ResourceObjectMetadata;
  * relation **bucket**. The resulting values land in a fresh
  * `ResolvedResourceGraph` overlay.
  *
- * Phase 6d/6e/6f/6g boundaries (deliberate):
+ * Resolver-pipeline boundaries (deliberate):
  *
- *   - **Phase 6f: list-parent batching.** When more than one parent
+ *   - **List-parent batching.** When more than one parent
  *     identity needs the same resolver-backed relation, the pipeline
  *     groups them into a bucket keyed by
  *     `(parentClass, relationField, targetClass, resolverClass)` and
  *     dispatches exactly one `resolveBatch()` per bucket. Single-parent
  *     callers are routed through the same code path with a one-entry
- *     bucket — output is byte-identical to Phase 6e.
- *   - **Phase 6g: nested expansion.** A second resolver pass runs for
+ *     bucket — output is byte-identical to the single-parent path.
+ *   - **Nested expansion.** A second resolver pass runs for
  *     dotted include tokens (e.g. `profile.preferences`). The first
  *     pass resolves the parent relation; for every `ResourceObject` it
  *     produced, the pipeline collects identities and dispatches a
@@ -61,7 +61,7 @@ use Semitexa\Core\Resource\Metadata\ResourceObjectMetadata;
 final class ResourceExpansionPipeline
 {
     /**
-     * Phase 6g cap. Aligned with `GraphqlSelectionToIncludeSet::MAX_DEPTH`
+     * Nested-include depth cap. Aligned with `GraphqlSelectionToIncludeSet::MAX_DEPTH`
      * (which counts nested levels beyond the root). A two-segment
      * dotted token like `profile.preferences` is permitted; three or
      * more segments raise `NestedIncludeDepthExceededException`.
@@ -90,7 +90,7 @@ final class ResourceExpansionPipeline
     }
 
     /**
-     * Phase 6d entry point: expand a single root Resource DTO.
+     * Entry point: expand a single root Resource DTO.
      *
      * Behaviour preserved exactly: an empty include set still returns
      * a root-only overlay; a missing id field still returns a
@@ -109,7 +109,7 @@ final class ResourceExpansionPipeline
 
         $rootMetadata = $this->registry->require($root::class);
         if ($rootMetadata->idField === null) {
-            // No identity, no addressable resolution map. Phase 6d
+            // No identity, no addressable resolution map. The pipeline
             // requires a stable parent identity to key resolved data.
             // Fall through to a root-only overlay.
             return ResolvedResourceGraph::withRootOnly($root, $includes);
@@ -119,7 +119,7 @@ final class ResourceExpansionPipeline
     }
 
     /**
-     * Phase 6f: expand a list of root Resource DTOs. The pipeline
+     * Expand a list of root Resource DTOs. The pipeline
      * groups parents into per-relation buckets and calls
      * `resolveBatch()` once per bucket.
      *
@@ -128,7 +128,7 @@ final class ResourceExpansionPipeline
      * `resolveBatch()` per resolver-backed bucket, regardless of how
      * many parents land in the bucket.
      *
-     * Phase 6g: after the top-level pass, dispatch a second pass for
+     * After the top-level pass, dispatch a second pass for
      * dotted include tokens. The second pass uses the resolved values
      * from the first pass as its parents and runs at most one nested
      * level.
@@ -165,7 +165,7 @@ final class ResourceExpansionPipeline
 
         $this->guardMaxDepth($includes);
 
-        // Phase 7 (post-v1): expansion-scoped resolver memo. Created
+        // Expansion-scoped resolver memo (post-v1). Created
         // here, discarded when this method returns. Two separate
         // expand()/expandMany() calls do not share memo state — a
         // deliberate Swoole safety choice. Inside one expansion the
@@ -242,7 +242,7 @@ final class ResourceExpansionPipeline
             $bucketParents  = $bucket['parents'];
             $parentClass    = $bucket['parentMetadata']->class;
 
-            // Phase 7 split: parents the memo can answer right now
+            // Memo split: parents the memo can answer right now
             // versus parents that still need a resolveBatch() call.
             // Skipping the resolver entirely when every parent is
             // memoised is the whole point of this pass.
@@ -308,7 +308,7 @@ final class ResourceExpansionPipeline
             ];
         }
 
-        // ---- Nested pass (Phase 6g) ------------------------------
+        // ---- Nested pass ----------------------------------------
         // For every top-level bucket whose field has a nested include
         // group (e.g. `profile.preferences`), gather the resolved
         // child DTOs, build a fresh bucket per nested resolver-backed
@@ -324,7 +324,7 @@ final class ResourceExpansionPipeline
 
             $childMetadata = $this->resolveTargetMetadata($parentField);
             if ($childMetadata === null) {
-                // No metadata for the target — Phase 6g cannot expand
+                // No metadata for the target — the nested pass cannot expand
                 // a child whose class isn't registered. The validator
                 // is supposed to catch this earlier; if not, fail
                 // softly by skipping rather than crashing.
@@ -387,7 +387,7 @@ final class ResourceExpansionPipeline
                     continue;
                 }
 
-                // Phase 7: same memo-aware split as the top-level
+                // Same memo-aware split as the top-level
                 // pass. The nested pass already deduplicates child
                 // urns when bucketing, but the memo also short-
                 // circuits across nested buckets that share a
@@ -535,7 +535,7 @@ final class ResourceExpansionPipeline
 
     /**
      * Pluck the value for a single parent from a validated batch
-     * return map. Per-parent shape rules (Phase 6d / 6e):
+     * return map. Per-parent shape rules:
      *
      *   - to-one relations: `ResourceObjectInterface|null`.
      *   - to-many relations: `list<ResourceObjectInterface>` (never
@@ -628,7 +628,7 @@ final class ResourceExpansionPipeline
     }
 
     /**
-     * Phase 6g: enforce the nested-include depth cap. The pipeline
+     * Enforce the nested-include depth cap. The pipeline
      * supports exactly one nested level beyond the root (`a.b`);
      * three or more segments are rejected before any resolver runs.
      */
@@ -665,7 +665,7 @@ final class ResourceExpansionPipeline
     }
 
     /**
-     * Phase 6g: extract the child Resource DTOs that should feed the
+     * Extract the child Resource DTOs that should feed the
      * nested expansion pass. Single resolver returns are wrapped in a
      * one-element list so the caller can iterate uniformly.
      *

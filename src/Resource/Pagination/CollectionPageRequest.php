@@ -7,7 +7,7 @@ namespace Semitexa\Core\Resource\Pagination;
 use Semitexa\Core\Resource\Exception\InvalidPaginationException;
 
 /**
- * Phase 6i: parsed-and-validated `?page=` / `?perPage=` request.
+ * Parsed-and-validated `?page=` / `?perPage=` request.
  *
  * Pure value object. No DB, ORM, HTTP, or framework state — just the
  * two integer parameters and a slicing helper. Parsing happens
@@ -48,7 +48,7 @@ final readonly class CollectionPageRequest
      * apply. Empty string is treated as omitted (matches PHP's
      * convention for missing-but-set query keys).
      *
-     * One Way Phase 2: routes that declare `#[CollectionPaginated]`
+     * One Way Pattern: routes that declare `#[CollectionPaginated]`
      * feed their per-route bounds in here; the parameter defaults keep
      * every existing call site on the documented static constants.
      *

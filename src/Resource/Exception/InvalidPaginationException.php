@@ -8,7 +8,7 @@ use Semitexa\Core\Exception\DomainException;
 use Semitexa\Core\Http\HttpStatus;
 
 /**
- * Phase 6i: thrown when a `?page=` / `?perPage=` query parameter
+ * Thrown when a `?page=` / `?perPage=` query parameter
  * fails parsing or validation. Covers:
  *
  *   - non-integer values (e.g. `?page=abc`),

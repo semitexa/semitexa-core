@@ -8,7 +8,7 @@ use Semitexa\Core\Exception\DomainException;
 use Semitexa\Core\Http\HttpStatus;
 
 /**
- * Phase 5c: thrown by the bounded GraphQL selection parser when the
+ * Thrown by the bounded GraphQL selection parser when the
  * query string cannot be tokenised or the brace structure is malformed.
  * Maps to HTTP 400.
  */

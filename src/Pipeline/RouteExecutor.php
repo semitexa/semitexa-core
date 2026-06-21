@@ -133,7 +133,7 @@ class RouteExecutor
                 $route = $this->buildOptionsRoute($route);
             }
 
-            // 2. Resolve Response DTO (Phase 3e: Accept-driven for multi-profile routes)
+            // 2. Resolve Response DTO (Accept-driven for multi-profile routes)
             $resDto = $this->resolveResponseDto($route, $request);
 
             // 3. Build Context
@@ -235,7 +235,7 @@ class RouteExecutor
             //     the stored session or emit cookies.
             $this->establishReRunExecutionContext($request);
 
-            // 1c. FILTER-ONLY view-change override (Intended Grid Model · Phase 2).
+            // 1c. FILTER-ONLY view-change override (Intended Grid Model).
             //     A view-change command's new view params are merged onto the cached
             //     DTO HERE — AFTER the auth gate (step 1) and the execution-context
             //     re-establishment (step 1b) have already re-resolved identity from
@@ -539,7 +539,7 @@ class RouteExecutor
     {
         $responseClass = $route->responseClass;
 
-        // Phase 3e: when the route declares `responsesByProfile`, the
+        // When the route declares `responsesByProfile`, the
         // CrossProfileDispatcher picks the response class from the request's
         // Accept header. Single-profile routes keep the legacy path.
         if ($route->responsesByProfile !== null && $route->responsesByProfile !== []) {

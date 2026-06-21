@@ -42,7 +42,7 @@ use Semitexa\Core\Tests\Unit\Resource\Fixtures\RecordingPreferencesResolver;
 use Semitexa\Core\Tests\Unit\Resource\Fixtures\RecordingProfileResolver;
 
 /**
- * Phase 6l: cursor pagination layered on the Phase 6h–6k contract.
+ * Cursor pagination layered on the collection contract.
  * The tests reproduce a typical list handler's flow on synthetic
  * input:
  *
@@ -344,7 +344,7 @@ final class Phase6lCursorPaginationIntegrationTest extends TestCase
     public function offset_page_mode_remains_byte_identical_when_cursor_absent(): void
     {
         $r = $this->renderPage(null, null, '1', '10', IncludeSet::empty());
-        // Phase 6i shape: `meta.pagination` keys exact set.
+        // Shape: `meta.pagination` keys exact set.
         self::assertSame(
             ['page', 'perPage', 'total', 'pageCount', 'hasNext', 'hasPrevious'],
             array_keys($r['body']['meta']['pagination']),

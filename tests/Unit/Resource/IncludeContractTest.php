@@ -10,7 +10,7 @@ use Semitexa\Core\Resource\IncludeSet;
 use Semitexa\Core\Resource\SupportsResourceIncludes;
 
 /**
- * Phase 2.5 contract guards for the include behavior surface:
+ * Contract guards for the include behavior surface:
  * - Payloads that do NOT implement SupportsResourceIncludes silently get an
  *   empty IncludeSet — no error, no accidental embedding.
  * - HTML routes do not consume `?include=` unless they explicitly opt in.
@@ -35,7 +35,7 @@ final class IncludeContractTest extends TestCase
     #[Test]
     public function include_set_is_safe_to_construct_without_query_string(): void
     {
-        // Phase 2 contract: null / empty raw query → empty include set; no error.
+        // Contract: null / empty raw query → empty include set; no error.
         $a = IncludeSet::fromQueryString(null);
         $b = IncludeSet::fromQueryString('');
         $c = IncludeSet::empty();
@@ -49,7 +49,7 @@ final class IncludeContractTest extends TestCase
     public function html_renderer_path_does_not_appear_in_phase_2_sources(): void
     {
         // HTML routes must not consume ?include= unless explicitly opted in.
-        // Phase 2 ships only the JSON renderer; verify that no HTML-path
+        // Ships only the JSON renderer; verify that no HTML-path
         // file pulls in IncludeSet without going through SupportsResourceIncludes
         // (which is a payload-level marker, not a renderer-level coupling).
         $jsonResp = file_get_contents(__DIR__ . '/../../../src/Resource/JsonResourceResponse.php');

@@ -14,7 +14,7 @@ use Semitexa\Core\Resource\JsonResourceResponse;
 use Semitexa\Core\Resource\RenderProfile;
 
 /**
- * Phase 5a: confirm the existing CrossProfileDispatcher correctly routes
+ * Confirm the existing CrossProfileDispatcher correctly routes
  * `application/graphql-response+json` to the GraphQL response class on a
  * three-profile route (Json + JsonLd + GraphQL), without regressing JSON or
  * JSON-LD selection.

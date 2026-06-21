@@ -11,7 +11,7 @@ use Semitexa\Core\Resource\Pagination\CollectionPage;
 use Semitexa\Core\Resource\Pagination\CollectionPageRequest;
 
 /**
- * Phase 6i: deterministic pagination request parser + page metadata.
+ * Deterministic pagination request parser + page metadata.
  *
  * The parser is the only place where raw `?page=` / `?perPage=`
  * strings turn into integers; once a `CollectionPageRequest` exists

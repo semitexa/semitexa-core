@@ -14,7 +14,7 @@ use Semitexa\Core\Resource\ResourceRef;
 use Semitexa\Core\Resource\ResourceRefList;
 
 /**
- * Phase 6d fixture: a Customer whose `profile` is resolver-backed
+ * Fixture: a Customer whose `profile` is resolver-backed
  * (`#[ResolveWith]`) and whose `addresses` is plain handler-eager
  * (no resolver). Used to exercise both expansion paths in one DTO.
  */

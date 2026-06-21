@@ -8,7 +8,7 @@ use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 
 /**
- * Phase 6l runtime-safety guards. Cursor pagination must not weaken
+ * Runtime-safety guards. Cursor pagination must not weaken
  * the resolver / pipeline invariants:
  *
  *   - Cursor source files do not import DB / ORM / HTTP / framework

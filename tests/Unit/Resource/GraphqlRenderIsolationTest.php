@@ -20,7 +20,7 @@ use Semitexa\Core\Tests\Unit\Resource\Fixtures\CustomerResource;
 use Semitexa\Core\Tests\Unit\Resource\Fixtures\ProfileResource;
 
 /**
- * Phase 5a: GraphQL rendering must be a pure function over the metadata
+ * GraphQL rendering must be a pure function over the metadata
  * graph + DTO graph. Static source check + runtime non-mutation guards.
  */
 final class GraphqlRenderIsolationTest extends TestCase
@@ -54,7 +54,7 @@ final class GraphqlRenderIsolationTest extends TestCase
                 self::assertStringNotContainsString(
                     $needle,
                     $content,
-                    sprintf('Phase 5a file %s must not import %s', basename($path), $needle),
+                    sprintf('file %s must not import %s', basename($path), $needle),
                 );
             }
         }

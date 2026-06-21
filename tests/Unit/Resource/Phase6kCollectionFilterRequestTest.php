@@ -11,7 +11,7 @@ use Semitexa\Core\Resource\Filter\CollectionFilterRequest;
 use Semitexa\Core\Resource\Filter\FilterOperator;
 
 /**
- * Phase 6k: deterministic `?filter=` parser + comparator.
+ * Deterministic `?filter=` parser + comparator.
  *
  * The parser is the only place where raw `?filter=` strings turn
  * into resolved `(field, operator, value)` tuples. Validation

@@ -9,7 +9,7 @@ use Semitexa\Core\Resource\ResourceIdentity;
 use Semitexa\Core\Resource\ResourceObjectInterface;
 
 /**
- * Phase 7 (post-v1, internal): expansion-scoped resolver memo store.
+ * Expansion-scoped resolver memo store (post-v1, internal).
  *
  * `ResourceExpansionPipeline` instantiates **one** of these per
  * `expand()` / `expandMany()` call. The memo collapses duplicate

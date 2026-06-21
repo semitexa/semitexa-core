@@ -12,8 +12,8 @@ use Semitexa\Core\Resource\Metadata\ResourceMetadataRegistry;
 use Semitexa\Core\Resource\Pagination\CollectionPage;
 
 /**
- * Phase 5a runtime gate for `RenderProfile::GraphQL`. Parallel to
- * `JsonResourceResponse` (Phase 2) and `JsonLdResourceResponse` (Phase 4).
+ * Runtime gate for `RenderProfile::GraphQL`. Parallel to
+ * `JsonResourceResponse` and `JsonLdResourceResponse`.
  *
  * Sets `Content-Type: application/graphql-response+json` per the GraphQL
  * over HTTP draft. Body shape is the bounded GraphQL JSON envelope
@@ -32,7 +32,7 @@ class GraphqlResourceResponse extends ResourceResponse
     #[InjectAsReadonly]
     protected ?ResourceMetadataRegistry $registry = null;
 
-    /** Phase 6d: optional expansion pipeline for resolver-backed includes. */
+    /** Optional expansion pipeline for resolver-backed includes. */
     #[InjectAsReadonly]
     protected ?ResourceExpansionPipeline $expansionPipeline = null;
 
@@ -58,7 +58,7 @@ class GraphqlResourceResponse extends ResourceResponse
         $rootMetadata = $this->registry->require($resource::class);
         $this->includeValidator->validate($context->includes, $rootMetadata, $context->payloadClass);
 
-        // Phase 6d: resolver-backed expansion overlay.
+        // Resolver-backed expansion overlay.
         if ($this->expansionPipeline !== null) {
             $resolved = $this->expansionPipeline->expand($resource, $context->includes, $context);
             if (!$resolved->isEmpty()) {
@@ -80,7 +80,7 @@ class GraphqlResourceResponse extends ResourceResponse
     }
 
     /**
-     * Phase 6h: render a list of Resource DTOs as a GraphQL collection
+     * Render a list of Resource DTOs as a GraphQL collection
      * envelope `{"data": {"<rootField>": [ … ]}}`. The caller picks a
      * deterministic `$rootFieldName` (e.g. `"customers"`) — the
      * renderer does not derive it from metadata for collection
@@ -131,7 +131,7 @@ class GraphqlResourceResponse extends ResourceResponse
         $envelope = ['data' => [$rootFieldName => $items]];
         if ($page !== null) {
             // GraphQL keeps `meta` at the top level (sibling of `data`),
-            // mirroring the Phase 6i JSON / JSON-LD shape. Embedding
+            // mirroring the JSON / JSON-LD shape. Embedding
             // pagination inside `data` would conflict with bare GraphQL
             // selection-set expectations. Documented as the smallest
             // consistent shape across the three profiles.

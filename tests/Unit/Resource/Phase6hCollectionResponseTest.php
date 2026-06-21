@@ -32,7 +32,7 @@ use Semitexa\Core\Tests\Unit\Resource\Fixtures\RecordingPreferencesResolver;
 use Semitexa\Core\Tests\Unit\Resource\Fixtures\RecordingProfileResolver;
 
 /**
- * Phase 6h: collection response rendering across the three profiles.
+ * Collection response rendering across the three profiles.
  *
  * The tests build collection responses directly with fixture roots
  * (no HTTP), exercising the `withResources()` API end to end. Each

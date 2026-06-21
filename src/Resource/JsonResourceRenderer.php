@@ -14,7 +14,7 @@ use Semitexa\Core\Resource\Metadata\ResourceMetadataRegistry;
 use Semitexa\Core\Resource\Metadata\ResourceObjectMetadata;
 
 /**
- * Produces the canonical Phase 2 JSON envelope for a Resource DTO graph.
+ * Produces the canonical JSON envelope for a Resource DTO graph.
  *
  * Output shape (decision D5):
  *   to-one ref:   { "type": "...", "id": "...", "href"?: "...", "data"?: {...} }
@@ -51,7 +51,7 @@ final class JsonResourceRenderer
     }
 
     /**
-     * Phase 6h: bare-node alias of {@see render()}. The JSON profile
+     * Bare-node alias of {@see render()}. The JSON profile
      * has no document-level wrapper (the `data` envelope is added by
      * `JsonResourceResponse`), so `renderNode()` simply forwards.
      * Provided for symmetry with the JSON-LD and GraphQL renderers
@@ -173,7 +173,7 @@ final class JsonResourceRenderer
         ?ResourceIdentity $parentIdentity = null,
     ): ?array {
         if ($value === null) {
-            // Phase 6g: an optional resolver-backed nested relation may
+            // An optional resolver-backed nested relation may
             // have its `?ResourceRef` slot declared `null` on a freshly
             // constructed parent DTO; the actual data lives on the
             // overlay. Render from overlay alone when the pipeline put
@@ -199,7 +199,7 @@ final class JsonResourceRenderer
 
         $shouldEmbed = $this->shouldEmbed($field, $includes);
 
-        // Phase 6d: resolver-backed overlay. If the pipeline expanded
+        // Resolver-backed overlay. If the pipeline expanded
         // this relation, prefer the resolved DTO over whatever is on
         // the bare ResourceRef. A `has()` hit with a `null` value means
         // the resolver explicitly said "no related entity"; render
@@ -244,7 +244,7 @@ final class JsonResourceRenderer
             throw new UnloadedRelationException($parentMetadata->type, $field->name);
         }
 
-        // Phase 6d: resolver-backed to-many overlay. The pipeline
+        // Resolver-backed to-many overlay. The pipeline
         // returned a list of resource DTOs for this parent; render
         // them as if they were embedded by the handler.
         if ($parentIdentity !== null
@@ -335,7 +335,7 @@ final class JsonResourceRenderer
     }
 
     /**
-     * Phase 6g: build a JSON ref-one envelope from the overlay only,
+     * Build a JSON ref-one envelope from the overlay only,
      * for the case where the parent DTO carries `null` for this
      * relation slot but the resolver pipeline produced a value. Type
      * and id come from the resolved DTO's own metadata; href is

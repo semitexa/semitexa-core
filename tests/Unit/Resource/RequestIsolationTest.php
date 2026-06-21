@@ -23,7 +23,7 @@ use Semitexa\Core\Tests\Unit\Resource\Fixtures\CustomerResource;
 use Semitexa\Core\Tests\Unit\Resource\Fixtures\ProfileResource;
 
 /**
- * Phase 2.5 explicit Swoole-style isolation guards. Two simulated requests
+ * Explicit Swoole-style isolation guards. Two simulated requests
  * with different inputs must not see each other's state.
  */
 final class RequestIsolationTest extends TestCase
@@ -84,7 +84,7 @@ final class RequestIsolationTest extends TestCase
     public function shared_validator_does_not_accumulate_state_across_calls(): void
     {
         $registry        = $this->buildRegistry();
-        // Phase 6c: Customer's expandable relations must be either
+        // Customer's expandable relations must be either
         // resolver-backed or handler-provided to be satisfiable. The
         // shared-validator isolation property is profile-neutral.
         $handlerProvided = HandlerProvidedIncludeRegistry::withDeclarations([

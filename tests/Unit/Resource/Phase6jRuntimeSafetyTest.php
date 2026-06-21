@@ -8,7 +8,7 @@ use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 
 /**
- * Phase 6j runtime-safety guards. The sort baseline must not weaken
+ * Runtime-safety guards. The sort baseline must not weaken
  * the resolver / pipeline invariants:
  *
  *   - Sort source files do not import DB / ORM / HTTP / framework

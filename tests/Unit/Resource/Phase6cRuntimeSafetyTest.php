@@ -8,9 +8,9 @@ use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 
 /**
- * Phase 6c runtime-safety guards.
+ * Runtime-safety guards.
  *
- * The Phase 6c include-satisfiability validator is **metadata-only**.
+ * The include-satisfiability validator is **metadata-only**.
  * It must not:
  *
  *   - instantiate `RelationResolverInterface` implementations,
@@ -24,7 +24,7 @@ use PHPUnit\Framework\TestCase;
  *   - read `Request`.
  *
  * These tests are static source-content checks — the same pattern used
- * by `OpenApiIsolationTest` (Phase 5b). Static checks are stronger than
+ * by `OpenApiIsolationTest`. Static checks are stronger than
  * mock-based assertions because they fail at CI time even without a
  * test runner walking the production path.
  */
@@ -80,7 +80,7 @@ final class Phase6cRuntimeSafetyTest extends TestCase
             self::assertStringNotContainsString(
                 $token,
                 $source,
-                "IncludeValidator must not reference `{$token}`. Phase 6c is metadata-only.",
+                "IncludeValidator must not reference `{$token}`. This stage is metadata-only.",
             );
         }
     }
@@ -96,7 +96,7 @@ final class Phase6cRuntimeSafetyTest extends TestCase
             self::assertStringNotContainsString(
                 $token,
                 $source,
-                "HandlerProvidedIncludeValidator must not reference `{$token}`. Phase 6c is metadata-only.",
+                "HandlerProvidedIncludeValidator must not reference `{$token}`. This stage is metadata-only.",
             );
         }
     }
@@ -112,7 +112,7 @@ final class Phase6cRuntimeSafetyTest extends TestCase
             self::assertStringNotContainsString(
                 $token,
                 $source,
-                "HandlerProvidedIncludeRegistry must not reference `{$token}`. Phase 6c is metadata-only.",
+                "HandlerProvidedIncludeRegistry must not reference `{$token}`. This stage is metadata-only.",
             );
         }
     }
@@ -127,7 +127,7 @@ final class Phase6cRuntimeSafetyTest extends TestCase
         self::assertSame(
             \Semitexa\Core\Exception\DomainException::class,
             $reflection->getParentClass()?->getName(),
-            'Phase 6c exception must extend Semitexa\\Core\\Exception\\DomainException so the existing ExceptionMapper picks it up.',
+            'The include-satisfiability exception must extend Semitexa\\Core\\Exception\\DomainException so the existing ExceptionMapper picks it up.',
         );
 
         // Construct one to verify status code mapping (no I/O involved).

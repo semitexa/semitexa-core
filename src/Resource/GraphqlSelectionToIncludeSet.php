@@ -13,7 +13,7 @@ use Semitexa\Core\Resource\Metadata\ResourceMetadataRegistry;
 use Semitexa\Core\Resource\Metadata\ResourceObjectMetadata;
 
 /**
- * Phase 5c: translate a parsed GraphQL selection set into an `IncludeSet`
+ * Translate a parsed GraphQL selection set into an `IncludeSet`
  * by walking `ResourceObjectMetadata`.
  *
  * Rules (closed for v1):
@@ -38,7 +38,7 @@ use Semitexa\Core\Resource\Metadata\ResourceObjectMetadata;
 #[AsService]
 final class GraphqlSelectionToIncludeSet
 {
-    /** Maximum nesting depth allowed by Phase 5c (matches Phase 3c limit). */
+    /** Maximum nesting depth allowed by the selection bridge (matches the include-depth limit). */
     public const MAX_DEPTH = 1;
 
     #[InjectAsReadonly]

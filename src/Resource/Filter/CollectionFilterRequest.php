@@ -7,14 +7,14 @@ namespace Semitexa\Core\Resource\Filter;
 use Semitexa\Core\Resource\Exception\InvalidFilterException;
 
 /**
- * Phase 6k: parsed-and-validated `?filter=` request.
+ * Parsed-and-validated `?filter=` request.
  *
  * Pure value object. No DB, ORM, HTTP, or framework state — just a
  * list of resolved {@see FilterTerm}s plus a deterministic
  * `apply(list, extractor)` helper. Parsing happens exactly once via
  * {@see fromQueryParam()}; thereafter the values are immutable.
  *
- * **Wire syntax (Phase 6k).**
+ * **Wire syntax.**
  *
  *     filter=field:operator:value
  *
@@ -43,7 +43,7 @@ use Semitexa\Core\Resource\Exception\InvalidFilterException;
  *
  * Default behaviour: an empty / omitted parameter yields an empty
  * term list and {@see apply()} returns the input unchanged. This
- * preserves the Phase 6j byte-identical no-filter default.
+ * preserves the byte-identical no-filter default.
  */
 final readonly class CollectionFilterRequest
 {

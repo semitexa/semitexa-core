@@ -13,7 +13,7 @@ use Semitexa\Core\Attribute\TransportType;
 use Semitexa\Core\Http\PayloadMetadataReflector;
 
 /**
- * Phase 1 (OPTIONS capability advertisement): the `#[LiveFilterParam]` marker
+ * The `#[LiveFilterParam]` marker
  * gates the advertised `sse-update` mode, and an SSE route's `sseGateModel` is
  * surfaced. Advertisement only — no serving behavior is exercised here.
  */

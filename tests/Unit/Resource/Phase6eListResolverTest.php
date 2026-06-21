@@ -29,9 +29,9 @@ use Semitexa\Core\Tests\Unit\Resource\Fixtures\RecordingAddressesResolver;
 use Semitexa\Core\Tests\Unit\Resource\Fixtures\RecordingProfileResolver;
 
 /**
- * Phase 6e: to-many resolver overlay end-to-end.
+ * To-many resolver overlay end-to-end.
  *
- * `addresses` is now resolver-backed. Together with Phase 6d's
+ * `addresses` is now resolver-backed. Together with the to-one
  * resolver-backed `profile`, both the to-one and to-many overlay
  * paths run through the same pipeline and renderer chain.
  */
@@ -409,7 +409,7 @@ final class Phase6eListResolverTest extends TestCase
             $this->context(IncludeSet::fromQueryString('addresses')),
         );
 
-        // Phase 6d documented behaviour: missing parent key → "absent" =
+        // Documented behaviour: missing parent key → "absent" =
         // empty list for to-many. The overlay records [].
         self::assertTrue($graph->has($rootIdentity, 'addresses'));
         self::assertSame([], $graph->lookup($rootIdentity, 'addresses'));

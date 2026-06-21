@@ -108,7 +108,7 @@ final class AllRoutesRuntimeSmokeTest extends TestCase
         $discovery = $container->get(AttributeDiscovery::class);
         $discovery->initialize();
 
-        // One Way Phase 2: the production worker also warms
+        // One Way: the production worker also warms
         // ResourceMetadataRegistry at WorkerStartFinalize
         // (WarmResourceMetadataListener); the in-process boot has no Swoole
         // lifecycle, so warm it here the same way DumpOpenApiCommand does for

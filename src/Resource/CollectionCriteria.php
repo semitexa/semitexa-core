@@ -9,7 +9,7 @@ use Semitexa\Core\Resource\Pagination\CollectionPageRequest;
 use Semitexa\Core\Resource\Sort\CollectionSortRequest;
 
 /**
- * One Way Phase 2: the compiled, validated intent of one collection
+ * One Way Pattern: the compiled, validated intent of one collection
  * read — page + sort + filter + free-text search, plus the route's
  * pagination policy — ready for a {@see \Semitexa\Core\Contract\CollectionQueryCompilerInterface}
  * implementation to push down to the source (SQL via the ORM

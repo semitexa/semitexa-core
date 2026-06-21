@@ -14,7 +14,7 @@ use Semitexa\Core\Resource\ResourceRef;
 /**
  * Fixture: a Customer-like Resource where `profile` is resolver-backed
  * (`#[ResolveWith]`) and `addresses` is intentionally NOT resolver-backed.
- * Used by Phase 6c tests that exercise the resolver-vs-handler-provided
+ * Used by include-satisfiability tests that exercise the resolver-vs-handler-provided
  * dual-mechanism rule.
  */
 #[ResourceObject(type: 'resolvable_with_profile')]

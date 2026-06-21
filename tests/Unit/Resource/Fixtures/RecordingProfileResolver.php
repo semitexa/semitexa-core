@@ -10,7 +10,7 @@ use Semitexa\Core\Resource\RenderContext;
 use Semitexa\Core\Resource\ResourceIdentity;
 
 /**
- * Phase 6d test fixture: records each resolveBatch() call and returns
+ * Test fixture: records each resolveBatch() call and returns
  * a deterministic to-one mapping per parent. Used by Phase6dPipelineTest
  * to verify call counts, parent-list shape, and overlay placement.
  */

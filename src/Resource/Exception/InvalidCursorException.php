@@ -8,7 +8,7 @@ use Semitexa\Core\Exception\DomainException;
 use Semitexa\Core\Http\HttpStatus;
 
 /**
- * Phase 6l: thrown when the `?cursor=` query parameter fails
+ * Thrown when the `?cursor=` query parameter fails
  * decoding, schema validation, or context binding. Covers:
  *
  *   - malformed base64url body,

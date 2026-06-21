@@ -8,7 +8,7 @@ use Semitexa\Core\Exception\DomainException;
 use Semitexa\Core\Http\HttpStatus;
 
 /**
- * Phase 5c: thrown when a client GraphQL query nests selection sets
+ * Thrown when a client GraphQL query nests selection sets
  * deeper than the bounded bridge supports. Default cap is depth 1
  * (mirrors `IncludeTokenCollector::MAX_DEPTH`). Maps to HTTP 400.
  */

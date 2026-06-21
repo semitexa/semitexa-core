@@ -56,7 +56,7 @@ final class ResourceMetadataValidator
             $errors[] = $e;
         }
 
-        // Phase 6b: resolver checks are independent of structural checks
+        // Resolver checks are independent of structural checks
         // and report per-field, so a single bad resolver does not mask the
         // remaining fields.
         foreach ($metadata->fields as $field) {
@@ -139,7 +139,7 @@ final class ResourceMetadataValidator
     }
 
     /**
-     * Phase 6b: validate a single `#[ResolveWith]` declaration.
+     * Validate a single `#[ResolveWith]` declaration.
      *
      * Rules:
      *   1. Resolver may only be declared on a relation field

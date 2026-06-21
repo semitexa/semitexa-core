@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Semitexa\Core\Resource;
 
 /**
- * Phase 6d: immutable overlay produced by `ResourceExpansionPipeline`.
+ * Immutable overlay produced by `ResourceExpansionPipeline`.
  * Pairs the original root Resource DTO(s) with a path-keyed map of
  * values resolved by registered `RelationResolverInterface`
  * implementations.
@@ -33,7 +33,7 @@ namespace Semitexa\Core\Resource;
  * No mutation. No lazy I/O. No global state. Two `ResolvedResourceGraph`
  * instances built from the same inputs are interchangeable.
  *
- * Phase 6f: a graph may carry multiple root parents (collection
+ * A graph may carry multiple root parents (collection
  * expansion). The legacy `$root` slot is kept for single-parent
  * compatibility and points at the first entry of `$roots` (or `null`
  * when the graph was built from an empty parent list). Renderers
@@ -43,7 +43,7 @@ namespace Semitexa\Core\Resource;
 final readonly class ResolvedResourceGraph
 {
     /**
-     * Phase 6f: every root carried by this graph. Single-parent
+     * Every root carried by this graph. Single-parent
      * expansion produces a one-element list. The list preserves the
      * caller's ordering — bucket batching never reorders the parent
      * list it received.
@@ -53,7 +53,7 @@ final readonly class ResolvedResourceGraph
     public array $roots;
 
     /**
-     * Phase 6d compatibility slot: the first root, or `null` for an
+     * Compatibility slot: the first root, or `null` for an
      * empty-collection graph. Existing single-parent callers may
      * continue to read `$graph->root`; multi-root callers should
      * iterate `$roots` instead.
@@ -62,7 +62,7 @@ final readonly class ResolvedResourceGraph
 
     /**
      * @param ResourceObjectInterface|list<ResourceObjectInterface> $root
-     *   single root (Phase 6d/6e) or list of roots (Phase 6f). An
+     *   single root or list of roots. An
      *   empty list is allowed; it yields a graph with no roots and no
      *   resolutions.
      * @param array<string, ResourceObjectInterface|list<ResourceObjectInterface>|null> $resolved
@@ -107,7 +107,7 @@ final readonly class ResolvedResourceGraph
     }
 
     /**
-     * Phase 6f: graph for a collection-shaped expansion that yielded
+     * Graph for a collection-shaped expansion that yielded
      * no parents. Carries an empty `roots` list and no resolutions.
      * Renderers iterating `roots` produce zero items; callers reading
      * `$graph->root` on this instance see `null`.
