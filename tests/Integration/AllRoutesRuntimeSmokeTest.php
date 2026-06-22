@@ -15,6 +15,9 @@ use Semitexa\Core\Container\ContainerFactory;
 use Semitexa\Core\Discovery\AttributeDiscovery;
 use Semitexa\Core\Discovery\ClassDiscovery;
 use Semitexa\Core\Request;
+use Semitexa\Core\Support\TenantModuleScopeResolver;
+use Semitexa\Core\Tenant\TenantContextStoreInterface;
+use Semitexa\Tenancy\Context\TenantContext;
 
 /**
  * Mechanical smoke pass: dispatch every active discovered route through
@@ -330,7 +333,7 @@ final class AllRoutesRuntimeSmokeTest extends TestCase
                 // domain response. If not, the registry never matched
                 // the path → that's the dangerous "discovered but
                 // unreachable" failure mode this test guards against.
-                if ($this->routeIsRegisteredForPath($method, $smokePath)) {
+                if ($this->routeIsRegisteredForPath($method, $smokePath, isset($route['module']) ? (string) $route['module'] : null)) {
                     continue;
                 }
                 $failures[] = sprintf(
@@ -460,15 +463,59 @@ final class AllRoutesRuntimeSmokeTest extends TestCase
      * to any registered route. Used in the 404 classifier to distinguish
      * "handler returned 404" (controlled) from "registry never matched the
      * smoke path" (the silent-discovery-failure mode).
+     *
+     * RouteRegistry::find() is tenant-scoped: it returns only routes whose
+     * module is active for the currently-resolved tenant. The smoke request is
+     * host-less, so the ambient lookup below resolves the default tenant and
+     * can only see global / default-tenant routes. In a multi-tenant install
+     * (the release clone deliberately runs site/demo/os/platform on isolated
+     * domains) a route owned by a non-default tenant — e.g. the demo tenant's
+     * /demo/* pages — then looks "discovered but unreachable", a false positive
+     * (the route serves 200 under its own host). So when the ambient lookup
+     * misses, re-check find() under each tenant that owns the route's module.
      */
-    private function routeIsRegisteredForPath(string $method, string $path): bool
+    private function routeIsRegisteredForPath(string $method, string $path, ?string $module = null): bool
     {
+        $container = ContainerFactory::get();
+        /** @var \Semitexa\Core\Discovery\RouteRegistry $registry */
+        $registry = $container->get(\Semitexa\Core\Discovery\RouteRegistry::class);
+
+        // Ambient / host-less lookup — covers global and default-tenant routes
+        // (unchanged behaviour).
         try {
-            /** @var \Semitexa\Core\Discovery\RouteRegistry $registry */
-            $registry = ContainerFactory::get()->get(\Semitexa\Core\Discovery\RouteRegistry::class);
-            return $registry->find($path, $method) !== null;
+            if ($registry->find($path, $method) !== null) {
+                return true;
+            }
         } catch (\Throwable) {
+            // fall through to tenant-scoped retries
+        }
+
+        $scopes = TenantModuleScopeResolver::scopesForModule($module);
+        if ($scopes === []) {
             return false;
+        }
+
+        /** @var TenantContextStoreInterface $store */
+        $store = $container->get(TenantContextStoreInterface::class);
+        $previous = $store->tryGet();
+        try {
+            foreach ($scopes as $tenantId) {
+                $store->set(TenantContext::fromResolution($tenantId, 'smoke-test'));
+                try {
+                    if ($registry->find($path, $method) !== null) {
+                        return true;
+                    }
+                } catch (\Throwable) {
+                    // try the next owning tenant
+                }
+            }
+            return false;
+        } finally {
+            if ($previous !== null) {
+                $store->set($previous);
+            } else {
+                $store->clear();
+            }
         }
     }
 }
