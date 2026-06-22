@@ -13,6 +13,9 @@ use Semitexa\Core\Auth\PayloadAccessType;
 use Semitexa\Core\Container\ContainerFactory;
 use Semitexa\Core\Discovery\AttributeDiscovery;
 use Semitexa\Core\Request;
+use Semitexa\Core\Support\TenantModuleScopeResolver;
+use Semitexa\Core\Tenant\TenantContextStoreInterface;
+use Semitexa\Tenancy\Context\TenantContext;
 use Semitexa\Modules\AuthDemo\Application\Payload\Request\ProtectedPermissionPingPayload;
 use Semitexa\Modules\AuthDemo\Application\Service\AuthDemoCapabilityStore;
 use Semitexa\Modules\AuthDemo\Application\Service\AuthDemoPermissionStore;
@@ -287,13 +290,56 @@ final class AuthenticatedRoutesRuntimeSmokeTest extends TestCase
         return isset(self::WEBHOOK_ROUTES[$path]);
     }
 
-    private function checkRouteRegistered(string $method, string $path): bool
+    /**
+     * RouteRegistry::find() is tenant-scoped. The synthetic smoke request is
+     * host-less, so the ambient lookup resolves the default tenant and only sees
+     * global / default-tenant routes. In a multi-tenant install (e.g. the release
+     * clone running site/demo/os/platform on isolated domains) a protected route
+     * owned by a non-default tenant — like the demo tenant's /demo/events/ledger —
+     * then looks "discovered but unreachable" even though it serves 401 under its
+     * own host. When the ambient lookup misses, re-check find() under each tenant
+     * that owns the route's module.
+     */
+    private function checkRouteRegistered(string $method, string $path, ?string $module = null): bool
     {
+        $container = ContainerFactory::get();
+        /** @var \Semitexa\Core\Discovery\RouteRegistry $registry */
+        $registry = $container->get(\Semitexa\Core\Discovery\RouteRegistry::class);
+
         try {
-            $registry = ContainerFactory::get()->get(\Semitexa\Core\Discovery\RouteRegistry::class);
-            return $registry->find($path, $method) !== null;
+            if ($registry->find($path, $method) !== null) {
+                return true;
+            }
         } catch (\Throwable) {
+            // fall through to tenant-scoped retries
+        }
+
+        $scopes = TenantModuleScopeResolver::scopesForModule($module);
+        if ($scopes === []) {
             return false;
+        }
+
+        /** @var TenantContextStoreInterface $store */
+        $store = $container->get(TenantContextStoreInterface::class);
+        $previous = $store->tryGet();
+        try {
+            foreach ($scopes as $tenantId) {
+                $store->set(TenantContext::fromResolution($tenantId, 'smoke-test'));
+                try {
+                    if ($registry->find($path, $method) !== null) {
+                        return true;
+                    }
+                } catch (\Throwable) {
+                    // try the next owning tenant
+                }
+            }
+            return false;
+        } finally {
+            if ($previous !== null) {
+                $store->set($previous);
+            } else {
+                $store->clear();
+            }
         }
     }
 
@@ -306,6 +352,7 @@ final class AuthenticatedRoutesRuntimeSmokeTest extends TestCase
         PayloadAccessType $access,
         string $authStrategy,
         string $class,
+        ?string $module = null,
     ): ?string {
         // Expected non-2xx pinned routes (error pages).
         if (($self_status = self::EXPECTED_NON_2XX[$rawPath] ?? null) !== null && $self_status === $status) {
@@ -331,7 +378,7 @@ final class AuthenticatedRoutesRuntimeSmokeTest extends TestCase
             }
             // Handler-controlled 404 (NotFoundException + ExceptionMapper) is acceptable
             // as long as the registry actually matched the path.
-            if ($this->checkRouteRegistered($method, $smokePath)) {
+            if ($this->checkRouteRegistered($method, $smokePath, $module)) {
                 return null;
             }
             return sprintf(
@@ -398,6 +445,7 @@ final class AuthenticatedRoutesRuntimeSmokeTest extends TestCase
             $smoked++;
             $fail = $this->classifyResponse(
                 $out['status'], $out['snippet'], $method, $path, $smokePath, $access, 'user-token', $class,
+                isset($route['module']) ? (string) $route['module'] : null,
             );
             if ($fail !== null) {
                 $failures[] = $fail;
@@ -455,6 +503,7 @@ final class AuthenticatedRoutesRuntimeSmokeTest extends TestCase
             $smoked++;
             $fail = $this->classifyResponse(
                 $out['status'], $out['snippet'], $method, $path, $smokePath, $access, $authStrategy, $class,
+                isset($route['module']) ? (string) $route['module'] : null,
             );
             if ($fail !== null) {
                 $failures[] = $fail;
