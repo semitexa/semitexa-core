@@ -19,7 +19,7 @@ use Semitexa\Core\Tests\Unit\Resource\Fixtures\UserResource;
 
 /**
  * Asserts that the metadata pipeline does not require — and does not perform —
- * any HTTP, DB, ORM, or container-managed services. Phase 1 must be safe to run
+ * any HTTP, DB, ORM, or container-managed services. The lint path must be safe to run
  * before the worker is fully booted.
  */
 final class LintIsolationTest extends TestCase
@@ -78,7 +78,7 @@ final class LintIsolationTest extends TestCase
                 self::assertStringNotContainsString(
                     $needle,
                     $content,
-                    sprintf('Phase 1 file %s must not import %s', basename($path), $needle),
+                    sprintf('file %s must not import %s', basename($path), $needle),
                 );
             }
         }

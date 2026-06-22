@@ -8,7 +8,7 @@ use Semitexa\Core\Exception\DomainException;
 use Semitexa\Core\Http\HttpStatus;
 
 /**
- * Phase 6j: thrown when the `?sort=` query parameter fails parsing
+ * Thrown when the `?sort=` query parameter fails parsing
  * or validation. Covers:
  *
  *   - empty term in a comma list (`?sort=name,,id`),

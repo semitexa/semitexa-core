@@ -9,7 +9,7 @@ use PHPUnit\Framework\TestCase;
 use Semitexa\Core\Resource\Metadata\ResourceMetadataCacheFile;
 
 /**
- * Phase 3d guard: confirm that the cache:clear command's source still
+ * Guard: confirm that the cache:clear command's source still
  * references the resource-metadata.php cache file. The behavioral test for
  * cache:clear itself lives in semitexa-core's command tests; this test
  * only ensures the eviction wiring isn't accidentally lost.

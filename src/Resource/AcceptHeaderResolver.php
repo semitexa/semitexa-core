@@ -7,7 +7,7 @@ namespace Semitexa\Core\Resource;
 use Semitexa\Core\Attribute\AsService;
 
 /**
- * Phase 3e: pure Accept-header → RenderProfile resolver.
+ * Pure Accept-header → RenderProfile resolver.
  *
  * Implements RFC 7231 §5.3.2 quality value parsing with the following
  * Resource-DTO contract additions:

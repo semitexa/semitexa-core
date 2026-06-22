@@ -38,9 +38,9 @@ final class PayloadMetadataReflector
 {
     /**
      * The property/parameter marker that names Mode-3-mutable filter fields
-     * ({@see \Semitexa\Core\Attribute\LiveFilterParam}). Introduced in Phase 1
+     * ({@see \Semitexa\Core\Attribute\LiveFilterParam}). Introduced
      * (advertisement only — the view-change command intake + filter-only re-run
-     * that HONOR it are Phase 2). The `modes`/`fields` derivations below still
+     * that HONOR it live elsewhere). The `modes`/`fields` derivations below still
      * guard on `class_exists` against this FQCN, so the `sse-update` mode and the
      * per-field `filter` flag light up only for payloads that actually carry the
      * marker, and the reflector stays decoupled from where the marker is applied.
@@ -92,7 +92,7 @@ final class PayloadMetadataReflector
             'modes'     => self::deriveModes($transport, $ref),
             'fields'    => $fields,
             // `invalidatedBy` is intentionally omitted: the route field does not
-            // exist yet (Phase 2). The document is forward-compatible — absent
+            // exist yet. The document is forward-compatible — absent
             // fields simply do not appear.
         ];
 
@@ -116,7 +116,7 @@ final class PayloadMetadataReflector
     }
 
     /**
-     * `modes` derivation (Phase 0 design §3.3) — honest and marker-driven, not
+     * `modes` derivation — honest and marker-driven, not
      * hard-coded:
      *
      *   modes = ["plain"]                  // every routable payload supports Mode 1
@@ -191,7 +191,7 @@ final class PayloadMetadataReflector
      *   1. Setter methods `set{Foo}(Type $foo)` — covers protected/private DTO props.
      *   2. Public properties — for DTOs exposing fields directly.
      *
-     * `required = !nullable && !hasDefault` (Phase 0 design §3.2). The
+     * `required = !nullable && !hasDefault`. The
      * `filter` flag (driven by the `#[LiveFilterParam]` marker) is added per
      * field once that marker class is loadable, reporting `true` for fields that
      * carry it and `false` otherwise; it is omitted entirely if the marker class

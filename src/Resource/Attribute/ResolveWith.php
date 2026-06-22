@@ -7,12 +7,12 @@ namespace Semitexa\Core\Resource\Attribute;
 use Attribute;
 
 /**
- * Phase 6b: declares which `RelationResolverInterface` implementation
- * loads a relation when the future expansion pipeline (Phase 6d+) is
+ * Declares which `RelationResolverInterface` implementation
+ * loads a relation when the future expansion pipeline is
  * asked to expand it.
  *
  * Pure metadata. The attribute carries a class-string only; it never
- * instantiates or invokes the resolver. Phase 6b ships the contract;
+ * instantiates or invokes the resolver. This attribute ships the contract;
  * runtime expansion arrives in later phases.
  *
  *     #[ResourceRef(target: ProfileResource::class, expandable: true, include: 'profile')]

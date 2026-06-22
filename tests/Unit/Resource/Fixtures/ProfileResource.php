@@ -21,8 +21,8 @@ final readonly class ProfileResource implements ResourceObjectInterface
         #[ResourceField]
         public string $bio,
 
-        // Phase 6g: optional resolver-backed nested relation. Default
-        // null keeps Phase 6d/6e/6f resolvers and tests that build
+        // Optional resolver-backed nested relation. Default
+        // null keeps the resolver-backed relations optional and tests that build
         // `ProfileResource(id, bio)` working unchanged. Tests that
         // exercise nested expansion register
         // `RecordingPreferencesResolver` and request

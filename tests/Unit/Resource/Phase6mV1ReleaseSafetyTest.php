@@ -9,7 +9,7 @@ use PHPUnit\Framework\TestCase;
 use Semitexa\Core\Resource\Metadata\ResourceMetadataCacheFile;
 
 /**
- * Phase 6m: consolidated release-readiness guard. The per-phase
+ * Consolidated release-readiness guard. The per-phase
  * runtime-safety tests already pin every individual invariant; this
  * test ties them into one closure-style sweep that any future
  * refactor must keep green for the Resource DTO v1 contract to
@@ -35,18 +35,18 @@ final class Phase6mV1ReleaseSafetyTest extends TestCase
     ];
 
     private const PURE_VALUE_OBJECTS = [
-        // Phase 6i pagination.
+        // Pagination.
         'Pagination/CollectionPageRequest.php',
         'Pagination/CollectionPage.php',
-        // Phase 6j sorting.
+        // Sorting.
         'Sort/CollectionSortRequest.php',
         'Sort/SortDirection.php',
         'Sort/SortTerm.php',
-        // Phase 6k filtering.
+        // Filtering.
         'Filter/CollectionFilterRequest.php',
         'Filter/FilterOperator.php',
         'Filter/FilterTerm.php',
-        // Phase 6l cursor pagination.
+        // Cursor pagination.
         'Cursor/CollectionCursor.php',
         'Cursor/CollectionCursorCodec.php',
         'Cursor/CollectionCursorPage.php',

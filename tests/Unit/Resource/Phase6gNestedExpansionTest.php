@@ -31,7 +31,7 @@ use Semitexa\Core\Tests\Unit\Resource\Fixtures\RecordingPreferencesResolver;
 use Semitexa\Core\Tests\Unit\Resource\Fixtures\RecordingProfileResolver;
 
 /**
- * Phase 6g: nested resolver expansion.
+ * Nested resolver expansion.
  *
  * `?include=profile.preferences` walks two resolver levels:
  *
@@ -41,7 +41,7 @@ use Semitexa\Core\Tests\Unit\Resource\Fixtures\RecordingProfileResolver;
  *      per resolved `ProfileResource` identity.
  *
  * Resolver invocation invariants (single-parent customer in this
- * suite; multi-parent batching is verified by Phase 6f):
+ * suite; multi-parent batching is verified by the list-parent batching test):
  *
  *   - `?include=profile`               → only the profile resolver fires.
  *   - `?include=addresses`             → only the addresses resolver fires.
@@ -278,7 +278,7 @@ final class Phase6gNestedExpansionTest extends TestCase
         $missingMap = new class implements RelationResolverInterface {
             public function resolveBatch(array $parents, RenderContext $ctx): array
             {
-                return []; // omit every parent → "absent" by Phase 6d rules.
+                return []; // omit every parent → "absent" by resolver rules.
             }
         };
         RecordingPreferencesResolver::reset();
@@ -430,7 +430,7 @@ final class Phase6gNestedExpansionTest extends TestCase
     public function single_level_behavior_is_byte_identical_to_phase_6e_for_no_nested_token(): void
     {
         // Under `?include=profile,addresses` (no dotted token), the
-        // overlay should be exactly the Phase 6e shape: two top-level
+        // overlay should be exactly the to-many shape: two top-level
         // slots, no preferences slot. This pins the regression of
         // accidentally triggering nested expansion on plain top-level
         // includes.

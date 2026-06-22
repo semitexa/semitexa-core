@@ -23,7 +23,7 @@ use Semitexa\Core\Tests\Unit\Resource\Fixtures\CustomerResource;
 use Semitexa\Core\Tests\Unit\Resource\Fixtures\ProfileResource;
 
 /**
- * Phase 2 runtime safety: rendering must perform zero IO. The framework's
+ * Runtime safety: rendering must perform zero IO. The framework's
  * own service container is also off-limits during render. These tests guard
  * the contract.
  */
@@ -57,7 +57,7 @@ final class RenderIsolationTest extends TestCase
                 self::assertStringNotContainsString(
                     $needle,
                     $content,
-                    sprintf('Phase 2 file %s must not import %s', basename($path), $needle),
+                    sprintf('file %s must not import %s', basename($path), $needle),
                 );
             }
         }
@@ -102,7 +102,7 @@ final class RenderIsolationTest extends TestCase
         $registry->register($extractor->extract(ProfileResource::class));
         $registry->register($extractor->extract(CustomerResource::class));
 
-        // Phase 6c: include validation is satisfiable only when the
+        // Include validation is satisfiable only when the
         // token has a resolver or the route declares it
         // handler-provided. The isolation contract holds for both
         // mechanisms — exercise the handler-provided path.

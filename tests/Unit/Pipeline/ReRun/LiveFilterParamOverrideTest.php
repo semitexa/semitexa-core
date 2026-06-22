@@ -10,7 +10,7 @@ use Semitexa\Core\Attribute\LiveFilterParam;
 use Semitexa\Core\Pipeline\ReRun\LiveFilterParamOverride;
 
 /**
- * Intended Grid Model · Phase 2 (C3) — the structural anti-poisoning boundary.
+ * Intended Grid Model (C3) — the structural anti-poisoning boundary.
  *
  * Proves the invariant that matters more than shipping: a view-change command may
  * override a cached-DTO field IF AND ONLY IF that field carries

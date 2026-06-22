@@ -9,7 +9,7 @@ use Semitexa\Core\Attribute\InjectAsReadonly;
 use Semitexa\Core\Resource\Exception\UnsupportedAcceptHeaderException;
 
 /**
- * Phase 3e: pick the response class for a multi-profile route based on the
+ * Pick the response class for a multi-profile route based on the
  * request's Accept header.
  *
  * Inputs are intentionally narrow:

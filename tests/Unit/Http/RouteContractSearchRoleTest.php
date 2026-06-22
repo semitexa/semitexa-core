@@ -9,7 +9,7 @@ use PHPUnit\Framework\TestCase;
 use Semitexa\Core\Http\ResolvedPayloadContract;
 
 /**
- * One Way Phase 2: the `search` input role — gated on the DECLARED
+ * One Way: the `search` input role — gated on the DECLARED
  * search param of a collection route, never on the bare field name,
  * so legacy grid-feed payloads carrying un-roled `q` fields stay
  * un-roled.

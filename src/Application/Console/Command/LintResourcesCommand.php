@@ -52,7 +52,7 @@ final class LintResourcesCommand extends BaseCommand
                 $errors[] = $e->getMessage();
             }
 
-            // Phase 6c: validate `#[HandlerProvidesResourceIncludes]`
+            // Validate `#[HandlerProvidesResourceIncludes]`
             // declarations against the resource metadata graph.
             $handlerProvidedRegistry  = HandlerProvidedIncludeRegistry::forTesting($this->classDiscovery);
             $handlerProvidedValidator = HandlerProvidedIncludeValidator::forTesting($registry);

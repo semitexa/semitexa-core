@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Semitexa\Core\Http;
 
 /**
- * One Way Pattern — Phase 1: the `input` block of the route contract
+ * One Way Pattern: the `input` block of the route contract
  * document.
  *
  * WRAPS the field list that {@see PayloadMetadataReflector} already emits
@@ -18,7 +18,7 @@ namespace Semitexa\Core\Http;
  *   sort                    → 'sort'
  *   filter                  → 'filter'
  *
- * One Way Phase 2 adds the free-text search role: the field whose name the
+ * The One Way Pattern adds the free-text search role: the field whose name the
  * route's contributed `collection.search.param` declares (from
  * `#[CollectionSearchable]`) is roled 'search'. Recognition is gated on the
  * declared param name — never on the bare name `q`, which legacy grid feed

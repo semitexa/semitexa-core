@@ -22,7 +22,7 @@ use Semitexa\Core\Tests\Unit\Resource\Fixtures\ResolvableProfileResource;
 use Semitexa\Core\Tests\Unit\Resource\Fixtures\StubRelationResolver;
 
 /**
- * Phase 6c: include-token satisfiability rules.
+ * Include-token satisfiability rules.
  *
  * A requested expandable token is satisfiable when:
  *   1. its leaf relation has `#[ResolveWith]`, OR

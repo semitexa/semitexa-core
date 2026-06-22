@@ -8,7 +8,7 @@ use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 
 /**
- * Phase 5d: body parser + 4 new exception files must stay pure.
+ * Body parser + 4 new exception files must stay pure.
  * Static source check: no DB / ORM / HTTP / renderer / IriBuilder
  * imports, no eval(), no PHP error suppression on json_decode (we want
  * PHP to surface anomalies).
@@ -48,7 +48,7 @@ final class GraphqlBodyTransportIsolationTest extends TestCase
                 self::assertStringNotContainsString(
                     $needle,
                     $content,
-                    sprintf('Phase 5d file %s must not contain %s', basename($path), $needle),
+                    sprintf('file %s must not contain %s', basename($path), $needle),
                 );
             }
         }

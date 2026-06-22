@@ -7,7 +7,7 @@ namespace Semitexa\Core\Pipeline\ReRun;
 use Semitexa\Core\Attribute\LiveFilterParam;
 
 /**
- * Track R · Intended Grid Model · Phase 2 (C3) — the FILTER-ONLY param override,
+ * Intended Grid Model — the FILTER-ONLY param override,
  * and the structural anti-poisoning boundary that makes it safe.
  *
  * A view-change COMMAND (page / limit / sort / filter change) arrives over the

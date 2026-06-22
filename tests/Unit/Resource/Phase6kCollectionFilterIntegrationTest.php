@@ -37,7 +37,7 @@ use Semitexa\Core\Tests\Unit\Resource\Fixtures\RecordingPreferencesResolver;
 use Semitexa\Core\Tests\Unit\Resource\Fixtures\RecordingProfileResolver;
 
 /**
- * Phase 6k: filter happens before sort and pagination, and the
+ * Filter happens before sort and pagination, and the
  * resolver pipeline only sees the visible filtered+sorted+paged
  * slice. Tests mirror a typical list handler flow on synthetic
  * input.

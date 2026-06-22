@@ -21,8 +21,8 @@ use Semitexa\Core\Tests\Unit\Resource\Fixtures\CustomerResource;
 use Semitexa\Core\Tests\Unit\Resource\Fixtures\ProfileResource;
 
 /**
- * Phase 2.5: complete relation-state matrix. Each combination is locked
- * down with one explicit test, so OpenAPI generation in Phase 3 can rely
+ * Complete relation-state matrix. Each combination is locked
+ * down with one explicit test, so OpenAPI generation can rely
  * on a stable contract.
  */
 final class OptionalRelationMatrixTest extends TestCase
@@ -87,7 +87,7 @@ final class OptionalRelationMatrixTest extends TestCase
 
         self::assertSame('profile', $output['profile']['type']);
         self::assertSame('p1', $output['profile']['id']);
-        // Phase 6g: ProfileResource gained an optional resolver-backed
+        // ProfileResource gained an optional resolver-backed
         // `preferences` relation. Without an overlay or eager data, it
         // renders as `null`. The assertion stays scoped to the keys
         // this test cares about (`id`, `bio`, `preferences`).

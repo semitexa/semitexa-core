@@ -24,7 +24,7 @@ use Semitexa\Core\Tests\Unit\Resource\Fixtures\RecordingAddressesResolver;
 use Semitexa\Core\Tests\Unit\Resource\Fixtures\RecordingProfileResolver;
 
 /**
- * Phase 6f runtime-safety guards. The list-parent batching change must
+ * Runtime-safety guards. The list-parent batching change must
  * NOT loosen the existing invariants:
  *
  *   - `ResourceExpansionPipeline` remains the only Resource-layer
@@ -72,8 +72,8 @@ final class Phase6fRuntimeSafetyTest extends TestCase
     #[Test]
     public function pipeline_source_contains_a_bounded_number_of_resolve_batch_call_sites(): void
     {
-        // Phase 6f required exactly 1 call site (one per request).
-        // Phase 6g introduces a deliberate second call site for the
+        // Required exactly 1 call site (one per request).
+        // Introduces a deliberate second call site for the
         // nested expansion pass — the top-level pass and the nested
         // pass each issue one `->resolveBatch(` per bucket. Two is
         // the architectural ceiling for this codebase right now;
@@ -94,7 +94,7 @@ final class Phase6fRuntimeSafetyTest extends TestCase
             2,
             $occurrences,
             'Pipeline must contain at most two ->resolveBatch() call sites '
-            . '(Phase 6f top-level bucket + Phase 6g nested bucket). A third '
+            . '(top-level bucket + nested bucket). A third '
             . 'site signals a regressed per-parent loop or unbounded recursion.',
         );
     }
@@ -115,7 +115,7 @@ final class Phase6fRuntimeSafetyTest extends TestCase
 
         $pipeline->expandMany($roots, $includes, $this->context($includes));
 
-        // 10 parents × 2 relations naive = 20 calls. Phase 6f promises
+        // 10 parents × 2 relations naive = 20 calls. Batching promises
         // exactly 1 call per resolver bucket = 2.
         self::assertCount(1, RecordingProfileResolver::$calls);
         self::assertCount(1, RecordingAddressesResolver::$calls);

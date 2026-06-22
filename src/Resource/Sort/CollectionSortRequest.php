@@ -7,7 +7,7 @@ namespace Semitexa\Core\Resource\Sort;
 use Semitexa\Core\Resource\Exception\InvalidSortException;
 
 /**
- * Phase 6j: parsed-and-validated `?sort=` request.
+ * Parsed-and-validated `?sort=` request.
  *
  * Pure value object. No DB, ORM, HTTP, or framework state — just a
  * list of resolved {@see SortTerm}s and a deterministic
@@ -15,7 +15,7 @@ use Semitexa\Core\Resource\Exception\InvalidSortException;
  * {@see fromQueryParam()}; thereafter the values are immutable and
  * trusted.
  *
- * Syntax (Phase 6j):
+ * Syntax:
  *
  *   sort=name              ascending by `name`
  *   sort=-name             descending by `name`
@@ -31,7 +31,7 @@ use Semitexa\Core\Resource\Exception\InvalidSortException;
  *
  * Default order: an empty / omitted parameter yields an empty term
  * list, and {@see apply()} then returns the input list unchanged.
- * This preserves the Phase 6i / 6h byte-identical no-sort default.
+ * This preserves the byte-identical no-sort default.
  */
 final readonly class CollectionSortRequest
 {

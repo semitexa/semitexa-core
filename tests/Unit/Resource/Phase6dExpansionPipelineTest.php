@@ -28,7 +28,7 @@ use Semitexa\Core\Tests\Unit\Resource\Fixtures\ProfileResource;
 use Semitexa\Core\Tests\Unit\Resource\Fixtures\RecordingProfileResolver;
 
 /**
- * Phase 6d: ResourceExpansionPipeline runtime behaviour.
+ * ResourceExpansionPipeline runtime behaviour.
  */
 final class Phase6dExpansionPipelineTest extends TestCase
 {

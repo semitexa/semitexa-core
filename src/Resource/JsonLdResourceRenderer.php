@@ -14,7 +14,7 @@ use Semitexa\Core\Resource\Metadata\ResourceMetadataRegistry;
 use Semitexa\Core\Resource\Metadata\ResourceObjectMetadata;
 
 /**
- * Phase 4: JSON-LD renderer. Produces the canonical Phase 4 JSON-LD shape
+ * JSON-LD renderer. Produces the canonical JSON-LD shape
  * for a Resource DTO graph.
  *
  * Output rules (closed for v1):
@@ -32,14 +32,14 @@ use Semitexa\Core\Resource\Metadata\ResourceObjectMetadata;
  *     scalar fields, nested relations.
  *   - `ResourceRefList` reference-only with href → `{"@id": <href>}` (Hydra
  *     collection link). With no href → `null` (defensive, matches the
- *     Phase 2.5 to(string $href) factory contract).
+ *     to(string $href) factory contract).
  *   - `ResourceRefList` embedded → JSON array of nested JSON-LD nodes.
  *   - Empty embedded collection → `[]`.
  *   - Optional `?ResourceRef` with null value → `null`.
  *   - Cycle / max-depth fallback → identity-only `{"@id", "@type"}`.
  *
  * Pure: zero IO, zero ORM, zero HTTP, zero Request access. Reuses the
- * Phase 1 metadata graph; never invokes `JsonResourceRenderer` or
+ * metadata graph; never invokes `JsonResourceRenderer` or
  * `IriBuilder`.
  */
 #[AsService]
@@ -82,7 +82,7 @@ final class JsonLdResourceRenderer
     }
 
     /**
-     * Phase 6h: render a single Resource DTO as a bare JSON-LD node,
+     * Render a single Resource DTO as a bare JSON-LD node,
      * without the document-level `@context` wrapper. Collection
      * responses stamp `@context` once at the document root and call
      * `renderNode()` per item so `@context` does not leak onto every
@@ -199,7 +199,7 @@ final class JsonLdResourceRenderer
         ?ResourceIdentity $parentIdentity = null,
     ): ?array {
         if ($value === null) {
-            // Phase 6g: nested resolver-backed relation whose bare DTO
+            // Nested resolver-backed relation whose bare DTO
             // slot is `null` — render from overlay alone.
             $node = $this->overlayOnlyRefOne($field, $context, $includes, $parentIdentity);
             if ($node !== null) {
@@ -211,7 +211,7 @@ final class JsonLdResourceRenderer
             throw new UnloadedRelationException($parentMetadata->type, $field->name);
         }
 
-        // Phase 6d: resolver-backed overlay. Prefer the pipeline's
+        // Resolver-backed overlay. Prefer the pipeline's
         // resolved DTO when present.
         if ($parentIdentity !== null
             && $context->resolved !== null
@@ -252,7 +252,7 @@ final class JsonLdResourceRenderer
 
     /**
      * Reference-only collection: `{"@id": <href>}` when href present;
-     * `null` otherwise (Phase 2.5 makes a non-empty href mandatory through
+     * `null` otherwise (a non-empty href is mandatory through
      * the public factory, so the null branch is only reachable via direct
      * constructor — defensive symmetry with `JsonResourceRenderer`).
      *
@@ -275,7 +275,7 @@ final class JsonLdResourceRenderer
             throw new UnloadedRelationException($parentMetadata->type, $field->name);
         }
 
-        // Phase 6d: resolver-backed to-many overlay.
+        // Resolver-backed to-many overlay.
         if ($parentIdentity !== null
             && $context->resolved !== null
             && $context->resolved->has($parentIdentity, $field->name)
@@ -315,7 +315,7 @@ final class JsonLdResourceRenderer
         }
 
         // Direct-constructor (data=null, href=null): emit JSON null rather
-        // than an indistinguishable empty `{}` — matches the Phase 2.5
+        // than an indistinguishable empty `{}` — matches the
         // contract from the JSON renderer.
         return null;
     }
@@ -383,7 +383,7 @@ final class JsonLdResourceRenderer
     }
 
     /**
-     * Phase 6g: render a JSON-LD nested node from the overlay alone,
+     * Render a JSON-LD nested node from the overlay alone,
      * for the case where the parent DTO carries `null` for this
      * relation slot but the resolver pipeline produced a value.
      *

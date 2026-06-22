@@ -8,7 +8,7 @@ use Semitexa\Core\Resource\Cursor\CollectionCursorPage;
 use Semitexa\Core\Resource\Pagination\CollectionPage;
 
 /**
- * One Way Phase 2: the result of compiling + executing a
+ * One Way Pattern: the result of compiling + executing a
  * {@see CollectionCriteria} against a source — the windowed items
  * plus exactly one resolved pagination shape.
  *

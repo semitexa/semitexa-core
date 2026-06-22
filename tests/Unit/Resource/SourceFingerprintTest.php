@@ -15,7 +15,7 @@ use Semitexa\Core\Tests\Unit\Resource\Fixtures\InMemoryDiscoveryFor3d5;
 use Semitexa\Core\Tests\Unit\Resource\Fixtures\ProfileResource;
 
 /**
- * Phase 3d.5: deterministic source fingerprint for stale-cache protection.
+ * Deterministic source fingerprint for stale-cache protection.
  */
 final class SourceFingerprintTest extends TestCase
 {
@@ -120,7 +120,7 @@ final class SourceFingerprintTest extends TestCase
     }
 }
 
-// Phase 6m.5: the inline `InMemoryDiscoveryFor3d5` stub that lived
+// The inline `InMemoryDiscoveryFor3d5` stub that lived
 // here was extracted to `Fixtures/InMemoryDiscoveryFor3d5.php` so
 // PSR-4 autoload finds it from any consuming test (notably
 // `StaleCacheProtectionTest`), instead of relying on the test that

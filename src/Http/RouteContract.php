@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Semitexa\Core\Http;
 
 /**
- * One Way Pattern — Phase 1: the assembled route contract for one route.
+ * One Way Pattern: the assembled route contract for one route.
  *
  * Joins the legacy OPTIONS document (`$base`, byte-for-byte what
  * {@see PayloadMetadataReflector::describe()} emits today — nothing in it

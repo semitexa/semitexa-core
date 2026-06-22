@@ -16,7 +16,7 @@ use Semitexa\Core\Resource\Pagination\CollectionPageRequest;
 use Semitexa\Core\Resource\Sort\CollectionSortRequest;
 
 /**
- * One Way Phase 2: the criteria vocabulary value objects —
+ * One Way: the criteria vocabulary value objects —
  * {@see CollectionPaginationPolicy} validation, the
  * {@see CollectionCriteria} helpers, and {@see CompiledCollection}
  * exclusivity.

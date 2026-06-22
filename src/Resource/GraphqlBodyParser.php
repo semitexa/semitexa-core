@@ -12,7 +12,7 @@ use Semitexa\Core\Resource\Exception\MissingGraphqlQueryException;
 use Semitexa\Core\Resource\Exception\UnsupportedGraphqlRequestBodyException;
 
 /**
- * Phase 5d: extract a GraphQL query string from a request body.
+ * Extract a GraphQL query string from a request body.
  *
  * **Transport only.** This class does not parse the GraphQL query — it
  * just lifts the query string out of either:
@@ -109,7 +109,7 @@ final class GraphqlBodyParser
             throw new MissingGraphqlQueryException(contentType: $contentTypeHeader);
         }
 
-        // `variables` field — if present and non-empty, reject. Phase 5c
+        // `variables` field — if present and non-empty, reject. The parser
         // explicitly rejects the GraphQL variable feature in the parser;
         // accepting them here would mislead clients into thinking they're
         // honoured.

@@ -19,12 +19,12 @@ use Semitexa\Core\Resource\Metadata\ResourceMetadataRegistry;
 use Semitexa\Core\Resource\RenderProfile;
 
 /**
- * One Way Pattern — Phase 1: the default route contract assembler.
+ * One Way Pattern: the default route contract assembler.
  *
  * Joins the two existing metadata halves for a route — the input side
  * ({@see PayloadMetadataReflector}, served over OPTIONS since Multi-Modal
  * Mode 4) and the output side ({@see ResourceMetadataRegistry}, consumed by
- * OpenAPI since Phase 3) — with named blocks contributed by packages
+ * OpenAPI) — with named blocks contributed by packages
  * through {@see RouteContractBlockContributorInterface}. Core reads BOTH
  * halves as-is; their semantics are untouched.
  *
@@ -121,7 +121,7 @@ final class DefaultRouteContractAssembler implements RouteContractAssemblerInter
             }
         }
 
-        // One Way Phase 2: the contributed search declaration names the
+        // One Way Pattern: the contributed search declaration names the
         // free-text param; the search role lights up only for that field.
         $searchParam = $blocks['collection']['search']['param'] ?? null;
 

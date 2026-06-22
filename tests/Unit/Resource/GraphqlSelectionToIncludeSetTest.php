@@ -24,7 +24,7 @@ use Semitexa\Core\Tests\Unit\Resource\Fixtures\AddressResource;
 use Semitexa\Core\Tests\Unit\Resource\Fixtures\CustomerResource;
 use Semitexa\Core\Tests\Unit\Resource\Fixtures\ProfileResource;
 
-// Phase 5c three-level depth fixtures (Customer5c → Address5c → Country5c
+// Three-level depth fixtures (Customer5c → Address5c → Country5c
 // with expandable relations between them) — used only by the
 // nested-too-deep test below. Inline so they are PSR-4 autoloaded with the
 // test file.
@@ -155,7 +155,7 @@ final class GraphqlSelectionToIncludeSetTest extends TestCase
     #[Test]
     public function nested_selection_beyond_max_depth_returns_400(): void
     {
-        // Use the Phase 3c three-level fixtures (Customer → Address → Country)
+        // Use the three-level fixtures (Customer → Address → Country)
         // so the field exists on every level — the depth-exceeded check is
         // therefore exercised cleanly, not an incidental unknown-field error.
         $extractor = new ResourceMetadataExtractor();

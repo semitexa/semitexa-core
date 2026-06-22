@@ -14,7 +14,7 @@ use Semitexa\Core\Resource\Exception\UnsupportedGraphqlRequestBodyException;
 use Semitexa\Core\Resource\GraphqlBodyParser;
 
 /**
- * Phase 5d: extract a GraphQL query string from the request body.
+ * Extract a GraphQL query string from the request body.
  * Tests construct a real Request with a forged body + headers + method
  * and assert the parser's behaviour for each supported and rejected
  * shape.

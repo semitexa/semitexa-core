@@ -7,15 +7,15 @@ namespace Semitexa\Core\Resource\Attribute;
 use Attribute;
 
 /**
- * Phase 6c: explicit declaration that a payload's handler eagerly embeds
+ * Explicit declaration that a payload's handler eagerly embeds
  * specific include tokens for a given root Resource DTO.
  *
- * The Phase 6c `IncludeValidator` accepts an expandable include token
+ * The `IncludeValidator` accepts an expandable include token
  * only when the framework knows how the relation will arrive. Two
  * mechanisms qualify:
  *
- *   1. The relation field has `#[ResolveWith(...)]` — the future Phase
- *      6d expansion pipeline will load it.
+ *   1. The relation field has `#[ResolveWith(...)]` — the future
+ *      expansion pipeline will load it.
  *   2. The payload's class declares `#[HandlerProvidesResourceIncludes]`
  *      and the requested token is in that list — the handler eagerly
  *      embeds it itself.
@@ -35,7 +35,7 @@ use Attribute;
  *     )]
  *     final class GetCustomerPayload implements SupportsResourceIncludes {}
  *
- * Pure metadata. Phase 6c never instantiates the handler from the
+ * Pure metadata. This attribute never instantiates the handler from the
  * attribute; it only consults the registry to satisfy include validation.
  */
 #[Attribute(Attribute::TARGET_CLASS)]

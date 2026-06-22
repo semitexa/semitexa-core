@@ -69,10 +69,10 @@ final class IncludeValidatorTest extends TestCase
     #[Test]
     public function valid_top_level_include_passes(): void
     {
-        // Phase 6c: an expandable token is satisfiable only when a
+        // An expandable token is satisfiable only when a
         // resolver is registered or the route declares it
         // handler-provided. This test exercises the handler-provided
-        // path; the resolver path is covered by the dedicated Phase 6c
+        // path; the resolver path is covered by the dedicated satisfiability
         // tests below.
         $registry             = $this->customerRegistry();
         $handlerProvided      = HandlerProvidedIncludeRegistry::withDeclarations([
@@ -154,7 +154,7 @@ final class IncludeValidatorTest extends TestCase
         $registry->register($extractor->extract(BotResource::class));
         $registry->register($extractor->extract(CommentResource::class));
 
-        // Phase 6c: handler-provided declaration covers the union
+        // Handler-provided declaration covers the union
         // relation so the existing structural test remains green.
         $handlerProvided = HandlerProvidedIncludeRegistry::withDeclarations([
             CommentResource::class => ['resource' => CommentResource::class, 'tokens' => ['mentions']],
@@ -168,7 +168,7 @@ final class IncludeValidatorTest extends TestCase
         $this->expectNotToPerformAssertions();
     }
 
-    // ----- Phase 6g: dotted (nested) include validation ----------------
+    // ----- Dotted (nested) include validation ----------------
 
     #[Test]
     public function dotted_resolver_backed_nested_token_passes_without_handler_declaration(): void

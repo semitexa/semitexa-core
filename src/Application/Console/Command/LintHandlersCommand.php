@@ -76,7 +76,7 @@ final class LintHandlersCommand extends BaseCommand
                 $errors[] = "{$handlerClass}::handle() parameter 0 must be a concrete class type.";
             }
 
-            // Param 1: must implement ResourceInterface. Phase 3e allows
+            // Param 1: must implement ResourceInterface. Multi-profile routes allow
             // union types (e.g. JsonResourceResponse|JsonLdResourceResponse)
             // for routes that serve multiple render profiles via Accept
             // negotiation; every component of the union must independently

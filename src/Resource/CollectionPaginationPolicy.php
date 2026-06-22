@@ -7,7 +7,7 @@ namespace Semitexa\Core\Resource;
 use Semitexa\Core\Resource\Pagination\CollectionPageRequest;
 
 /**
- * One Way Phase 2: the server-side pagination policy for one
+ * One Way Pattern: the server-side pagination policy for one
  * collection route — the resolved value object behind semitexa-api's
  * `#[CollectionPaginated]` attribute.
  *

@@ -10,7 +10,7 @@ use Semitexa\Core\Auth\PayloadAccessType;
  * Immutable, typed representation of a discovered route.
  *
  * Dual-write companion to the existing array-based route format.
- * Phase 1: created alongside arrays; consumers migrate in Phase 3.
+ * Created alongside arrays while consumers migrate to the typed route.
  */
 final readonly class DiscoveredRoute
 {
@@ -44,7 +44,7 @@ final readonly class DiscoveredRoute
         public PayloadAccessType $accessType = PayloadAccessType::Protected,
         public array $tenantScopes = [],
         /**
-         * Phase 3e: declared render profile(s).
+         * Declared render profile(s).
          * `RenderProfile` for single-profile routes,
          * `list<RenderProfile>` for multi-profile routes,
          * `null` when the route uses the legacy `responseWith`-only path.
@@ -53,7 +53,7 @@ final readonly class DiscoveredRoute
          */
         public mixed $renderProfile = null,
         /**
-         * Phase 3e: profile-value → response class map for Accept-driven dispatch.
+         * Profile-value → response class map for Accept-driven dispatch.
          * Keys are `RenderProfile::value` (e.g. `'json'`, `'json-ld'`).
          *
          * @var array<string, class-string>|null

@@ -8,7 +8,7 @@ use Semitexa\Core\Exception\DomainException;
 use Semitexa\Core\Http\HttpStatus;
 
 /**
- * Phase 5d: thrown when a GraphQL POST request body contains a `query`
+ * Thrown when a GraphQL POST request body contains a `query`
  * field that is present but invalid (non-string, empty after trim).
  * Maps to HTTP 400.
  */

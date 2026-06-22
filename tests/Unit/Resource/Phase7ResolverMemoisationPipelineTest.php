@@ -27,7 +27,7 @@ use Semitexa\Core\Tests\Unit\Resource\Fixtures\RecordingPreferencesResolver;
 use Semitexa\Core\Tests\Unit\Resource\Fixtures\RecordingProfileResolver;
 
 /**
- * Phase 7: expansion-scoped resolver memoisation in
+ * Expansion-scoped resolver memoisation in
  * `ResourceExpansionPipeline`. The pipeline collapses duplicate
  * resolver demand inside a single `expand()` / `expandMany()` call:
  *
@@ -118,8 +118,8 @@ final class Phase7ResolverMemoisationPipelineTest extends TestCase
 
         $a = $this->customer('1');
 
-        // Same identity twice. Phase 6f's bucket already grouped
-        // them; Phase 7's memo collapses them at the resolver call
+        // Same identity twice. The batching bucket already grouped
+        // them; the memo collapses them at the resolver call
         // boundary so the resolver receives ONE identity, not two.
         $graph = $pipeline->expandMany(
             [$a, $a],
@@ -231,7 +231,7 @@ final class Phase7ResolverMemoisationPipelineTest extends TestCase
     #[Test]
     public function memo_does_not_persist_across_separate_expansion_calls(): void
     {
-        // Phase 7 commits to expansion-scoped (NOT request-scoped)
+        // Commits to expansion-scoped (NOT request-scoped)
         // memoisation: each `expandMany()` call creates a fresh
         // memo and discards it on return. Two separate calls
         // therefore each invoke the resolver — even with the same

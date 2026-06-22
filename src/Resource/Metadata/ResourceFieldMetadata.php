@@ -24,9 +24,9 @@ final readonly class ResourceFieldMetadata
         public ?array $unionTargets = null,
         public ?string $discriminator = null,
         /**
-         * Phase 6b: FQCN of the `RelationResolverInterface` implementation
+         * FQCN of the `RelationResolverInterface` implementation
          * that loads this relation when the future expansion pipeline
-         * (Phase 6d+) is asked to expand it. `null` means "no resolver
+         * is asked to expand it. `null` means "no resolver
          * declared" — the relation is either eager-loaded by the handler
          * or simply rendered as a link.
          */

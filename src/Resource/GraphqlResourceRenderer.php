@@ -14,7 +14,7 @@ use Semitexa\Core\Resource\Metadata\ResourceMetadataRegistry;
 use Semitexa\Core\Resource\Metadata\ResourceObjectMetadata;
 
 /**
- * Phase 5a: bounded GraphQL render profile.
+ * Bounded GraphQL render profile.
  *
  * **Deliberately NOT a GraphQL query executor.** This renderer serializes
  * an already-prepared Resource DTO graph into a GraphQL-compatible JSON
@@ -90,7 +90,7 @@ final class GraphqlResourceRenderer
     }
 
     /**
-     * Phase 6h: render a single Resource DTO as a bare GraphQL node,
+     * Render a single Resource DTO as a bare GraphQL node,
      * without the `{data: {<rootField>: …}}` wrapper. Collection
      * responses stamp the `data` envelope once at the document root,
      * pick a deterministic root field name (e.g. pluralized resource
@@ -227,7 +227,7 @@ final class GraphqlResourceRenderer
         ?ResourceIdentity $parentIdentity = null,
     ): ?array {
         if ($value === null) {
-            // Phase 6g: nested resolver-backed relation whose bare DTO
+            // Nested resolver-backed relation whose bare DTO
             // slot is `null` — render from overlay alone.
             $node = $this->overlayOnlyRefOne($field, $context, $includes, $parentIdentity);
             if ($node !== null) {
@@ -239,7 +239,7 @@ final class GraphqlResourceRenderer
             throw new UnloadedRelationException($parentMetadata->type, $field->name);
         }
 
-        // Phase 6d: resolver-backed overlay.
+        // Resolver-backed overlay.
         if ($parentIdentity !== null
             && $context->resolved !== null
             && $context->resolved->has($parentIdentity, $field->name)
@@ -300,7 +300,7 @@ final class GraphqlResourceRenderer
             throw new UnloadedRelationException($parentMetadata->type, $field->name);
         }
 
-        // Phase 6d: resolver-backed to-many overlay.
+        // Resolver-backed to-many overlay.
         if ($parentIdentity !== null
             && $context->resolved !== null
             && $context->resolved->has($parentIdentity, $field->name)
@@ -407,7 +407,7 @@ final class GraphqlResourceRenderer
     }
 
     /**
-     * Phase 6g: render a GraphQL nested object from the overlay alone,
+     * Render a GraphQL nested object from the overlay alone,
      * for the case where the parent DTO carries `null` for this
      * relation slot but the resolver pipeline produced a value.
      *

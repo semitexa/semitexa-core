@@ -8,7 +8,7 @@ use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 
 /**
- * Phase 3d: lifecycle warmup must not import any of: PDO/Doctrine/Orm/Guzzle/
+ * Lifecycle warmup must not import any of: PDO/Doctrine/Orm/Guzzle/
  * Psr-Http/JsonResourceRenderer/IriBuilder/Request. Static source check.
  */
 final class WarmListenerIsolationTest extends TestCase
@@ -45,7 +45,7 @@ final class WarmListenerIsolationTest extends TestCase
                 self::assertStringNotContainsString(
                     $needle,
                     $content,
-                    sprintf('Phase 3d file %s must not import %s', basename($path), $needle),
+                    sprintf('file %s must not import %s', basename($path), $needle),
                 );
             }
         }

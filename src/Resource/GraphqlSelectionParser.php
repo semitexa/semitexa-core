@@ -9,7 +9,7 @@ use Semitexa\Core\Resource\Exception\MalformedGraphqlSelectionException;
 use Semitexa\Core\Resource\Exception\UnsupportedGraphqlFeatureException;
 
 /**
- * Phase 5c: bounded GraphQL selection parser.
+ * Bounded GraphQL selection parser.
  *
  * **Deliberately NOT a GraphQL parser.** This class extracts a single
  * named or anonymous query operation's *selection set* from a query
@@ -122,14 +122,14 @@ final class GraphqlSelectionParser
             if ($c === '$') {
                 throw new UnsupportedGraphqlFeatureException(
                     'variables',
-                    hint: 'Phase 5c selection bridge does not parse variables.',
+                    hint: 'This bounded selection bridge does not parse variables.',
                 );
             }
 
             if ($c === '@') {
                 throw new UnsupportedGraphqlFeatureException(
                     'directives',
-                    hint: 'Phase 5c selection bridge does not parse directives.',
+                    hint: 'This bounded selection bridge does not parse directives.',
                 );
             }
 
@@ -138,7 +138,7 @@ final class GraphqlSelectionParser
                 if (substr($query, $i, 3) === '...') {
                     throw new UnsupportedGraphqlFeatureException(
                         'fragments',
-                        hint: 'Phase 5c selection bridge does not parse fragments or fragment spreads.',
+                        hint: 'This bounded selection bridge does not parse fragments or fragment spreads.',
                     );
                 }
                 throw new MalformedGraphqlSelectionException('unexpected "."', $i, '.');
@@ -147,7 +147,7 @@ final class GraphqlSelectionParser
             if ($c === ':') {
                 throw new UnsupportedGraphqlFeatureException(
                     'aliases',
-                    hint: 'Phase 5c selection bridge does not support field aliases.',
+                    hint: 'This bounded selection bridge does not support field aliases.',
                 );
             }
 
@@ -185,7 +185,7 @@ final class GraphqlSelectionParser
         if ($first === 'mutation') {
             throw new UnsupportedGraphqlFeatureException(
                 'mutations',
-                hint: 'Phase 5c selection bridge accepts only `query { … }` operations.',
+                hint: 'This bounded selection bridge accepts only `query { … }` operations.',
             );
         }
         if ($first === 'subscription') {
@@ -213,7 +213,7 @@ final class GraphqlSelectionParser
         if (isset($tokens[$i]) && $tokens[$i]['v'] === '(') {
             throw new UnsupportedGraphqlFeatureException(
                 'variable definitions',
-                hint: 'Phase 5c selection bridge does not accept variable declarations.',
+                hint: 'This bounded selection bridge does not accept variable declarations.',
             );
         }
     }
@@ -266,7 +266,7 @@ final class GraphqlSelectionParser
             if (isset($tokens[$i]) && $tokens[$i]['v'] === '(') {
                 throw new UnsupportedGraphqlFeatureException(
                     'field arguments',
-                    hint: 'Phase 5c selection bridge does not accept field arguments.',
+                    hint: 'This bounded selection bridge does not accept field arguments.',
                 );
             }
 

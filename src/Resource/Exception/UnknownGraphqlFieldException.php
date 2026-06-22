@@ -8,7 +8,7 @@ use Semitexa\Core\Exception\DomainException;
 use Semitexa\Core\Http\HttpStatus;
 
 /**
- * Phase 5c: thrown by the selection-set translator when the client
+ * Thrown by the selection-set translator when the client
  * selects a field name that does not exist on the target Resource DTO,
  * or when a scalar field is given a sub-selection (e.g. `name { id }`),
  * or when a non-expandable relation is selected for embedding.

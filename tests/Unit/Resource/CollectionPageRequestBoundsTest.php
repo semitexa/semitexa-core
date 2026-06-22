@@ -10,7 +10,7 @@ use Semitexa\Core\Resource\Exception\InvalidPaginationException;
 use Semitexa\Core\Resource\Pagination\CollectionPageRequest;
 
 /**
- * One Way Phase 2: per-route bounds on the page-request parser.
+ * One Way: per-route bounds on the page-request parser.
  * The defaults keep every pre-Phase-2 call site byte-identical;
  * declared bounds replace the static constants in both the default
  * and the max validation.

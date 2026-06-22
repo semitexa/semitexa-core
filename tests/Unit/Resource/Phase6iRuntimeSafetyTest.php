@@ -8,7 +8,7 @@ use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 
 /**
- * Phase 6i runtime-safety guards. Pagination must not weaken the
+ * Runtime-safety guards. Pagination must not weaken the
  * resolver invariants: the slice happens before `expandMany()`, and
  * no new code path becomes a back-door for resolver invocation.
  *

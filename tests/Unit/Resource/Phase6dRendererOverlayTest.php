@@ -23,7 +23,7 @@ use Semitexa\Core\Tests\Unit\Resource\Fixtures\CustomerWithResolvedProfileResour
 use Semitexa\Core\Tests\Unit\Resource\Fixtures\ProfileResource;
 
 /**
- * Phase 6d: each renderer must read the resolved overlay for
+ * Each renderer must read the resolved overlay for
  * resolver-backed relations. The overlay is built by tests directly to
  * isolate renderer behaviour from pipeline behaviour.
  */

@@ -17,7 +17,7 @@ use Semitexa\Core\Tests\Unit\Resource\Fixtures\CustomerResource;
 use Semitexa\Core\Tests\Unit\Resource\Fixtures\ProfileResource;
 
 /**
- * Phase 3d: lifecycle warming behavior. The Registry must:
+ * Lifecycle warming behavior. The Registry must:
  *   - prefer the cache file in production
  *   - rebuild from discovery in dev / on cache miss / on corrupt cache
  *   - rewrite the cache after a production rebuild
@@ -182,7 +182,7 @@ final class RegistryEnsureWarmedTest extends TestCase
 }
 
 /**
- * Stub ClassDiscovery for Phase 3d lifecycle tests.
+ * Stub ClassDiscovery for lifecycle warming tests.
  */
 final class InMemoryDiscoveryFor3d extends ClassDiscovery
 {

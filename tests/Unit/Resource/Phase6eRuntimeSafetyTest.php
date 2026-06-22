@@ -8,11 +8,11 @@ use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 
 /**
- * Phase 6e runtime-safety guards.
+ * Runtime-safety guards.
  *
- * The framework guarantees from Phase 6d (no resolveBatch in any
+ * The framework guarantees (no resolveBatch in any
  * renderer or validator, only in `ResourceExpansionPipeline`) are
- * re-asserted here so a Phase 6e regression flips the alarm.
+ * re-asserted here so a regression flips the alarm.
  *
  * Static source-content checks (PHP comments stripped) are stronger
  * than runtime mock counters because they fail at CI time even

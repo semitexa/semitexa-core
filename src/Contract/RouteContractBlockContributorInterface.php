@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Semitexa\Core\Contract;
 
 /**
- * One Way Pattern — Phase 1: the contract-block contributor seam.
+ * One Way Pattern: the contract-block contributor seam.
  *
  * Packages contribute NAMED blocks to the route contract document assembled
  * by {@see RouteContractAssemblerInterface} — the same `extensions`-bag

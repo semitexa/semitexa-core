@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Semitexa\Core\Resource\Metadata;
 
 /**
- * Phase 3d.5 / 6m: structured outcome of a
+ * Structured outcome of a
  * `ResourceMetadataCacheFile::loadWithResult()` attempt. Distinguishes:
  *
  *   - Hit     — payload valid, fingerprint matches, registry hydrated.

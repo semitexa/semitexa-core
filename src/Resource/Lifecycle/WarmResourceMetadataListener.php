@@ -15,7 +15,7 @@ use Semitexa\Core\Server\Lifecycle\ServerLifecycleListenerInterface;
 use Semitexa\Core\Server\Lifecycle\ServerLifecyclePhase;
 
 /**
- * Phase 3d: warm `ResourceMetadataRegistry` exactly once per worker on boot.
+ * Warm `ResourceMetadataRegistry` exactly once per worker on boot.
  *
  * Production (`APP_ENV === 'prod'`): cache-first.
  *   - If `var/cache/resource-metadata.php` exists and parses, hydrate the

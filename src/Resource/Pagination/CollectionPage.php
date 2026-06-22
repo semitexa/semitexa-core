@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Semitexa\Core\Resource\Pagination;
 
 /**
- * Phase 6i: resolved pagination metadata attached to a collection
+ * Resolved pagination metadata attached to a collection
  * response envelope. Computed from a {@see CollectionPageRequest}
  * and the total item count.
  *
@@ -26,10 +26,10 @@ namespace Semitexa\Core\Resource\Pagination;
 final readonly class CollectionPage
 {
     /**
-     * One Way Phase 2: `$mode` is the explicit pagination-mode
+     * One Way Pattern: `$mode` is the explicit pagination-mode
      * discriminator (`meta.pagination.mode`) for routes with a declared
      * `#[CollectionPaginated]` policy. `null` omits the key entirely,
-     * keeping the Phase 6i envelope byte-identical for every route
+     * keeping the envelope byte-identical for every route
      * that does not declare a policy.
      */
     public function __construct(

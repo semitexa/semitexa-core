@@ -10,8 +10,8 @@ use Semitexa\Core\Resource\Pagination\CollectionPage;
 use Semitexa\Core\Resource\Pagination\CollectionPageRequest;
 
 /**
- * One Way Phase 2: the optional `meta.pagination.mode` discriminator
- * on page envelopes. Null mode keeps the Phase 6i envelope
+ * One Way: the optional `meta.pagination.mode` discriminator
+ * on page envelopes. Null mode keeps the page envelope
  * byte-identical (key order included); a declared mode leads the
  * envelope, mirroring the cursor shape.
  */

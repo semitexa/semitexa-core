@@ -8,7 +8,7 @@ use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 
 /**
- * Phase 6h runtime-safety guards. The collection response API must
+ * Runtime-safety guards. The collection response API must
  * NOT loosen existing invariants:
  *
  *   - `ResourceExpansionPipeline` remains the only Resource-layer

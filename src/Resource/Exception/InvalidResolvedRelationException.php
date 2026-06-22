@@ -8,7 +8,7 @@ use Semitexa\Core\Exception\DomainException;
 use Semitexa\Core\Http\HttpStatus;
 
 /**
- * Phase 6d: thrown when a `RelationResolverInterface::resolveBatch()`
+ * Thrown when a `RelationResolverInterface::resolveBatch()`
  * call returns a value whose shape does not match the expected
  * contract:
  *

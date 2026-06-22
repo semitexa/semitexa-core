@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Semitexa\Core\Resource\Cursor;
 
 /**
- * Phase 6l: cursor-mode pagination metadata. Sibling to
+ * Cursor-mode pagination metadata. Sibling to
  * {@see \Semitexa\Core\Resource\Pagination\CollectionPage} (offset
  * mode); the two are mutually exclusive — a response carries one or
  * the other, never both.
@@ -22,7 +22,7 @@ namespace Semitexa\Core\Resource\Cursor;
  *   }
  *
  * `mode: "cursor"` distinguishes this shape from offset pagination
- * (which omits the `mode` field for byte-identical Phase 6i
+ * (which omits the `mode` field for byte-identical
  * compatibility).
  *
  * `total` is included for in-memory collections where the count is

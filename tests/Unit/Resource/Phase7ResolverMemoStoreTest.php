@@ -16,7 +16,7 @@ use Semitexa\Core\Tests\Unit\Resource\Fixtures\RecordingPreferencesResolver;
 use Semitexa\Core\Tests\Unit\Resource\Fixtures\RecordingProfileResolver;
 
 /**
- * Phase 7: pure unit tests of the `ResolverMemoStore` value object.
+ * Pure unit tests of the `ResolverMemoStore` value object.
  * The store is keyed by
  *
  *   resolverClass | parentUrn | fieldName | parentClass | targetClass

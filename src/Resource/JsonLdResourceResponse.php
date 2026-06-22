@@ -12,8 +12,8 @@ use Semitexa\Core\Resource\Metadata\ResourceMetadataRegistry;
 use Semitexa\Core\Resource\Pagination\CollectionPage;
 
 /**
- * Phase 4 runtime gate for `RenderProfile::JsonLd`. Parallel to
- * `JsonResourceResponse` from Phase 2 — handlers return one of these
+ * Runtime gate for `RenderProfile::JsonLd`. Parallel to
+ * `JsonResourceResponse` — handlers return one of these
  * instead of building JSON-LD by hand.
  *
  * Usage in a handler:
@@ -37,7 +37,7 @@ class JsonLdResourceResponse extends ResourceResponse
     #[InjectAsReadonly]
     protected ?IncludeValidator $includeValidator = null;
 
-    /** Phase 6d: optional expansion pipeline for resolver-backed includes. */
+    /** Optional expansion pipeline for resolver-backed includes. */
     #[InjectAsReadonly]
     protected ?ResourceExpansionPipeline $expansionPipeline = null;
 
@@ -69,7 +69,7 @@ class JsonLdResourceResponse extends ResourceResponse
         $rootMetadata = $this->registry->require($resource::class);
         $this->includeValidator->validate($context->includes, $rootMetadata, $context->payloadClass);
 
-        // Phase 6d: resolver-backed expansion overlay.
+        // Resolver-backed expansion overlay.
         if ($this->expansionPipeline !== null) {
             $resolved = $this->expansionPipeline->expand($resource, $context->includes, $context);
             if (!$resolved->isEmpty()) {
@@ -91,7 +91,7 @@ class JsonLdResourceResponse extends ResourceResponse
     }
 
     /**
-     * Phase 6h / 6i: render a list of Resource DTOs as a JSON-LD
+     * Render a list of Resource DTOs as a JSON-LD
      * collection document
      * `{"@context": …, "@graph": [ … ], "meta": {"pagination": …}}`.
      * `@context` lives exactly once at the document root; each

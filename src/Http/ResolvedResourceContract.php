@@ -8,7 +8,7 @@ use Semitexa\Core\Resource\Metadata\ResourceMetadataRegistry;
 use Semitexa\Core\Resource\Metadata\ResourceObjectMetadata;
 
 /**
- * One Way Pattern — Phase 1: the `output` block of the route contract
+ * One Way Pattern: the `output` block of the route contract
  * document — {@see ResourceObjectMetadata} serialized for the wire.
  *
  * Pure serialization of what {@see \Semitexa\Core\Resource\Metadata\ResourceMetadataExtractor}

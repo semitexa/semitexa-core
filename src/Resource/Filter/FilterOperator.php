@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Semitexa\Core\Resource\Filter;
 
 /**
- * Phase 6k: the bounded set of filter operators supported by the
+ * The bounded set of filter operators supported by the
  * collection slice. Adding a new operator means three things must
  * land together: a case here, a parse/normalise rule in
  * {@see CollectionFilterRequest::parseTerm()}, and a comparison

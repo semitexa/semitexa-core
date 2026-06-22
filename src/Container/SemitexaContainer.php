@@ -445,9 +445,7 @@ final class SemitexaContainer implements ContainerInterface, ExecutionContextAwa
 
                 // Try execution context first (Request, Session, etc.)
                 if (isset($executionContextValues[$typeName])) {
-                    $prop = $ref->getProperty($propName);
-                    $prop->setAccessible(true);
-                    $prop->setValue($instance, $executionContextValues[$typeName]);
+                    $this->assignProperty($ref, $instance, $propName, $executionContextValues[$typeName]);
                     continue;
                 }
 
@@ -463,9 +461,7 @@ final class SemitexaContainer implements ContainerInterface, ExecutionContextAwa
                     // properties; skipping this recursion would leave its typed properties
                     // uninitialized and trigger "must not be accessed before initialization".
                     $this->injectMutableProperties($nestedClone, $nestedClass, $visited);
-                    $prop = $ref->getProperty($propName);
-                    $prop->setAccessible(true);
-                    $prop->setValue($instance, $nestedClone);
+                    $this->assignProperty($ref, $instance, $propName, $nestedClone);
                     continue;
                 }
 
@@ -486,13 +482,21 @@ final class SemitexaContainer implements ContainerInterface, ExecutionContextAwa
                 }
                 $factory = $this->instanceStore->factories[$info['type']] ?? null;
                 if ($factory !== null) {
-                    $prop = $ref->getProperty($propName);
-                    $prop->setAccessible(true);
-                    $prop->setValue($instance, $factory);
+                    $this->assignProperty($ref, $instance, $propName, $factory);
                 }
             }
         } finally {
             unset($visited[$class]);
         }
+    }
+
+    /**
+     * Write a value into a (possibly non-public) property via reflection.
+     */
+    private function assignProperty(ReflectionClass $ref, object $instance, string $propName, mixed $value): void
+    {
+        $prop = $ref->getProperty($propName);
+        $prop->setAccessible(true);
+        $prop->setValue($instance, $value);
     }
 }

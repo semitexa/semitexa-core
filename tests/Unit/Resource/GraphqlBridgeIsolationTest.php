@@ -8,7 +8,7 @@ use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 
 /**
- * Phase 5c: parser + bridge + the four exception files must stay pure.
+ * Parser + bridge + the four exception files must stay pure.
  * Static source check across all selection-set bridge files.
  */
 final class GraphqlBridgeIsolationTest extends TestCase
@@ -48,7 +48,7 @@ final class GraphqlBridgeIsolationTest extends TestCase
                 self::assertStringNotContainsString(
                     $needle,
                     $content,
-                    sprintf('Phase 5c file %s must not contain %s', basename($path), $needle),
+                    sprintf('file %s must not contain %s', basename($path), $needle),
                 );
             }
         }

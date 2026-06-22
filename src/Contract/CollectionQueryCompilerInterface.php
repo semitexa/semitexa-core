@@ -8,7 +8,7 @@ use Semitexa\Core\Resource\CollectionCriteria;
 use Semitexa\Core\Resource\CompiledCollection;
 
 /**
- * One Way Phase 2: the criteria push-down seam.
+ * One Way Pattern: the criteria push-down seam.
  *
  * A compiler takes the validated intent of a collection read
  * ({@see CollectionCriteria}) and executes it AGAINST the source —

@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Semitexa\Core\Resource\Filter;
 
 /**
- * Phase 6k: one resolved `(field, operator, value)` tuple from a
+ * One resolved `(field, operator, value)` tuple from a
  * parsed `?filter=` request. Pure value object — the parser produces
  * a list of these and the apply step iterates them with AND
  * semantics.

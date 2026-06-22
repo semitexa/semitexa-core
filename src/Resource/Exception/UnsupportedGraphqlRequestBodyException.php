@@ -8,10 +8,10 @@ use Semitexa\Core\Exception\DomainException;
 use Semitexa\Core\Http\HttpStatus;
 
 /**
- * Phase 5d: thrown when a GraphQL POST request body carries a
+ * Thrown when a GraphQL POST request body carries a
  * Content-Type the bridge does not support (anything other than
  * `application/json` or `application/graphql`), or when the JSON body
- * declares features Phase 5d's bounded transport rejects (non-empty
+ * declares features the bounded transport rejects (non-empty
  * `variables`). Maps to HTTP 400.
  */
 final class UnsupportedGraphqlRequestBodyException extends DomainException

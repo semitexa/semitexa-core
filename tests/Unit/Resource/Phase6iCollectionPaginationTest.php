@@ -34,7 +34,7 @@ use Semitexa\Core\Tests\Unit\Resource\Fixtures\RecordingPreferencesResolver;
 use Semitexa\Core\Tests\Unit\Resource\Fixtures\RecordingProfileResolver;
 
 /**
- * Phase 6i: collection envelopes carry pagination metadata; the
+ * Collection envelopes carry pagination metadata; the
  * resolver pipeline only sees the paged slice.
  *
  * The handler-level slice happens *before* `expandMany()` is called,
@@ -255,7 +255,7 @@ final class Phase6iCollectionPaginationTest extends TestCase
 
         self::assertSame(JsonLdResourceRenderer::DEFAULT_VOCAB, $body['@context']);
         self::assertCount(2, $body['@graph']);
-        // JSON-LD encodes the resource id into `@id` as a urn (Phase 4
+        // JSON-LD encodes the resource id into `@id` as a urn (JSON-LD
         // shape); a separate `id` field is not emitted on the node.
         self::assertSame('phase6e_customer', $body['@graph'][0]['@type']);
         self::assertSame('urn:semitexa:phase6e_customer:3', $body['@graph'][0]['@id']);

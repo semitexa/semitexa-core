@@ -11,7 +11,7 @@ use Semitexa\Core\Resource\Cursor\CollectionCursorCodec;
 use Semitexa\Core\Resource\Exception\InvalidCursorException;
 
 /**
- * Phase 6l: cursor codec is the only place where opaque tokens are
+ * Cursor codec is the only place where opaque tokens are
  * minted and validated. Every rejection path must surface as
  * `InvalidCursorException` (HTTP 400); successful decode must
  * verify the request's sort + filter signatures match.
@@ -51,7 +51,7 @@ final class Phase6lCursorCodecTest extends TestCase
     {
         $token = $this->codec()->encode($this->sample());
         self::assertMatchesRegularExpression('/^[A-Za-z0-9_-]+$/', $token);
-        // Phase 6l strips trailing `=` padding for cleanliness in URLs.
+        // Strips trailing `=` padding for cleanliness in URLs.
         self::assertStringNotContainsString('=', $token);
     }
 

@@ -16,7 +16,7 @@ final class RenderContext
         public readonly string $baseUrl = '',
         public readonly int $maxDepth = 8,
         /**
-         * Phase 6c: FQCN of the payload class that produced this
+         * FQCN of the payload class that produced this
          * render context. Used by `IncludeValidator` to look up
          * `#[HandlerProvidesResourceIncludes]` declarations and decide
          * whether requested include tokens are satisfiable.
@@ -29,7 +29,7 @@ final class RenderContext
          */
         public readonly ?string $payloadClass = null,
         /**
-         * Phase 6d: optional resolved-relation overlay produced by
+         * Optional resolved-relation overlay produced by
          * `ResourceExpansionPipeline` for resolver-backed
          * (`#[ResolveWith]`) relations. Renderers consult the overlay
          * before reading the raw `ResourceRef` / `ResourceRefList` on
@@ -42,7 +42,7 @@ final class RenderContext
     }
 
     /**
-     * Phase 6d: build a child RenderContext that swaps the resolved
+     * Build a child RenderContext that swaps the resolved
      * overlay. Used by Response classes that build the bare context
      * for include validation, then attach the overlay produced by the
      * expansion pipeline before handing the context to the renderer.

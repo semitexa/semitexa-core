@@ -9,7 +9,7 @@ use Semitexa\Core\Http\HttpStatus;
 use Semitexa\Core\Resource\RenderProfile;
 
 /**
- * Phase 3e: thrown when the request `Accept` header does not map to any of
+ * Thrown when the request `Accept` header does not map to any of
  * the route's declared render profiles. Surfaces as HTTP 406 Not Acceptable.
  *
  * The error context lists the requested media type(s) and the supported

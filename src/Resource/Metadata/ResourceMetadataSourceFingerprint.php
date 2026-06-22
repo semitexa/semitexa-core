@@ -12,7 +12,7 @@ use Semitexa\Core\Resource\Attribute\ResourceObject;
 use Semitexa\Core\Support\ProjectRoot;
 
 /**
- * Phase 3d.5: deterministic fingerprint over the discovered Resource DTO
+ * Deterministic fingerprint over the discovered Resource DTO
  * source set. The fingerprint changes when:
  *
  *   - a Resource DTO is added / removed from the discovered classmap, OR

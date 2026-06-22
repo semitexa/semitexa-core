@@ -226,7 +226,7 @@ final class ResourceMetadataExtractorTest extends TestCase
     #[Test]
     public function resolve_with_on_scalar_field_is_carried_through_for_validator_to_reject(): void
     {
-        // Phase 6b decision: the extractor records `resolverClass` on every
+        // Decision: the extractor records `resolverClass` on every
         // kind so the validator can produce a precise error message; the
         // extractor does not refuse the structure itself.
         $extractor = new ResourceMetadataExtractor();

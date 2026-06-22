@@ -12,7 +12,7 @@ use Semitexa\Core\Resource\Metadata\ResourceMetadataRegistry;
 use Semitexa\Core\Resource\Pagination\CollectionPage;
 
 /**
- * The Phase 2 runtime gate for `RenderProfile::Json`. Handlers return one of
+ * The runtime gate for `RenderProfile::Json`. Handlers return one of
  * these instead of building JSON by hand. Wraps the existing `ResourceResponse`
  * envelope so existing routing/middleware still works.
  *
@@ -46,7 +46,7 @@ class JsonResourceResponse extends ResourceResponse
     #[InjectAsReadonly]
     protected ?ResourceMetadataRegistry $registry = null;
 
-    /** Phase 6d: optional expansion pipeline for resolver-backed includes. */
+    /** Optional expansion pipeline for resolver-backed includes. */
     #[InjectAsReadonly]
     protected ?ResourceExpansionPipeline $expansionPipeline = null;
 
@@ -80,7 +80,7 @@ class JsonResourceResponse extends ResourceResponse
         $rootMetadata = $this->registry->require($resource::class);
         $this->includeValidator->validate($context->includes, $rootMetadata, $context->payloadClass);
 
-        // Phase 6d: run the resolver pipeline for resolver-backed
+        // Run the resolver pipeline for resolver-backed
         // (`#[ResolveWith]`) relations and attach the overlay to the
         // RenderContext. Eager handler-provided includes are
         // unaffected: the pipeline only touches relations whose
@@ -106,7 +106,7 @@ class JsonResourceResponse extends ResourceResponse
     }
 
     /**
-     * Phase 6h / 6i: render a list of Resource DTOs as a JSON
+     * Render a list of Resource DTOs as a JSON
      * collection envelope `{"data": [ … ]}`, optionally with a
      * `meta.pagination` block when the caller supplies a resolved
      * {@see CollectionPage}. Includes are validated against the
@@ -119,7 +119,7 @@ class JsonResourceResponse extends ResourceResponse
      * handler slices the source collection before calling this
      * method so resolvers only fire for the visible parents.
      *
-     * One Way Phase 2: `$filterOptions` carries server-fed select
+     * One Way Pattern: `$filterOptions` carries server-fed select
      * options for declared filterable fields —
      * `meta.filterOptions: { field: [{value, label}] }`. Supplied by
      * the handler; only routes that opt in pay the query cost. Null
@@ -142,7 +142,7 @@ class JsonResourceResponse extends ResourceResponse
         $this->ensureWired();
         \assert($this->registry !== null && $this->renderer !== null && $this->includeValidator !== null);
         if ($page !== null && $cursorPage !== null) {
-            // Phase 6l: page mode and cursor mode are mutually
+            // Page mode and cursor mode are mutually
             // exclusive. The handler must pick one; passing both is
             // a configuration bug we surface immediately.
             throw new \InvalidArgumentException(

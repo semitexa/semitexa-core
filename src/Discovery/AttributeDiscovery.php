@@ -295,17 +295,35 @@ class AttributeDiscovery
 
     private function discoverPayloadsAndRoutes(BootDiagnostics $diagnostics): void
     {
-        // Routable payloads carry one of #[AsPublicPayload]/#[AsProtectedPayload]/
-        // #[AsServicePayload], all of which extend AbstractPayloadRoute. Querying
-        // by the abstract base via IS_INSTANCEOF keeps semitexa-core decoupled
-        // from the concrete attribute classes (which live in semitexa-authorization).
+        $requestMeta = $this->collectPayloadMetadata($diagnostics);
+
+        // Process responses before finalizing requests.
+        $this->processResponseAttributes($diagnostics);
+
+        // Group requests by route and apply the override chain, then register
+        // the winning candidate of each route.
+        $byRoute = $this->groupRouteCandidatesByOverride($requestMeta, $diagnostics);
+        $this->registerResolvedRoutes($byRoute);
+    }
+
+    /**
+     * Reflect every routable payload into its raw route metadata, keyed by class.
+     *
+     * Routable payloads carry one of #[AsPublicPayload]/#[AsProtectedPayload]/
+     * #[AsServicePayload], all of which extend AbstractPayloadRoute. Querying by
+     * the abstract base via IS_INSTANCEOF keeps semitexa-core decoupled from the
+     * concrete attribute classes (which live in semitexa-authorization).
+     *
+     * @return array<string, array<string, mixed>>
+     */
+    private function collectPayloadMetadata(BootDiagnostics $diagnostics): array
+    {
         $allPayloadClasses = $this->classDiscovery->findClassesWithAttributeInstanceof(AbstractPayloadRoute::class);
         $httpRequestClasses = array_values(array_filter(
             $allPayloadClasses,
             fn (string $class) => $this->moduleRegistry->isClassActive($class) || self::isProjectPayload($class)
         ));
         $requestMeta = [];
-        $requestGroups = [];
         foreach ($httpRequestClasses as $className) {
             try {
                 $class = new ReflectionClass($className);
@@ -339,7 +357,7 @@ class AttributeDiscovery
                         // Read in this same IS_INSTANCEOF pass; threaded through the
                         // override-merge so the selected route carries it.
                         'sseGateModel' => $attr->sseGateModel,
-                        // Phase 3e: multi-profile dispatch metadata. Both fields
+                        // Multi-profile dispatch metadata. Both fields
                         // pass through unchanged — RouteExecutor + dispatcher
                         // consume them at request time.
                         'renderProfile' => $attr->renderProfile,
@@ -351,17 +369,24 @@ class AttributeDiscovery
                     $this->payloadBaseMap[$className] = $meta['attr']['base'];
                     $this->payloadPartRegistry->registerPayloadBase($className, $meta['attr']['base']);
                 }
-                $groupKey = $meta['attr']['base'] ?? $className;
-                $requestGroups[$groupKey][] = $meta;
             } catch (\Throwable $e) {
                 $diagnostics->skip('AttributeDiscovery', "Payload reflection failed for {$className}: " . $e->getMessage(), $e);
             }
         }
 
-        // Process responses before finalizing requests
-        $this->processResponseAttributes($diagnostics);
+        return $requestMeta;
+    }
 
-        // Build flat list of all requests with resolved path/methods, then group by route and apply override chain
+    /**
+     * Resolve each request's attributes and bucket candidates by their route
+     * (path + methods + tenant-scope signature) so the override chain can pick
+     * one winner per route.
+     *
+     * @param array<string, array<string, mixed>> $requestMeta
+     * @return array<string, list<array<string, mixed>>>
+     */
+    private function groupRouteCandidatesByOverride(array $requestMeta, BootDiagnostics $diagnostics): array
+    {
         $resolvedCache = [];
         $byRoute = [];
         foreach (array_keys($requestMeta) as $className) {
@@ -394,6 +419,18 @@ class AttributeDiscovery
             }
         }
 
+        return $byRoute;
+    }
+
+    /**
+     * Pick the override-chain winner of each route bucket and register it on the
+     * request map + route registry (running the framework-reserved-path and SSE
+     * boot guards on the routed candidate).
+     *
+     * @param array<string, list<array<string, mixed>>> $byRoute
+     */
+    private function registerResolvedRoutes(array $byRoute): void
+    {
         foreach ($byRoute as $routeKey => $candidates) {
             $selected = self::selectRequestByOverrideChain($candidates);
             if ($selected === null) {
@@ -477,7 +514,7 @@ class AttributeDiscovery
                 'produces' => $routeProduces,
                 'module' => $selectedModule,
                 'tenantScopes' => $selectedTenantScopes,
-                // Phase 3e: thread the multi-profile metadata through to the
+                // Thread the multi-profile metadata through to the
                 // routing layer so RouteExecutor + CrossProfileDispatcher can
                 // pick the right response class per request.
                 'renderProfile' => $resolved['renderProfile'] ?? null,
@@ -835,7 +872,7 @@ class AttributeDiscovery
             // SSE gate-model axis — passed through unchanged (null when unset).
             // The boot guard (assertSseGateCoherence) reads it off the resolved route.
             'sseGateModel' => $attr['sseGateModel'] ?? null,
-            // Phase 3e: forwarded as-is from the source attribute. null when
+            // Forwarded as-is from the source attribute. null when
             // unset (single-profile / no negotiation).
             'renderProfile' => $attr['renderProfile'] ?? null,
             'responsesByProfile' => $attr['responsesByProfile'] ?? null,

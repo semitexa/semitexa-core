@@ -17,19 +17,19 @@ use Semitexa\Core\Resource\Metadata\ResourceObjectMetadata;
  * Validates an `IncludeSet` against the metadata graph rooted at a given
  * Resource DTO.
  *
- * Phase 2 supports dot-notation tokens (e.g. `addresses.country`).
+ * Supports dot-notation tokens (e.g. `addresses.country`).
  *
- * Phase 6c additionally requires that every requested expandable
+ * It additionally requires that every requested expandable
  * relation be **satisfiable**, i.e. have either:
  *
  *   1. a `#[ResolveWith]` resolver in metadata
  *      (`ResourceFieldMetadata::$resolverClass !== null`) — the future
- *      Phase 6d expansion pipeline will load it; OR
+ *      expansion pipeline will load it; OR
  *   2. a route-level `#[HandlerProvidesResourceIncludes]` declaration
  *      that lists the requested token — the handler eagerly embeds it
  *      itself.
  *
- * Phase 6c does **not** instantiate any resolver; it only consults
+ * It does **not** instantiate any resolver; it only consults
  * metadata + the `HandlerProvidedIncludeRegistry`. There is no DB,
  * ORM, Request, renderer, or `IriBuilder` access.
  */
@@ -143,7 +143,7 @@ final class IncludeValidator
         }
 
         // Polymorphic union — for include validation we accept the token as long as ALL
-        // declared targets agree on the next segment. Phase 2 keeps this conservative:
+        // declared targets agree on the next segment. This stays conservative:
         // a nested include only validates against the first registered union target.
         if ($field->unionTargets !== null && $field->unionTargets !== []) {
             /** @var class-string $target */

@@ -8,7 +8,7 @@ use Semitexa\Core\Exception\DomainException;
 use Semitexa\Core\Http\HttpStatus;
 
 /**
- * Phase 6c: thrown when a client requests an include token that is a
+ * Thrown when a client requests an include token that is a
  * valid expandable relation in metadata but that the framework cannot
  * satisfy because:
  *

@@ -20,7 +20,7 @@ use Semitexa\Core\Tests\Unit\Resource\Fixtures\CustomerResource;
 use Semitexa\Core\Tests\Unit\Resource\Fixtures\ProfileResource;
 
 /**
- * Phase 4 runtime safety: JSON-LD rendering must be a pure function over
+ * Runtime safety: JSON-LD rendering must be a pure function over
  * the metadata graph + DTO graph. Static source check + runtime
  * non-mutation checks.
  */
@@ -53,7 +53,7 @@ final class JsonLdRenderIsolationTest extends TestCase
                 self::assertStringNotContainsString(
                     $needle,
                     $content,
-                    sprintf('Phase 4 file %s must not import %s', basename($path), $needle),
+                    sprintf('file %s must not import %s', basename($path), $needle),
                 );
             }
         }
