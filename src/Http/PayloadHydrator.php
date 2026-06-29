@@ -223,12 +223,26 @@ class PayloadHydrator
         }
 
         if ($type instanceof ReflectionUnionType) {
+            $firstNamed = null;
             foreach ($type->getTypes() as $t) {
-                if ($t instanceof ReflectionNamedType && $t->getName() !== 'null') {
+                if (!$t instanceof ReflectionNamedType || $t->getName() === 'null') {
+                    continue;
+                }
+                $firstNamed ??= $t->getName();
+                // In strict mode, accept the first arm the value cleanly fits so a
+                // union like int|string does not reject a valid "hello" just
+                // because int happens to be declared first.
+                if ($strict && self::isTypeCompatible($value, $t->getName())) {
                     return self::castToType($value, $t->getName(), $fieldName, $strict);
                 }
             }
-            return $value;
+            if ($firstNamed === null) {
+                return $value;
+            }
+            // Non-strict keeps its historical behavior (cast to the first arm).
+            // Strict with no compatible arm falls through to castToType, which
+            // throws TypeMismatchException for a genuinely incompatible value.
+            return self::castToType($value, $firstNamed, $fieldName, $strict);
         }
 
         if ($type instanceof ReflectionNamedType) {

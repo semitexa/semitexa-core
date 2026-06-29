@@ -38,6 +38,25 @@ final class PayloadHydratorTest extends TestCase
         self::assertSame(42, $hydrated->n);
     }
 
+    #[Test]
+    public function strict_request_selects_the_compatible_arm_of_a_union(): void
+    {
+        $dto = new class {
+            public int|string|null $v = null;
+
+            public function setV(int|string $value): void
+            {
+                $this->v = $value;
+            }
+        };
+
+        // "hello" is invalid for the int arm but valid for the string arm; strict
+        // hydration must select string instead of rejecting the value outright.
+        $hydrated = PayloadHydrator::hydrate($dto, $this->jsonRequest(['v' => 'hello'], strict: true));
+
+        self::assertSame('hello', $hydrated->v);
+    }
+
     private function intDto(): object
     {
         return new class {
