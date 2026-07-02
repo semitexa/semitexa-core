@@ -36,6 +36,15 @@ readonly class Request
         public array $cookies,
         public ?string $content = null,
         public array $files = [],
+        /**
+         * Per-request strict hydration flag. When true, PayloadHydrator rejects
+         * values that cannot be meaningfully coerced (throws TypeMismatchException)
+         * instead of silently casting. This is an INTERNAL flag set by the test
+         * transport (semitexa-testing InProcessTransport) — it is NOT derived from
+         * any request header, so untrusted clients cannot toggle validation
+         * behavior over the wire. Production requests always carry false.
+         */
+        public bool $strictHydration = false,
     ) {}
     
     /**

@@ -20,46 +20,18 @@ use ReflectionUnionType;
  * if the method exists. Value is cast to the setter's parameter type before calling.
  * Path params are keyed by route param name (e.g. 'id' -> setId($value)).
  *
- * Strict mode: when enabled via enableStrictMode(true), type mismatches that cannot
- * be meaningfully coerced throw TypeMismatchException instead of silently casting.
- * Intended for use by semitexa-testing's InProcessTransport only.
+ * Strict mode: when the incoming Request carries $strictHydration === true, type
+ * mismatches that cannot be meaningfully coerced throw TypeMismatchException
+ * instead of silently casting. The flag is PER-REQUEST (read off the Request,
+ * never a process-global static), so it is safe under Swoole concurrency: one
+ * request's strictness can never bleed into another's. Only semitexa-testing's
+ * InProcessTransport sets it; production requests carry false.
  */
 class PayloadHydrator
 {
-    private static bool $strictTypes = false;
-
-    /**
-     * Enable or disable strict type checking during hydration.
-     * In strict mode, sending "hello" for an int field throws TypeMismatchException
-     * instead of casting it to 0.
-     *
-     * NOTE: This flag is global (static). Only safe to toggle in single-process
-     * test environments (PHPUnit CLI). Never enable in production or Swoole workers.
-     *
-     * @throws \LogicException if called inside a Swoole worker (coroutine context)
-     */
-    public static function enableStrictMode(bool $enabled = true): void
-    {
-        if (self::$strictTypes !== $enabled
-            && class_exists(\Swoole\Coroutine::class, false)
-            && \Swoole\Coroutine::getCid() >= 0
-        ) {
-            throw new \LogicException(
-                'PayloadHydrator::enableStrictMode() must not change state in Swoole workers. '
-                . 'The flag is process-global and unsafe under concurrency.'
-            );
-        }
-
-        self::$strictTypes = $enabled;
-    }
-
-    public static function isStrictMode(): bool
-    {
-        return self::$strictTypes;
-    }
-
     public static function hydrate(object $dto, Request $httpRequest): object
     {
+        $strict = $httpRequest->strictHydration;
         $pathParams = self::extractPathParams($dto, $httpRequest);
         $data = self::collectData($httpRequest);
         $data = array_merge($data, $pathParams);
@@ -79,7 +51,7 @@ class PayloadHydrator
 
             $param = $method->getParameters()[0];
             $type = $param->getType();
-            $typedValue = self::castValue($value, $type, $key);
+            $typedValue = self::castValue($value, $type, $key, $strict);
             $method->invoke($dto, $typedValue);
         }
 
@@ -244,19 +216,33 @@ class PayloadHydrator
         return $decoded;
     }
 
-    private static function castValue(mixed $value, ?\ReflectionType $type, string $fieldName = ''): mixed
+    private static function castValue(mixed $value, ?\ReflectionType $type, string $fieldName = '', bool $strict = false): mixed
     {
         if ($type === null) {
             return $value;
         }
 
         if ($type instanceof ReflectionUnionType) {
+            $firstNamed = null;
             foreach ($type->getTypes() as $t) {
-                if ($t instanceof ReflectionNamedType && $t->getName() !== 'null') {
-                    return self::castToType($value, $t->getName(), $fieldName);
+                if (!$t instanceof ReflectionNamedType || $t->getName() === 'null') {
+                    continue;
+                }
+                $firstNamed ??= $t->getName();
+                // In strict mode, accept the first arm the value cleanly fits so a
+                // union like int|string does not reject a valid "hello" just
+                // because int happens to be declared first.
+                if ($strict && self::isTypeCompatible($value, $t->getName())) {
+                    return self::castToType($value, $t->getName(), $fieldName, $strict);
                 }
             }
-            return $value;
+            if ($firstNamed === null) {
+                return $value;
+            }
+            // Non-strict keeps its historical behavior (cast to the first arm).
+            // Strict with no compatible arm falls through to castToType, which
+            // throws TypeMismatchException for a genuinely incompatible value.
+            return self::castToType($value, $firstNamed, $fieldName, $strict);
         }
 
         if ($type instanceof ReflectionNamedType) {
@@ -264,7 +250,7 @@ class PayloadHydrator
             if ($type->allowsNull() && ($value === null || $value === '')) {
                 return null;
             }
-            return self::castToType($value, $typeName, $fieldName);
+            return self::castToType($value, $typeName, $fieldName, $strict);
         }
 
         if ($type instanceof ReflectionIntersectionType) {
@@ -274,7 +260,7 @@ class PayloadHydrator
         return $value;
     }
 
-    private static function castToType(mixed $value, string $type, string $fieldName = ''): mixed
+    private static function castToType(mixed $value, string $type, string $fieldName = '', bool $strict = false): mixed
     {
         if ($value === null || $value === '') {
             return match ($type) {
@@ -287,7 +273,7 @@ class PayloadHydrator
         }
 
         // Strict mode: reject values that cannot be meaningfully coerced to the target type.
-        if (self::$strictTypes && !self::isTypeCompatible($value, $type)) {
+        if ($strict && !self::isTypeCompatible($value, $type)) {
             throw new TypeMismatchException($fieldName, $type, $value);
         }
 
