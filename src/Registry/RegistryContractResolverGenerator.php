@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Semitexa\Core\Registry;
 
 use ReflectionClass;
+use Semitexa\Core\Attribute\SatisfiesServiceContract;
 use Semitexa\Core\Support\ProjectRoot;
 
 /**
@@ -149,14 +150,21 @@ class RegistryContractResolverGenerator
         $byKeyEntries = [];
         foreach ($implementations as $impl) {
             $implClass = $impl['class'];
-            $module = $impl['module'];
-            $shortClassName = (new ReflectionClass($implClass))->getShortName();
-            $compositeKey = $module . '::' . $shortClassName;
+            // The map MUST be keyed by the enum-backed factoryKey value, because
+            // get()/keys() below look up by `$key->value`. Keying by module::Class
+            // (the old behaviour) made get() throw and keys() unusable for every
+            // factory contract.
+            $lookupKey = self::resolveFactoryKeyValue($implClass, $baseInterface);
+            if ($lookupKey === null) {
+                // Factory contracts require an enum-backed factoryKey on every
+                // implementation (enforced by GraphBuilder); skip defensively.
+                continue;
+            }
             $typeHint = self::addImport($implClass, $imports, $usedShortNames);
             $paramName = self::uniqueParamName($implClass, $paramNames);
             $paramNames[] = $paramName;
             $params[] = "        private {$typeHint} \${$paramName},";
-            $byKeyEntries[] = '            ' . var_export($compositeKey, true) . ' => $this->' . $paramName . ',';
+            $byKeyEntries[] = '            ' . var_export($lookupKey, true) . ' => $this->' . $paramName . ',';
         }
         $paramsStr = implode("\n", $params);
         $paramsStr = rtrim($paramsStr, ',');
@@ -218,6 +226,32 @@ PHP;
 
         file_put_contents($outPath, $content);
         return CanonicalRegistryPaths::REGISTRY_CONTRACTS_NAMESPACE . '\\' . $factoryShortName;
+    }
+
+    /**
+     * Read the enum-backed factoryKey value from an implementation's
+     * #[SatisfiesServiceContract(of: <baseInterface>, factoryKey: <enum>)] attribute.
+     *
+     * This is the key consumers pass to the factory's get(), so the generated
+     * `$byKey` map is keyed by it. Returns null when the implementation declares
+     * no factoryKey for this contract.
+     */
+    private static function resolveFactoryKeyValue(string $implClass, string $baseInterface): int|string|null
+    {
+        try {
+            $ref = new ReflectionClass($implClass);
+        } catch (\Throwable) {
+            return null;
+        }
+
+        foreach ($ref->getAttributes(SatisfiesServiceContract::class) as $attrRef) {
+            $attr = $attrRef->newInstance();
+            if ($attr->of === $baseInterface && $attr->factoryKey instanceof \BackedEnum) {
+                return $attr->factoryKey->value;
+            }
+        }
+
+        return null;
     }
 
     /**

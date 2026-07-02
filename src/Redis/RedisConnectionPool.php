@@ -28,6 +28,17 @@ final class RedisConnectionPool
     private int $size;
 
     /**
+     * All bounded so a slow/broken Redis or a momentarily-exhausted pool can never
+     * suspend a Swoole coroutine forever — an indefinite blocking read or an
+     * unbounded channel pop is what triggers the "all coroutines asleep - deadlock"
+     * worker crash behind held-open SSE feeds.
+     */
+    private const CONNECT_TIMEOUT_SECONDS = 3.0;
+    private const READ_WRITE_TIMEOUT_SECONDS = 5.0;
+    private const BORROW_TIMEOUT_SECONDS = 2.0;
+    private const RETURN_TIMEOUT_SECONDS = 0.05;
+
+    /**
      * @param int $size Number of connections in the pool
      * @param array{scheme?:string, host?:string, port?:int, password?:string} $config Redis connection params
      */
@@ -78,9 +89,14 @@ final class RedisConnectionPool
         }
 
         if ($this->pool !== null) {
-            $client = $this->pool->pop();
+            // Bounded borrow: an unbounded pop() on a momentarily-exhausted pool
+            // (e.g. every connection held by a stalled read) suspends this
+            // coroutine with no producer to wake it — a worker-killing deadlock.
+            // On timeout, hand out a fresh (over-cap) client so the caller can
+            // proceed; put() drops it back if the pool is already full.
+            $client = $this->pool->pop(self::BORROW_TIMEOUT_SECONDS);
             if (!$client instanceof ClientInterface) {
-                throw new \RuntimeException('Redis pool exhausted or closed');
+                return $this->createClient();
             }
             return $client;
         }
@@ -95,7 +111,16 @@ final class RedisConnectionPool
     public function put(ClientInterface $client): void
     {
         if ($this->pool !== null) {
-            $this->pool->push($client);
+            // Non-blocking return: if the pool is already full (an over-cap client
+            // created by a timed-out get()), drop this one instead of blocking on
+            // a full channel — a blocking push would be the same deadlock, inverted.
+            if (!$this->pool->push($client, self::RETURN_TIMEOUT_SECONDS)) {
+                try {
+                    $client->disconnect();
+                } catch (\Throwable) {
+                    // Ignore — the client is being discarded anyway.
+                }
+            }
             return;
         }
 
@@ -151,6 +176,12 @@ final class RedisConnectionPool
             'scheme' => $this->scheme,
             'host'   => $this->host,
             'port'   => $this->port,
+            // Bounded connect + read/write timeouts: an indefinite blocking read
+            // (Redis slow/restarted, half-open socket) is the classic Swoole
+            // worker deadlock. On timeout Predis throws → withConnection() discards
+            // the connection and creates a fresh one, so the pool self-heals.
+            'timeout'            => self::CONNECT_TIMEOUT_SECONDS,
+            'read_write_timeout' => self::READ_WRITE_TIMEOUT_SECONDS,
         ];
 
         if ($this->password !== '') {
