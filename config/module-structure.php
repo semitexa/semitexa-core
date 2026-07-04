@@ -40,8 +40,9 @@ return new LocalModuleStructureExtension(
         'Server/Lifecycle' => new ModuleStructureRule(
             path: 'Server/Lifecycle',
             allowedFilePatterns: ['/^[A-Z][A-Za-z0-9]*\.php$/'],
+            excludedFilePatterns: ['/(Helper|Helpers|Util|Utils|Manager|Managers|Misc|Common)\.php$/'],
             mode: ModuleStructureRule::MODE_LEAF_FILES_ONLY,
-            rationale: 'semitexa-core-only: worker lifecycle subsystem (phases, context, invoker, registry, core listeners). PascalCase PHP files; no subdirectories.',
+            rationale: 'semitexa-core-only: worker lifecycle subsystem (phases, context, invoker, registry, core listeners). PascalCase PHP files with the standard drift deny-list; no subdirectories. Kept byte-identical in contract to the global spec rule.',
         ),
     ],
     reason: 'semitexa-core hosts the framework server/lifecycle subsystem at src/Server/, which is core-only public API predating the structure spec.',
