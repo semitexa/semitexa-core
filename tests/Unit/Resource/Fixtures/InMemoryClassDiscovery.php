@@ -21,7 +21,7 @@ use Semitexa\Core\Discovery\ClassDiscovery;
  * `ai:verify` heuristic classifies it correctly and never tries to
  * run it as a PHPUnit test.
  */
-final class InMemoryDiscoveryFor3d5 extends ClassDiscovery
+final class InMemoryClassDiscovery extends ClassDiscovery
 {
     /** @param list<string> $classes */
     public function __construct(private readonly array $classes)

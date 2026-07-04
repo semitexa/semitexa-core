@@ -35,7 +35,7 @@ use Semitexa\Core\Tests\Unit\Resource\Fixtures\RecordingProfileResolver;
  * through the same machinery as a one-entry bucket and stays
  * byte-identical to the single-parent path.
  */
-final class Phase6fListParentBatchingTest extends TestCase
+final class ListParentBatchingTest extends TestCase
 {
     private function registry(): ResourceMetadataRegistry
     {

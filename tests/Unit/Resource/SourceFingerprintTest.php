@@ -11,7 +11,7 @@ use Semitexa\Core\Resource\Attribute\ResourceObject;
 use Semitexa\Core\Resource\Metadata\ResourceMetadataSourceFingerprint;
 use Semitexa\Core\Tests\Unit\Resource\Fixtures\AddressResource;
 use Semitexa\Core\Tests\Unit\Resource\Fixtures\CustomerResource;
-use Semitexa\Core\Tests\Unit\Resource\Fixtures\InMemoryDiscoveryFor3d5;
+use Semitexa\Core\Tests\Unit\Resource\Fixtures\InMemoryClassDiscovery;
 use Semitexa\Core\Tests\Unit\Resource\Fixtures\ProfileResource;
 
 /**
@@ -21,7 +21,7 @@ final class SourceFingerprintTest extends TestCase
 {
     private function discovery(array $classes): ClassDiscovery
     {
-        return new InMemoryDiscoveryFor3d5($classes);
+        return new InMemoryClassDiscovery($classes);
     }
 
     #[Test]
@@ -120,8 +120,8 @@ final class SourceFingerprintTest extends TestCase
     }
 }
 
-// The inline `InMemoryDiscoveryFor3d5` stub that lived
-// here was extracted to `Fixtures/InMemoryDiscoveryFor3d5.php` so
+// The inline `InMemoryClassDiscovery` stub that lived
+// here was extracted to `Fixtures/InMemoryClassDiscovery.php` so
 // PSR-4 autoload finds it from any consuming test (notably
 // `StaleCacheProtectionTest`), instead of relying on the test that
 // happened to also be loaded by the runner.

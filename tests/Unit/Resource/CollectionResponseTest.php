@@ -45,7 +45,7 @@ use Semitexa\Core\Tests\Unit\Resource\Fixtures\RecordingProfileResolver;
  *   - the singular `withResource()` API still produces byte-identical
  *     output for the regression check on the existing route.
  */
-final class Phase6hCollectionResponseTest extends TestCase
+final class CollectionResponseTest extends TestCase
 {
     protected function setUp(): void
     {

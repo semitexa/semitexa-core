@@ -45,7 +45,7 @@ use Semitexa\Core\Tests\Unit\Resource\Fixtures\RecordingProfileResolver;
  * Pipeline order:
  *   catalog → filter → sort → paginate → slice → expandMany → render
  */
-final class Phase6kCollectionFilterIntegrationTest extends TestCase
+final class CollectionFilterIntegrationTest extends TestCase
 {
     /** @var array<string, list<string>> */
     private const FILTER_ALLOW = [

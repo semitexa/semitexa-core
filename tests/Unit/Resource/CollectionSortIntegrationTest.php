@@ -46,7 +46,7 @@ use Semitexa\Core\Tests\Unit\Resource\Fixtures\RecordingProfileResolver;
  * default order is distinct from `?sort=id`, which lets us assert
  * the sort actually happened.
  */
-final class Phase6jCollectionSortIntegrationTest extends TestCase
+final class CollectionSortIntegrationTest extends TestCase
 {
     private const ALLOW = ['id', 'name'];
 

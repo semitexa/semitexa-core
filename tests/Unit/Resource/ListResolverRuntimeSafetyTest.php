@@ -18,7 +18,7 @@ use PHPUnit\Framework\TestCase;
  * than runtime mock counters because they fail at CI time even
  * without a request walking through the production code path.
  */
-final class Phase6eRuntimeSafetyTest extends TestCase
+final class ListResolverRuntimeSafetyTest extends TestCase
 {
     #[Test]
     public function pipeline_is_still_the_only_resolve_batch_caller_in_resource_layer(): void

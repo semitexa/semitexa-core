@@ -16,7 +16,7 @@ use Semitexa\Core\Resource\Exception\InvalidCursorException;
  * `InvalidCursorException` (HTTP 400); successful decode must
  * verify the request's sort + filter signatures match.
  */
-final class Phase6lCursorCodecTest extends TestCase
+final class CursorCodecTest extends TestCase
 {
     private function codec(): CollectionCursorCodec
     {

@@ -15,7 +15,7 @@ use Semitexa\Core\Resource\Metadata\ResourceMetadataRegistry;
 use Semitexa\Core\Resource\Metadata\ResourceMetadataSourceFingerprint;
 use Semitexa\Core\Tests\Unit\Resource\Fixtures\AddressResource;
 use Semitexa\Core\Tests\Unit\Resource\Fixtures\CustomerResource;
-use Semitexa\Core\Tests\Unit\Resource\Fixtures\InMemoryDiscoveryFor3d5;
+use Semitexa\Core\Tests\Unit\Resource\Fixtures\InMemoryClassDiscovery;
 use Semitexa\Core\Tests\Unit\Resource\Fixtures\ProfileResource;
 
 /**
@@ -50,7 +50,7 @@ final class StaleCacheProtectionTest extends TestCase
 
     private function customerDiscovery(): ClassDiscovery
     {
-        return new InMemoryDiscoveryFor3d5([
+        return new InMemoryClassDiscovery([
             AddressResource::class,
             ProfileResource::class,
             CustomerResource::class,
@@ -108,9 +108,9 @@ final class StaleCacheProtectionTest extends TestCase
     }
 
     #[Test]
-    public function pre_3d5_cache_with_no_fingerprint_field_is_treated_as_stale(): void
+    public function legacy_cache_with_no_fingerprint_field_is_treated_as_stale(): void
     {
-        // Write a payload in the OLD pre-3d.5 shape (no `fingerprint` key).
+        // Write a payload in the legacy shape (no `fingerprint` key).
         file_put_contents($this->cachePath, "<?php return ['version' => 1, 'metadata' => []];\n");
         $cache = ResourceMetadataCacheFile::forPath($this->cachePath);
 
@@ -160,7 +160,7 @@ final class StaleCacheProtectionTest extends TestCase
     {
         // First boot writes a cache for class set A.
         $cache       = ResourceMetadataCacheFile::forPath($this->cachePath);
-        $discoveryA  = new InMemoryDiscoveryFor3d5([AddressResource::class, ProfileResource::class, CustomerResource::class]);
+        $discoveryA  = new InMemoryClassDiscovery([AddressResource::class, ProfileResource::class, CustomerResource::class]);
         $fpA         = $this->fingerprint($discoveryA);
         $first       = $this->freshRegistry();
         $first->ensureWarmed($discoveryA, $cache, production: true, fingerprint: $fpA);
@@ -170,7 +170,7 @@ final class StaleCacheProtectionTest extends TestCase
 
         // Second boot: imagine a deploy added a class. Different discovery
         // → different fingerprint → Stale → rebuild + rewrite.
-        $discoveryB = new InMemoryDiscoveryFor3d5([AddressResource::class, ProfileResource::class]);
+        $discoveryB = new InMemoryClassDiscovery([AddressResource::class, ProfileResource::class]);
         $fpB        = $this->fingerprint($discoveryB);
         self::assertNotSame($fpAValue, $fpB->compute(), 'Sanity: different class set must yield different fingerprint.');
 
@@ -200,7 +200,7 @@ final class StaleCacheProtectionTest extends TestCase
         // it bypasses the populated cache).
         $dev = $this->freshRegistry();
         $dev->ensureWarmed(
-            new InMemoryDiscoveryFor3d5([]),
+            new InMemoryClassDiscovery([]),
             $cache,
             production: false,
             fingerprint: $fp,
@@ -227,7 +227,7 @@ final class StaleCacheProtectionTest extends TestCase
         self::assertSame($hash1, $hash2);
     }
 
-    // The pre-3d.5 boolean `ResourceMetadataCacheFile::load()`
+    // The legacy boolean `ResourceMetadataCacheFile::load()`
     // shim was removed for the v1 release. Tests that exercised the
     // shim path went with it; the equivalent semantics
     // (`loadWithResult($r, null) === CacheLoadResult::Hit`) live in

@@ -8,19 +8,20 @@ use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 
 /**
- * Runtime-safety guards. The filter baseline must not
- * weaken the resolver / pipeline invariants:
+ * Runtime-safety guards. The sort baseline must not weaken
+ * the resolver / pipeline invariants:
  *
- *   - Filter source files do not import DB / ORM / HTTP / framework
+ *   - Sort source files do not import DB / ORM / HTTP / framework
  *     runtime classes; they are pure value objects + parsers.
+ *   - Collection responses still call `expandMany()` exactly once.
  *   - `ResourceExpansionPipeline` is still the only Resource-layer
  *     file that calls `->resolveBatch(`.
- *   - Each collection response calls `->expandMany(` exactly once.
- *   - `IncludeValidator` still does not instantiate resolvers.
+ *   - `IncludeValidator` / `HandlerProvidedIncludeValidator` still do
+ *     not instantiate resolvers.
  */
-final class Phase6kRuntimeSafetyTest extends TestCase
+final class CollectionSortRuntimeSafetyTest extends TestCase
 {
-    private const FILTER_FORBIDDEN = [
+    private const SORT_FORBIDDEN = [
         'PDO',
         'Doctrine\\',
         'Semitexa\\Orm\\',
@@ -36,29 +37,29 @@ final class Phase6kRuntimeSafetyTest extends TestCase
     ];
 
     #[Test]
-    public function collection_filter_request_source_is_pure(): void
+    public function collection_sort_request_source_is_pure(): void
     {
         $this->assertSourcePure(
-            __DIR__ . '/../../../src/Resource/Filter/CollectionFilterRequest.php',
-            self::FILTER_FORBIDDEN,
+            __DIR__ . '/../../../src/Resource/Sort/CollectionSortRequest.php',
+            self::SORT_FORBIDDEN,
         );
     }
 
     #[Test]
-    public function filter_term_source_is_pure(): void
+    public function sort_term_source_is_pure(): void
     {
         $this->assertSourcePure(
-            __DIR__ . '/../../../src/Resource/Filter/FilterTerm.php',
-            self::FILTER_FORBIDDEN,
+            __DIR__ . '/../../../src/Resource/Sort/SortTerm.php',
+            self::SORT_FORBIDDEN,
         );
     }
 
     #[Test]
-    public function filter_operator_source_is_pure(): void
+    public function sort_direction_source_is_pure(): void
     {
         $this->assertSourcePure(
-            __DIR__ . '/../../../src/Resource/Filter/FilterOperator.php',
-            self::FILTER_FORBIDDEN,
+            __DIR__ . '/../../../src/Resource/Sort/SortDirection.php',
+            self::SORT_FORBIDDEN,
         );
     }
 

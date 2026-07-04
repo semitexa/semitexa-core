@@ -19,7 +19,7 @@ use Semitexa\Core\Resource\Sort\SortDirection;
  * (HTTP 400). The `apply()` step is purely in-memory; the VO does
  * not know the row type — callers supply an extractor.
  */
-final class Phase6jCollectionSortRequestTest extends TestCase
+final class CollectionSortRequestTest extends TestCase
 {
     private const ALLOW = ['id', 'name'];
 

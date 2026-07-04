@@ -18,7 +18,7 @@ use PHPUnit\Framework\TestCase;
  *   - Each collection response calls `->expandMany(` exactly once.
  *   - `IncludeValidator` still does not instantiate resolvers.
  */
-final class Phase6lRuntimeSafetyTest extends TestCase
+final class CursorPaginationRuntimeSafetyTest extends TestCase
 {
     private const CURSOR_FORBIDDEN = [
         'PDO',

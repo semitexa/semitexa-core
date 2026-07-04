@@ -38,7 +38,7 @@ use Semitexa\Core\Tests\Unit\Resource\Fixtures\RecordingProfileResolver;
  *     that calls `->resolveBatch(` more than once per bucket — only one
  *     `->resolveBatch(` call site is allowed in the pipeline source.
  */
-final class Phase6fRuntimeSafetyTest extends TestCase
+final class ListParentBatchingRuntimeSafetyTest extends TestCase
 {
     #[Test]
     public function pipeline_is_still_the_only_resolve_batch_caller_in_resource_layer(): void

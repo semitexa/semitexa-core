@@ -35,7 +35,7 @@ use Semitexa\Core\Tests\Unit\Resource\Fixtures\RecordingProfileResolver;
  * resolver-backed `profile`, both the to-one and to-many overlay
  * paths run through the same pipeline and renderer chain.
  */
-final class Phase6eListResolverTest extends TestCase
+final class ListResolverTest extends TestCase
 {
     private function registry(): ResourceMetadataRegistry
     {

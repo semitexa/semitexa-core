@@ -19,7 +19,7 @@ use PHPUnit\Framework\TestCase;
  * than runtime mock counters because they fail at CI time even
  * without a request walking through the production code path.
  */
-final class Phase6dRuntimeSafetyTest extends TestCase
+final class ExpansionPipelineRuntimeSafetyTest extends TestCase
 {
     private const RENDERER_FORBIDDEN = [
         '->resolveBatch(',

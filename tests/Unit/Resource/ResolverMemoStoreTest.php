@@ -22,10 +22,10 @@ use Semitexa\Core\Tests\Unit\Resource\Fixtures\RecordingProfileResolver;
  *   resolverClass | parentUrn | fieldName | parentClass | targetClass
  *
  * The pipeline integration is exercised in
- * `Phase7ResolverMemoisationPipelineTest`; this file covers the
+ * `ResolverMemoisationPipelineTest`; this file covers the
  * key derivation rules and storage semantics in isolation.
  */
-final class Phase7ResolverMemoStoreTest extends TestCase
+final class ResolverMemoStoreTest extends TestCase
 {
     private function profileField(): ResourceFieldMetadata
     {

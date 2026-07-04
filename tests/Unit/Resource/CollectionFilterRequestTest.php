@@ -20,7 +20,7 @@ use Semitexa\Core\Resource\Filter\FilterOperator;
  * in-memory; the VO does not know the row type — callers supply an
  * extractor.
  */
-final class Phase6kCollectionFilterRequestTest extends TestCase
+final class CollectionFilterRequestTest extends TestCase
 {
     /** @var array<string, list<string>> */
     private const ALLOW = [

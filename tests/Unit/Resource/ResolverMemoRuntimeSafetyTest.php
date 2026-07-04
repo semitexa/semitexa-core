@@ -50,7 +50,7 @@ use Semitexa\Core\Tests\Unit\Resource\Fixtures\RecordingProfileResolver;
  *     store and re-asks the resolver. (Cross-request Swoole safety
  *     follows from this.)
  */
-final class Phase7RuntimeSafetyTest extends TestCase
+final class ResolverMemoRuntimeSafetyTest extends TestCase
 {
     private const FORBIDDEN_RUNTIME_TOKENS = [
         'PDO',

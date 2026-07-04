@@ -28,7 +28,7 @@ use PHPUnit\Framework\TestCase;
  * mock-based assertions because they fail at CI time even without a
  * test runner walking the production path.
  */
-final class Phase6cRuntimeSafetyTest extends TestCase
+final class IncludeSatisfiabilityRuntimeSafetyTest extends TestCase
 {
     private const FORBIDDEN_TOKENS_IN_INCLUDE_VALIDATOR = [
         '->resolveBatch(',

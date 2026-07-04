@@ -38,7 +38,7 @@ use Semitexa\Core\Tests\Unit\Resource\Fixtures\RecordingProfileResolver;
  *     NOT share memo state. Cross-request safety in Swoole follows
  *     directly from this property.
  */
-final class Phase7ResolverMemoisationPipelineTest extends TestCase
+final class ResolverMemoisationPipelineTest extends TestCase
 {
     protected function setUp(): void
     {

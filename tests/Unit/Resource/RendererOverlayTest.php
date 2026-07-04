@@ -27,7 +27,7 @@ use Semitexa\Core\Tests\Unit\Resource\Fixtures\ProfileResource;
  * resolver-backed relations. The overlay is built by tests directly to
  * isolate renderer behaviour from pipeline behaviour.
  */
-final class Phase6dRendererOverlayTest extends TestCase
+final class RendererOverlayTest extends TestCase
 {
     private function registry(): ResourceMetadataRegistry
     {

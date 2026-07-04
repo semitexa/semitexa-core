@@ -8,18 +8,54 @@ use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 
 /**
- * Runtime-safety guards. The collection response API must
- * NOT loosen existing invariants:
+ * Runtime-safety guards. Pagination must not weaken the
+ * resolver invariants: the slice happens before `expandMany()`, and
+ * no new code path becomes a back-door for resolver invocation.
  *
- *   - `ResourceExpansionPipeline` remains the only Resource-layer
- *     class that calls `->resolveBatch(`.
- *   - Collection responses (`withResources()` on JSON / JSON-LD /
- *     GraphQL) call `expandMany()` exactly once and never call
- *     `->resolveBatch(` directly.
- *   - Renderers still never call `->resolveBatch(`.
+ *   - The pagination value object source files do not import DB,
+ *     ORM, HTTP, or framework-runtime classes.
+ *   - Collection responses still call `expandMany()` once per
+ *     `withResources()` invocation.
+ *   - `ResourceExpansionPipeline` is still the only Resource-layer
+ *     file that calls `->resolveBatch(`.
+ *   - `IncludeValidator` / `HandlerProvidedIncludeValidator` still
+ *     do not instantiate resolvers.
  */
-final class Phase6hRuntimeSafetyTest extends TestCase
+final class CollectionPaginationRuntimeSafetyTest extends TestCase
 {
+    private const PAGINATION_FORBIDDEN = [
+        'PDO',
+        'Doctrine\\',
+        'Semitexa\\Orm\\',
+        'curl_',
+        'Guzzle',
+        'IriBuilder',
+        'Semitexa\\Core\\Request',
+        'JsonResourceRenderer',
+        'JsonLdResourceRenderer',
+        'GraphqlResourceRenderer',
+        '->resolveBatch(',
+        '->expandMany(',
+    ];
+
+    #[Test]
+    public function collection_page_request_source_is_pure_data_and_validation(): void
+    {
+        $this->assertSourcePure(
+            __DIR__ . '/../../../src/Resource/Pagination/CollectionPageRequest.php',
+            self::PAGINATION_FORBIDDEN,
+        );
+    }
+
+    #[Test]
+    public function collection_page_source_is_pure_data(): void
+    {
+        $this->assertSourcePure(
+            __DIR__ . '/../../../src/Resource/Pagination/CollectionPage.php',
+            self::PAGINATION_FORBIDDEN,
+        );
+    }
+
     #[Test]
     public function only_pipeline_invokes_resolve_batch_in_resource_layer(): void
     {
@@ -29,7 +65,6 @@ final class Phase6hRuntimeSafetyTest extends TestCase
         $iterator = new \RecursiveIteratorIterator(
             new \RecursiveDirectoryIterator($resourceDir, \FilesystemIterator::SKIP_DOTS),
         );
-
         $callers = [];
         foreach ($iterator as $entry) {
             if (!$entry->isFile() || $entry->getExtension() !== 'php') {
@@ -44,45 +79,20 @@ final class Phase6hRuntimeSafetyTest extends TestCase
         self::assertCount(
             1,
             $callers,
-            'Exactly one Resource-layer file may invoke ->resolveBatch(); found: ' . implode(', ', $callers),
+            'Only ResourceExpansionPipeline may invoke ->resolveBatch(); found: '
+            . implode(', ', $callers),
         );
         self::assertSame('ResourceExpansionPipeline.php', basename($callers[0]));
     }
 
     #[Test]
-    public function collection_responses_do_not_call_resolve_batch_directly(): void
+    public function collection_responses_still_call_expand_many_exactly_once(): void
     {
         $sources = [
             __DIR__ . '/../../../src/Resource/JsonResourceResponse.php',
             __DIR__ . '/../../../src/Resource/JsonLdResourceResponse.php',
             __DIR__ . '/../../../src/Resource/GraphqlResourceResponse.php',
         ];
-
-        foreach ($sources as $relPath) {
-            $abs = realpath($relPath);
-            self::assertNotFalse($abs, "Cannot read {$relPath}");
-            $stripped = $this->stripComments((string) file_get_contents($abs));
-            self::assertStringNotContainsString(
-                '->resolveBatch(',
-                $stripped,
-                basename($abs) . ' must delegate batch expansion to ResourceExpansionPipeline.',
-            );
-        }
-    }
-
-    #[Test]
-    public function collection_responses_call_expand_many_exactly_once(): void
-    {
-        // The `withResources()` body in each response calls
-        // `expandMany()` once and only once. A regression that
-        // accidentally introduced a per-parent loop would push the
-        // count above 1.
-        $sources = [
-            __DIR__ . '/../../../src/Resource/JsonResourceResponse.php',
-            __DIR__ . '/../../../src/Resource/JsonLdResourceResponse.php',
-            __DIR__ . '/../../../src/Resource/GraphqlResourceResponse.php',
-        ];
-
         foreach ($sources as $relPath) {
             $abs = realpath($relPath);
             self::assertNotFalse($abs);
@@ -92,34 +102,10 @@ final class Phase6hRuntimeSafetyTest extends TestCase
                 substr_count($stripped, '->expandMany('),
                 basename($abs) . ' must call expandMany() exactly once.',
             );
-        }
-    }
-
-    #[Test]
-    public function pipeline_source_does_not_reference_db_orm_http_renderer(): void
-    {
-        $forbidden = [
-            'PDO',
-            'Doctrine\\',
-            'Semitexa\\Orm\\',
-            'curl_',
-            'Guzzle',
-            'IriBuilder',
-            'Semitexa\\Core\\Request',
-            'JsonResourceRenderer',
-            'JsonLdResourceRenderer',
-            'GraphqlResourceRenderer',
-        ];
-
-        $stripped = $this->stripComments((string) file_get_contents(
-            (string) realpath(__DIR__ . '/../../../src/Resource/ResourceExpansionPipeline.php'),
-        ));
-
-        foreach ($forbidden as $needle) {
             self::assertStringNotContainsString(
-                $needle,
+                '->resolveBatch(',
                 $stripped,
-                'ResourceExpansionPipeline must not reference `' . $needle . '`.',
+                basename($abs) . ' must not call ->resolveBatch() directly.',
             );
         }
     }
@@ -132,6 +118,24 @@ final class Phase6hRuntimeSafetyTest extends TestCase
         ));
         self::assertStringNotContainsString('->resolveBatch(', $stripped);
         self::assertStringNotContainsString('new RelationResolverInterface', $stripped);
+    }
+
+    /**
+     * @param list<string> $forbiddenTokens
+     */
+    private function assertSourcePure(string $relativePath, array $forbiddenTokens): void
+    {
+        $absolute = realpath($relativePath);
+        self::assertNotFalse($absolute, "Source file not found: {$relativePath}");
+        $stripped = $this->stripComments((string) file_get_contents($absolute));
+
+        foreach ($forbiddenTokens as $forbidden) {
+            self::assertStringNotContainsString(
+                $forbidden,
+                $stripped,
+                basename($absolute) . ' must not reference `' . $forbidden . '`.',
+            );
+        }
     }
 
     private function stripComments(string $raw): string

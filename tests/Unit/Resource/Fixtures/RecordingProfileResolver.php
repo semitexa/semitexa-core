@@ -11,7 +11,7 @@ use Semitexa\Core\Resource\ResourceIdentity;
 
 /**
  * Test fixture: records each resolveBatch() call and returns
- * a deterministic to-one mapping per parent. Used by Phase6dPipelineTest
+ * a deterministic to-one mapping per parent. Used by ExpansionPipelineTest
  * to verify call counts, parent-list shape, and overlay placement.
  */
 #[AsService]

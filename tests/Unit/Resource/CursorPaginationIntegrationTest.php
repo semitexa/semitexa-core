@@ -53,7 +53,7 @@ use Semitexa\Core\Tests\Unit\Resource\Fixtures\RecordingProfileResolver;
  * up exactly where the previous page left off, in the effective
  * sort order.
  */
-final class Phase6lCursorPaginationIntegrationTest extends TestCase
+final class CursorPaginationIntegrationTest extends TestCase
 {
     /** @var array<string, list<string>> */
     private const FILTER_ALLOW = [
@@ -383,7 +383,7 @@ final class Phase6lCursorPaginationIntegrationTest extends TestCase
         // The handler decides cursor mode by `?cursor=` presence.
         // Empty cursor falls back to page mode in the real handler;
         // calling the codec directly with '' is HTTP 400 (covered in
-        // Phase6lCursorCodecTest). This test documents the same
+        // CursorCodecTest). This test documents the same
         // expectation by verifying that the fallback page-mode path
         // does NOT emit `meta.mode`.
         $r = $this->renderPage(null, 'name', '1', '1', IncludeSet::empty());

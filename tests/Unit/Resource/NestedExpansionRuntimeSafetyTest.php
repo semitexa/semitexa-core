@@ -41,7 +41,7 @@ use Semitexa\Core\Tests\Unit\Resource\Fixtures\RecordingProfileResolver;
  *   - Nested resolvers fire only when a dotted include token is
  *     requested.
  */
-final class Phase6gRuntimeSafetyTest extends TestCase
+final class NestedExpansionRuntimeSafetyTest extends TestCase
 {
     protected function setUp(): void
     {

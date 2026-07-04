@@ -52,7 +52,7 @@ use Semitexa\Core\Tests\Unit\Resource\Fixtures\RecordingProfileResolver;
  *     bucket (top-level addresses + top-level profile + nested
  *     preferences).
  */
-final class Phase6gNestedExpansionTest extends TestCase
+final class NestedExpansionTest extends TestCase
 {
     protected function setUp(): void
     {

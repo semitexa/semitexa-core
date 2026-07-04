@@ -19,7 +19,7 @@ use Semitexa\Core\Resource\Metadata\ResourceMetadataCacheFile;
  * "Resource DTO v1 Status" section of
  * `var/docs/resource-dto-relation-contract-design.md`.
  */
-final class Phase6mV1ReleaseSafetyTest extends TestCase
+final class V1ReleaseSafetyTest extends TestCase
 {
     private const PIPELINE_FORBIDDEN_TOKENS = [
         'PDO',

@@ -42,7 +42,7 @@ use Semitexa\Core\Tests\Unit\Resource\Fixtures\RecordingProfileResolver;
  * `page=1&perPage=2`, the recording profile resolver must observe
  * exactly 2 parent identities.
  */
-final class Phase6iCollectionPaginationTest extends TestCase
+final class CollectionPaginationTest extends TestCase
 {
     protected function setUp(): void
     {

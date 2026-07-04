@@ -18,7 +18,7 @@ use Semitexa\Core\Resource\Pagination\CollectionPageRequest;
  * its values are trusted. Validation rejects every invalid shape
  * with `InvalidPaginationException` (HTTP 400).
  */
-final class Phase6iCollectionPageRequestTest extends TestCase
+final class CollectionPageRequestTest extends TestCase
 {
     #[Test]
     public function defaults_apply_when_both_parameters_are_omitted(): void

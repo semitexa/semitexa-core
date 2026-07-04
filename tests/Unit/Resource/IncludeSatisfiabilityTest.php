@@ -33,7 +33,7 @@ use Semitexa\Core\Tests\Unit\Resource\Fixtures\StubRelationResolver;
  * (HTTP 400). Unknown / scalar / non-expandable tokens still fail
  * with their existing exceptions.
  */
-final class Phase6cIncludeSatisfiabilityTest extends TestCase
+final class IncludeSatisfiabilityTest extends TestCase
 {
     private function customerRegistry(): ResourceMetadataRegistry
     {

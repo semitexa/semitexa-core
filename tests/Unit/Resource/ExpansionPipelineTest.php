@@ -30,7 +30,7 @@ use Semitexa\Core\Tests\Unit\Resource\Fixtures\RecordingProfileResolver;
 /**
  * ResourceExpansionPipeline runtime behaviour.
  */
-final class Phase6dExpansionPipelineTest extends TestCase
+final class ExpansionPipelineTest extends TestCase
 {
     private function registry(): ResourceMetadataRegistry
     {
