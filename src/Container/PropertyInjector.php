@@ -139,9 +139,13 @@ final class PropertyInjector
 
             /** @var class-string $typeName */
             $typeName = $type->getName();
+            /** @var \Semitexa\Core\Attribute\InjectAsReadonly $attrInstance */
+            $attrInstance = $attrs[0]->newInstance();
             $out[$prop->getName()] = [
                 'type' => $typeName,
-                'optional' => $type->allowsNull(),
+                // Nullable-type optionality is the LEGACY convention (lint:di
+                // forbids it); the attribute's explicit flag is the blessed one.
+                'optional' => $attrInstance->optional || $type->allowsNull(),
             ];
         }
 

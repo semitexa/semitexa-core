@@ -213,9 +213,13 @@ final class InjectionAnalyzer
 
             /** @var class-string $typeName */
             $typeName = $type->getName();
+            $attrInstance = $injectAttrs[0]['attr']->newInstance();
             $out[$prop->getName()] = [
                 'kind' => $injectAttrs[0]['kind'],
                 'type' => $typeName,
+                // Soft dependency (see the attribute docblock): skip injection
+                // when unresolvable instead of throwing. Nullable-type = legacy.
+                'optional' => (property_exists($attrInstance, 'optional') && $attrInstance->optional) || $type->allowsNull(),
             ];
         }
 

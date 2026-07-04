@@ -106,6 +106,31 @@ class PropertyInjectorTest extends TestCase
         );
     }
 
+    public function test_explicit_optional_flag_skips_when_unbound_without_nullable_type(): void
+    {
+        $target = new PropertyInjectorTest_ExplicitOptionalTarget();
+
+        PropertyInjector::inject($target, new PropertyInjectorTest_Container([]));
+
+        // Non-null type + optional: true → skipped, stays UNINITIALIZED
+        // (the consumer isset-guards; this is the blessed soft-dep pattern,
+        // replacing the lint-forbidden nullable convention).
+        $ref = new \ReflectionProperty($target, 'dep');
+        self::assertFalse($ref->isInitialized($target));
+    }
+
+    public function test_explicit_optional_flag_still_injects_when_bound(): void
+    {
+        $dep = new PropertyInjectorTest_Dep();
+        $target = new PropertyInjectorTest_ExplicitOptionalTarget();
+
+        PropertyInjector::inject($target, new PropertyInjectorTest_Container([
+            PropertyInjectorTest_Dep::class => $dep,
+        ]));
+
+        self::assertSame($dep, $target->exposeDep());
+    }
+
     public function test_required_type_still_throws_when_unbound(): void
     {
         // Pins the asymmetry: non-nullable means required. The optional
@@ -220,5 +245,16 @@ final class PropertyInjectorTest_Container implements ContainerInterface
     public function has(string $id): bool
     {
         return isset($this->bindings[$id]);
+    }
+}
+
+final class PropertyInjectorTest_ExplicitOptionalTarget
+{
+    #[InjectAsReadonly(optional: true)]
+    protected PropertyInjectorTest_Dep $dep;
+
+    public function exposeDep(): PropertyInjectorTest_Dep
+    {
+        return $this->dep;
     }
 }

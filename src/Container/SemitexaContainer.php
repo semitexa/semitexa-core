@@ -465,6 +465,10 @@ final class SemitexaContainer implements ContainerInterface, ExecutionContextAwa
                     continue;
                 }
 
+                if (!empty($info['optional'])) {
+                    continue; // soft dependency — stays uninitialized, consumer isset-guards
+                }
+
                 throw new InjectionException(
                     targetClass: $class,
                     propertyName: $propName,
