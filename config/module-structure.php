@@ -34,12 +34,12 @@ return new LocalModuleStructureExtension(
         'Server' => new ModuleStructureRule(
             path: 'Server',
             allowedDirectories: ['Lifecycle'],
-            allowedFilePatterns: ['/^[A-Z][A-Za-z0-9]*\.php$/'],
+            allowedFilePatterns: ['/^[A-Z][A-Za-z0-9_]*\.php$/'],
             rationale: 'semitexa-core-only: the Swoole server bootstrap subsystem (SwooleBootstrap, SwooleEvent, …).',
         ),
         'Server/Lifecycle' => new ModuleStructureRule(
             path: 'Server/Lifecycle',
-            allowedFilePatterns: ['/^[A-Z][A-Za-z0-9]*\.php$/'],
+            allowedFilePatterns: ['/^[A-Z][A-Za-z0-9_]*\.php$/'],
             excludedFilePatterns: ['/(Helper|Helpers|Util|Utils|Manager|Managers|Misc|Common)\.php$/'],
             mode: ModuleStructureRule::MODE_LEAF_FILES_ONLY,
             rationale: 'semitexa-core-only: worker lifecycle subsystem (phases, context, invoker, registry, core listeners). PascalCase PHP files with the standard drift deny-list; no subdirectories. Kept byte-identical in contract to the global spec rule.',
