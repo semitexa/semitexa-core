@@ -367,7 +367,15 @@ final class GraphBuilder
                         $args[] = $param->getDefaultValue();
                         continue;
                     }
-                    throw new ContainerException("Container: cannot resolve constructor param \${$param->getName()} for {$class}");
+                    $typeLabel = $type !== null ? (string) $type : 'untyped';
+                    throw new ContainerException(sprintf(
+                        'Container cannot autowire %s::__construct($%s): a parameter of type "%s" is not a service — the container only autowires class-typed constructor parameters. '
+                        . 'Fix: give $%s a default value, or inject it as an #[InjectAsReadonly] property instead, or change its type to a registered #[AsService] class.',
+                        $class,
+                        $param->getName(),
+                        $typeLabel,
+                        $param->getName(),
+                    ));
                 }
                 $name = $type->getName();
                 $mappedClass = $idToClass[$name] ?? null;
@@ -380,7 +388,14 @@ final class GraphBuilder
                         $args[] = $param->getDefaultValue();
                         continue;
                     }
-                    throw new ContainerException("Container: missing dependency for {$class}::__construct(\${$param->getName()}: {$name})");
+                    throw new ContainerException(sprintf(
+                        'Container cannot build %s: its constructor dependency %s ($%s) is not a registered service. '
+                        . 'Fix: mark %s with #[AsService] (and ensure its module is active or it lives under the project src/), or provide it via a factory.',
+                        $class,
+                        $name,
+                        $param->getName(),
+                        $name,
+                    ));
                 }
                 $args[] = $inst;
             }
