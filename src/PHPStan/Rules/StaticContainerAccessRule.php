@@ -21,7 +21,15 @@ use PHPStan\Rules\RuleErrorBuilder;
  */
 final class StaticContainerAccessRule implements Rule
 {
-    /** Namespaces where ContainerFactory usage is allowed (core internals only) */
+    /**
+     * Namespaces where ContainerFactory usage is allowed — core internals,
+     * plus the narrow dynamic-dispatch tier: infrastructure whose whole job
+     * is resolving an arbitrary, runtime-named #[AsService] class (queue
+     * consumers, the scheduler's job executor). Dynamic dispatch is what the
+     * container is FOR; there is no attribute-injection shape for a class
+     * name that only exists in a database row. Entries here are exact class
+     * prefixes — bless the dispatch chokepoint, never a whole package.
+     */
     private const ALLOWED_NAMESPACES = [
         'Semitexa\\Core\\Container\\',
         'Semitexa\\Core\\Log\\StaticLoggerBridge',
@@ -30,6 +38,7 @@ final class StaticContainerAccessRule implements Rule
         'Semitexa\\Core\\Server\\',
         'Semitexa\\Core\\Event\\EventDispatcher',
         'Semitexa\\Core\\Queue\\',
+        'Semitexa\\Scheduler\\Application\\Service\\RunExecutor',
     ];
 
     public function getNodeType(): string
