@@ -272,7 +272,12 @@ final class ReRunUnitTest extends TestCase
         $context = $this->makeContext(cookies: ['sid' => 'sid-alice'], tenant: $tenant);
         $reRunner->reRun($context);
 
-        $this->assertSame($tenant, $store->lastSet, 'Tenant context is re-established from the immutable block.');
+        // Swap semantics: the captured context is installed FOR the re-run and the
+        // slot is restored afterwards (empty here — no previous context), so
+        // consecutive re-runs for different tenants in the shared transport
+        // coroutine each start clean instead of inheriting a foreign context.
+        $this->assertContains($tenant, $store->setHistory, 'Tenant context is re-established from the immutable block for the duration of the re-run.');
+        $this->assertNull($store->current, 'The pre-re-run (empty) slot is restored after the run.');
     }
 
     /**
@@ -617,29 +622,37 @@ final class ReRunFakePayload
     public ?string $impersonateAs = null;
 }
 
-/** Records the last tenant context installed, to prove re-establishment. */
+/**
+ * Records every tenant context installed, to prove re-establishment. `$current`
+ * mirrors the live slot (swap semantics clear it after the run); `$setHistory`
+ * keeps the full install order so a test can assert what the RE-RUN saw.
+ */
 final class ReRunFakeTenantStore implements TenantContextStoreInterface
 {
-    public ?TenantContextInterface $lastSet = null;
+    public ?TenantContextInterface $current = null;
+
+    /** @var list<TenantContextInterface> */
+    public array $setHistory = [];
 
     public function get(): TenantContextInterface
     {
-        return $this->lastSet ?? new ReRunFakeTenantContext();
+        return $this->current ?? new ReRunFakeTenantContext();
     }
 
     public function tryGet(): ?TenantContextInterface
     {
-        return $this->lastSet;
+        return $this->current;
     }
 
     public function set(TenantContextInterface $context): void
     {
-        $this->lastSet = $context;
+        $this->current = $context;
+        $this->setHistory[] = $context;
     }
 
     public function clear(): void
     {
-        $this->lastSet = null;
+        $this->current = null;
     }
 }
 
