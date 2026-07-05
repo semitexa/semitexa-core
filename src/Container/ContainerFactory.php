@@ -28,6 +28,17 @@ class ContainerFactory
      */
     public static function create(): SemitexaContainer
     {
+        // Enforce the codebase-wide UTC assumption at the earliest shared
+        // bootstrap point (both the Swoole server and the CLI reach create()
+        // before any request/command work). The whole stack — ORM DATETIME
+        // round-trips, scheduler claim/lease `now` strings, calendar windows —
+        // assumes DateTimeImmutable defaults to UTC; without this a deploy
+        // whose php.ini date.timezone is non-UTC silently shifts every stored
+        // instant by the offset (runs fire early, events land at the wrong
+        // hour). User-facing local time is handled explicitly elsewhere
+        // (OsPreferences::timezone), never via the ambient default.
+        date_default_timezone_set('UTC');
+
         if (self::$container === null) {
             $container = new SemitexaContainer();
             self::registerBootstrapEntries($container);
