@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Semitexa\Core\Event;
 
 use Semitexa\Core\Attribute\AsEventListener;
+use Semitexa\Core\Discovery\BootDiagnostics;
 use Semitexa\Core\Discovery\ClassDiscovery;
 use Semitexa\Core\ModuleRegistry;
 use Semitexa\Core\Config\EnvValueResolver;
@@ -76,6 +77,18 @@ final class EventListenerRegistry
                 }
                 $this->listenersByEvent[$eventClass][] = $meta;
             } catch (\Throwable $e) {
+                // A discovered, active event listener that fails to register
+                // (reflection, attribute newInstance, or a malformed
+                // transport/queue env reference) is a boot-visible defect, not
+                // a silent drop: the event still dispatches, so nothing errors
+                // at runtime, yet the subscriber (audit, ledger publish, cache
+                // invalidation, welcome-email) never fires — undetectable
+                // without this signal.
+                BootDiagnostics::current()->invalidUsage(
+                    'EventListenerRegistry',
+                    "failed to register event listener {$className}: " . $e->getMessage(),
+                    $e,
+                );
                 continue;
             }
         }
