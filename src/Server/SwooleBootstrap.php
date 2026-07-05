@@ -93,6 +93,7 @@ class SwooleBootstrap
                 workerId: $workerId,
                 environment: $workerEnv,
                 bootstrapState: $bootstrapState,
+                container: ContainerFactory::get(),
             );
             $lifecycleInvoker->invokePhase(ServerLifecyclePhase::WorkerStartBeforeContainer, $context, false);
             ContainerFactory::create();
