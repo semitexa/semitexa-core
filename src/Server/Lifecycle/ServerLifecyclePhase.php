@@ -12,6 +12,7 @@ enum ServerLifecyclePhase: string
     case WorkerStartAfterServerBindings = 'worker_start.after_server_bindings';
     case WorkerStartFinalize = 'worker_start.finalize';
     case WorkerStop = 'worker_stop';
+    case WorkerExit = 'worker_exit';
     case WorkerError = 'worker_error';
     case Start = 'start';
     case Shutdown = 'shutdown';

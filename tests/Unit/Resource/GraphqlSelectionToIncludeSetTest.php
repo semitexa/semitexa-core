@@ -24,12 +24,12 @@ use Semitexa\Core\Tests\Unit\Resource\Fixtures\AddressResource;
 use Semitexa\Core\Tests\Unit\Resource\Fixtures\CustomerResource;
 use Semitexa\Core\Tests\Unit\Resource\Fixtures\ProfileResource;
 
-// Three-level depth fixtures (Customer5c → Address5c → Country5c
+// Three-level depth fixtures (Customer → Address → Country
 // with expandable relations between them) — used only by the
 // nested-too-deep test below. Inline so they are PSR-4 autoloaded with the
 // test file.
-#[ResourceObject(type: 'phase5c.country')]
-final readonly class CountryResourceFixture5c implements ResourceObjectInterface
+#[ResourceObject(type: 'selection.country')]
+final readonly class CountrySelectionFixture implements ResourceObjectInterface
 {
     public function __construct(
         #[ResourceId] public string $id,
@@ -37,24 +37,24 @@ final readonly class CountryResourceFixture5c implements ResourceObjectInterface
     ) {}
 }
 
-#[ResourceObject(type: 'phase5c.address')]
-final readonly class AddressResourceFixture5c implements ResourceObjectInterface
+#[ResourceObject(type: 'selection.address')]
+final readonly class AddressSelectionFixture implements ResourceObjectInterface
 {
     public function __construct(
         #[ResourceId] public string $id,
         #[ResourceField] public string $city,
-        #[ResourceRefAttr(target: CountryResourceFixture5c::class, expandable: true, include: 'country', href: '/addresses/{id}/country')]
+        #[ResourceRefAttr(target: CountrySelectionFixture::class, expandable: true, include: 'country', href: '/addresses/{id}/country')]
         public ?ResourceRef $country = null,
     ) {}
 }
 
-#[ResourceObject(type: 'phase5c.customer')]
-final readonly class CustomerResourceFixture5c implements ResourceObjectInterface
+#[ResourceObject(type: 'selection.customer')]
+final readonly class CustomerSelectionFixture implements ResourceObjectInterface
 {
     public function __construct(
         #[ResourceId] public string $id,
         #[ResourceField] public string $name,
-        #[ResourceRefListAttr(target: AddressResourceFixture5c::class, expandable: true, include: 'addresses', href: '/customers/{id}/addresses')]
+        #[ResourceRefListAttr(target: AddressSelectionFixture::class, expandable: true, include: 'addresses', href: '/customers/{id}/addresses')]
         public ResourceRefList $addresses,
     ) {}
 }
@@ -160,9 +160,9 @@ final class GraphqlSelectionToIncludeSetTest extends TestCase
         // therefore exercised cleanly, not an incidental unknown-field error.
         $extractor = new ResourceMetadataExtractor();
         $registry  = ResourceMetadataRegistry::forTesting($extractor);
-        $registry->register($extractor->extract(CountryResourceFixture5c::class));
-        $registry->register($extractor->extract(AddressResourceFixture5c::class));
-        $registry->register($extractor->extract(CustomerResourceFixture5c::class));
+        $registry->register($extractor->extract(CountrySelectionFixture::class));
+        $registry->register($extractor->extract(AddressSelectionFixture::class));
+        $registry->register($extractor->extract(CustomerSelectionFixture::class));
 
         $bridge   = GraphqlSelectionToIncludeSet::forTesting($registry);
         $rootField = $this->parser->parse('{ customer { addresses { country { id } } } }')->singleRootField();
@@ -170,7 +170,7 @@ final class GraphqlSelectionToIncludeSetTest extends TestCase
         try {
             $bridge->translate(
                 $rootField,
-                $registry->require(CustomerResourceFixture5c::class),
+                $registry->require(CustomerSelectionFixture::class),
             );
             self::fail('Expected GraphqlSelectionDepthExceededException');
         } catch (GraphqlSelectionDepthExceededException $e) {

@@ -289,7 +289,12 @@ final class SemitexaContainer implements ContainerInterface, ExecutionContextAwa
             }
         }
 
-        throw new NotFoundException('Container: unknown service: ' . $id);
+        throw new NotFoundException(sprintf(
+            'Container has no service registered for "%s". It was never discovered — '
+            . 'mark the class with #[AsService] (or bind an implementation for the interface) '
+            . 'and ensure it belongs to an active module or the project src/.',
+            $id,
+        ));
     }
 
     public function has(string $id): bool
@@ -463,6 +468,10 @@ final class SemitexaContainer implements ContainerInterface, ExecutionContextAwa
                     $this->injectMutableProperties($nestedClone, $nestedClass, $visited);
                     $this->assignProperty($ref, $instance, $propName, $nestedClone);
                     continue;
+                }
+
+                if (!empty($info['optional'])) {
+                    continue; // soft dependency — stays uninitialized, consumer isset-guards
                 }
 
                 throw new InjectionException(

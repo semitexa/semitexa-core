@@ -93,6 +93,7 @@ class SwooleBootstrap
                 workerId: $workerId,
                 environment: $workerEnv,
                 bootstrapState: $bootstrapState,
+                container: ContainerFactory::get(),
             );
             $lifecycleInvoker->invokePhase(ServerLifecyclePhase::WorkerStartBeforeContainer, $context, false);
             ContainerFactory::create();
@@ -105,6 +106,39 @@ class SwooleBootstrap
             $lifecycleInvoker->invokePhase(ServerLifecyclePhase::WorkerStartAfterContainer, $context, true);
             $lifecycleInvoker->invokePhase(ServerLifecyclePhase::WorkerStartAfterServerBindings, $context, true);
             $lifecycleInvoker->invokePhase(ServerLifecyclePhase::WorkerStartFinalize, $context, true);
+        });
+
+        $server->on(SwooleEvent::WorkerExit->value, function (Server $server, int $workerId) use ($bootstrapState, $lifecycleInvoker) {
+            // Framework guarantee: a worker asked to exit must be ABLE to exit.
+            // This fires (repeatedly) during the reload_async drain window while
+            // the event loop still holds resources. Two things keep workers
+            // hostage past max_wait_time: recurring timers that keep firing into
+            // the teardown, and coroutines parked on sockets that died with the
+            // restart (a DB ping, an LLM HTTP call) — the latter end as Swoole's
+            // FATAL "all coroutines are asleep - deadlock!". Clear every user
+            // timer and cancel every parked coroutine: cancellation turns an
+            // immortal wait into a catchable failure on code that already
+            // handles transport errors.
+            \Swoole\Timer::clearAll();
+            $current = \Swoole\Coroutine::getCid();
+            $cancelled = 0;
+            foreach (\Swoole\Coroutine::listCoroutines() as $cid) {
+                if ($cid !== $current && \Swoole\Coroutine::cancel($cid)) {
+                    $cancelled++;
+                }
+            }
+            if ($cancelled > 0) {
+                // Operational breadcrumb: which exits actually had parked work.
+                error_log('[lifecycle] worker ' . $workerId . ' exit: cancelled ' . $cancelled . ' parked coroutine(s)');
+            }
+
+            $context = new ServerLifecycleContext(
+                server: $server,
+                workerId: $workerId,
+                environment: Environment::create(),
+                bootstrapState: $bootstrapState,
+            );
+            $lifecycleInvoker->invokePhase(ServerLifecyclePhase::WorkerExit, $context, true);
         });
 
         $server->on(SwooleEvent::WorkerStop->value, function (Server $server, int $workerId) use ($bootstrapState, $lifecycleInvoker) {

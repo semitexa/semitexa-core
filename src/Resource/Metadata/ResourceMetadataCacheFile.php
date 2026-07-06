@@ -73,7 +73,7 @@ final class ResourceMetadataCacheFile
 
         if ($expectedFingerprint !== null) {
             // No recorded fingerprint on a payload that should have one →
-            // pre-3d.5 cache. Treat as Stale so we rewrite with the new
+            // a legacy fingerprintless cache. Treat as Stale so we rewrite with the new
             // payload shape rather than load it as-is.
             if ($recordedFingerprint === null) {
                 return CacheLoadResult::Stale;
@@ -98,7 +98,7 @@ final class ResourceMetadataCacheFile
         return CacheLoadResult::Hit;
     }
 
-    // The pre-3d.5 boolean `load()` shim was removed for the
+    // The legacy boolean `load()` shim was removed for the
     // v1 release. Callers must use `loadWithResult(...)` so they can
     // distinguish Hit / Miss / Stale / Corrupt and act on each outcome
     // explicitly. An audit confirmed no production call site

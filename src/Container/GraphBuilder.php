@@ -367,7 +367,15 @@ final class GraphBuilder
                         $args[] = $param->getDefaultValue();
                         continue;
                     }
-                    throw new ContainerException("Container: cannot resolve constructor param \${$param->getName()} for {$class}");
+                    $typeLabel = $type !== null ? (string) $type : 'untyped';
+                    throw new ContainerException(sprintf(
+                        'Container cannot autowire %s::__construct($%s): a parameter of type "%s" is not a service — the container only autowires class-typed constructor parameters. '
+                        . 'Fix: give $%s a default value, or inject it as an #[InjectAsReadonly] property instead, or change its type to a registered #[AsService] class.',
+                        $class,
+                        $param->getName(),
+                        $typeLabel,
+                        $param->getName(),
+                    ));
                 }
                 $name = $type->getName();
                 $mappedClass = $idToClass[$name] ?? null;
@@ -380,7 +388,14 @@ final class GraphBuilder
                         $args[] = $param->getDefaultValue();
                         continue;
                     }
-                    throw new ContainerException("Container: missing dependency for {$class}::__construct(\${$param->getName()}: {$name})");
+                    throw new ContainerException(sprintf(
+                        'Container cannot build %s: its constructor dependency %s ($%s) is not a registered service. '
+                        . 'Fix: mark %s with #[AsService] (and ensure its module is active or it lives under the project src/), or provide it via a factory.',
+                        $class,
+                        $name,
+                        $param->getName(),
+                        $name,
+                    ));
                 }
                 $args[] = $inst;
             }
@@ -389,7 +404,16 @@ final class GraphBuilder
         if ($injectionAnalyzer !== null) {
             $injectionAnalyzer->injectConfigProperties($instance, $class, $ref);
         }
-        $this->injectPropertiesInto($instance, $class, $injections, $readonlyInstances, $idToClass, []);
+        // Derive the scoped-class map from the prototypes so the
+        // ExecutionScoped-trap diagnostic works on this path too.
+        $this->injectPropertiesInto(
+            $instance,
+            $class,
+            $injections,
+            $readonlyInstances,
+            $idToClass,
+            array_fill_keys(array_keys($executionScopedPrototypes), true),
+        );
         return $instance;
     }
 
@@ -443,9 +467,56 @@ final class GraphBuilder
                 propertyType: $typeName,
                 injectionKind: $kind,
                 message: "Cannot inject {$class}::\${$propName} (type: {$typeName}, "
-                    . "kind: {$kind}). No binding found.",
+                    . "kind: {$kind}). No binding found."
+                    . $this->describeExecutionScopedTrap($typeName, $idToClass, $executionScopedClasses),
             );
         }
+    }
+
+    /**
+     * The recurring footgun behind "No binding found": the requested type IS
+     * implemented, but the implementation is `#[ExecutionScoped]`, and
+     * execution-scoped services cannot be handed out as boot-time property
+     * injections (one frozen instance would smuggle per-request state across
+     * requests). Without this note the failure reads as a missing service and
+     * has historically been "fixed" by binding a worker-local in-memory
+     * substitute — which silently breaks cross-worker behavior (the collab
+     * draft-store regression), or by trial-and-error against a boot
+     * crash-loop (the calendar repository). Name the trap and the two
+     * sanctioned ways out at the exact point of failure.
+     *
+     * @param IdToClassMap $idToClass
+     * @param array<class-string, true> $executionScopedClasses
+     */
+    private function describeExecutionScopedTrap(string $typeName, array $idToClass, array $executionScopedClasses): string
+    {
+        $implementer = null;
+        $mapped = $idToClass[$typeName] ?? null;
+        if ($mapped !== null && isset($executionScopedClasses[$mapped])) {
+            $implementer = $mapped;
+        } else {
+            foreach (array_keys($executionScopedClasses) as $scopedClass) {
+                if (is_a($scopedClass, $typeName, true)) {
+                    $implementer = $scopedClass;
+                    break;
+                }
+            }
+        }
+
+        if ($implementer === null) {
+            return '';
+        }
+
+        return " NOTE: {$implementer} implements this type but is #[ExecutionScoped] — "
+            . 'execution-scoped services cannot be injected as boot-time properties into '
+            . 'container-built classes (one frozen instance would leak per-request state '
+            . 'across requests). Sanctioned ways out: (1) make the implementation a plain '
+            . 'singleton that resolves per-request state AT CALL TIME through a '
+            . 'coroutine-local seam (inject TenantContextStoreInterface and read tryGet() '
+            . 'per call — see CalendarEventDbRepository / FormCollabDraftDbRepository), or '
+            . "(2) drop #[ExecutionScoped] from {$implementer} if it holds no per-execution "
+            . 'state. Do NOT bind a worker-local in-memory substitute: it boots, then '
+            . 'silently breaks cross-worker behavior (the collab draft-store regression).';
     }
 
     /**

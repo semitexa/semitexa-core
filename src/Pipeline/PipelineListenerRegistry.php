@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Semitexa\Core\Pipeline;
 
 use Semitexa\Core\Attribute\AsPipelineListener;
+use Semitexa\Core\Discovery\BootDiagnostics;
 use Semitexa\Core\Discovery\ClassDiscovery;
 use Semitexa\Core\ModuleRegistry;
 use ReflectionClass;
@@ -65,7 +66,19 @@ final class PipelineListenerRegistry
                     $this->listenersByPhase[$phase] = [];
                 }
                 $this->listenersByPhase[$phase][] = $meta;
-            } catch (\Throwable) {
+            } catch (\Throwable $e) {
+                // A discovered, active pipeline listener that fails to register
+                // is a boot-visible defect, never a silent drop: this loop
+                // wires the AuthCheck phase (AuthorizationListener, CsrfListener),
+                // so a swallowed failure here runs requests with authorization
+                // silently absent. Surface it through BootDiagnostics — the
+                // same channel ServiceContractRegistry uses for the identical
+                // "known class failed at registration" case.
+                BootDiagnostics::current()->invalidUsage(
+                    'PipelineListenerRegistry',
+                    "failed to register pipeline listener {$className}: " . $e->getMessage(),
+                    $e,
+                );
                 continue;
             }
         }

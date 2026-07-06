@@ -88,7 +88,7 @@ final class InjectionAnalyzer
      *
      * @param array<string, class-string> $idToClass
      * @param array<class-string, true> $executionScopedClasses
-     * @return array<class-string, array<string, array{kind: string, type: class-string}>>
+     * @return array<class-string, array<string, array{kind: string, type: class-string, optional: bool}>>
      */
     public function collectInjections(array $idToClass, array $executionScopedClasses): array
     {
@@ -114,11 +114,11 @@ final class InjectionAnalyzer
     /**
      * Build injection metadata for a single class with strict validation.
      *
-     * @return array<string, array{kind: string, type: class-string}>
+     * @return array<string, array{kind: string, type: class-string, optional: bool}>
      */
     /**
      * @param class-string $class
-     * @return array<string, array{kind: string, type: class-string}>
+     * @return array<string, array{kind: string, type: class-string, optional: bool}>
      */
     public function buildInjectionsForClass(string $class): array
     {
@@ -213,9 +213,13 @@ final class InjectionAnalyzer
 
             /** @var class-string $typeName */
             $typeName = $type->getName();
+            $attrInstance = $injectAttrs[0]['attr']->newInstance();
             $out[$prop->getName()] = [
                 'kind' => $injectAttrs[0]['kind'],
                 'type' => $typeName,
+                // Soft dependency (see the attribute docblock): skip injection
+                // when unresolvable instead of throwing. Nullable-type = legacy.
+                'optional' => (property_exists($attrInstance, 'optional') && $attrInstance->optional) || $type->allowsNull(),
             ];
         }
 

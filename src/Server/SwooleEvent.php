@@ -8,6 +8,7 @@ enum SwooleEvent: string
 {
     case WorkerStart = 'WorkerStart';
     case WorkerStop = 'WorkerStop';
+    case WorkerExit = 'WorkerExit';
     case WorkerError = 'WorkerError';
     case Start = 'Start';
     case Shutdown = 'Shutdown';

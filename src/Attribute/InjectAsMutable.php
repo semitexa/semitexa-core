@@ -13,4 +13,16 @@ use Attribute;
 #[Attribute(Attribute::TARGET_PROPERTY)]
 final class InjectAsMutable
 {
+    public function __construct(
+        /**
+         * Soft dependency: when the container has no binding for the property's
+         * type, injection is SKIPPED and the property stays uninitialized — the
+         * class must isset-guard access (typically a lazy accessor with a
+         * null-object fallback). This replaces the old "nullable property type"
+         * convention, which lint:di forbids: the property type stays honest,
+         * absence is expressed structurally.
+         */
+        public bool $optional = false,
+    ) {
+    }
 }
