@@ -116,7 +116,7 @@ class PropertyInjectorTest extends TestCase
         // (the consumer isset-guards; this is the blessed soft-dep pattern,
         // replacing the lint-forbidden nullable convention).
         $ref = new \ReflectionProperty($target, 'dep');
-        self::assertFalse($ref->isInitialized($target));
+        $this->assertFalse($ref->isInitialized($target));
     }
 
     public function test_explicit_optional_flag_still_injects_when_bound(): void
@@ -128,7 +128,7 @@ class PropertyInjectorTest extends TestCase
             PropertyInjectorTest_Dep::class => $dep,
         ]));
 
-        self::assertSame($dep, $target->exposeDep());
+        $this->assertSame($dep, $target->exposeDep());
     }
 
     public function test_required_type_still_throws_when_unbound(): void

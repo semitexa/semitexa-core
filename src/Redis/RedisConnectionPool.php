@@ -149,9 +149,20 @@ final class RedisConnectionPool
                 }
 
                 try {
-                    $this->pool->push($this->createClient());
+                    // Bounded, like put(): when the borrowed client was an
+                    // over-cap extra the channel is already full, and an
+                    // unbounded push would suspend this coroutine forever.
+                    // Drop the replacement instead.
+                    $replacement = $this->createClient();
+                    if (!$this->pool->push($replacement, self::RETURN_TIMEOUT_SECONDS)) {
+                        try {
+                            $replacement->disconnect();
+                        } catch (\Throwable) {
+                            // Ignore — the replacement is being discarded anyway.
+                        }
+                    }
                 } catch (\Throwable) {
-                    // Pool might be closed; ignore
+                    // Pool might be closed or replacement creation failed; ignore
                 }
             } else {
                 $this->cliFallback = null;
