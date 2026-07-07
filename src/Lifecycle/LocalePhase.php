@@ -40,7 +40,10 @@ final class LocalePhase
         $resolution = $this->localeBootstrapper->resolve($request, $cookieJar);
         $this->requestScopedContainer->set(LocaleContextInterface::class, $this->localeBootstrapper->getLocaleContext());
 
-        $config = $this->localeBootstrapper->getConfig();
+        // The EFFECTIVE (per-tenant) pack — the redirect target and the
+        // context-store default/prefix must match the pack the resolution
+        // above validated against, not the global base.
+        $config = $this->localeBootstrapper->getEffectiveConfig();
 
         LocaleContextStore::setUrlPrefixEnabled($config->urlPrefixEnabled);
         LocaleContextStore::setDefaultLocale($config->defaultLocale);

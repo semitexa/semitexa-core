@@ -83,6 +83,7 @@ class Application
 
         $localeBootstrapper = $componentRegistry->createLocaleBootstrapper(
             events: $events instanceof EventDispatcherInterface ? $events : null,
+            container: $this->container,
         );
 
         /** @var TenantContextStoreInterface $tenantContextStore */

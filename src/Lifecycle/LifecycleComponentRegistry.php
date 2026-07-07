@@ -20,6 +20,7 @@ use Semitexa\Core\Request;
 use Semitexa\Core\HttpResponse;
 use Semitexa\Locale\Context\LocaleManager;
 use Semitexa\Locale\Application\Service\LocaleBootstrapper;
+use Semitexa\Locale\Domain\Contract\LocalePackProviderInterface;
 
 /**
  * Centralizes detection and creation of optional lifecycle bootstrappers.
@@ -155,13 +156,29 @@ final class LifecycleComponentRegistry
      */
     public function createLocaleBootstrapper(
         ?EventDispatcherInterface $events = null,
+        ?ContainerInterface $container = null,
     ): ?LocaleBootstrapper {
         if (!$this->localeAvailable) {
             return null;
         }
+
+        // Per-tenant language-pack overlay, when a package binds one (settings-
+        // backed). Optional + resolved from the container (dynamic contract
+        // wiring, the registry's job) so Core never hard-depends on it and a
+        // build without it keeps the global pack.
+        // localeAvailable already gated this method, so locale classes are
+        // present; the pack provider is bound only when a package ships one.
+        $packProvider = null;
+        if ($container !== null && $container->has(LocalePackProviderInterface::class)) {
+            /** @var LocalePackProviderInterface $resolved */
+            $resolved = $container->get(LocalePackProviderInterface::class);
+            $packProvider = $resolved;
+        }
+
         return new LocaleBootstrapper(
             new LocaleManager(),
             events: $events,
+            packProvider: $packProvider,
         );
     }
 
