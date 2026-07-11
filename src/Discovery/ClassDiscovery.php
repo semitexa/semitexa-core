@@ -11,8 +11,28 @@ class ClassDiscovery
     /** @var array<class-string, string> */
     private array $classMap = [];
     private bool $initialized = false;
-    /** @var array<class-string, list<class-string>> */
+    /** @var array<string, list<class-string>> keyed by attribute cache key ('@instanceof:'-prefixed for instanceof queries) */
     private array $attributeCache = [];
+
+    /**
+     * Coroutine gates that serialise one-time, blocking-IO work per key.
+     *
+     * Both {@see initialize()} (recursive PSR-4 filesystem scan) and the
+     * per-attribute discovery loop in {@see findClassesWithAttributeInternal()}
+     * (autoload + reflection over the whole classmap) are coroutine SUSPENSION
+     * points under SWOOLE_HOOK_ALL. Without a gate, the first concurrent burst
+     * after a worker boot lets every coroutine enter the same scan at once — a
+     * thundering herd of blocking file IO that stalls the worker reactor
+     * (observed as intermittent hangs / 500s under load). Each gate elects a
+     * single producer per key; every other coroutine suspends on the channel
+     * and resumes once the cache is fully populated.
+     *
+     * @var array<string, \Swoole\Coroutine\Channel>
+     */
+    private array $coroutineGates = [];
+
+    /** @var array<string, int> Coroutine id owning each in-flight gate (reentrancy guard). */
+    private array $coroutineGateOwners = [];
 
     private array $allowedNamespacePrefixes = [
         'Semitexa\\' => true,
@@ -50,10 +70,18 @@ class ClassDiscovery
 
     public function initialize(): void
     {
-        if ($this->initialized) {
-            return;
-        }
+        $this->runOncePerKey(
+            '@init',
+            fn (): bool => $this->initialized,
+            function (): void {
+                $this->runInitialization();
+                $this->initialized = true;
+            },
+        );
+    }
 
+    private function runInitialization(): void
+    {
         $composerDir = ProjectRoot::get() . '/vendor/composer';
         $composerClassMap = $this->loadComposerClassMap($composerDir . '/autoload_classmap.php');
         $composerPsr4Map = $this->loadComposerPsr4Map($composerDir . '/autoload_psr4.php');
@@ -75,8 +103,6 @@ class ClassDiscovery
         }
 
         $this->mergePsr4ClassCandidates($composerPsr4Map);
-
-        $this->initialized = true;
     }
 
     /**
@@ -178,6 +204,22 @@ class ClassDiscovery
 
         $this->initialize();
 
+        $this->runOncePerKey(
+            'attr:' . $cacheKey,
+            fn (): bool => isset($this->attributeCache[$cacheKey]),
+            function () use ($attributeClass, $instanceof, $cacheKey): void {
+                $this->attributeCache[$cacheKey] = $this->computeClassesWithAttribute($attributeClass, $instanceof);
+            },
+        );
+
+        return $this->attributeCache[$cacheKey] ?? [];
+    }
+
+    /**
+     * @return list<class-string>
+     */
+    private function computeClassesWithAttribute(string $attributeClass, bool $instanceof): array
+    {
         $reflectionFlags = $instanceof ? \ReflectionAttribute::IS_INSTANCEOF : 0;
         $classes = [];
 
@@ -215,9 +257,90 @@ class ClassDiscovery
             }
         }
 
-        $this->attributeCache[$cacheKey] = $classes;
-
         return $classes;
+    }
+
+    /**
+     * Runs $produce at most once per $key across concurrent coroutines.
+     *
+     * The first coroutine to arrive for a key runs $produce; concurrent callers
+     * suspend on a one-shot gate channel and resume once it completes, then read
+     * the populated cache via their own accessor. Outside a Swoole coroutine
+     * (CLI, tests, single-threaded worker boot) it degrades to a plain
+     * compute-if-absent with no synchronisation.
+     *
+     * There is no coroutine suspension point between the top guard and the gate
+     * creation below (no IO, no channel op), so exactly one coroutine can become
+     * the producer for a key. On producer failure the gate is dropped and the
+     * failing coroutine rethrows; waiters wake, re-check $isDone() and — since
+     * the gate is gone — the next one becomes the producer and retries, so no
+     * caller ever proceeds on incomplete state. On success the closed gate is
+     * retained and every future call short-circuits on $isDone().
+     *
+     * @param callable(): bool $isDone
+     * @param callable(): void $produce
+     */
+    private function runOncePerKey(string $key, callable $isDone, callable $produce): void
+    {
+        while (true) {
+            if ($isDone()) {
+                return;
+            }
+
+            // Outside a coroutine there is no concurrency and no suspension point
+            // between here and the guard above, so produce inline.
+            if (!$this->inCoroutine()) {
+                $produce();
+                return;
+            }
+
+            /** @var int $currentCid Swoole\Coroutine::getCid() is int (its stub is untyped) */
+            $currentCid = \Swoole\Coroutine::getCid();
+
+            if (isset($this->coroutineGates[$key])) {
+                // Reentrant call on the producing coroutine must not wait on itself.
+                if (($this->coroutineGateOwners[$key] ?? -1) === $currentCid) {
+                    return;
+                }
+                // Another coroutine owns production — block until it closes the
+                // gate, then loop: a successful producer makes $isDone() short-
+                // circuit; a failed one dropped the gate, so this coroutine
+                // retries as the new producer rather than continuing on an
+                // incomplete cache.
+                $this->coroutineGates[$key]->pop();
+                continue;
+            }
+
+            $gate = new \Swoole\Coroutine\Channel(1);
+            $this->coroutineGates[$key] = $gate;
+            $this->coroutineGateOwners[$key] = $currentCid;
+
+            // We are the elected producer; no other coroutine can have produced
+            // between the top guard and here (no suspension point above), so the
+            // cache is still cold.
+            try {
+                $produce();
+            } catch (\Throwable $e) {
+                // Failed production must not wedge waiters behind a permanently
+                // closed gate, nor let them proceed on incomplete state — drop
+                // the gate and wake them so the next caller retries.
+                unset($this->coroutineGates[$key], $this->coroutineGateOwners[$key]);
+                $gate->close();
+                throw $e;
+            }
+
+            // Success: wake every waiter. The closed gate stays in the map so late
+            // arrivals resolve via the cheap $isDone() short-circuit above.
+            unset($this->coroutineGateOwners[$key]);
+            $gate->close();
+            return;
+        }
+    }
+
+    private function inCoroutine(): bool
+    {
+        return class_exists(\Swoole\Coroutine::class, false)
+            && \Swoole\Coroutine::getCid() >= 0;
     }
 
     /**
