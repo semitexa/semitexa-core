@@ -11,7 +11,7 @@ class ClassDiscovery
     /** @var array<class-string, string> */
     private array $classMap = [];
     private bool $initialized = false;
-    /** @var array<class-string, list<class-string>> */
+    /** @var array<string, list<class-string>> keyed by attribute cache key ('@instanceof:'-prefixed for instanceof queries) */
     private array $attributeCache = [];
 
     /**
@@ -216,7 +216,7 @@ class ClassDiscovery
     }
 
     /**
-     * @return list<string>
+     * @return list<class-string>
      */
     private function computeClassesWithAttribute(string $attributeClass, bool $instanceof): array
     {
@@ -284,13 +284,14 @@ class ClassDiscovery
             return;
         }
 
+        // Outside a coroutine there is no concurrency and no suspension point
+        // between here and the guard above, so produce inline.
         if (!$this->inCoroutine()) {
-            if (!$isDone()) {
-                $produce();
-            }
+            $produce();
             return;
         }
 
+        /** @var int $currentCid Swoole\Coroutine::getCid() is int (its stub is untyped) */
         $currentCid = \Swoole\Coroutine::getCid();
 
         if (isset($this->coroutineGates[$key])) {
@@ -307,10 +308,11 @@ class ClassDiscovery
         $this->coroutineGates[$key] = $gate;
         $this->coroutineGateOwners[$key] = $currentCid;
 
+        // We are the elected producer; no other coroutine can have produced
+        // between the top guard and here (no suspension point above), so the
+        // cache is still cold.
         try {
-            if (!$isDone()) {
-                $produce();
-            }
+            $produce();
         } catch (\Throwable $e) {
             // Failed production must not wedge waiters behind a permanently
             // closed gate — drop it so a subsequent call retries.
