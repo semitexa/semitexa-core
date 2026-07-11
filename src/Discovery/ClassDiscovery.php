@@ -271,60 +271,70 @@ class ClassDiscovery
      *
      * There is no coroutine suspension point between the top guard and the gate
      * creation below (no IO, no channel op), so exactly one coroutine can become
-     * the producer for a key. On producer failure the gate is dropped so a later
-     * call re-attempts; on success the closed gate is retained and every future
-     * call short-circuits on $isDone().
+     * the producer for a key. On producer failure the gate is dropped and the
+     * failing coroutine rethrows; waiters wake, re-check $isDone() and — since
+     * the gate is gone — the next one becomes the producer and retries, so no
+     * caller ever proceeds on incomplete state. On success the closed gate is
+     * retained and every future call short-circuits on $isDone().
      *
      * @param callable(): bool $isDone
      * @param callable(): void $produce
      */
     private function runOncePerKey(string $key, callable $isDone, callable $produce): void
     {
-        if ($isDone()) {
-            return;
-        }
-
-        // Outside a coroutine there is no concurrency and no suspension point
-        // between here and the guard above, so produce inline.
-        if (!$this->inCoroutine()) {
-            $produce();
-            return;
-        }
-
-        /** @var int $currentCid Swoole\Coroutine::getCid() is int (its stub is untyped) */
-        $currentCid = \Swoole\Coroutine::getCid();
-
-        if (isset($this->coroutineGates[$key])) {
-            // Reentrant call on the producing coroutine must not wait on itself.
-            if (($this->coroutineGateOwners[$key] ?? -1) === $currentCid) {
+        while (true) {
+            if ($isDone()) {
                 return;
             }
-            // Another coroutine owns production — block until it closes the gate.
-            $this->coroutineGates[$key]->pop();
+
+            // Outside a coroutine there is no concurrency and no suspension point
+            // between here and the guard above, so produce inline.
+            if (!$this->inCoroutine()) {
+                $produce();
+                return;
+            }
+
+            /** @var int $currentCid Swoole\Coroutine::getCid() is int (its stub is untyped) */
+            $currentCid = \Swoole\Coroutine::getCid();
+
+            if (isset($this->coroutineGates[$key])) {
+                // Reentrant call on the producing coroutine must not wait on itself.
+                if (($this->coroutineGateOwners[$key] ?? -1) === $currentCid) {
+                    return;
+                }
+                // Another coroutine owns production — block until it closes the
+                // gate, then loop: a successful producer makes $isDone() short-
+                // circuit; a failed one dropped the gate, so this coroutine
+                // retries as the new producer rather than continuing on an
+                // incomplete cache.
+                $this->coroutineGates[$key]->pop();
+                continue;
+            }
+
+            $gate = new \Swoole\Coroutine\Channel(1);
+            $this->coroutineGates[$key] = $gate;
+            $this->coroutineGateOwners[$key] = $currentCid;
+
+            // We are the elected producer; no other coroutine can have produced
+            // between the top guard and here (no suspension point above), so the
+            // cache is still cold.
+            try {
+                $produce();
+            } catch (\Throwable $e) {
+                // Failed production must not wedge waiters behind a permanently
+                // closed gate, nor let them proceed on incomplete state — drop
+                // the gate and wake them so the next caller retries.
+                unset($this->coroutineGates[$key], $this->coroutineGateOwners[$key]);
+                $gate->close();
+                throw $e;
+            }
+
+            // Success: wake every waiter. The closed gate stays in the map so late
+            // arrivals resolve via the cheap $isDone() short-circuit above.
+            unset($this->coroutineGateOwners[$key]);
+            $gate->close();
             return;
         }
-
-        $gate = new \Swoole\Coroutine\Channel(1);
-        $this->coroutineGates[$key] = $gate;
-        $this->coroutineGateOwners[$key] = $currentCid;
-
-        // We are the elected producer; no other coroutine can have produced
-        // between the top guard and here (no suspension point above), so the
-        // cache is still cold.
-        try {
-            $produce();
-        } catch (\Throwable $e) {
-            // Failed production must not wedge waiters behind a permanently
-            // closed gate — drop it so a subsequent call retries.
-            unset($this->coroutineGates[$key], $this->coroutineGateOwners[$key]);
-            $gate->close();
-            throw $e;
-        }
-
-        // Success: wake every waiter. The closed gate stays in the map so late
-        // arrivals resolve via the cheap $isDone() short-circuit above.
-        unset($this->coroutineGateOwners[$key]);
-        $gate->close();
     }
 
     private function inCoroutine(): bool
