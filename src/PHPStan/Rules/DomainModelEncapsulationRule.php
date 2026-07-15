@@ -7,9 +7,9 @@ namespace Semitexa\Core\PHPStan\Rules;
 use PhpParser\Node;
 use PhpParser\Node\Stmt\Class_;
 use PHPStan\Analyser\Scope;
+use PHPStan\Reflection\ReflectionProvider;
 use PHPStan\Rules\Rule;
 use PHPStan\Rules\RuleErrorBuilder;
-use ReflectionClass;
 use ReflectionMethod;
 use ReflectionProperty;
 
@@ -37,6 +37,10 @@ final class DomainModelEncapsulationRule implements Rule
 {
     private const ORM_RESOURCE_ATTRIBUTE = 'Semitexa\\Orm\\Attribute\\FromTable';
 
+    public function __construct(
+        private readonly ReflectionProvider $reflectionProvider,
+    ) {}
+
     public function getNodeType(): string
     {
         return Class_::class;
@@ -54,11 +58,11 @@ final class DomainModelEncapsulationRule implements Rule
             return [];
         }
 
-        if (!class_exists($domain)) {
+        if (!$this->reflectionProvider->hasClass($domain)) {
             return [];
         }
 
-        $reflection = new ReflectionClass($domain);
+        $reflection = $this->reflectionProvider->getClass($domain)->getNativeReflection();
 
         // A class marked as an ORM resource model is not a domain model.
         foreach ($reflection->getAttributes() as $classAttribute) {
@@ -67,9 +71,14 @@ final class DomainModelEncapsulationRule implements Rule
             }
         }
 
-        $mapperName = $node->name?->name ?? 'unknown';
-        $methods    = $this->publicMethodNames($reflection);
+        $mapperName = $node->name instanceof Node\Identifier ? $node->name->name : 'anonymous';
         $errors     = [];
+
+        // Lowercased public method names, as a lookup set for accessor detection.
+        $methods = [];
+        foreach ($reflection->getMethods(ReflectionMethod::IS_PUBLIC) as $method) {
+            $methods[strtolower($method->getName())] = true;
+        }
 
         foreach ($reflection->getProperties() as $property) {
             if ($property->isStatic()) {
@@ -91,7 +100,7 @@ final class DomainModelEncapsulationRule implements Rule
 
     /**
      * @param array<string, true> $methods lowercased public method names
-     * @return list<\PHPStan\Rules\RuleError>
+     * @return list<\PHPStan\Rules\IdentifierRuleError>
      */
     private function checkProperty(
         ReflectionProperty $property,
@@ -216,18 +225,5 @@ final class DomainModelEncapsulationRule implements Rule
         }
 
         return null;
-    }
-
-    /**
-     * @return array<string, true> lowercased public method names as a lookup set
-     */
-    private function publicMethodNames(ReflectionClass $reflection): array
-    {
-        $names = [];
-        foreach ($reflection->getMethods(ReflectionMethod::IS_PUBLIC) as $method) {
-            $names[strtolower($method->getName())] = true;
-        }
-
-        return $names;
     }
 }

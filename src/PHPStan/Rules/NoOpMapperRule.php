@@ -66,7 +66,7 @@ final class NoOpMapperRule implements Rule
                     continue;
                 }
 
-                $className = $node->name?->name ?? 'unknown';
+                $className = $node->name instanceof Node\Identifier ? $node->name->name : 'anonymous';
 
                 return [
                     RuleErrorBuilder::message(
