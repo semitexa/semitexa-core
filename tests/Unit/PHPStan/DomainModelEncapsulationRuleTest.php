@@ -44,8 +44,8 @@ final class DomainModelEncapsulationRuleTest extends TestCase
     public function it_discovers_the_domain_model_via_as_mapper(): void
     {
         $source = $this->source();
-        self::assertStringContainsString('Semitexa\\\\Orm\\\\Attribute\\\\AsMapper', $source, 'FQCN spelling');
-        self::assertStringContainsString("'AsMapper'", $source, 'imported short-name spelling');
+        self::assertStringContainsString('Semitexa\\\\Orm\\\\Attribute\\\\AsMapper', $source, 'matches the canonical FQCN');
+        self::assertStringContainsString('resolveName', $source, 'resolves the attribute name so aliased imports still match');
         self::assertStringContainsString('domainModel', $source);
     }
 

@@ -42,11 +42,11 @@ final class NoOpMapperRuleTest extends TestCase
     }
 
     #[Test]
-    public function it_targets_the_as_mapper_attribute_in_both_spellings(): void
+    public function it_targets_the_as_mapper_attribute_by_resolved_fqcn(): void
     {
         $source = $this->source();
-        self::assertStringContainsString('Semitexa\\\\Orm\\\\Attribute\\\\AsMapper', $source, 'matches the FQCN spelling');
-        self::assertStringContainsString("'AsMapper'", $source, 'matches the imported short-name spelling');
+        self::assertStringContainsString('Semitexa\\\\Orm\\\\Attribute\\\\AsMapper', $source, 'matches the canonical FQCN');
+        self::assertStringContainsString('resolveName', $source, 'resolves the attribute name so aliased imports still match');
     }
 
     #[Test]

@@ -33,8 +33,10 @@ final class NoOpMapperRule implements Rule
     {
         foreach ($node->attrGroups as $attrGroup) {
             foreach ($attrGroup->attrs as $attr) {
-                $name = $attr->name->toString();
-                if ($name !== 'Semitexa\\Orm\\Attribute\\AsMapper' && $name !== 'AsMapper') {
+                // Resolve against the file scope so an aliased import
+                // (`use ... AsMapper as Mapper;`) still matches.
+                $name = ltrim($scope->resolveName($attr->name), '\\');
+                if ($name !== 'Semitexa\\Orm\\Attribute\\AsMapper') {
                     continue;
                 }
 
