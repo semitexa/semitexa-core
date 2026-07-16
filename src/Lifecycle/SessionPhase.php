@@ -110,13 +110,25 @@ final class SessionPhase
             $cookieName = $session->getCookieName();
             $sessionLifetime = (int) (Environment::getEnvValue('SESSION_LIFETIME') ?? '3600');
             $isHttps = $request->getScheme() === 'https';
-            $cookieJar->set($cookieName, $session->getSessionIdForCookie(), [
+
+            // Optional parent-domain scope (e.g. ".example.com") so ONE session is
+            // shared across sibling hosts of the same site — a public apex and an
+            // authenticated subdomain, say. Unset (the default) keeps the cookie
+            // host-only, so each host has its own isolated session. Applied to
+            // both the session and the XSRF cookie so the CSRF double-submit
+            // stays consistent across those hosts too.
+            $cookieDomain = (string) (Environment::getEnvValue('SESSION_COOKIE_DOMAIN') ?? '');
+            $baseOptions = [
                 'path' => '/',
-                'httpOnly' => true,
                 'secure' => $isHttps,
                 'sameSite' => 'lax',
                 'maxAge' => $sessionLifetime,
-            ]);
+            ];
+            if ($cookieDomain !== '') {
+                $baseOptions['domain'] = $cookieDomain;
+            }
+
+            $cookieJar->set($cookieName, $session->getSessionIdForCookie(), ['httpOnly' => true] + $baseOptions);
 
             // XSRF-TOKEN cookie for the double-submit CSRF flow. Must NOT be
             // HttpOnly — browser JS has to read it to populate X-CSRF-Token.
@@ -125,13 +137,7 @@ final class SessionPhase
             /** @var CsrfToken $csrf */
             $csrf = $session->getPayload(CsrfToken::class);
             if ($csrf->getValue() !== '') {
-                $cookieJar->set('XSRF-TOKEN', $csrf->getValue(), [
-                    'path' => '/',
-                    'httpOnly' => false,
-                    'secure' => $isHttps,
-                    'sameSite' => 'lax',
-                    'maxAge' => $sessionLifetime,
-                ]);
+                $cookieJar->set('XSRF-TOKEN', $csrf->getValue(), ['httpOnly' => false] + $baseOptions);
             }
         }
 
