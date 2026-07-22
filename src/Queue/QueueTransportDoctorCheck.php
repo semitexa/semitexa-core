@@ -43,6 +43,13 @@ final class QueueTransportDoctorCheck implements DoctorCheckInterface
             );
         }
 
+        if ($transport === 'database' || $transport === 'db') {
+            return DoctorResult::pass(
+                "Transport 'database' (broker-less, queue_messages table). NATS remains available "
+                . 'as a scaling option via semitexa-ledger.',
+            );
+        }
+
         return DoctorResult::pass("Queue transport '{$transport}' registered.");
     }
 }

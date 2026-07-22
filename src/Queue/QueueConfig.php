@@ -10,8 +10,9 @@ use Semitexa\Core\Exception\ConfigurationException;
 class QueueConfig
 {
     /**
-     * When EVENTS_ASYNC=1 (or true/yes), use NATS; otherwise in-memory (sync).
-     * Override with EVENTS_TRANSPORT=nats|in-memory if needed.
+     * When EVENTS_ASYNC=1 (or true/yes): NATS when installed, otherwise the
+     * broker-less 'database' transport (semitexa/orm). Without async:
+     * in-memory (sync). Override with EVENTS_TRANSPORT=nats|database|in-memory.
      */
     public static function defaultTransport(): string
     {
@@ -25,13 +26,19 @@ class QueueConfig
             return 'in-memory';
         }
 
-        if (!QueueTransportRegistry::has('nats')) {
-            throw new ConfigurationException(
-                "EVENTS_ASYNC requires the 'nats' queue transport. Configure NATS env values and install semitexa-ledger.",
-            );
+        if (QueueTransportRegistry::has('nats')) {
+            return 'nats';
         }
 
-        return 'nats';
+        if (QueueTransportRegistry::has('database')) {
+            return 'database';
+        }
+
+        throw new ConfigurationException(
+            'EVENTS_ASYNC=1 but no async queue transport is available. Install semitexa-ledger '
+            . '+ NATS for a broker, or semitexa/orm for the broker-less database transport '
+            . '(or set EVENTS_ASYNC=0 for in-process sync dispatch).',
+        );
     }
 
     public static function isAsyncEnabled(string $value): bool
