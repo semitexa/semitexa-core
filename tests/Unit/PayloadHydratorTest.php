@@ -119,7 +119,7 @@ final class PayloadHydratorTest extends TestCase
     {
         $hydrated = PayloadHydrator::hydrate(
             $this->sefDto(),
-            $this->pathRequest('/pages/%D0%92%D0%B8%D1%81%D1%82%D0%B0%D0%B2%D0%BA%D0%B8%20%E2%84%961'),
+            $this->pathRequest('/pages/' . rawurlencode('Виставки №1')),
         );
 
         self::assertSame('Виставки №1', $hydrated->sef);
@@ -131,6 +131,16 @@ final class PayloadHydratorTest extends TestCase
         $hydrated = PayloadHydrator::hydrate($this->sefDto(), $this->pathRequest('/pages/about-us'));
 
         self::assertSame('about-us', $hydrated->sef);
+    }
+
+    #[Test]
+    public function encoded_slash_still_matches_the_segment_and_decodes_in_the_value(): void
+    {
+        // %2F is not a literal slash, so the {sef} segment ([^/]+) still matches;
+        // the captured value is then decoded to a real slash.
+        $hydrated = PayloadHydrator::hydrate($this->sefDto(), $this->pathRequest('/pages/a%2Fb'));
+
+        self::assertSame('a/b', $hydrated->sef);
     }
 
     private function sefDto(): object
