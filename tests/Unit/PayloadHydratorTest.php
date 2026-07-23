@@ -113,4 +113,48 @@ final class PayloadHydratorTest extends TestCase
 
         self::assertSame('alice', $hydrated->name);
     }
+
+    #[Test]
+    public function percent_encoded_path_param_is_decoded(): void
+    {
+        $hydrated = PayloadHydrator::hydrate(
+            $this->sefDto(),
+            $this->pathRequest('/pages/%D0%92%D0%B8%D1%81%D1%82%D0%B0%D0%B2%D0%BA%D0%B8%20%E2%84%961'),
+        );
+
+        self::assertSame('Виставки №1', $hydrated->sef);
+    }
+
+    #[Test]
+    public function plain_ascii_path_param_is_unchanged(): void
+    {
+        $hydrated = PayloadHydrator::hydrate($this->sefDto(), $this->pathRequest('/pages/about-us'));
+
+        self::assertSame('about-us', $hydrated->sef);
+    }
+
+    private function sefDto(): object
+    {
+        return new #[\Semitexa\Core\Attribute\AsPublicPayload(path: '/pages/{sef}')] class {
+            public ?string $sef = null;
+
+            public function setSef(string $value): void
+            {
+                $this->sef = $value;
+            }
+        };
+    }
+
+    private function pathRequest(string $uri): Request
+    {
+        return new Request(
+            method: 'GET',
+            uri: $uri,
+            headers: [],
+            query: [],
+            post: [],
+            server: [],
+            cookies: [],
+        );
+    }
 }
