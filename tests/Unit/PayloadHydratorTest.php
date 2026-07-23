@@ -113,4 +113,58 @@ final class PayloadHydratorTest extends TestCase
 
         self::assertSame('alice', $hydrated->name);
     }
+
+    #[Test]
+    public function percent_encoded_path_param_is_decoded(): void
+    {
+        $hydrated = PayloadHydrator::hydrate(
+            $this->sefDto(),
+            $this->pathRequest('/pages/' . rawurlencode('Виставки №1')),
+        );
+
+        self::assertSame('Виставки №1', $hydrated->sef);
+    }
+
+    #[Test]
+    public function plain_ascii_path_param_is_unchanged(): void
+    {
+        $hydrated = PayloadHydrator::hydrate($this->sefDto(), $this->pathRequest('/pages/about-us'));
+
+        self::assertSame('about-us', $hydrated->sef);
+    }
+
+    #[Test]
+    public function encoded_slash_still_matches_the_segment_and_decodes_in_the_value(): void
+    {
+        // %2F is not a literal slash, so the {sef} segment ([^/]+) still matches;
+        // the captured value is then decoded to a real slash.
+        $hydrated = PayloadHydrator::hydrate($this->sefDto(), $this->pathRequest('/pages/a%2Fb'));
+
+        self::assertSame('a/b', $hydrated->sef);
+    }
+
+    private function sefDto(): object
+    {
+        return new #[\Semitexa\Core\Attribute\AsPublicPayload(path: '/pages/{sef}')] class {
+            public ?string $sef = null;
+
+            public function setSef(string $value): void
+            {
+                $this->sef = $value;
+            }
+        };
+    }
+
+    private function pathRequest(string $uri): Request
+    {
+        return new Request(
+            method: 'GET',
+            uri: $uri,
+            headers: [],
+            query: [],
+            post: [],
+            server: [],
+            cookies: [],
+        );
+    }
 }

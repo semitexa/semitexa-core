@@ -127,11 +127,13 @@ class PayloadHydrator
             return [];
         }
 
+        // Match against the raw path, decode only captured values: an encoded
+        // slash (%2F) inside a segment must not influence segment splitting.
         $params = [];
         foreach ($pathParams as $paramName => $groupIndex) {
             $captureIndex = $groupIndex + 1;
             if (isset($matches[$captureIndex])) {
-                $params[$paramName] = $matches[$captureIndex];
+                $params[$paramName] = rawurldecode($matches[$captureIndex]);
             }
         }
 
