@@ -44,6 +44,7 @@ class QueueTransportRegistry
         self::register('in-memory', new InMemoryTransportFactory());
         self::register('memory', new InMemoryTransportFactory());
         self::registerOptionalNatsTransport();
+        self::registerOptionalDatabaseTransport();
 
         self::$initialized = true;
     }
@@ -83,6 +84,35 @@ class QueueTransportRegistry
         self::$factories = [];
         self::$instances = [];
         self::$initialized = false;
+    }
+
+    /**
+     * The 'database' transport ships with semitexa/orm (claim-lease rows in
+     * 'queue_messages') and makes async queues work without a broker. Wired
+     * via class_exists so core keeps no dependency on orm.
+     */
+    private static function registerOptionalDatabaseTransport(): void
+    {
+        $factoryClass = 'Semitexa\\Orm\\Application\\Service\\Queue\\DatabaseTransportFactory';
+        if (!class_exists($factoryClass)) {
+            return;
+        }
+
+        // Defensive like the NATS path: a broken optional package must degrade
+        // to "transport unavailable", never break registry initialization.
+        // PHPStan sees the in-repo orm factory and calls these guards dead —
+        // they exist for consumer installs shipping a DIFFERENT orm version.
+        try {
+            $factory = new $factoryClass();
+        } catch (\Throwable) { // @phpstan-ignore catch.neverThrown
+            return;
+        }
+        if (!$factory instanceof QueueTransportFactoryInterface) { // @phpstan-ignore instanceof.alwaysTrue
+            return;
+        }
+
+        self::register('database', $factory);
+        self::register('db', $factory);
     }
 
     private static function registerOptionalNatsTransport(): void
