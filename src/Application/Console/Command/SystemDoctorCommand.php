@@ -46,15 +46,22 @@ final class SystemDoctorCommand extends BaseCommand
 
         $report = [];
         foreach ($classes as $className) {
-            $ref = new \ReflectionClass($className);
-            $attrs = $ref->getAttributes(AsDoctorCheck::class);
-            if ($attrs === [] || !$ref->implementsInterface(DoctorCheckInterface::class)) {
-                continue;
-            }
-            /** @var AsDoctorCheck $attr */
-            $attr = $attrs[0]->newInstance();
-
+            // A mis-declared or unloadable check from ANY package must become
+            // one failed row, never abort the whole diagnosis.
+            $name = $className;
+            $package = '';
             try {
+                /** @var class-string $className */
+                $ref = new \ReflectionClass($className);
+                $attrs = $ref->getAttributes(AsDoctorCheck::class);
+                if ($attrs === [] || !$ref->implementsInterface(DoctorCheckInterface::class)) {
+                    continue;
+                }
+                /** @var AsDoctorCheck $attr */
+                $attr = $attrs[0]->newInstance();
+                $name = $attr->name;
+                $package = $attr->package;
+
                 /** @var DoctorCheckInterface $check */
                 $check = $ref->newInstance();
                 $result = $check->run();
@@ -63,22 +70,26 @@ final class SystemDoctorCommand extends BaseCommand
             }
 
             $report[] = [
-                'name' => $attr->name,
-                'package' => $attr->package,
+                'name' => $name,
+                'package' => $package,
                 'status' => $result->status->value,
                 'message' => $result->message,
                 'hint' => $result->hint,
             ];
         }
 
+        $healthy = !$this->hasFailures($report);
+
         if ($input->getOption('json')) {
-            $output->writeln(json_encode([
+            // Substitute invalid UTF-8 instead of letting a rogue check
+            // message turn the report into a JsonException crash.
+            $output->writeln((string) json_encode([
                 'artifact' => 'semitexa.system-doctor/v1',
                 'checks' => $report,
-                'healthy' => !$this->hasFailures($report),
-            ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR));
+                'healthy' => $healthy,
+            ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE));
 
-            return $this->hasFailures($report) ? Command::FAILURE : Command::SUCCESS;
+            return $healthy ? Command::SUCCESS : Command::FAILURE;
         }
 
         $io->title('System doctor');
@@ -108,7 +119,7 @@ final class SystemDoctorCommand extends BaseCommand
             $counts[DoctorStatus::Skip->value] ?? 0,
         );
 
-        if ($this->hasFailures($report)) {
+        if (!$healthy) {
             $io->error("Environment is NOT healthy: {$summary}");
             return Command::FAILURE;
         }

@@ -98,8 +98,19 @@ class QueueTransportRegistry
             return;
         }
 
-        /** @var QueueTransportFactoryInterface $factory */
-        $factory = new $factoryClass();
+        // Defensive like the NATS path: a broken optional package must degrade
+        // to "transport unavailable", never break registry initialization.
+        // PHPStan sees the in-repo orm factory and calls these guards dead —
+        // they exist for consumer installs shipping a DIFFERENT orm version.
+        try {
+            $factory = new $factoryClass();
+        } catch (\Throwable) { // @phpstan-ignore catch.neverThrown
+            return;
+        }
+        if (!$factory instanceof QueueTransportFactoryInterface) { // @phpstan-ignore instanceof.alwaysTrue
+            return;
+        }
+
         self::register('database', $factory);
         self::register('db', $factory);
     }

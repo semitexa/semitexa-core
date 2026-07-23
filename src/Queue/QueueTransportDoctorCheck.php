@@ -24,8 +24,8 @@ final class QueueTransportDoctorCheck implements DoctorCheckInterface
         } catch (\Throwable $e) {
             return DoctorResult::fail(
                 $e->getMessage(),
-                'Install semitexa-ledger + a reachable NATS, or set EVENTS_ASYNC=0. '
-                . 'Broker-less variant generation stays available via media:drain / media:import --sync.',
+                'Install semitexa-ledger + a reachable NATS, or semitexa/orm for the broker-less '
+                . "'database' transport, or set EVENTS_ASYNC=0 for in-process sync dispatch.",
             );
         }
 
