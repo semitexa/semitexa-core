@@ -67,13 +67,17 @@ final class LintResponsesCommand extends BaseCommand
                     continue;
                 }
                 $path = $file->getPathname();
+                // Separators normalized before matching, as ClassDiscovery does:
+                // getPathname() yields backslashes on Windows and the exclusion
+                // would silently stop applying there.
+                $normalizedPath = str_replace('\\', '/', $path);
 
                 // Skip test code. Packages are scanned through their src/ only,
                 // so package tests were already out of scope; modules are scanned
                 // whole, which pulled their tests in and made the rule
                 // inconsistent between the two. A test that asserts envelope
                 // behaviour has to construct an HttpResponse to assert against.
-                if (preg_match('#/src/modules/[^/]+/tests/#', $path)) {
+                if (preg_match('#/src/modules/[^/]+/tests/#', $normalizedPath)) {
                     continue;
                 }
 
