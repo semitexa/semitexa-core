@@ -60,10 +60,22 @@ final class LintResponsesCommand extends BaseCommand
                 new \RecursiveDirectoryIterator($dir, \FilesystemIterator::SKIP_DOTS)
             );
             foreach ($iterator as $file) {
+                if (!$file instanceof \SplFileInfo) {
+                    continue;
+                }
                 if ($file->getExtension() !== 'php') {
                     continue;
                 }
                 $path = $file->getPathname();
+
+                // Skip test code. Packages are scanned through their src/ only,
+                // so package tests were already out of scope; modules are scanned
+                // whole, which pulled their tests in and made the rule
+                // inconsistent between the two. A test that asserts envelope
+                // behaviour has to construct an HttpResponse to assert against.
+                if (preg_match('#/src/modules/[^/]+/tests/#', $path)) {
+                    continue;
+                }
 
                 // Skip allowed kernel / framework-infrastructure directories.
                 // The rule is "user payload handlers must return ResourceInterface DTOs";
