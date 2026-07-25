@@ -86,15 +86,18 @@ final class LintResponsesCommand extends BaseCommand
                 // it is not a ban on the framework itself producing HttpResponse from
                 // pipeline phases, lifecycle phases, exception mappers, or pre-handler
                 // tenancy guards. These run *outside* the user-handler pipeline.
-                if (str_contains($path, 'semitexa-core/src/Http/')
-                    || str_contains($path, 'semitexa-core/src/Application.php')
+                // Every comparison below is separator-sensitive, so all of them
+                // read $normalizedPath. Only the real filesystem path is used
+                // for I/O further down.
+                if (str_contains($normalizedPath, 'semitexa-core/src/Http/')
+                    || str_contains($normalizedPath, 'semitexa-core/src/Application.php')
                     // any package's Pipeline/ directory — pre-handler middleware
-                    || preg_match('#/packages/[^/]+/src/Pipeline/#', $path)
+                    || preg_match('#/packages/[^/]+/src/Pipeline/#', $normalizedPath)
                     // any package's Lifecycle/ directory — kernel lifecycle phases
-                    || preg_match('#/packages/[^/]+/src/Lifecycle/#', $path)
+                    || preg_match('#/packages/[^/]+/src/Lifecycle/#', $normalizedPath)
                     // tenancy error responders + pre-handler guards (not TypedHandler implementations)
-                    || str_contains($path, 'semitexa-tenancy/src/Application/Service/DefaultTenantErrorResponder.php')
-                    || str_contains($path, 'semitexa-tenancy/src/Application/Service/TenantRequiredGuard.php')
+                    || str_contains($normalizedPath, 'semitexa-tenancy/src/Application/Service/DefaultTenantErrorResponder.php')
+                    || str_contains($normalizedPath, 'semitexa-tenancy/src/Application/Service/TenantRequiredGuard.php')
                 ) {
                     continue;
                 }
