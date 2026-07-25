@@ -60,25 +60,44 @@ final class LintResponsesCommand extends BaseCommand
                 new \RecursiveDirectoryIterator($dir, \FilesystemIterator::SKIP_DOTS)
             );
             foreach ($iterator as $file) {
+                if (!$file instanceof \SplFileInfo) {
+                    continue;
+                }
                 if ($file->getExtension() !== 'php') {
                     continue;
                 }
                 $path = $file->getPathname();
+                // Separators normalized before matching, as ClassDiscovery does:
+                // getPathname() yields backslashes on Windows and the exclusion
+                // would silently stop applying there.
+                $normalizedPath = str_replace('\\', '/', $path);
+
+                // Skip test code. Packages are scanned through their src/ only,
+                // so package tests were already out of scope; modules are scanned
+                // whole, which pulled their tests in and made the rule
+                // inconsistent between the two. A test that asserts envelope
+                // behaviour has to construct an HttpResponse to assert against.
+                if (preg_match('#/src/modules/[^/]+/tests/#', $normalizedPath)) {
+                    continue;
+                }
 
                 // Skip allowed kernel / framework-infrastructure directories.
                 // The rule is "user payload handlers must return ResourceInterface DTOs";
                 // it is not a ban on the framework itself producing HttpResponse from
                 // pipeline phases, lifecycle phases, exception mappers, or pre-handler
                 // tenancy guards. These run *outside* the user-handler pipeline.
-                if (str_contains($path, 'semitexa-core/src/Http/')
-                    || str_contains($path, 'semitexa-core/src/Application.php')
+                // Every comparison below is separator-sensitive, so all of them
+                // read $normalizedPath. Only the real filesystem path is used
+                // for I/O further down.
+                if (str_contains($normalizedPath, 'semitexa-core/src/Http/')
+                    || str_contains($normalizedPath, 'semitexa-core/src/Application.php')
                     // any package's Pipeline/ directory — pre-handler middleware
-                    || preg_match('#/packages/[^/]+/src/Pipeline/#', $path)
+                    || preg_match('#/packages/[^/]+/src/Pipeline/#', $normalizedPath)
                     // any package's Lifecycle/ directory — kernel lifecycle phases
-                    || preg_match('#/packages/[^/]+/src/Lifecycle/#', $path)
+                    || preg_match('#/packages/[^/]+/src/Lifecycle/#', $normalizedPath)
                     // tenancy error responders + pre-handler guards (not TypedHandler implementations)
-                    || str_contains($path, 'semitexa-tenancy/src/Application/Service/DefaultTenantErrorResponder.php')
-                    || str_contains($path, 'semitexa-tenancy/src/Application/Service/TenantRequiredGuard.php')
+                    || str_contains($normalizedPath, 'semitexa-tenancy/src/Application/Service/DefaultTenantErrorResponder.php')
+                    || str_contains($normalizedPath, 'semitexa-tenancy/src/Application/Service/TenantRequiredGuard.php')
                 ) {
                     continue;
                 }

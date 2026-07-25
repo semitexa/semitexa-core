@@ -6,7 +6,7 @@ Semitexa uses a **custom DI container** (no PHP-DI). It is built once per worker
 
 - **Service contracts:** types registered via **#[AsServiceContract(of: SomeInterface::class)]** on implementation classes. The container discovers them through `ServiceContractRegistry` (same as `bin/semitexa contracts:list`).
 - **Handlers:** are **not** service contracts. They are discovered via **#[AsPayloadHandler(payload: ..., resource: ...)]** and registered automatically so the kernel can resolve them by concrete class when handling a route. Implement `TypedHandlerInterface`; do not use `AsServiceContract` on handlers.
-- **Event listeners:** implement `EventListenerInterface` and use `#[AsServiceContract(of: EventListenerInterface::class)]`.
+- **Event listeners:** are discovered via **#[AsEventListener(event: ...)]** on the listener class; no marker interface is involved.
 - **Other services:** define an interface and put `#[AsServiceContract(of: ThatInterface::class)]` on the implementation(s). Classes in `Semitexa\Core\` are treated as module `Core`.
 
 Bootstrap entries (e.g. `Environment`) are registered in `ContainerFactory::registerBootstrapEntries()` with `$container->set()` before `build()`.
