@@ -37,6 +37,30 @@ final class SwooleLogRetentionTest extends TestCase
         return $path;
     }
 
+    /**
+     * Review finding on PR #90: is_numeric() accepts '14.5' and '1e3', which cast to
+     * 14 and 1. A typo would then quietly change the retention window — the exact
+     * class of silent misconfiguration this whole change exists to remove.
+     */
+    #[Test]
+    public function only_real_integers_are_accepted_as_a_retention_window(): void
+    {
+        self::assertSame(30, SwooleLogRetention::daysFromEnv('30'));
+        self::assertSame(30, SwooleLogRetention::daysFromEnv(30));
+
+        // 0 and negatives are the explicit "never prune" modes, not mistakes.
+        self::assertSame(0, SwooleLogRetention::daysFromEnv('0'));
+        self::assertSame(-1, SwooleLogRetention::daysFromEnv('-1'));
+
+        foreach (['14.5', '1e3', '0.5', 'fourteen', '', 'daily', null, []] as $bad) {
+            self::assertSame(
+                14,
+                SwooleLogRetention::daysFromEnv($bad),
+                'must fall back rather than reinterpret: ' . var_export($bad, true),
+            );
+        }
+    }
+
     #[Test]
     public function files_past_the_window_go_and_recent_ones_stay(): void
     {

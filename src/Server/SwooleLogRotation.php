@@ -78,7 +78,9 @@ enum SwooleLogRotation: string
         // the live log.
         $rotated = array_values(array_filter(
             glob($configuredPath . '.*') ?: [],
-            static fn(string $path) => preg_match('/\.\d{6,14}$/', $path) === 1,
+            // is_file too: glob() happily returns a directory whose name matches,
+            // and returning one would make every later filemtime() call warn.
+            static fn(string $path) => preg_match('/\.\d{6,14}$/', $path) === 1 && is_file($path),
         ));
         if ($rotated === []) {
             return $configuredPath;

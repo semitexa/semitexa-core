@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Semitexa\Core;
 
+use Semitexa\Core\Server\SwooleLogRetention;
+
 use Semitexa\Core\Support\ProjectRoot;
 
 /**
@@ -86,7 +88,7 @@ readonly class Environment
             corsAllowCredentials: filter_var($get('CORS_ALLOW_CREDENTIALS', '0'), FILTER_VALIDATE_BOOLEAN),
             redisPoolSize: $redisPoolSize,
             swooleLogRotation: is_string($logRotation) ? $logRotation : 'daily',
-            swooleLogRetentionDays: is_numeric($logRetention) ? (int) $logRetention : 14,
+            swooleLogRetentionDays: SwooleLogRetention::daysFromEnv($logRetention),
         );
     }
     

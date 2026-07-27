@@ -25,6 +25,21 @@ final readonly class SwooleLogRetention
     ) {}
 
     /**
+     * Parse SWOOLE_LOG_RETENTION_DAYS.
+     *
+     * Deliberately stricter than `is_numeric()`, which accepts '14.5' and '1e3' —
+     * those cast to 14 and 1, so a typo would quietly change the retention window
+     * rather than fall back to the default. `0` and negatives are kept as written:
+     * they are the explicit "never prune" modes, not mistakes.
+     */
+    public static function daysFromEnv(mixed $value, int $default = 14): int
+    {
+        $parsed = filter_var($value, FILTER_VALIDATE_INT);
+
+        return $parsed === false ? $default : $parsed;
+    }
+
+    /**
      * @return list<string> paths that were removed (for logging/tests)
      */
     public function prune(?int $now = null): array

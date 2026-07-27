@@ -107,6 +107,22 @@ final class SwooleLogRotationTest extends TestCase
         self::assertSame($base, SwooleLogRotation::resolveActiveFile($base));
     }
 
+    /**
+     * Review finding on PR #90: glob() returns directories too, and returning one
+     * would make every later filemtime() call warn on a path that can never be read.
+     */
+    #[Test]
+    public function a_directory_with_a_matching_name_is_not_returned_as_the_log(): void
+    {
+        $base = $this->dir . '/swoole.log';
+        file_put_contents($base, "live\n");
+        mkdir($base . '.20260727');
+
+        self::assertSame($base, SwooleLogRotation::resolveActiveFile($base));
+
+        rmdir($base . '.20260727');
+    }
+
     #[Test]
     public function without_rotation_the_configured_path_is_used_unchanged(): void
     {
