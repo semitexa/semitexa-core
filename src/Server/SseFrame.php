@@ -20,11 +20,12 @@ use Semitexa\Core\Log\StaticLoggerBridge;
  *
  * The chokepoint that maps a consumer's typed `_type` field to a *validated*
  * `event` name does NOT live here — it stays with the consumer (the SSR
- * `resolveSseEventName()` + `UiSseEventType` path), which constructs the frame
- * only after the allow-list check. A `core` lifecycle frame (connected/close)
- * supplies its own closed-set transport event name directly. Either way, an
- * arbitrary event string cannot be promoted to a wire `event:` line here: this
- * object only renders the event it is given, CR/LF-stripped.
+ * `SseFrameFactory::resolveEventName()` + `UiSseEventType` path), which
+ * constructs the frame only after the allow-list check. A `core` lifecycle
+ * frame (connected/close) supplies its own closed-set transport event name
+ * directly. Either way, an arbitrary event string cannot be promoted to a wire
+ * `event:` line here: this object only renders the event it is given,
+ * CR/LF-stripped.
  */
 final class SseFrame
 {
