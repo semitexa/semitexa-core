@@ -35,6 +35,12 @@ readonly class Environment
         public string $corsAllowHeaders,
         public bool $corsAllowCredentials,
         public int $redisPoolSize = 16,
+        // Appended with defaults rather than slotted in beside the other swoole*
+        // log settings: Environment is public and constructed positionally by
+        // consumer code, so inserting in the middle silently reassigns every
+        // argument after it.
+        public string $swooleLogRotation = 'daily',
+        public int $swooleLogRetentionDays = 14,
     ) {}
     
     public static function create(): self
@@ -47,6 +53,10 @@ readonly class Environment
         };
         
         $redisPoolSize = self::parsePositiveInt($get('REDIS_POOL_SIZE', '16'), 'REDIS_POOL_SIZE');
+        // Resolved through typed locals rather than an inline cast: $get() returns
+        // mixed, and a bad value here decides whether logs rotate at all.
+        $logRotation = $get('SWOOLE_LOG_ROTATION', 'daily');
+        $logRetention = $get('SWOOLE_LOG_RETENTION_DAYS', '14');
 
         return new self(
             appEnv: $get('APP_ENV', 'prod'),
@@ -62,6 +72,9 @@ readonly class Environment
             swooleMaxCoroutine: (int) $get('SWOOLE_MAX_COROUTINE', '100000'),
             swooleLogFile: $get('SWOOLE_LOG_FILE', 'var/log/swoole.log'),
             swooleLogLevel: (int) $get('SWOOLE_LOG_LEVEL', '1'),
+            // Defaults chosen so an untended install cannot fill its disk: without
+            // rotation swoole.log simply grows forever (a release clone reached 47MB
+            // across 2.5 months), and rotation without retention only slices it.
             swooleSessionTableSize: (int) $get('SWOOLE_SESSION_TABLE_SIZE', '4096'),
             swooleSessionMaxBytes: (int) $get('SWOOLE_SESSION_MAX_BYTES', '65535'),
             swooleSseWorkerTableSize: (int) $get('SWOOLE_SSE_WORKER_TABLE_SIZE', '4096'),
@@ -72,6 +85,8 @@ readonly class Environment
             corsAllowHeaders: $get('CORS_ALLOW_HEADERS', 'Content-Type, Authorization'),
             corsAllowCredentials: filter_var($get('CORS_ALLOW_CREDENTIALS', '0'), FILTER_VALIDATE_BOOLEAN),
             redisPoolSize: $redisPoolSize,
+            swooleLogRotation: is_string($logRotation) ? $logRotation : 'daily',
+            swooleLogRetentionDays: is_numeric($logRetention) ? (int) $logRetention : 14,
         );
     }
     
@@ -148,6 +163,8 @@ readonly class Environment
             'SWOOLE_MAX_COROUTINE' => (string) $this->swooleMaxCoroutine,
             'SWOOLE_LOG_FILE' => $this->swooleLogFile,
             'SWOOLE_LOG_LEVEL' => (string) $this->swooleLogLevel,
+            'SWOOLE_LOG_ROTATION' => $this->swooleLogRotation,
+            'SWOOLE_LOG_RETENTION_DAYS' => (string) $this->swooleLogRetentionDays,
             'SWOOLE_SESSION_TABLE_SIZE' => (string) $this->swooleSessionTableSize,
             'SWOOLE_SESSION_MAX_BYTES' => (string) $this->swooleSessionMaxBytes,
             'SWOOLE_SSE_WORKER_TABLE_SIZE' => (string) $this->swooleSseWorkerTableSize,

@@ -57,6 +57,14 @@ class SwooleBootstrap
         ErrorHandler::configure($env);
 
         $config = new ServerConfigurator($env);
+
+        // Age out rotated logs here: the master process, before any worker exists,
+        // is the one point that runs exactly once per boot. Doing it per worker
+        // would have four processes racing to unlink the same files.
+        if ($config->logRotation()->isEnabled()) {
+            $config->logRetention()->prune();
+        }
+
         $server = new Server($config->getHost(), $config->getPort());
         $server->set($config->getServerOptions());
 
