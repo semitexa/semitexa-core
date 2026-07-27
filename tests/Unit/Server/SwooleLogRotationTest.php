@@ -80,6 +80,33 @@ final class SwooleLogRotationTest extends TestCase
         self::assertSame($base . '.20260727', SwooleLogRotation::resolveActiveFile($base));
     }
 
+    /**
+     * Self-review finding: the newest name wins a lexical sort, so a sibling an
+     * operator's own logrotate left behind ('swoole.log.zip' sorts after any date)
+     * would have been served as the live log.
+     */
+    #[Test]
+    public function foreign_siblings_are_never_mistaken_for_the_active_log(): void
+    {
+        $base = $this->dir . '/swoole.log';
+        touch($base);
+        file_put_contents($base . '.20260727', "real\n");
+        file_put_contents($base . '.zip', "not a log\n");
+        file_put_contents($base . '.1.gz', "also not\n");
+
+        self::assertSame($base . '.20260727', SwooleLogRotation::resolveActiveFile($base));
+    }
+
+    #[Test]
+    public function only_foreign_siblings_means_no_rotated_file_at_all(): void
+    {
+        $base = $this->dir . '/swoole.log';
+        file_put_contents($base, "live\n");
+        file_put_contents($base . '.zip', "not a log\n");
+
+        self::assertSame($base, SwooleLogRotation::resolveActiveFile($base));
+    }
+
     #[Test]
     public function without_rotation_the_configured_path_is_used_unchanged(): void
     {

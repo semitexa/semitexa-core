@@ -72,7 +72,14 @@ enum SwooleLogRotation: string
      */
     public static function resolveActiveFile(string $configuredPath): string
     {
-        $rotated = glob($configuredPath . '.*') ?: [];
+        // Restrict to Swoole's own numeric date suffix. A bare '.*' also matches
+        // whatever an operator's logrotate left behind, and since the newest name
+        // wins a lexical sort, a sibling like 'swoole.log.zip' would be served as
+        // the live log.
+        $rotated = array_values(array_filter(
+            glob($configuredPath . '.*') ?: [],
+            static fn(string $path) => preg_match('/\.\d{6,14}$/', $path) === 1,
+        ));
         if ($rotated === []) {
             return $configuredPath;
         }
