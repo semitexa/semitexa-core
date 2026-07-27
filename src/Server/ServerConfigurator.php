@@ -18,8 +18,15 @@ readonly class ServerConfigurator
             'max_request'      => $this->env->swooleMaxRequest,
             'enable_coroutine' => true,
             'max_coroutine'    => $this->env->swooleMaxCoroutine,
-            'log_file'         => $this->env->swooleLogFile,
+            // Absolute, and the same path retention scans. Handing Swoole the raw
+            // relative value meant that whenever the process CWD was not the project
+            // root, rotated logs were written to one directory and pruned in another.
+            'log_file'         => $this->logFilePath(),
             'log_level'        => $this->env->swooleLogLevel,
+            // Without this Swoole appends to one file forever. Note the side effect:
+            // once rotation is on, Swoole writes to '<log_file>.<date>' and leaves
+            // log_file itself empty, so readers must resolve the active file.
+            'log_rotation'     => $this->logRotation()->swooleValue(),
             'pid_file'         => $this->getPidFilePath(),
             // Async reload: workers get max_wait_time seconds to finish active coroutines,
             // then the manager force-kills any that haven't exited yet.
@@ -28,6 +35,29 @@ readonly class ServerConfigurator
             'reload_async'     => true,
             'max_wait_time'    => 3,
         ];
+    }
+
+    public function logRotation(): SwooleLogRotation
+    {
+        return SwooleLogRotation::fromEnv($this->env->swooleLogRotation);
+    }
+
+    /**
+     * Absolute path Swoole is configured to log to. `swooleLogFile` is relative in
+     * every shipped config, and retention has to glob a real directory.
+     */
+    public function logFilePath(): string
+    {
+        $configured = $this->env->swooleLogFile;
+
+        return str_starts_with($configured, '/')
+            ? $configured
+            : ProjectRoot::get() . '/' . ltrim($configured, '/');
+    }
+
+    public function logRetention(): SwooleLogRetention
+    {
+        return new SwooleLogRetention($this->logFilePath(), $this->env->swooleLogRetentionDays);
     }
 
     public function getHost(): string
