@@ -130,14 +130,34 @@ class SwooleBootstrap
             \Swoole\Timer::clearAll();
             $current = \Swoole\Coroutine::getCid();
             $cancelled = 0;
+            $stubborn = [];
             foreach (\Swoole\Coroutine::listCoroutines() as $cid) {
-                if ($cid !== $current && \Swoole\Coroutine::cancel($cid)) {
-                    $cancelled++;
+                if ($cid === $current) {
+                    continue;
                 }
+                if (\Swoole\Coroutine::cancel($cid)) {
+                    $cancelled++;
+                    continue;
+                }
+                // Cancellation REFUSED. This is the interesting case and it used
+                // to be invisible: the old counter only tallied successes, so a
+                // worker held past max_wait_time reported "cancelled N" and said
+                // nothing about the one coroutine actually keeping it hostage.
+                // A coroutine blocked inside a driver's syscall (a PDO query, for
+                // instance) cannot be interrupted, and that is what turns into
+                // "worker exit timeout, forced termination" — and, on a bad day,
+                // into a crash during forced teardown.
+                $stubborn[$cid] = self::describeCoroutine($cid);
             }
             if ($cancelled > 0) {
                 // Operational breadcrumb: which exits actually had parked work.
                 error_log('[lifecycle] worker ' . $workerId . ' exit: cancelled ' . $cancelled . ' parked coroutine(s)');
+            }
+            foreach ($stubborn as $cid => $where) {
+                error_log(
+                    '[lifecycle] worker ' . $workerId . ' exit: coroutine ' . $cid
+                    . ' REFUSED cancellation, still parked at ' . $where
+                );
             }
 
             $context = new ServerLifecycleContext(
@@ -396,5 +416,38 @@ class SwooleBootstrap
         foreach ($headers as $header => $value) {
             $headerEmitter($header, $value);
         }
+    }
+
+    /**
+     * Where a coroutine is parked, as a compact frame trail for the exit log.
+     *
+     * Only ever called for a coroutine that refused cancellation, so the cost is
+     * paid on the rare path that actually needs explaining. Best-effort by
+     * design: introspection must never be the reason a worker fails to exit, so
+     * any failure degrades to a placeholder rather than propagating.
+     */
+    private static function describeCoroutine(int $cid): string
+    {
+        try {
+            $frames = \Swoole\Coroutine::getBackTrace($cid);
+        } catch (\Throwable) {
+            return 'unknown (backtrace unavailable)';
+        }
+
+        if (!is_array($frames) || $frames === []) {
+            return 'unknown (empty backtrace)';
+        }
+
+        $trail = [];
+        foreach (array_slice($frames, 0, 4) as $frame) {
+            if (!is_array($frame)) {
+                continue;
+            }
+            $call = (string) ($frame['class'] ?? '') . (string) ($frame['type'] ?? '') . (string) ($frame['function'] ?? '?');
+            $file = isset($frame['file']) ? basename((string) $frame['file']) : null;
+            $trail[] = $file !== null ? $call . ' (' . $file . ':' . (string) ($frame['line'] ?? '?') . ')' : $call;
+        }
+
+        return $trail === [] ? 'unknown (unreadable frames)' : implode(' <- ', $trail);
     }
 }
