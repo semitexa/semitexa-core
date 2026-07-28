@@ -153,7 +153,12 @@ class SwooleBootstrap
             }
             if ($cancelled > 0) {
                 // Operational breadcrumb: which exits actually had parked work.
-                StaticLoggerBridge::debug('lifecycle', 'Worker exit cancelled parked coroutines', [
+                // warning(), not debug(): debug() returns early when no logger is
+                // wired, while warning()/error() fall back to FallbackErrorLogger.
+                // Teardown is exactly when the container may not resolve a logger,
+                // so debug() would drop this line in the one situation it exists
+                // for. Not noise either — a non-zero count means work was parked.
+                StaticLoggerBridge::warning('lifecycle', 'Worker exit cancelled parked coroutines', [
                     'worker_id' => $workerId,
                     'cancelled' => $cancelled,
                 ]);

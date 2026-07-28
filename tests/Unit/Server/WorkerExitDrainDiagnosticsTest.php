@@ -49,12 +49,16 @@ final class WorkerExitDrainDiagnosticsTest extends TestCase
 
         Coroutine\run(static function () use (&$description): void {
             $gate = new Coroutine\Channel(1);
-            $parked = Coroutine::create(static function () use ($gate): void {
+            $ready = new Coroutine\Channel(1);
+            $parked = Coroutine::create(static function () use ($gate, $ready): void {
+                // Signal readiness instead of sleeping a fixed interval: a timing
+                // guess is flaky on a loaded runner, and the push happens
+                // immediately before the park it announces.
+                $ready->push(true);
                 $gate->pop(2.0);
             });
 
-            // Let it reach the park before asking where it is.
-            Coroutine::sleep(0.02);
+            $ready->pop(2.0);
             $description = self::describe($parked);
 
             $gate->push(true);
@@ -91,14 +95,21 @@ final class WorkerExitDrainDiagnosticsTest extends TestCase
 
         Coroutine\run(static function () use (&$description): void {
             $gate = new Coroutine\Channel(1);
-            $deep = Coroutine::create(static function () use ($gate): void {
-                $recurse = static function (int $n) use (&$recurse, $gate): void {
-                    $n > 0 ? $recurse($n - 1) : $gate->pop(2.0);
+            $ready = new Coroutine\Channel(1);
+            $deep = Coroutine::create(static function () use ($gate, $ready): void {
+                $recurse = static function (int $n) use (&$recurse, $gate, $ready): void {
+                    if ($n > 0) {
+                        $recurse($n - 1);
+
+                        return;
+                    }
+                    $ready->push(true);
+                    $gate->pop(2.0);
                 };
                 $recurse(12);
             });
 
-            Coroutine::sleep(0.02);
+            $ready->pop(2.0);
             $description = self::describe($deep);
             $gate->push(true);
         });
