@@ -8,6 +8,7 @@ use JsonException;
 use Semitexa\Core\Application;
 use Semitexa\Core\Container\ContainerFactory;
 use Semitexa\Core\Environment;
+use Semitexa\Core\Log\StaticLoggerBridge;
 use Semitexa\Core\ErrorHandler;
 use Semitexa\Core\Http\HttpStatus;
 use Semitexa\Core\Http\SwooleResponseEmitter;
@@ -132,6 +133,7 @@ class SwooleBootstrap
             $cancelled = 0;
             $stubborn = [];
             foreach (\Swoole\Coroutine::listCoroutines() as $cid) {
+                $cid = (int) $cid;
                 if ($cid === $current) {
                     continue;
                 }
@@ -147,17 +149,24 @@ class SwooleBootstrap
                 // instance) cannot be interrupted, and that is what turns into
                 // "worker exit timeout, forced termination" — and, on a bad day,
                 // into a crash during forced teardown.
-                $stubborn[$cid] = self::describeCoroutine($cid);
+                $stubborn[(int) $cid] = self::describeCoroutine((int) $cid);
             }
             if ($cancelled > 0) {
                 // Operational breadcrumb: which exits actually had parked work.
-                error_log('[lifecycle] worker ' . $workerId . ' exit: cancelled ' . $cancelled . ' parked coroutine(s)');
+                StaticLoggerBridge::debug('lifecycle', 'Worker exit cancelled parked coroutines', [
+                    'worker_id' => $workerId,
+                    'cancelled' => $cancelled,
+                ]);
             }
             foreach ($stubborn as $cid => $where) {
-                error_log(
-                    '[lifecycle] worker ' . $workerId . ' exit: coroutine ' . $cid
-                    . ' REFUSED cancellation, still parked at ' . $where
-                );
+                // Warning, not info: this is the coroutine that will hold the
+                // worker to its exit timeout, and the frame trail is the only
+                // thing that says which one.
+                StaticLoggerBridge::warning('lifecycle', 'Worker exit: coroutine refused cancellation', [
+                    'worker_id' => $workerId,
+                    'cid' => $cid,
+                    'parked_at' => $where,
+                ]);
             }
 
             $context = new ServerLifecycleContext(
