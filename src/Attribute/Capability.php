@@ -1,0 +1,79 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Semitexa\Core\Attribute;
+
+use Attribute;
+
+/**
+ * Declares that an attribute class represents a framework capability, and
+ * describes it well enough for tooling to offer it to whoever is building
+ * something.
+ *
+ * The framework already knows what it can do — `#[AsDeferred]`, `#[AsComponent]`,
+ * `#[WithTransport]` and their peers are a machine-readable vocabulary of
+ * abilities. What was missing is anywhere that vocabulary is *spoken*: the
+ * generators never mention it, the verifier never mentions it, and the agent
+ * instructions shipped to consumer projects mentioned none of it at all. So a
+ * capability that exists and works goes unused, and the same thing gets
+ * hand-rolled instead — a `fetch()` against a bespoke JSON route where a
+ * deferred slot was already available.
+ *
+ * This attribute is attached to the capability attributes themselves, one level
+ * up. It lives next to the thing it describes on purpose: a catalog kept in a
+ * separate file drifts from the code the first time someone adds a parameter
+ * and forgets, and a stale catalog is worse than none — it teaches the wrong
+ * thing confidently.
+ *
+ * Nothing reads this at runtime. It exists for tooling: `ai:ask capabilities`
+ * derives its catalog from these declarations across every installed package,
+ * which is what lets a consumer project pick up a capability added later from
+ * `composer update` alone, with no edit to that project.
+ *
+ * ```php
+ * #[Capability(
+ *     id: 'ssr.deferred',
+ *     summary: 'Renders a region after the main page and streams it in when ready.',
+ *     useWhen: 'A region is slow enough to delay first paint — an external call, a heavy query.',
+ *     replaces: ['client-side fetch() to a bespoke JSON route', 'blocking the page on a slow query'],
+ * )]
+ * #[Attribute(Attribute::TARGET_CLASS)]
+ * final class AsDeferred { ... }
+ * ```
+ */
+#[Attribute(Attribute::TARGET_CLASS)]
+final class Capability
+{
+    /**
+     * @param string $id      Stable catalog id, `<area>.<name>` (`ssr.deferred`).
+     *                        Referenced by verify findings, so renaming one
+     *                        breaks a published pointer — treat as an API.
+     * @param string $summary One line: what the capability does.
+     * @param string $useWhen The situation that should make someone reach for
+     *                        it. This is the half that decides whether it gets
+     *                        used, so it describes a circumstance, not a
+     *                        feature.
+     * @param string $avoidWhen The situation where reaching for it is the wrong
+     *                        call. Mirrors the `Avoid when` field the command
+     *                        catalog already uses, and earns its place: a
+     *                        capability described only by its upside gets
+     *                        applied everywhere, and over-application discredits
+     *                        the catalog faster than omission does.
+     * @param list<string> $replaces The hand-rolled equivalents someone would
+     *                        otherwise write. Verify rules key on these to say
+     *                        "you built this by hand; here is the mechanism",
+     *                        so each entry names something detectable in code
+     *                        rather than a vague alternative.
+     * @param string $seeAlso Optional pointer to a related capability id.
+     */
+    public function __construct(
+        public readonly string $id,
+        public readonly string $summary,
+        public readonly string $useWhen,
+        public readonly string $avoidWhen,
+        public readonly array $replaces = [],
+        public readonly string $seeAlso = '',
+    ) {
+    }
+}
