@@ -26,6 +26,26 @@ use Attribute;
  * and forgets, and a stale catalog is worse than none — it teaches the wrong
  * thing confidently.
  *
+ * ## What counts as a capability
+ *
+ * An ability someone can **miss**: the work gets finished without it, worse.
+ * That is the whole test, and it has an operational form — a capability can
+ * name what someone would have built by hand instead. If no such alternative
+ * can be written down, the thing is not missable and does not belong here.
+ *
+ * `#[AsDeferred]` qualifies: without it people write a `fetch` into
+ * `innerHTML`. `#[InjectAsReadonly]` does not: nobody builds a service without
+ * meeting it, and there is no worse thing they would have reached for instead.
+ *
+ * This is why `replaces` is required rather than optional. It is not
+ * documentation — it is the evidence that the entry is worth advertising at
+ * all, and it is what the verify rules key on. An attribute that is plumbing
+ * carries {@see InternalAttribute} instead, with the reason recorded next to
+ * the class rather than in a list that drifts.
+ *
+ * The criterion was not invented for this docblock: every one of the eighteen
+ * capabilities declared when it was written already names an alternative.
+ *
  * Nothing reads this at runtime. It exists for tooling: `ai:ask capabilities`
  * derives its catalog from these declarations across every installed package,
  * which is what lets a consumer project pick up a capability added later from
@@ -61,10 +81,13 @@ final class Capability
      *                        applied everywhere, and over-application discredits
      *                        the catalog faster than omission does.
      * @param list<string> $replaces The hand-rolled equivalents someone would
-     *                        otherwise write. Verify rules key on these to say
-     *                        "you built this by hand; here is the mechanism",
-     *                        so each entry names something detectable in code
-     *                        rather than a vague alternative.
+     *                        otherwise write. Required, and not merely for the
+     *                        verify rules that key on it: being unable to name
+     *                        one means the ability cannot be missed, which
+     *                        means it is plumbing and belongs behind
+     *                        {@see InternalAttribute}. Each entry must name
+     *                        something detectable in code rather than a vague
+     *                        alternative.
      * @param string $seeAlso Optional pointer to a related capability id.
      */
     public function __construct(
@@ -72,7 +95,7 @@ final class Capability
         public readonly string $summary,
         public readonly string $useWhen,
         public readonly string $avoidWhen,
-        public readonly array $replaces = [],
+        public readonly array $replaces,
         public readonly string $seeAlso = '',
     ) {
     }
