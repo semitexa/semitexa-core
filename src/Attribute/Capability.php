@@ -65,6 +65,7 @@ use Attribute;
  *     id: 'ssr.deferred',
  *     summary: 'Renders a region after the main page and streams it in when ready.',
  *     useWhen: 'A region is slow enough to delay first paint — an external call, a heavy query.',
+ *     avoidWhen: 'The region carries the answer the page exists to give; deferring it defers the point.',
  *     replaces: ['client-side fetch() to a bespoke JSON route', 'blocking the page on a slow query'],
  * )]
  * #[Attribute(Attribute::TARGET_CLASS)]
