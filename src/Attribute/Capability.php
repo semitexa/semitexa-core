@@ -20,8 +20,17 @@ use Attribute;
  * hand-rolled instead — a `fetch()` against a bespoke JSON route where a
  * deferred slot was already available.
  *
- * This attribute is attached to the capability attributes themselves, one level
- * up. It lives next to the thing it describes on purpose: a catalog kept in a
+ * Two shapes, one attribute. On an attribute class it describes a MECHANISM —
+ * `#[AsDeferred]` and its peers, written into application code. On any other
+ * class it describes what a PACKAGE offers, which is the only way to advertise
+ * something like `semitexa/files` or `semitexa/weave`: those ship no attributes
+ * at all, so a mechanism-only vocabulary cannot see them. By convention a
+ * package declares these on a single `Capabilities` class, so there is one
+ * definite place to look and for a guard to check.
+ *
+ * Repeatable, because one such class may own several feature areas.
+ *
+ * It lives next to the thing it describes on purpose: a catalog kept in a
  * separate file drifts from the code the first time someone adds a parameter
  * and forgets, and a stale catalog is worse than none — it teaches the wrong
  * thing confidently.
@@ -62,7 +71,7 @@ use Attribute;
  * final class AsDeferred { ... }
  * ```
  */
-#[Attribute(Attribute::TARGET_CLASS)]
+#[Attribute(Attribute::TARGET_CLASS | Attribute::IS_REPEATABLE)]
 final class Capability
 {
     /**
