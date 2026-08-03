@@ -6,12 +6,12 @@ namespace Semitexa\Core\Tests\Unit\Discovery;
 
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
-use ReflectionMethod;
 use Semitexa\Authorization\Attribute\AsProtectedPayload;
 use Semitexa\Core\Attribute\TransportType;
 use Semitexa\Core\Auth\PayloadAccessType;
-use Semitexa\Core\Discovery\AttributeDiscovery;
+use Semitexa\Core\Discovery\AttributeChainResolver;
 use Semitexa\Core\Discovery\DefaultRouteMetadataResolver;
+use Semitexa\Core\Discovery\PayloadAttributeSchema;
 use Semitexa\Core\Discovery\DiscoveredRoute;
 
 final class RouteTransportMetadataTest extends TestCase
@@ -19,37 +19,36 @@ final class RouteTransportMetadataTest extends TestCase
     #[Test]
     public function merged_request_attributes_keep_base_transport_when_override_omits_it(): void
     {
-        /** @var array{path: string, transport: TransportType} $merged */
-        $merged = $this->invokeAttributeDiscoveryStatic(
-            'mergeRequestAttributes',
+        // Was a reflection call into AttributeDiscovery::mergeRequestAttributes.
+        // ep-slay-attribute-discovery moved that merge into AttributeChainResolver,
+        // so this now exercises the real path a payload takes — declare a base,
+        // override only the path — instead of poking a private in isolation.
+        $cache = [];
+        /** @var array{path: string, transport: TransportType, accessType: PayloadAccessType} $merged */
+        $merged = (new AttributeChainResolver(new PayloadAttributeSchema()))->resolve(
+            'App\\Payload\\LiveEventsPayload',
             [
-                'path' => '/events',
-                'methods' => ['GET'],
-                'name' => 'events.stream',
-                'requirements' => [],
-                'defaults' => [],
-                'options' => [],
-                'tags' => [],
-                'accessType' => PayloadAccessType::Public,
-                'responseWith' => null,
-                'consumes' => null,
-                'produces' => ['text/event-stream'],
-                'transport' => TransportType::Sse,
+                'App\\Payload\\EventsPayload' => [
+                    'class' => 'App\\Payload\\EventsPayload',
+                    'short' => 'EventsPayload',
+                    'attr' => self::payloadAttributes([
+                        'path' => '/events',
+                        'name' => 'events.stream',
+                        'accessType' => PayloadAccessType::Public,
+                        'produces' => ['text/event-stream'],
+                        'transport' => TransportType::Sse,
+                    ]),
+                ],
+                'App\\Payload\\LiveEventsPayload' => [
+                    'class' => 'App\\Payload\\LiveEventsPayload',
+                    'short' => 'LiveEventsPayload',
+                    'attr' => self::payloadAttributes([
+                        'base' => 'App\\Payload\\EventsPayload',
+                        'path' => '/events/live',
+                    ]),
+                ],
             ],
-            [
-                'path' => '/events/live',
-                'methods' => null,
-                'name' => null,
-                'requirements' => null,
-                'defaults' => null,
-                'options' => null,
-                'tags' => null,
-                'accessType' => null,
-                'responseWith' => null,
-                'consumes' => null,
-                'produces' => null,
-                'transport' => null,
-            ],
+            $cache,
         );
 
         self::assertSame('/events/live', $merged['path']);
@@ -60,23 +59,12 @@ final class RouteTransportMetadataTest extends TestCase
     #[Test]
     public function request_defaults_assign_http_transport_when_missing(): void
     {
-        /** @var array{methods: list<string>, transport: TransportType} $defaults */
-        $defaults = $this->invokeAttributeDiscoveryStatic(
-            'applyRequestDefaults',
-            [
+        /** @var array{methods: list<string>, transport: TransportType, accessType: PayloadAccessType} $defaults */
+        $defaults = (new PayloadAttributeSchema())->applyDefaults(
+            self::payloadAttributes([
                 'path' => '/docs',
-                'methods' => null,
-                'name' => null,
-                'requirements' => null,
-                'defaults' => null,
-                'options' => null,
-                'tags' => null,
                 'accessType' => PayloadAccessType::Public,
-                'responseWith' => null,
-                'consumes' => null,
-                'produces' => null,
-                'transport' => null,
-            ],
+            ]),
             'DocsPayload',
             'Semitexa\\Core\\Tests\\Fixture\\DocsPayload',
         );
@@ -92,22 +80,8 @@ final class RouteTransportMetadataTest extends TestCase
         $this->expectException(\Semitexa\Core\Exception\ConfigurationException::class);
         $this->expectExceptionMessageMatches('/must declare an access attribute/');
 
-        $this->invokeAttributeDiscoveryStatic(
-            'applyRequestDefaults',
-            [
-                'path' => '/no-access',
-                'methods' => null,
-                'name' => null,
-                'requirements' => null,
-                'defaults' => null,
-                'options' => null,
-                'tags' => null,
-                'accessType' => null,
-                'responseWith' => null,
-                'consumes' => null,
-                'produces' => null,
-                'transport' => null,
-            ],
+        (new PayloadAttributeSchema())->applyDefaults(
+            self::payloadAttributes(['path' => '/no-access']),
             'NoAccessPayload',
             'Semitexa\\Core\\Tests\\Fixture\\NoAccessPayload',
         );
@@ -169,11 +143,24 @@ final class RouteTransportMetadataTest extends TestCase
         self::assertSame('sse', $metadata->extensions['transport'] ?? null);
     }
 
-    private function invokeAttributeDiscoveryStatic(string $method, mixed ...$args): mixed
+    /**
+     * A full payload attribute map with every slot present and null, overlaid
+     * with whatever the case under test declares.
+     *
+     * Discovery always hands the resolver a complete map — every key present,
+     * unset ones null — so building fixtures that way keeps these tests honest
+     * about the shape the production code actually sees.
+     *
+     * @param  array<string, mixed> $declared
+     * @return array<string, mixed>
+     */
+    private static function payloadAttributes(array $declared): array
     {
-        $reflection = new ReflectionMethod(AttributeDiscovery::class, $method);
-        $reflection->setAccessible(true);
+        $empty = ['base' => null, 'overrides' => null];
+        foreach ((new PayloadAttributeSchema())->mergeableKeys() as $key) {
+            $empty[$key] = null;
+        }
 
-        return $reflection->invoke(null, ...$args);
+        return array_replace($empty, $declared);
     }
 }
