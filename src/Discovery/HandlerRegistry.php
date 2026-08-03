@@ -86,4 +86,29 @@ final class HandlerRegistry
     {
         return $this->handlersByClass[$className] ?? null;
     }
+
+    /**
+     * Every distinct payload class some handler claims to handle.
+     *
+     * Discovery uses this for its boot guard: a handler naming a payload that no
+     * route ever produced is a wiring mistake that would otherwise surface as a
+     * silently dead endpoint. Answering it here keeps the composite key format
+     * private to this class — the caller no longer has to know that the map is
+     * keyed by "payload\0resource".
+     *
+     * @return list<string>
+     */
+    public function payloadClasses(): array
+    {
+        $payloads = [];
+        foreach (array_keys($this->handlersByPayloadAndResource) as $key) {
+            $parts = explode("\0", $key, 2);
+            if (count($parts) !== 2) {
+                continue;
+            }
+            $payloads[$parts[0]] = true;
+        }
+
+        return array_keys($payloads);
+    }
 }

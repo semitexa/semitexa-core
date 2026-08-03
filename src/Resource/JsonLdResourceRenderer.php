@@ -5,10 +5,10 @@ declare(strict_types=1);
 namespace Semitexa\Core\Resource;
 
 use Semitexa\Core\Attribute\AsService;
-use Semitexa\Core\Attribute\InjectAsReadonly;
 use Semitexa\Core\Resource\Exception\UnloadedRelationException;
 use Semitexa\Core\Resource\Exception\UnsupportedRenderProfileException;
 use Semitexa\Core\Resource\Metadata\ResourceFieldKind;
+use Semitexa\Core\Attribute\InjectAsReadonly;
 use Semitexa\Core\Resource\Metadata\ResourceFieldMetadata;
 use Semitexa\Core\Resource\Metadata\ResourceMetadataRegistry;
 use Semitexa\Core\Resource\Metadata\ResourceObjectMetadata;
@@ -45,6 +45,11 @@ use Semitexa\Core\Resource\Metadata\ResourceObjectMetadata;
 #[AsService]
 final class JsonLdResourceRenderer
 {
+    use RendersResourceObjects;
+
+    #[InjectAsReadonly]
+    protected ResourceMetadataRegistry $registry;
+
     /**
      * Default JSON-LD vocabulary URI. Framework-local — projects can layer a
      * project-specific vocabulary later via the `RenderContext::$baseUrl`
@@ -52,16 +57,6 @@ final class JsonLdResourceRenderer
      */
     public const DEFAULT_VOCAB = 'urn:semitexa:vocab/v1';
 
-    #[InjectAsReadonly]
-    protected ResourceMetadataRegistry $registry;
-
-    /** Bypass property injection for unit tests. */
-    public static function forTesting(ResourceMetadataRegistry $registry): self
-    {
-        $r = new self();
-        $r->registry = $registry;
-        return $r;
-    }
 
     /**
      * @return array<string, mixed> JSON-LD document ready for json_encode().
@@ -337,39 +332,8 @@ final class JsonLdResourceRenderer
         return $this->renderRefOne($parentMetadata, $field, $value, $context, $includes, $parentIdentity);
     }
 
-    private function shouldEmbed(ResourceFieldMetadata $field, IncludeSet $includes): bool
-    {
-        if ($field->include === null) {
-            return false;
-        }
-        return $includes->has($field->include);
-    }
 
-    private function readPublicProperty(ResourceObjectInterface $resource, string $name): mixed
-    {
-        $vars = get_object_vars($resource);
-        return $vars[$name] ?? null;
-    }
 
-    private function extractIdentity(
-        ResourceObjectInterface $resource,
-        ResourceObjectMetadata $metadata,
-    ): ResourceIdentity {
-        $idField = $metadata->idField;
-        if ($idField === null) {
-            throw new \LogicException('extractIdentity called on resource without idField.');
-        }
-        $vars = get_object_vars($resource);
-        $id   = $vars[$idField] ?? null;
-        if (!is_string($id) || $id === '') {
-            throw new \LogicException(sprintf(
-                'Resource %s::$%s did not yield a non-empty string id.',
-                $metadata->class,
-                $idField,
-            ));
-        }
-        return new ResourceIdentity($metadata->type, $id);
-    }
 
     /**
      * @return array{"@id": string, "@type": string}

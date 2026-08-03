@@ -9,13 +9,12 @@ use Semitexa\Core\Attribute\AsPayloadHandler;
 use Semitexa\Core\Attribute\AsPayloadPart;
 use Semitexa\Core\Attribute\AsResource;
 use Semitexa\Core\Attribute\AsResourcePart;
-use Semitexa\Core\Attribute\SseGateModel;
+use Semitexa\Core\Attribute\AsDiscoveryContributor;
 use Semitexa\Core\Attribute\TransportType;
 use Semitexa\Core\Auth\PayloadAccessType;
 use Semitexa\Core\Config\EnvValueResolver;
 use Semitexa\Core\Environment;
 use Semitexa\Core\ModuleRegistry;
-use Semitexa\Core\Support\ProjectRoot;
 use Semitexa\Core\Queue\HandlerExecution;
 use Semitexa\Core\Contract\TypedHandlerInterface;
 use Semitexa\Core\Pipeline\HandlerReflectionCache;
@@ -30,34 +29,33 @@ use Semitexa\Core\Exception\ConfigurationException;
  * and builds a registry of controllers and routes.
  */
 /**
- * @phpstan-type Route        array<string, mixed>
- * @phpstan-type AttrMap      array<string, mixed>
- * @phpstan-type HandlerEntry array{class: string, for?: string, payload?: string, resource?: string, execution: string, transport: ?string, queue: ?string, priority: int}
+ * @phpstan-type Route   array<string, mixed>
+ * @phpstan-type AttrMap array<string, mixed>
  */
 class AttributeDiscovery
 {
     /** @var array<string, AttrMap> */
     private array $httpRequests = [];
     /** @var array<string, AttrMap> */
-    private array $httpHandlers = [];
-    /** @var array<string, list<HandlerEntry>> key: payload . "\0" . resource */
-    private array $handlersByPayloadAndResource = [];
-    /** @var array<string, AttrMap> */
     private array $resolvedResponseAttrs = [];
     /** @var array<string, string> */
     private array $responseClassAliases = [];
-    /** @var array<string, list<string>> baseClass => [traitFQN, ...] */
-    private array $payloadParts = [];
-    /** @var array<string, list<string>> baseClass => [traitFQN, ...] */
-    private array $resourceParts = [];
-    /** @var array<string, string> className => attribute base class */
-    private array $payloadBaseMap = [];
-    /** @var array<string, string> className => attribute base class */
-    private array $resourceBaseMap = [];
     private bool $initialized = false;
+    /** Set for the duration of initialize() so a contributor cannot re-enter it. */
+    private bool $initializing = false;
 
     private readonly HandlerRegistry $handlerRegistry;
     private readonly PayloadPartRegistry $payloadPartRegistry;
+    private readonly SourceOrigin $sourceOrigin;
+
+    /** Chain resolution for #[AsPublicPayload] & siblings. */
+    private readonly AttributeChainResolver $payloadAttributes;
+
+    /** Chain resolution for #[AsResource]. */
+    private readonly AttributeChainResolver $resourceAttributes;
+
+    /** Fatal boot guards for a route that is wrong rather than merely broken. */
+    private readonly RouteDeclarationGuard $routeGuard;
 
     public function __construct(
         private readonly ClassDiscovery $classDiscovery,
@@ -65,9 +63,14 @@ class AttributeDiscovery
         private readonly RouteRegistry $routeRegistry,
         ?HandlerRegistry $handlerRegistry = null,
         ?PayloadPartRegistry $payloadPartRegistry = null,
+        ?SourceOrigin $sourceOrigin = null,
     ) {
         $this->handlerRegistry = $handlerRegistry ?? new HandlerRegistry();
         $this->payloadPartRegistry = $payloadPartRegistry ?? new PayloadPartRegistry();
+        $this->sourceOrigin = $sourceOrigin ?? new SourceOrigin();
+        $this->payloadAttributes = new AttributeChainResolver(new PayloadAttributeSchema());
+        $this->resourceAttributes = new AttributeChainResolver(new ResourceAttributeSchema());
+        $this->routeGuard = new RouteDeclarationGuard();
     }
 
     /**
@@ -92,24 +95,42 @@ class AttributeDiscovery
      */
     public function initialize(): void
     {
-        if ($this->initialized) {
+        // `$initialized` alone is not enough to make this idempotent. It is set
+        // only once the scan below returns, and the scan runs third-party
+        // contribute() implementations; a contributor that reaches any accessor
+        // which boots discovery — getPayloadPartsForClass() and
+        // getResourcePartsForClass() both call initialize() — would re-enter here
+        // with the flag still false and restart the whole scan underneath itself.
+        // Deep enough, that is stack exhaustion, which is a fatal the \Throwable
+        // handler inside the scan cannot contain; shallow enough, it double-registers
+        // every handler and part. The in-progress flag makes the re-entrant call a
+        // no-op instead, so the outer scan is the only one that runs.
+        if ($this->initialized || $this->initializing) {
             return;
         }
 
-        // Discovery relies on tenant/module env such as TENANT_*_MODULES.
-        // CLI entrypoints can reach discovery before worker bootstrap syncs .env values.
-        Environment::syncEnvFromFiles();
+        $this->initializing = true;
 
-        // Initialize class discovery
-        $this->classDiscovery->initialize();
+        try {
+            // Discovery relies on tenant/module env such as TENANT_*_MODULES.
+            // CLI entrypoints can reach discovery before worker bootstrap syncs .env values.
+            Environment::syncEnvFromFiles();
 
-        // Initialize module registry
-        $this->moduleRegistry->initialize();
+            // Initialize class discovery
+            $this->classDiscovery->initialize();
 
-        // Scan attributes using intelligent autoloader
-        $this->scanAttributesIntelligently();
+            // Initialize module registry
+            $this->moduleRegistry->initialize();
 
-        $this->initialized = true;
+            // Scan attributes using intelligent autoloader
+            $this->scanAttributesIntelligently();
+
+            $this->initialized = true;
+        } finally {
+            // Cleared even on a throw, or a failed boot would leave discovery
+            // permanently refusing to initialize with no way back.
+            $this->initializing = false;
+        }
     }
 
     /**
@@ -141,7 +162,8 @@ class AttributeDiscovery
     public function getDiscoveredPayloadHandlerClassNames(): array
     {
         $this->initialize();
-        return array_keys($this->httpHandlers);
+
+        return $this->handlerRegistry->getHandlerClassNames();
     }
 
     /**
@@ -190,7 +212,7 @@ class AttributeDiscovery
             if ($extra) {
                 $route['responseClass'] = $extra['responseClass'];
                 $responseClass = is_string($extra['responseClass'] ?? null) ? $extra['responseClass'] : null;
-                $route['handlers'] = $this->findHandlersByPayloadAndResource($reqClass, $responseClass);
+                $route['handlers'] = $this->handlerRegistry->findHandlers($reqClass, $responseClass);
             }
         }
         return $route;
@@ -205,12 +227,7 @@ class AttributeDiscovery
     {
         $discoveredPayloadClasses = array_keys($this->httpRequests);
         $missing = [];
-        foreach ($this->handlersByPayloadAndResource as $key => $handlers) {
-            $parts = explode("\0", $key, 2);
-            if (count($parts) !== 2) {
-                continue;
-            }
-            $payloadClass = $parts[0];
+        foreach ($this->handlerRegistry->payloadClasses() as $payloadClass) {
             $hasRoute = false;
             foreach ($discoveredPayloadClasses as $requestClass) {
                 if ($requestClass === $payloadClass || is_subclass_of($requestClass, $payloadClass)) {
@@ -231,43 +248,6 @@ class AttributeDiscovery
         }
     }
 
-    /**
-     * Find handlers that match (requestClass, responseClass).
-     * Handlers register with module resource class; routes use registry class (subclass of module).
-     * Match when: resource === responseClass OR responseClass is subclass of resource.
-     *
-     * @return list<array{class: string, for?: string, execution: string, transport: ?string, queue: ?string, priority: int, ...}>
-     */
-    private function findHandlersByPayloadAndResource(string $requestClass, ?string $responseClass): array
-    {
-        if ($responseClass === null) {
-            return [];
-        }
-        $found = [];
-        foreach ($this->handlersByPayloadAndResource as $key => $handlers) {
-            $parts = explode("\0", $key, 2);
-            if (count($parts) !== 2) {
-                continue;
-            }
-            $payload = $parts[0];
-            $resource = $parts[1];
-            if ($resource !== $responseClass && !is_subclass_of($responseClass, $resource)) {
-                continue;
-            }
-            if ($requestClass !== $payload && !is_subclass_of($requestClass, $payload)) {
-                continue;
-            }
-            foreach ($handlers as $meta) {
-                $found[] = $meta;
-            }
-        }
-        return $found;
-    }
-
-    /**
-     * Scan attributes using intelligent autoloader.
-     * Orchestrates discovery in named phases for readability.
-     */
     private function scanAttributesIntelligently(): void
     {
         $diagnostics = BootDiagnostics::current();
@@ -276,21 +256,15 @@ class AttributeDiscovery
         $this->discoverPayloadsAndRoutes($diagnostics);
         $this->discoverHandlers($diagnostics);
         $this->discoverParts($diagnostics);
-        $this->discoverSsrComponents($diagnostics);
+        $this->discoverContributedComponents($diagnostics);
     }
 
     private function resetState(): void
     {
         $this->routeRegistry->reset();
         $this->httpRequests = [];
-        $this->httpHandlers = [];
-        $this->handlersByPayloadAndResource = [];
         $this->resolvedResponseAttrs = [];
         $this->responseClassAliases = [];
-        $this->payloadParts = [];
-        $this->resourceParts = [];
-        $this->payloadBaseMap = [];
-        $this->resourceBaseMap = [];
     }
 
     private function discoverPayloadsAndRoutes(BootDiagnostics $diagnostics): void
@@ -321,7 +295,7 @@ class AttributeDiscovery
         $allPayloadClasses = $this->classDiscovery->findClassesWithAttributeInstanceof(AbstractPayloadRoute::class);
         $httpRequestClasses = array_values(array_filter(
             $allPayloadClasses,
-            fn (string $class) => $this->moduleRegistry->isClassActive($class) || self::isProjectPayload($class)
+            fn (string $class) => $this->moduleRegistry->isClassActive($class) || $this->sourceOrigin->isProjectClass($class, 'payload')
         ));
         $requestMeta = [];
         foreach ($httpRequestClasses as $className) {
@@ -337,7 +311,7 @@ class AttributeDiscovery
                     'class' => $className,
                     'short' => $class->getShortName(),
                     'file' => $class->getFileName() ?: '',
-                    'priority' => self::determineSourcePriority($class->getFileName() ?: ''),
+                    'priority' => $this->sourceOrigin->priorityForFile($class->getFileName() ?: ''),
                     'attr' => [
                         'path' => EnvValueResolver::resolve($attr->path),
                         'methods' => EnvValueResolver::resolve($attr->methods),
@@ -366,7 +340,6 @@ class AttributeDiscovery
                 ];
                 $requestMeta[$className] = $meta;
                 if ($meta['attr']['base'] !== null) {
-                    $this->payloadBaseMap[$className] = $meta['attr']['base'];
                     $this->payloadPartRegistry->registerPayloadBase($className, $meta['attr']['base']);
                 }
             } catch (\Throwable $e) {
@@ -391,7 +364,7 @@ class AttributeDiscovery
         $byRoute = [];
         foreach (array_keys($requestMeta) as $className) {
             try {
-                $resolved = $this->resolveRequestAttributes($className, $requestMeta, $resolvedCache);
+                $resolved = $this->resolvePayloadAttributes($className, $requestMeta, $resolvedCache);
                 $meta = $requestMeta[$className];
                 $overrides = $meta['attr']['overrides'] ?? null;
                 $methods = array_values(array_filter(
@@ -431,612 +404,123 @@ class AttributeDiscovery
      */
     private function registerResolvedRoutes(array $byRoute): void
     {
-        foreach ($byRoute as $routeKey => $candidates) {
+        foreach ($byRoute as $candidates) {
             $selected = self::selectRequestByOverrideChain($candidates);
             if ($selected === null) {
                 continue;
             }
-            $selectedModule = $selected['module'];
-            $selectedTenantScopes = $selected['tenantScopes'];
-            $resolved = $selected['resolved'];
-            $class = $selected['class'];
 
-            $this->httpRequests[$class] = [
-                'requestClass' => $class,
-                'path' => $resolved['path'],
-                'methods' => $resolved['methods'],
-                'name' => $resolved['name'],
-                'responseClass' => $resolved['responseWith'],
-                'file' => $selected['file'],
-                'module' => $selectedModule,
-                'tenantScopes' => $selectedTenantScopes,
-                'handlers' => [],
-            ];
-
-            // Resolve produces: payload-level takes precedence over response class AsResource
-            $routeProduces = $resolved['produces'] ?? null;
-            if ($routeProduces === null) {
-                $responseClass = is_string($resolved['responseWith'] ?? null) ? $resolved['responseWith'] : null;
-                if ($responseClass !== null) {
-                    $resolvedResp = $this->getResolvedResponseAttributes($responseClass);
-                    if ($resolvedResp !== null && isset($resolvedResp['produces'])) {
-                        $routeProduces = $resolvedResp['produces'];
-                    }
-                }
-            }
-
-            // Framework-reserved path validation
-            $reservedPaths = ['/__semitexa_kiss', '/__semitexa_hug'];
-            $normalizedPath = rtrim($resolved['path'], '/');
-            if (in_array($normalizedPath, $reservedPaths, true)
-                && !str_starts_with($class, 'Semitexa\\Ssr\\')
-                && !str_starts_with($class, 'Semitexa\\Core\\')
-            ) {
-                throw new \Semitexa\Core\Exception\ConflictException(
-                    "Route path '{$resolved['path']}' is reserved by the Semitexa framework and cannot be claimed by non-framework class {$class}."
-                );
-            }
-
-            $transport = $resolved['transport'] ?? TransportType::Http;
-            $transportValue = $transport instanceof TransportType
-                ? $transport->value
-                : (is_string($transport) && $transport !== '' ? $transport : TransportType::Http->value);
-
-            // SSE boot guard — keys on the transport: Sse declaration. Thrown
-            // here (the override-resolved, routed candidate, outside any
-            // try/catch) it propagates as a hard boot failure, alongside the
-            // adjacent reserved-path ConflictException.
-            $accessType = $resolved['accessType'] ?? null;
-            if ($accessType instanceof PayloadAccessType) {
-                self::assertSseGateCoherence(
-                    $transportValue,
-                    $resolved['sseGateModel'] ?? null,
-                    $accessType,
-                    $class,
-                );
-            }
-
-            $this->routeRegistry->register([
-                'path' => $resolved['path'],
-                'methods' => $resolved['methods'],
-                'name' => $resolved['name'],
-                'class' => $class,
-                'responseClass' => $resolved['responseWith'] ?? null,
-                'method' => '__invoke',
-                'requirements' => $resolved['requirements'],
-                'defaults' => $resolved['defaults'],
-                'options' => $resolved['options'],
-                'tags' => $resolved['tags'],
-                'accessType' => $resolved['accessType'],
-                'type' => 'http-request',
-                'transport' => $transportValue,
-                'consumes' => $resolved['consumes'] ?? null,
-                'produces' => $routeProduces,
-                'module' => $selectedModule,
-                'tenantScopes' => $selectedTenantScopes,
-                // Thread the multi-profile metadata through to the
-                // routing layer so RouteExecutor + CrossProfileDispatcher can
-                // pick the right response class per request.
-                'renderProfile' => $resolved['renderProfile'] ?? null,
-                'responsesByProfile' => $resolved['responsesByProfile'] ?? null,
-            ]);
+            $this->registerRoute($selected);
         }
     }
 
     /**
-     * SSE boot guard (discovery-time, not runtime).
+     * Admit one override-chain winner: guard it, record it, register it.
      *
-     * Reformulated rule (PROMPTs 16–20): an SSE endpoint must declare a provable
-     * authorization gate model. The discriminator is the *presence* of a declared
-     * fact, not inference of behavior — so the guard is neither theater (an
-     * ungated public stream declares nothing → fails) nor false-fail (a legitimate
-     * token/bearer-gated public stream declares its in-handler model → passes).
+     * Guards run before either write. The original ran them after populating the
+     * request map, which was harmless — a guard failure aborts the boot, so
+     * nobody ever observed the half-written state — but validating before
+     * mutating is the order that stays correct if this is ever called somewhere
+     * a throw does not end the process.
      *
-     * It keys on `transport: TransportType::Sse` (broader `produces` would still
-     * miss `/__semitexa_kiss`, which therefore must also declare the flag). Both
-     * inputs beyond the gate model are core types — no authorization dependency.
-     *
-     *  - SSE + no gate model            → boot-fail (the coverage hole).
-     *  - SseGateModel::Subject + Public → boot-fail (a Subject gate re-authorizes
-     *                                     the session subject; a public endpoint
-     *                                     has none).
-     *  - ChannelToken / BearerSession on a public route → pass (gate is in-handler).
-     *
-     * @throws ConfigurationException
+     * @param array{class: string, file: string, resolved: array<string, mixed>, module: string, tenantScopes: list<string>} $selected
      */
-    private static function assertSseGateCoherence(
-        string $transportValue,
-        ?SseGateModel $sseGateModel,
-        PayloadAccessType $accessType,
-        string $className,
-    ): void {
-        $isSse = $transportValue === TransportType::Sse->value;
-
-        if ($isSse && $sseGateModel === null) {
-            throw new ConfigurationException(sprintf(
-                'Payload %s declares transport: TransportType::Sse but no sseGateModel. '
-                . 'Every SSE endpoint must declare a provable authorization gate model '
-                . '(sseGateModel: SseGateModel::Subject, ::ChannelToken, or ::BearerSession) '
-                . 'so the boot guard can prove the stream is gated rather than silently ungated. '
-                . 'Use ::Subject for a subject-re-authorized stream, or ::ChannelToken / '
-                . '::BearerSession for an in-handler-gated public stream.',
-                $className,
-            ));
-        }
-
-        if ($sseGateModel === SseGateModel::Subject && $accessType === PayloadAccessType::Public) {
-            throw new ConfigurationException(sprintf(
-                'Payload %s declares sseGateModel: SseGateModel::Subject but is #[AsPublicPayload]. '
-                . 'A Subject gate re-authorizes the session subject on every tick and a public '
-                . 'endpoint has no subject to re-authorize. Use #[AsProtectedPayload] or '
-                . '#[AsServicePayload], or declare an in-handler gate model '
-                . '(SseGateModel::ChannelToken / ::BearerSession).',
-                $className,
-            ));
-        }
-    }
-
-    private function discoverHandlers(BootDiagnostics $diagnostics): void
+    private function registerRoute(array $selected): void
     {
-        // Find handlers and map to requests (Semitexa packages + project App\ handlers)
-        $httpHandlerClasses = array_filter(
-            $this->classDiscovery->findClassesWithAttribute(AsPayloadHandler::class),
-            fn (string $class) => (
-                (str_starts_with($class, 'Semitexa\\') || str_starts_with($class, 'App\\Modules\\'))
-                && $this->moduleRegistry->isClassActive($class)
-            ) || (
-                self::isProjectHandler($class)
-                && !str_starts_with($class, 'App\\Modules\\')
-            )
-        );
-        foreach ($httpHandlerClasses as $className) {
-            try {
-                $class = new ReflectionClass($className);
-                $attrs = $class->getAttributes(AsPayloadHandler::class);
-                if (!empty($attrs)) {
-                    /** @var AsPayloadHandler $attr */
-                    $attr = $attrs[0]->newInstance();
-                    $payloadClass = $attr->payload;
-                    $resourceClass = $attr->resource;
-                    $execution = HandlerExecution::normalize($attr->execution ?? null);
-                    $transport = $attr->transport !== null ? EnvValueResolver::resolve($attr->transport) : null;
-                    $queue = $attr->queue !== null ? EnvValueResolver::resolve($attr->queue) : null;
-                    $priority = $attr->priority ?? 0;
-                    $handlerMeta = [
-                        'class' => $class->getName(),
-                        'payload' => $payloadClass,
-                        'resource' => $resourceClass,
-                        'execution' => $execution->value,
-                        'transport' => is_string($transport) && $transport !== '' ? $transport : null,
-                        'queue' => is_string($queue) && $queue !== '' ? $queue : null,
-                        'priority' => $priority,
-                        'maxRetries' => $attr->maxRetries,
-                        'retryDelay' => $attr->retryDelay,
-                    ];
-                    $key = $payloadClass . "\0" . $resourceClass;
-                    if (!isset($this->handlersByPayloadAndResource[$key])) {
-                        $this->handlersByPayloadAndResource[$key] = [];
-                    }
-                    $this->handlersByPayloadAndResource[$key][] = $handlerMeta;
-                    $this->httpHandlers[$class->getName()] = $handlerMeta;
+        $class = $selected['class'];
+        $resolved = $selected['resolved'];
+        $transportValue = self::normalizeTransport($resolved['transport'] ?? null);
 
-                    // Dual-write to HandlerRegistry
-                    $this->handlerRegistry->register($payloadClass, $resourceClass, $handlerMeta);
+        $this->routeGuard->assertPathNotReserved($resolved['path'], $class);
 
-                    // Warm reflection cache for TypedHandlerInterface handlers
-                    if ($class->implementsInterface(TypedHandlerInterface::class)) {
-                        try {
-                            HandlerReflectionCache::warm($class->getName());
-                        } catch (\LogicException $e) {
-                            throw new ConfigurationException(
-                                "Failed to warm reflection cache for TypedHandlerInterface handler {$class->getName()}: " . $e->getMessage(),
-                                $e
-                            );
-                        }
-                    }
-                }
-            } catch (\Throwable $e) {
-                $diagnostics->skip('AttributeDiscovery', "Handler reflection failed for {$className}: " . $e->getMessage(), $e);
-            }
+        $accessType = $resolved['accessType'] ?? null;
+        if ($accessType instanceof PayloadAccessType) {
+            $this->routeGuard->assertSseGateCoherence(
+                $transportValue,
+                $resolved['sseGateModel'] ?? null,
+                $accessType,
+                $class,
+            );
         }
 
-        $this->assertPayloadsHaveDiscoveredRoutes();
-    }
-
-    private function discoverParts(BootDiagnostics $diagnostics): void
-    {
-        $this->discoverPayloadParts($diagnostics);
-        $this->discoverResourceParts($diagnostics);
-    }
-
-    private function discoverSsrComponents(BootDiagnostics $diagnostics): void
-    {
-        // Discover layout slot contributions (optional)
-        if (
-            class_exists('Semitexa\\Ssr\\Attribute\\AsLayoutSlot')
-            && class_exists('Semitexa\\Ssr\\Application\\Service\\Layout\\LayoutSlotRegistry')
-        ) {
-            $slotAttribute = 'Semitexa\\Ssr\\Attribute\\AsLayoutSlot';
-            $slotClasses = $this->classDiscovery->findClassesWithAttribute($slotAttribute);
-            foreach ($slotClasses as $className) {
-                try {
-                    $class = new \ReflectionClass($className);
-                    $attrs = $class->getAttributes($slotAttribute);
-                    foreach ($attrs as $attr) {
-                        /** @var \Semitexa\Ssr\Attribute\AsLayoutSlot $meta */
-                        $meta = $attr->newInstance();
-                        $handle = $meta->handle;
-                        $slot = $meta->slot;
-                        $template = EnvValueResolver::resolve($meta->template);
-                        $context = EnvValueResolver::resolve($meta->context);
-                        \Semitexa\Ssr\Application\Service\Layout\LayoutSlotRegistry::register(
-                            $handle,
-                            $slot,
-                            $template,
-                            self::coerceStringMap($context),
-                            $meta->priority,
-                            $meta->deferred,
-                            $meta->cacheTtl,
-                            $meta->dataProvider,
-                            $meta->skeletonTemplate,
-                            $meta->mode,
-                            $meta->refreshInterval,
-                        );
-                    }
-                } catch (\Throwable $e) {
-                    $diagnostics->skip('AttributeDiscovery', "Layout slot failed for {$className}: " . $e->getMessage(), $e);
-                }
-            }
-        }
-
-        // Discover DataProvider registrations (optional)
-        if (
-            class_exists('Semitexa\\Ssr\\Attribute\\AsDataProvider')
-            && class_exists('Semitexa\\Ssr\\Application\\Service\\DataProviderRegistry')
-        ) {
-            $dpAttribute = 'Semitexa\\Ssr\\Attribute\\AsDataProvider';
-            $dpClasses = array_values(array_filter(
-                $this->classDiscovery->findClassesWithAttribute($dpAttribute),
-                fn (string $class) => $this->moduleRegistry->isClassActive($class) || self::isProjectResource($class)
-            ));
-            foreach ($dpClasses as $className) {
-                try {
-                    $class = new \ReflectionClass($className);
-                    $attrs = $class->getAttributes($dpAttribute);
-                    foreach ($attrs as $attr) {
-                        $meta = $attr->newInstance();
-                        if ($meta->slot === '') {
-                            throw new ConfigurationException("AsDataProvider on {$className} is missing slot.");
-                        }
-                        $slotId = $meta->slot;
-                        $handles = array_values(array_filter(
-                            $meta->handles,
-                            static fn (string $handle): bool => $handle !== '',
-                        ));
-                        \Semitexa\Ssr\Application\Service\DataProviderRegistry::register(
-                            $slotId,
-                            $className,
-                            $handles,
-                        );
-                    }
-                } catch (\Throwable $e) {
-                    $diagnostics->skip('AttributeDiscovery', "Data provider failed for {$className}: " . $e->getMessage(), $e);
-                }
-            }
-        }
-
-        // Discover AsSlotResource contributions (optional)
-        if (
-            class_exists('Semitexa\\Ssr\\Attribute\\AsSlotResource')
-            && class_exists('Semitexa\\Ssr\\Application\\Service\\Layout\\LayoutSlotRegistry')
-        ) {
-            $slotResourceAttribute = 'Semitexa\\Ssr\\Attribute\\AsSlotResource';
-            $slotResourceClasses = array_values(array_filter(
-                $this->classDiscovery->findClassesWithAttribute($slotResourceAttribute),
-                fn (string $class) => $this->moduleRegistry->isClassActive($class) || self::isProjectResource($class)
-            ));
-            foreach ($slotResourceClasses as $className) {
-                try {
-                    $class = new \ReflectionClass($className);
-                    $attrs = $class->getAttributes($slotResourceAttribute);
-                    foreach ($attrs as $attr) {
-                        /** @var \Semitexa\Ssr\Attribute\AsSlotResource $meta */
-                        $meta = $attr->newInstance();
-                        /** @var string $template */
-                        $template = EnvValueResolver::resolve($meta->template);
-                        $context = EnvValueResolver::resolve($meta->context);
-                        $clientModules = array_values(array_filter(
-                            $meta->clientModules,
-                            static fn (string $module): bool => $module !== ''
-                        ));
-                        \Semitexa\Ssr\Application\Service\Layout\LayoutSlotRegistry::register(
-                            handle: $meta->handle,
-                            slot: $meta->slot,
-                            template: $template,
-                            context: self::coerceStringMap($context),
-                            priority: $meta->priority,
-                            deferred: $meta->deferred,
-                            cacheTtl: $meta->cacheTtl,
-                            dataProvider: null,
-                            skeletonTemplate: $meta->skeletonTemplate,
-                            mode: $meta->mode,
-                            refreshInterval: $meta->refreshInterval,
-                            resourceClass: $className,
-                            clientModules: $clientModules,
-                        );
-                    }
-                } catch (\Throwable $e) {
-                    $diagnostics->skip('AttributeDiscovery', "Slot resource failed for {$className}: " . $e->getMessage(), $e);
-                }
-            }
-        }
-
-        // Discover AsSlotHandler contributions (optional)
-        if (
-            class_exists('Semitexa\\Ssr\\Attribute\\AsSlotHandler')
-            && class_exists('Semitexa\\Ssr\\Application\\Service\\Layout\\SlotHandlerRegistry')
-        ) {
-            $slotHandlerAttribute = 'Semitexa\\Ssr\\Attribute\\AsSlotHandler';
-            $slotHandlerClasses = array_values(array_filter(
-                $this->classDiscovery->findClassesWithAttribute($slotHandlerAttribute),
-                fn (string $class) => $this->moduleRegistry->isClassActive($class) || self::isProjectResource($class)
-            ));
-            foreach ($slotHandlerClasses as $className) {
-                try {
-                    $class = new \ReflectionClass($className);
-                    $attrs = $class->getAttributes($slotHandlerAttribute);
-                    foreach ($attrs as $attr) {
-                        /** @var \Semitexa\Ssr\Attribute\AsSlotHandler $meta */
-                        $meta = $attr->newInstance();
-                        \Semitexa\Ssr\Application\Service\Layout\SlotHandlerRegistry::register(
-                            slotClass: $meta->slot,
-                            handlerClass: $className,
-                            priority: $meta->priority,
-                        );
-                    }
-                } catch (\Throwable $e) {
-                    $diagnostics->skip('AttributeDiscovery', "Slot handler failed for {$className}: " . $e->getMessage(), $e);
-                }
-            }
-        }
-    }
-
-    /**
-     * @param array<string, array{class: string, short: string, attr: AttrMap}> $metaMap
-     * @param array<string, AttrMap>                                             $cache
-     * @return AttrMap
-     */
-    private function resolveRequestAttributes(string $className, array $metaMap, array &$cache = []): array
-    {
-        if (isset($cache[$className])) {
-            return $cache[$className];
-        }
-        if (!isset($metaMap[$className])) {
-            throw new ConfigurationException("Request metadata missing for {$className}");
-        }
-        $meta = $metaMap[$className];
-        $attr = $meta['attr'];
-        if (!empty($attr['base'])) {
-            $baseClass = is_string($attr['base']) ? $attr['base'] : '';
-            $baseAttr = $this->resolveRequestAttributes($baseClass, $metaMap, $cache);
-            $merged = self::mergeRequestAttributes($baseAttr, $attr);
-        } else {
-            $merged = self::applyRequestDefaults($attr, $meta['short'], $className);
-        }
-        if (!empty($merged['responseWith'])) {
-            $responseWith = is_string($merged['responseWith']) ? $merged['responseWith'] : null;
-            $merged['responseWith'] = $this->canonicalResponseClass($responseWith);
-        }
-        return $cache[$className] = $merged;
-    }
-
-    /**
-     * @param  AttrMap $base
-     * @param  AttrMap $override
-     * @return AttrMap
-     */
-    private static function mergeRequestAttributes(array $base, array $override): array
-    {
-        $result = $base;
-        foreach (['path','methods','name','requirements','defaults','options','tags','accessType','responseWith','consumes','produces','transport','sseGateModel','renderProfile','responsesByProfile'] as $key) {
-            if (($override[$key] ?? null) !== null) {
-                $result[$key] = $override[$key];
-            }
-        }
-        return $result;
-    }
-
-    /**
-     * @param  AttrMap $attr
-     * @return AttrMap
-     */
-    private static function applyRequestDefaults(array $attr, string $shortName, string $className): array
-    {
-        if ($attr['path'] === null) {
-            throw new ConfigurationException("Request {$className} must define a path");
-        }
-        return [
-            'path' => $attr['path'],
-            'methods' => $attr['methods'] ?? ['GET'],
-            'name' => $attr['name'] ?? $shortName,
-            'requirements' => $attr['requirements'] ?? [],
-            'defaults' => $attr['defaults'] ?? [],
-            'options' => $attr['options'] ?? [],
-            'tags' => $attr['tags'] ?? [],
-            'accessType' => $attr['accessType']
-                ?? throw new ConfigurationException("Request {$className} must declare an access attribute (#[AsPublicPayload], #[AsProtectedPayload], or #[AsServicePayload])."),
-            'responseWith' => $attr['responseWith'],
-            'consumes' => $attr['consumes'] ?? null,
-            'produces' => $attr['produces'] ?? null,
-            'transport' => $attr['transport'] ?? TransportType::Http,
-            // SSE gate-model axis — passed through unchanged (null when unset).
-            // The boot guard (assertSseGateCoherence) reads it off the resolved route.
-            'sseGateModel' => $attr['sseGateModel'] ?? null,
-            // Forwarded as-is from the source attribute. null when
-            // unset (single-profile / no negotiation).
-            'renderProfile' => $attr['renderProfile'] ?? null,
-            'responsesByProfile' => $attr['responsesByProfile'] ?? null,
+        $this->httpRequests[$class] = [
+            'requestClass' => $class,
+            'path' => $resolved['path'],
+            'methods' => $resolved['methods'],
+            'name' => $resolved['name'],
+            'responseClass' => $resolved['responseWith'],
+            'file' => $selected['file'],
+            'module' => $selected['module'],
+            'tenantScopes' => $selected['tenantScopes'],
+            'handlers' => [],
         ];
-    }
 
-    private function processResponseAttributes(BootDiagnostics $diagnostics): void
-    {
-        // Runtime discovery: accept resources from active modules and project src/
-        $allResourceClasses = $this->classDiscovery->findClassesWithAttribute(AsResource::class);
-        $responseClasses = array_values(array_filter(
-            $allResourceClasses,
-            fn (string $class) => $this->moduleRegistry->isClassActive($class) || self::isProjectResource($class)
-        ));
-        if (empty($responseClasses)) {
-            return;
-        }
-
-        $responseMeta = [];
-        $responseGroups = [];
-        foreach ($responseClasses as $className) {
-            try {
-                $class = new ReflectionClass($className);
-                $attrs = $class->getAttributes(AsResource::class);
-                if (empty($attrs)) {
-                    continue;
-                }
-                /** @var AsResource $attr — read by property name only; attribute argument order in source does not matter */
-                $attr = $attrs[0]->newInstance();
-                $meta = [
-                    'class' => $className,
-                    'short' => $class->getShortName(),
-                    'file' => $class->getFileName() ?: '',
-                    'priority' => self::determineSourcePriority($class->getFileName() ?: ''),
-                    'attr' => [
-                        'handle' => $attr->handle !== null ? EnvValueResolver::resolve($attr->handle) : null,
-                        'format' => $attr->format,
-                        'renderer' => $attr->renderer !== null ? EnvValueResolver::resolve($attr->renderer) : null,
-                        'template' => $attr->template !== null ? EnvValueResolver::resolve($attr->template) : null,
-                        'context' => $attr->context ?? [],
-                        'base' => $attr->base !== null && $attr->base !== '' ? ltrim($attr->base, '\\') : null,
-                        'produces' => $attr->produces,
-                    ],
-                ];
-                $responseMeta[$className] = $meta;
-                if ($meta['attr']['base'] !== null) {
-                    $this->resourceBaseMap[$className] = $meta['attr']['base'];
-                    $this->payloadPartRegistry->registerResourceBase($className, $meta['attr']['base']);
-                }
-                $groupKey = $meta['attr']['base'] ?? $className;
-                $responseGroups[$groupKey][] = $meta;
-
-                $this->responseClassAliases[$className] = $className;
-            } catch (\Throwable $e) {
-                $diagnostics->skip('AttributeDiscovery', "Resource reflection failed for {$className}: " . $e->getMessage(), $e);
-            }
-        }
-
-        if (empty($responseMeta)) {
-            return;
-        }
-
-        $cache = [];
-        foreach ($responseMeta as $className => $meta) {
-            $this->resolvedResponseAttrs[$className] = self::resolveResponseAttributes($className, $responseMeta, $cache);
-        }
-
-        foreach ($responseGroups as $baseClass => $candidates) {
-            usort($candidates, fn ($a, $b) => $b['priority'] <=> $a['priority']);
-            $selected = $candidates[0]['class'];
-            foreach ($candidates as $candidate) {
-                $this->responseClassAliases[$candidate['class']] = $selected;
-            }
-        }
+        $this->routeRegistry->register([
+            'path' => $resolved['path'],
+            'methods' => $resolved['methods'],
+            'name' => $resolved['name'],
+            'class' => $class,
+            'responseClass' => $resolved['responseWith'] ?? null,
+            'method' => '__invoke',
+            'requirements' => $resolved['requirements'],
+            'defaults' => $resolved['defaults'],
+            'options' => $resolved['options'],
+            'tags' => $resolved['tags'],
+            'accessType' => $resolved['accessType'],
+            'type' => 'http-request',
+            'transport' => $transportValue,
+            'consumes' => $resolved['consumes'] ?? null,
+            'produces' => $this->resolveProduces($resolved),
+            'module' => $selected['module'],
+            'tenantScopes' => $selected['tenantScopes'],
+            // Thread the multi-profile metadata through to the
+            // routing layer so RouteExecutor + CrossProfileDispatcher can
+            // pick the right response class per request.
+            'renderProfile' => $resolved['renderProfile'] ?? null,
+            'responsesByProfile' => $resolved['responsesByProfile'] ?? null,
+        ]);
     }
 
     /**
-     * @param array<string, array{class: string, short: string, attr: AttrMap, file: string, priority: int}> $metaMap
-     * @param array<string, AttrMap>                                                                          $cache
-     * @return AttrMap
+     * What the route produces: the payload's own declaration wins, and only when
+     * it is silent does the response class's #[AsResource] supply the answer.
+     *
+     * @param  array<string, mixed> $resolved
+     * @return mixed
      */
-    private static function resolveResponseAttributes(string $className, array $metaMap, array &$cache = []): array
+    private function resolveProduces(array $resolved): mixed
     {
-        if (isset($cache[$className])) {
-            return $cache[$className];
+        $produces = $resolved['produces'] ?? null;
+        if ($produces !== null) {
+            return $produces;
         }
-        if (!isset($metaMap[$className])) {
-            throw new ConfigurationException("Response metadata missing for {$className}");
-        }
-        $meta = $metaMap[$className];
-        $attr = $meta['attr'];
-        $base = is_string($attr['base'] ?? null) ? $attr['base'] : null;
-        if ($base !== null && $base !== '') {
-            $baseAttr = self::resolveResponseAttributes($base, $metaMap, $cache);
-            $merged = self::mergeResponseAttributes($baseAttr, $attr);
-        } else {
-            $merged = self::applyResponseDefaults($attr, $meta['short'], $className);
-        }
-        return $cache[$className] = $merged;
-    }
 
-    /**
-     * @param  AttrMap $base
-     * @param  AttrMap $override
-     * @return AttrMap
-     */
-    private static function mergeResponseAttributes(array $base, array $override): array
-    {
-        $result = $base;
-        foreach (['handle', 'format', 'renderer', 'template', 'context', 'produces'] as $key) {
-            if (!\array_key_exists($key, $override)) {
-                continue;
-            }
-            if ($override[$key] !== null) {
-                $result[$key] = $override[$key];
-            }
-        }
-        return $result;
-    }
-
-    /**
-     * @param  AttrMap $attr
-     * @return AttrMap
-     */
-    private static function applyResponseDefaults(array $attr, string $shortName, string $className): array
-    {
-        $handle = $attr['handle'] ?? self::defaultLayoutHandleFromShortName($shortName);
-        return [
-            'handle' => $handle,
-            'format' => $attr['format'] ?? null,
-            'renderer' => $attr['renderer'] ?? null,
-            'template' => $attr['template'] ?? null,
-            'context' => \array_key_exists('context', $attr) ? $attr['context'] : null,
-            'produces' => $attr['produces'] ?? null,
-        ];
-    }
-
-    /**
-     * Default layout/template handle from Response class short name.
-     * "AboutResponse" -> "about", "HomeResponse" -> "home", so it matches pages/{handle}.html.twig.
-     */
-    private static function defaultLayoutHandleFromShortName(string $shortName): string
-    {
-        if (str_ends_with($shortName, 'Response')) {
-            $shortName = substr($shortName, 0, -8);
-        }
-        return strtolower(ltrim(preg_replace('/[A-Z]/', '-$0', $shortName), '-'));
-    }
-
-    private function canonicalResponseClass(?string $class): ?string
-    {
-        if ($class === null) {
+        $responseClass = is_string($resolved['responseWith'] ?? null) ? $resolved['responseWith'] : null;
+        if ($responseClass === null) {
             return null;
         }
-        return $this->responseClassAliases[$class] ?? $class;
+
+        $resolvedResponse = $this->getResolvedResponseAttributes($responseClass);
+
+        return $resolvedResponse['produces'] ?? null;
     }
 
     /**
-     * @return AttrMap|null
+     * Reduce a declared transport to its wire string, defaulting to HTTP.
+     *
+     * The attribute normally carries a {@see TransportType}, but the value
+     * survives an EnvValueResolver round-trip and an override merge, so a plain
+     * string is legitimate here too.
      */
-    public function getResolvedResponseAttributes(string $class): ?array
+    private static function normalizeTransport(mixed $transport): string
     {
-        $canonical = $this->responseClassAliases[$class] ?? $class;
-        return $this->resolvedResponseAttrs[$canonical] ?? null;
+        if ($transport instanceof TransportType) {
+            return $transport->value;
+        }
+
+        return is_string($transport) && $transport !== ''
+            ? $transport
+            : TransportType::Http->value;
     }
 
     /**
@@ -1098,91 +582,268 @@ class AttributeDiscovery
         return $head;
     }
 
-    private static function determineSourcePriority(string $file): int
+    private function processResponseAttributes(BootDiagnostics $diagnostics): void
     {
-        if ($file === '') {
-            return 0;
+        // Runtime discovery: accept resources from active modules and project src/
+        $allResourceClasses = $this->classDiscovery->findClassesWithAttribute(AsResource::class);
+        $responseClasses = array_values(array_filter(
+            $allResourceClasses,
+            fn (string $class) => $this->moduleRegistry->isClassActive($class) || $this->sourceOrigin->isProjectClass($class, 'resource')
+        ));
+        if (empty($responseClasses)) {
+            return;
         }
 
-        if (str_contains($file, '/src/modules/')) {
-            return 400;
+        $responseMeta = [];
+        $responseGroups = [];
+        foreach ($responseClasses as $className) {
+            try {
+                $class = new ReflectionClass($className);
+                $attrs = $class->getAttributes(AsResource::class);
+                if (empty($attrs)) {
+                    continue;
+                }
+                /** @var AsResource $attr — read by property name only; attribute argument order in source does not matter */
+                $attr = $attrs[0]->newInstance();
+                $meta = [
+                    'class' => $className,
+                    'short' => $class->getShortName(),
+                    'file' => $class->getFileName() ?: '',
+                    'priority' => $this->sourceOrigin->priorityForFile($class->getFileName() ?: ''),
+                    'attr' => [
+                        'handle' => $attr->handle !== null ? EnvValueResolver::resolve($attr->handle) : null,
+                        'format' => $attr->format,
+                        'renderer' => $attr->renderer !== null ? EnvValueResolver::resolve($attr->renderer) : null,
+                        'template' => $attr->template !== null ? EnvValueResolver::resolve($attr->template) : null,
+                        'context' => $attr->context ?? [],
+                        'base' => $attr->base !== null && $attr->base !== '' ? ltrim($attr->base, '\\') : null,
+                        'produces' => $attr->produces,
+                    ],
+                ];
+                $responseMeta[$className] = $meta;
+                if ($meta['attr']['base'] !== null) {
+                    $this->payloadPartRegistry->registerResourceBase($className, $meta['attr']['base']);
+                }
+                $groupKey = $meta['attr']['base'] ?? $className;
+                $responseGroups[$groupKey][] = $meta;
+
+                $this->responseClassAliases[$className] = $className;
+            } catch (\Throwable $e) {
+                $diagnostics->skip('AttributeDiscovery', "Resource reflection failed for {$className}: " . $e->getMessage(), $e);
+            }
         }
 
-        if (self::isProjectRequest($file)) {
-            return 300;
+        if (empty($responseMeta)) {
+            return;
         }
 
-        if (str_contains($file, '/packages/')) {
-            return 200;
+        $cache = [];
+        foreach ($responseMeta as $className => $meta) {
+            $this->resolvedResponseAttrs[$className] = $this->resourceAttributes->resolve($className, $responseMeta, $cache);
         }
 
-        return 100;
-    }
-
-    private static function isProjectRequest(string $file): bool
-    {
-        if ($file === '') {
-            return false;
-        }
-
-        // Check if file is in project src/ directory (including src/modules/)
-        $projectRoot = ProjectRoot::get();
-        $projectSrc = $projectRoot . '/src/';
-
-        return str_starts_with($file, $projectSrc);
-    }
-
-    private static function isProjectHandler(string $className): bool
-    {
-        try {
-            $file = (new ReflectionClass($className))->getFileName();
-            return $file !== false && self::isProjectRequest($file);
-        } catch (\Throwable $e) {
-            BootDiagnostics::current()->skip('AttributeDiscovery', "isProjectHandler check failed for {$className}: " . $e->getMessage(), $e);
-            return false;
-        }
-    }
-
-    private static function isProjectPayload(string $className): bool
-    {
-        try {
-            $file = (new ReflectionClass($className))->getFileName();
-            return $file !== false && self::isProjectRequest($file);
-        } catch (\Throwable $e) {
-            BootDiagnostics::current()->skip('AttributeDiscovery', "isProjectPayload check failed for {$className}: " . $e->getMessage(), $e);
-            return false;
-        }
-    }
-
-    private static function isProjectResource(string $className): bool
-    {
-        try {
-            $file = (new ReflectionClass($className))->getFileName();
-            return $file !== false && self::isProjectRequest($file);
-        } catch (\Throwable $e) {
-            BootDiagnostics::current()->skip('AttributeDiscovery', "isProjectResource check failed for {$className}: " . $e->getMessage(), $e);
-            return false;
+        foreach ($responseGroups as $baseClass => $candidates) {
+            usort($candidates, fn ($a, $b) => $b['priority'] <=> $a['priority']);
+            $selected = $candidates[0]['class'];
+            foreach ($candidates as $candidate) {
+                $this->responseClassAliases[$candidate['class']] = $selected;
+            }
         }
     }
 
     /**
-     * Coerce an opaque value (typically a resolved attribute argument) into a string-keyed map.
-     * Non-array inputs collapse to []; non-string keys are dropped.
+     * Resolve a payload's attribute chain, then canonicalize the response class
+     * it points at.
      *
-     * @return array<string, mixed>
+     * The canonicalization is the one step the generic resolver cannot do: a
+     * payload names the resource it responds with, but several resource classes
+     * may share an attribute base, in which case discovery has already elected a
+     * single winner among them (see processResponseAttributes). Rewriting
+     * `responseWith` to that winner here means every later stage — route
+     * registration, handler matching, enrichment — sees one canonical class
+     * instead of whichever alias the payload happened to name. It runs after the
+     * merge because a child can override `responseWith`.
+     *
+     * @param  array<string, array{class: string, short: string, attr: AttrMap}> $metaMap
+     * @param  array<string, AttrMap>                                            $cache
+     * @return AttrMap
      */
-    private static function coerceStringMap(mixed $value): array
+    private function resolvePayloadAttributes(string $className, array $metaMap, array &$cache): array
     {
-        if (!is_array($value)) {
-            return [];
+        $resolved = $this->payloadAttributes->resolve($className, $metaMap, $cache);
+
+        if (!empty($resolved['responseWith'])) {
+            $responseWith = is_string($resolved['responseWith']) ? $resolved['responseWith'] : null;
+            $resolved['responseWith'] = $this->canonicalResponseClass($responseWith);
         }
-        $out = [];
-        foreach ($value as $k => $v) {
-            if (is_string($k)) {
-                $out[$k] = $v;
+
+        return $resolved;
+    }
+
+    private function canonicalResponseClass(?string $class): ?string
+    {
+        if ($class === null) {
+            return null;
+        }
+        return $this->responseClassAliases[$class] ?? $class;
+    }
+
+    /**
+     * @return AttrMap|null
+     */
+    public function getResolvedResponseAttributes(string $class): ?array
+    {
+        $canonical = $this->responseClassAliases[$class] ?? $class;
+        return $this->resolvedResponseAttrs[$canonical] ?? null;
+    }
+
+    private function discoverHandlers(BootDiagnostics $diagnostics): void
+    {
+        // Find handlers and map to requests (Semitexa packages + project App\ handlers)
+        $httpHandlerClasses = array_filter(
+            $this->classDiscovery->findClassesWithAttribute(AsPayloadHandler::class),
+            fn (string $class) => (
+                (str_starts_with($class, 'Semitexa\\') || str_starts_with($class, 'App\\Modules\\'))
+                && $this->moduleRegistry->isClassActive($class)
+            ) || (
+                $this->sourceOrigin->isProjectClass($class, 'handler')
+                && !str_starts_with($class, 'App\\Modules\\')
+            )
+        );
+        foreach ($httpHandlerClasses as $className) {
+            try {
+                $class = new ReflectionClass($className);
+                $attrs = $class->getAttributes(AsPayloadHandler::class);
+                if (!empty($attrs)) {
+                    /** @var AsPayloadHandler $attr */
+                    $attr = $attrs[0]->newInstance();
+                    $payloadClass = $attr->payload;
+                    $resourceClass = $attr->resource;
+                    $execution = HandlerExecution::normalize($attr->execution ?? null);
+                    $transport = $attr->transport !== null ? EnvValueResolver::resolve($attr->transport) : null;
+                    $queue = $attr->queue !== null ? EnvValueResolver::resolve($attr->queue) : null;
+                    $priority = $attr->priority ?? 0;
+                    $handlerMeta = [
+                        'class' => $class->getName(),
+                        'payload' => $payloadClass,
+                        'resource' => $resourceClass,
+                        'execution' => $execution->value,
+                        'transport' => is_string($transport) && $transport !== '' ? $transport : null,
+                        'queue' => is_string($queue) && $queue !== '' ? $queue : null,
+                        'priority' => $priority,
+                        'maxRetries' => $attr->maxRetries,
+                        'retryDelay' => $attr->retryDelay,
+                    ];
+                    $this->handlerRegistry->register($payloadClass, $resourceClass, $handlerMeta);
+
+                    // Warm reflection cache for TypedHandlerInterface handlers
+                    if ($class->implementsInterface(TypedHandlerInterface::class)) {
+                        try {
+                            HandlerReflectionCache::warm($class->getName());
+                        } catch (\LogicException $e) {
+                            throw new ConfigurationException(
+                                "Failed to warm reflection cache for TypedHandlerInterface handler {$class->getName()}: " . $e->getMessage(),
+                                $e
+                            );
+                        }
+                    }
+                }
+            } catch (\Throwable $e) {
+                $diagnostics->skip('AttributeDiscovery', "Handler reflection failed for {$className}: " . $e->getMessage(), $e);
             }
         }
-        return $out;
+
+        $this->assertPayloadsHaveDiscoveredRoutes();
+    }
+
+    private function discoverParts(BootDiagnostics $diagnostics): void
+    {
+        $this->discoverPayloadParts($diagnostics);
+        $this->discoverResourceParts($diagnostics);
+    }
+
+    /**
+     * Run every package-supplied {@see DiscoveryContributor}.
+     *
+     * Core deliberately names no downstream attribute here. It finds the
+     * contributors, resolves the classes each one asks about, applies the module
+     * scoping each one declares, and hands over the instantiated attribute — the
+     * meaning of that attribute stays in the package that defined it.
+     *
+     * A contributor naming an attribute class that is not loadable is skipped in
+     * silence: that simply means its package is not installed.
+     */
+    private function discoverContributedComponents(BootDiagnostics $diagnostics): void
+    {
+        foreach ($this->discoveryContributors($diagnostics) as $contributor) {
+            $attribute = $contributor->attribute();
+            if (!class_exists($attribute)) {
+                continue;
+            }
+
+            $classes = $this->classDiscovery->findClassesWithAttribute($attribute);
+            if ($contributor->scopedToActiveModules()) {
+                $classes = array_filter(
+                    $classes,
+                    fn (string $class): bool => $this->moduleRegistry->isClassActive($class)
+                        || $this->sourceOrigin->isProjectClass($class, 'contribution'),
+                );
+            }
+
+            foreach ($classes as $className) {
+                try {
+                    foreach ((new ReflectionClass($className))->getAttributes($attribute) as $found) {
+                        $contributor->contribute($className, $found->newInstance(), $diagnostics);
+                    }
+                } catch (\Throwable $e) {
+                    $diagnostics->skip(
+                        'AttributeDiscovery',
+                        sprintf('%s contribution failed for %s: %s', $attribute, $className, $e->getMessage()),
+                        $e,
+                    );
+                }
+            }
+        }
+    }
+
+    /**
+     * Instantiate every discovered contributor, highest priority first.
+     *
+     * Contributors are constructed with no arguments so discovery never has to
+     * resolve a container that is still being built around it.
+     *
+     * @return list<DiscoveryContributor>
+     */
+    private function discoveryContributors(BootDiagnostics $diagnostics): array
+    {
+        $found = [];
+        foreach ($this->classDiscovery->findClassesWithAttribute(AsDiscoveryContributor::class) as $className) {
+            try {
+                $class = new ReflectionClass($className);
+                if (!$class->implementsInterface(DiscoveryContributor::class) || !$class->isInstantiable()) {
+                    $diagnostics->invalidUsage(
+                        'AttributeDiscovery',
+                        sprintf('%s is #[AsDiscoveryContributor] but is not an instantiable %s.', $className, DiscoveryContributor::class),
+                    );
+                    continue;
+                }
+
+                $attrs = $class->getAttributes(AsDiscoveryContributor::class);
+                /** @var AsDiscoveryContributor $meta */
+                $meta = $attrs[0]->newInstance();
+                /** @var DiscoveryContributor $instance */
+                $instance = $class->newInstance();
+                $found[] = ['priority' => $meta->priority, 'class' => $className, 'instance' => $instance];
+            } catch (\Throwable $e) {
+                $diagnostics->skip('AttributeDiscovery', "Discovery contributor failed for {$className}: " . $e->getMessage(), $e);
+            }
+        }
+
+        // Name breaks priority ties so the boot order is reproducible rather
+        // than a function of filesystem scan order.
+        usort($found, fn (array $a, array $b): int => [$b['priority'], $a['class']] <=> [$a['priority'], $b['class']]);
+
+        return array_column($found, 'instance');
     }
 
     /**
@@ -1192,7 +853,7 @@ class AttributeDiscovery
     {
         $classes = $this->classDiscovery->findClassesWithAttribute(AsPayloadPart::class);
         foreach ($classes as $className) {
-            if (!$this->moduleRegistry->isClassActive($className) && !self::isProjectPayload($className)) {
+            if (!$this->moduleRegistry->isClassActive($className) && !$this->sourceOrigin->isProjectClass($className, 'payload')) {
                 continue;
             }
             try {
@@ -1204,7 +865,6 @@ class AttributeDiscovery
                 foreach ($attrs as $attr) {
                     $instance = $attr->newInstance();
                     $base = ltrim($instance->base, '\\');
-                    $this->payloadParts[$base][] = $className;
                     $this->payloadPartRegistry->registerPayloadPart($base, $className);
                 }
             } catch (\Throwable $e) {
@@ -1217,7 +877,7 @@ class AttributeDiscovery
     {
         $classes = $this->classDiscovery->findClassesWithAttribute(AsResourcePart::class);
         foreach ($classes as $className) {
-            if (!$this->moduleRegistry->isClassActive($className) && !self::isProjectResource($className)) {
+            if (!$this->moduleRegistry->isClassActive($className) && !$this->sourceOrigin->isProjectClass($className, 'resource')) {
                 continue;
             }
             try {
@@ -1229,7 +889,6 @@ class AttributeDiscovery
                 foreach ($attrs as $attr) {
                     $instance = $attr->newInstance();
                     $base = ltrim($instance->base, '\\');
-                    $this->resourceParts[$base][] = $className;
                     $this->payloadPartRegistry->registerResourcePart($base, $className);
                 }
             } catch (\Throwable $e) {
@@ -1240,57 +899,33 @@ class AttributeDiscovery
 
     /**
      * Get trait list for a payload class.
-     * Matches via PHP inheritance and attribute base chain.
+     *
+     * Boot-triggering wrapper over {@see PayloadPartRegistry}. Discovery used to
+     * keep a second copy of the parts and base maps and answer from that; the
+     * two stores were dual-written and their lookups were character-for-character
+     * identical, so the copy could only ever agree with the registry or be a bug.
+     * The registry is now the single store — the value this method still adds is
+     * the lazy `initialize()`, which callers holding a not-yet-booted discovery
+     * rely on and the registry has no notion of.
      *
      * @return list<string>
      */
     public function getPayloadPartsForClass(string $requestClass): array
     {
         $this->initialize();
-        $chain = self::buildBaseChain($requestClass, $this->payloadBaseMap);
-        $traits = [];
-        foreach ($this->payloadParts as $base => $traitList) {
-            if (in_array($base, $chain, true) || is_subclass_of($requestClass, $base)) {
-                array_push($traits, ...$traitList);
-            }
-        }
-        return $traits;
+
+        return $this->payloadPartRegistry->getPayloadPartsForClass($requestClass);
     }
 
     /**
-     * Get trait list for a resource class.
-     * Matches via PHP inheritance and attribute base chain.
+     * Get trait list for a resource class. See {@see getPayloadPartsForClass}.
      *
      * @return list<string>
      */
     public function getResourcePartsForClass(string $responseClass): array
     {
         $this->initialize();
-        $chain = self::buildBaseChain($responseClass, $this->resourceBaseMap);
-        $traits = [];
-        foreach ($this->resourceParts as $base => $traitList) {
-            if (in_array($base, $chain, true) || is_subclass_of($responseClass, $base)) {
-                array_push($traits, ...$traitList);
-            }
-        }
-        return $traits;
-    }
 
-    /**
-     * Walk the attribute base chain for a class.
-     *
-     * @param  array<string, string> $baseMap class => parent class
-     * @return list<string>          The class itself and all ancestors via attribute base
-     */
-    private static function buildBaseChain(string $className, array $baseMap): array
-    {
-        $chain = [];
-        $current = $className;
-        while ($current !== null) {
-            $chain[] = $current;
-            $current = $baseMap[$current] ?? null;
-        }
-        return $chain;
+        return $this->payloadPartRegistry->getResourcePartsForClass($responseClass);
     }
-
 }
