@@ -41,6 +41,8 @@ class AttributeDiscovery
     /** @var array<string, string> */
     private array $responseClassAliases = [];
     private bool $initialized = false;
+    /** Set for the duration of initialize() so a contributor cannot re-enter it. */
+    private bool $initializing = false;
 
     private readonly HandlerRegistry $handlerRegistry;
     private readonly PayloadPartRegistry $payloadPartRegistry;
@@ -93,24 +95,42 @@ class AttributeDiscovery
      */
     public function initialize(): void
     {
-        if ($this->initialized) {
+        // `$initialized` alone is not enough to make this idempotent. It is set
+        // only once the scan below returns, and the scan runs third-party
+        // contribute() implementations; a contributor that reaches any accessor
+        // which boots discovery — getPayloadPartsForClass() and
+        // getResourcePartsForClass() both call initialize() — would re-enter here
+        // with the flag still false and restart the whole scan underneath itself.
+        // Deep enough, that is stack exhaustion, which is a fatal the \Throwable
+        // handler inside the scan cannot contain; shallow enough, it double-registers
+        // every handler and part. The in-progress flag makes the re-entrant call a
+        // no-op instead, so the outer scan is the only one that runs.
+        if ($this->initialized || $this->initializing) {
             return;
         }
 
-        // Discovery relies on tenant/module env such as TENANT_*_MODULES.
-        // CLI entrypoints can reach discovery before worker bootstrap syncs .env values.
-        Environment::syncEnvFromFiles();
+        $this->initializing = true;
 
-        // Initialize class discovery
-        $this->classDiscovery->initialize();
+        try {
+            // Discovery relies on tenant/module env such as TENANT_*_MODULES.
+            // CLI entrypoints can reach discovery before worker bootstrap syncs .env values.
+            Environment::syncEnvFromFiles();
 
-        // Initialize module registry
-        $this->moduleRegistry->initialize();
+            // Initialize class discovery
+            $this->classDiscovery->initialize();
 
-        // Scan attributes using intelligent autoloader
-        $this->scanAttributesIntelligently();
+            // Initialize module registry
+            $this->moduleRegistry->initialize();
 
-        $this->initialized = true;
+            // Scan attributes using intelligent autoloader
+            $this->scanAttributesIntelligently();
+
+            $this->initialized = true;
+        } finally {
+            // Cleared even on a throw, or a failed boot would leave discovery
+            // permanently refusing to initialize with no way back.
+            $this->initializing = false;
+        }
     }
 
     /**

@@ -139,6 +139,67 @@ final class AttributeChainResolverTest extends TestCase
     }
 
     #[Test]
+    public function a_circular_base_chain_is_a_configuration_error_naming_the_cycle(): void
+    {
+        // Two classes naming each other used to recurse until memory ran out —
+        // a fatal, not a catchable exception, so boot died without saying which
+        // pair was at fault. The cache cannot double as the in-progress marker
+        // because it is written only after the recursion returns.
+        $this->expectException(ConfigurationException::class);
+        $this->expectExceptionMessage('Request base chain is circular: P\\A -> P\\B -> P\\A');
+
+        $cache = [];
+        self::payloadResolver()->resolve(
+            'P\\A',
+            [
+                'P\\A' => self::payloadMeta('A', ['base' => 'P\\B', 'path' => '/a']),
+                'P\\B' => self::payloadMeta('B', ['base' => 'P\\A', 'path' => '/b']),
+            ],
+            $cache,
+        );
+    }
+
+    #[Test]
+    public function a_class_naming_itself_as_its_own_base_is_caught(): void
+    {
+        $this->expectException(ConfigurationException::class);
+        $this->expectExceptionMessage('Request base chain is circular: P\\Self -> P\\Self');
+
+        $cache = [];
+        self::payloadResolver()->resolve(
+            'P\\Self',
+            ['P\\Self' => self::payloadMeta('Self', ['base' => 'P\\Self', 'path' => '/self'])],
+            $cache,
+        );
+    }
+
+    #[Test]
+    public function a_diamond_is_not_mistaken_for_a_cycle(): void
+    {
+        // Two children sharing one base is legitimate, and the shared $cache means
+        // the base is walked once. A naive "seen this class" guard would reject it.
+        $cache = [];
+        $resolver = self::payloadResolver();
+        $map = [
+            'P\\Base' => self::payloadMeta('Base', [
+                'path' => '/base',
+                'transport' => TransportType::Sse,
+                'accessType' => PayloadAccessType::Public,
+            ]),
+            'P\\Left' => self::payloadMeta('Left', ['base' => 'P\\Base', 'path' => '/left']),
+            'P\\Right' => self::payloadMeta('Right', ['base' => 'P\\Base', 'path' => '/right']),
+        ];
+
+        $left = $resolver->resolve('P\\Left', $map, $cache);
+        $right = $resolver->resolve('P\\Right', $map, $cache);
+
+        self::assertSame(TransportType::Sse, $left['transport']);
+        self::assertSame(TransportType::Sse, $right['transport']);
+        self::assertSame('/left', $left['path']);
+        self::assertSame('/right', $right['path']);
+    }
+
+    #[Test]
     public function the_resource_schema_reports_its_own_family_name(): void
     {
         // Same resolver, different schema — the message must say which discovery

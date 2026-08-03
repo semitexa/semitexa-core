@@ -29,12 +29,16 @@ use Semitexa\Core\Discovery\AttributeDiscovery;
  * and to update the frozen map in the same commit that makes the decision.
  *
  * Scope note: this pins shape, never behaviour. Behavioural characterization of
- * the attribute merge/override rules lives in {@see RouteTransportMetadataTest},
- * which reaches three *private static* methods through reflection
- * (`mergeRequestAttributes`, `applyRequestDefaults`, `assertSseGateCoherence`).
- * Those reflection entry points are this class's hidden second contract: an
- * extraction that moves one of them must migrate its test to the new home in the
- * same commit, or the suite goes red for a reason that looks unrelated.
+ * the attribute merge/override rules lives in {@see RouteTransportMetadataTest}.
+ * It used to reach three *private static* methods on this class through
+ * reflection — `mergeRequestAttributes`, `applyRequestDefaults` and
+ * `assertSseGateCoherence` — which made them a hidden second contract. That is no
+ * longer the case: ep-slay-attribute-discovery moved the merge to
+ * {@see \Semitexa\Core\Discovery\AttributeChainResolver}, the defaults to
+ * {@see \Semitexa\Core\Discovery\PayloadAttributeSchema} and the SSE gate check to
+ * {@see \Semitexa\Core\Discovery\RouteDeclarationGuard}, and the test now calls
+ * those three directly. AttributeDiscovery has no reflection entry points left,
+ * so this file is the whole contract again.
  */
 final class AttributeDiscoveryPublicSurfaceTest extends TestCase
 {

@@ -21,9 +21,10 @@ namespace Semitexa\Core\Discovery;
  * require is an undeclared dependency wearing a disguise. Now ssr ships its own
  * contributors and core names no downstream package at all.
  *
- * Implementations are found by their {@see AsDiscoveryContributor} attribute, the
- * same self-hosting trick core already uses for pipeline listeners, server
- * lifecycle hooks and resource metadata.
+ * Implementations are found by their
+ * {@see \Semitexa\Core\Attribute\AsDiscoveryContributor} attribute, the same
+ * self-hosting trick core already uses for pipeline listeners, server lifecycle
+ * hooks and resource metadata.
  */
 interface DiscoveryContributor
 {

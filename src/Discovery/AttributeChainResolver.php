@@ -41,14 +41,32 @@ final class AttributeChainResolver
      *
      * @param  array<string, array{class: string, short: string, attr: AttrMap, ...}> $metaMap
      * @param  array<string, AttrMap>                                                 $cache
+     * @param  array<string, true>                                                    $chain  classes already open on this walk, keyed by FQCN
      * @return AttrMap
      *
-     * @throws ConfigurationException when a class names a `base:` that discovery never saw
+     * @throws ConfigurationException when a class names a `base:` that discovery
+     *                                never saw, or when the chain is circular
      */
-    public function resolve(string $className, array $metaMap, array &$cache): array
+    public function resolve(string $className, array $metaMap, array &$cache, array $chain = []): array
     {
         if (isset($cache[$className])) {
             return $cache[$className];
+        }
+
+        // The cache entry is written only once the recursion below returns, so it
+        // cannot double as an in-progress marker: two classes naming each other as
+        // `base:` would re-enter this method forever. That recursion is not
+        // catchable — it exhausts memory and dies as a fatal — where every other
+        // misconfiguration here surfaces as a ConfigurationException naming the
+        // class at fault. The chain is carried as a parameter rather than instance
+        // state because these resolvers live on AttributeDiscovery for the life of
+        // the worker and would otherwise be shared across coroutines.
+        if (isset($chain[$className])) {
+            throw new ConfigurationException(sprintf(
+                '%s base chain is circular: %s',
+                $this->schema->subject(),
+                implode(' -> ', [...array_keys($chain), $className]),
+            ));
         }
 
         if (!isset($metaMap[$className])) {
@@ -65,7 +83,8 @@ final class AttributeChainResolver
         $base = is_string($attr['base'] ?? null) ? $attr['base'] : null;
 
         if ($base !== null && $base !== '') {
-            $merged = $this->overlay($this->resolve($base, $metaMap, $cache), $attr);
+            $chain[$className] = true;
+            $merged = $this->overlay($this->resolve($base, $metaMap, $cache, $chain), $attr);
         } else {
             $merged = $this->schema->applyDefaults($attr, $meta['short'], $className);
         }
