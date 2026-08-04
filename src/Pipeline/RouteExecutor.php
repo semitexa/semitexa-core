@@ -95,10 +95,14 @@ class RouteExecutor
         // one has() per request. Every call site below uses `?->`, so a null
         // tracer is a null-check rather than a wrapped block — the request path
         // reads the same with the tracing removed.
-        /** @var RequestTracerInterface|null $tracer */
-        $tracer = $this->container->has(RequestTracerInterface::class)
+        // Wrapped, never raw: the interface asks implementations not to throw and
+        // cannot enforce it, and every call below is on the request path - the
+        // first one runs before the try block, the last inside finally.
+        /** @var RequestTracerInterface|null $resolvedTracer */
+        $resolvedTracer = $this->container->has(RequestTracerInterface::class)
             ? $this->container->get(RequestTracerInterface::class)
             : null;
+        $tracer = SafeRequestTracer::wrap($resolvedTracer);
 
         // The root span also carries what the tracer needs in order to decide
         // whether this request is one it was asked to record - a developer traces
@@ -221,8 +225,13 @@ class RouteExecutor
         } catch (\Semitexa\Core\Exception\NotFoundException $e) {
             // Let NotFoundException bubble up so Application::handleRouteException()
             // can dispatch the custom error.404 route when registered.
+            $tracer?->mark('request.exception', ['class' => $e::class]);
             throw $e;
         } catch (DomainException|\Throwable $e) {
+            // Named on the trace before anything is mapped: without this the trace
+            // shows spans that stop and never says what stopped them, which is the
+            // one question a failing request is opened to answer.
+            $tracer?->mark('request.exception', ['class' => $e::class]);
             if ($exceptionMapper === null || $metadata === null) {
                 throw $e;
             }

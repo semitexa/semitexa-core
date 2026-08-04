@@ -25,16 +25,24 @@ namespace Semitexa\Core\Pipeline;
  *
  * ## Contract
  *
- * Implementations MUST NOT throw. RouteExecutor does not guard these calls, and
- * an observer that can break the request it observes is worse than no observer:
- * it would turn a diagnostic tool into a source of the faults being diagnosed.
- * Swallow your own errors.
+ * Implementations MUST NOT throw. An observer that can break the request it
+ * observes is worse than no observer: it would turn a diagnostic tool into a
+ * source of the faults being diagnosed. Swallow your own errors.
+ *
+ * RouteExecutor does not rely on that alone — it holds every tracer inside
+ * {@see SafeRequestTracer}, which contains a throw wherever it happens. The rule
+ * still stands, because a tracer reached from anywhere else has no such wrapper,
+ * and because an implementation that leans on being wrapped will silently stop
+ * recording the first time it faults.
  *
  * Implementations MUST NOT alter behaviour. Nothing returned here is consumed.
  *
- * Spans nest by call order — every {@see begin()} is matched by exactly one
- * {@see end()} on the same span, and RouteExecutor closes a span before opening
- * the next one at the same level.
+ * Spans nest by call order: every {@see begin()} is matched by exactly one
+ * {@see end()} on the same span, and a span is closed before the next one at the
+ * same level opens. This holds on failing requests too, where the code that would
+ * have called `end()` was skipped by an exception — SafeRequestTracer closes what
+ * the unwind left open, passing `['unfinished' => true]` so a recording can tell
+ * a step that completed from one the request died inside.
  */
 interface RequestTracerInterface
 {
