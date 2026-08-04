@@ -49,6 +49,22 @@ class RouteExecutor
         private readonly ?AuthBootstrapperInterface $authBootstrapper = null,
     ) {}
 
+    /**
+     * Did this request ask to be traced? Query parameter or header, either way.
+     */
+    private function traceMarker(Request $request): ?string
+    {
+        // getQuery(), not getQueryString(): under Swoole the request_uri that
+        // backs the uri property carries no query string - the parameters arrive
+        // separately - so parsing the uri finds nothing and the marker is missed.
+        $fromQuery = $request->getQuery('__trace');
+        if ($fromQuery !== '') {
+            return $fromQuery;
+        }
+
+        return $request->getHeader('x-semitexa-trace');
+    }
+
     private function getAttributeDiscovery(): AttributeDiscovery
     {
         /** @var AttributeDiscovery $attributeDiscovery */
@@ -73,6 +89,34 @@ class RouteExecutor
     {
         $metadata = null;
         $exceptionMapper = null;
+
+        // Optional dev-only observer. Resolved once, exactly as the pre-hydration
+        // auth gate below is: absent in production, where the whole feature costs
+        // one has() per request. Every call site below uses `?->`, so a null
+        // tracer is a null-check rather than a wrapped block — the request path
+        // reads the same with the tracing removed.
+        // Wrapped, never raw: the interface asks implementations not to throw and
+        // cannot enforce it, and every call below is on the request path - the
+        // first one runs before the try block, the last inside finally.
+        /** @var RequestTracerInterface|null $resolvedTracer */
+        $resolvedTracer = $this->container->has(RequestTracerInterface::class)
+            ? $this->container->get(RequestTracerInterface::class)
+            : null;
+        $tracer = SafeRequestTracer::wrap($resolvedTracer);
+
+        // The root span also carries what the tracer needs in order to decide
+        // whether this request is one it was asked to record - a developer traces
+        // the single request they care about, not everything.
+        // The marker is read HERE and handed over, rather than looked up by the
+        // tracer: under Swoole the superglobals are not populated - request data
+        // arrives on the request object - so a tracer reaching for $_GET would
+        // work in unit tests and silently record nothing in a real worker.
+        $tracer?->begin('request', [
+            'method' => $request->getMethod(),
+            'path'   => $route->path ?? null,
+            'route'  => $route->name ?? null,
+            'marker' => $this->traceMarker($request),
+        ]);
 
         try {
             $metadata = $this->resolveRouteMetadata($route);
@@ -109,7 +153,11 @@ class RouteExecutor
             if ($this->container->has(PreHydrationAuthGateInterface::class)) {
                 /** @var PreHydrationAuthGateInterface $gate */
                 $gate = $this->container->get(PreHydrationAuthGateInterface::class);
+                $tracer?->begin('auth.pre_hydration_gate', ['gate' => $gate::class]);
                 $gate->gate($reqDto, $request, $this->authBootstrapper);
+                $tracer?->end('auth.pre_hydration_gate');
+            } else {
+                $tracer?->mark('auth.pre_hydration_gate.absent');
             }
 
             // 1c. Hydrate and Validate — skipped for OPTIONS. The endpoint is
@@ -118,10 +166,17 @@ class RouteExecutor
             //     rules must not reject an (empty) OPTIONS probe. OPTIONS reports
             //     type-level shape only; validate() is not reflected.
             if (!$isOptions) {
+                $tracer?->begin('payload.hydrate_and_validate', ['payload' => $reqDto::class]);
                 [$reqDto, $validationResponse] = $this->fillAndValidatePayload($reqDto, $request);
+                $tracer?->end('payload.hydrate_and_validate', ['rejected' => $validationResponse !== null]);
                 if ($validationResponse) {
+                    // Ends the request. Recorded as a mark so the trace shows why
+                    // it stops here rather than simply running out of spans.
+                    $tracer?->mark('request.short_circuit', ['reason' => 'validation']);
                     return $this->decorateResponse($validationResponse, $request, $metadata);
                 }
+            } else {
+                $tracer?->mark('payload.hydrate_and_validate.skipped', ['reason' => 'OPTIONS probe']);
             }
 
             // For OPTIONS, swap the resolved route for a variant whose sole
@@ -134,7 +189,9 @@ class RouteExecutor
             }
 
             // 2. Resolve Response DTO (Accept-driven for multi-profile routes)
+            $tracer?->begin('resource.resolve');
             $resDto = $this->resolveResponseDto($route, $request);
+            $tracer?->end('resource.resolve', ['resource' => $resDto::class]);
 
             // 3. Build Context
             $context = new RequestPipelineContext(
@@ -148,7 +205,9 @@ class RouteExecutor
 
             // 4. Execute Pipeline
             $pipelineExecutor = new PipelineExecutor($this->requestScopedContainer, $this->container);
+            $tracer?->begin('pipeline');
             $pipelineExecutor->execute($context);
+            $tracer?->end('pipeline', ['handler' => $context->lastHandlerClass]);
             $resDto = $context->resourceDto;
             if (!is_object($resDto)) {
                 throw new PipelineException('Pipeline did not produce a response DTO.');
@@ -156,7 +215,9 @@ class RouteExecutor
 
             // 5. Render Response
             $renderer = new ResponseRenderer();
+            $tracer?->begin('response.render');
             $resDto = $renderer->render($resDto, $reqDto, $request, $route);
+            $tracer?->end('response.render');
 
             // 6. Adapt to HttpResponse
             return $this->decorateResponse($this->adaptResponse($resDto), $request, $metadata);
@@ -164,12 +225,22 @@ class RouteExecutor
         } catch (\Semitexa\Core\Exception\NotFoundException $e) {
             // Let NotFoundException bubble up so Application::handleRouteException()
             // can dispatch the custom error.404 route when registered.
+            $tracer?->mark('request.exception', ['class' => $e::class]);
             throw $e;
         } catch (DomainException|\Throwable $e) {
+            // Named on the trace before anything is mapped: without this the trace
+            // shows spans that stop and never says what stopped them, which is the
+            // one question a failing request is opened to answer.
+            $tracer?->mark('request.exception', ['class' => $e::class]);
             if ($exceptionMapper === null || $metadata === null) {
                 throw $e;
             }
             return $this->decorateResponse($exceptionMapper->map($e, $request, $metadata), $request, $metadata);
+        } finally {
+            // finally, not a line before each return: execute() leaves through
+            // five different points including two rethrows, and a root span that
+            // closes on only some of them would silently mis-time the others.
+            $tracer?->end('request');
         }
     }
 
