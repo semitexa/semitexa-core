@@ -1,24 +1,21 @@
-# Semitexa Core Docs
+# core docs
 
-This directory is the canonical technical reference for `semitexa/core`.
+The documentation for this package lives in the documentation hub
+(`semitexa/docs`), served at `/docs`. This folder keeps only the package's
+own release record.
 
-Use it for:
+| Subject | Page |
+|---|---|
+| Creating a module and its first route | `routing/adding-routes` |
+| Moving a route's URL through `.env` | `routing/env-route-override` |
+| The canonical module folder layout | `get-started/module-structure` |
+| Payload validation, rules and hydration | `validation/payload-validation` |
+| Request pipeline events and server lifecycle hooks | `events/pipeline` |
+| Sync vs async dispatch, the async worker | `events/dispatch-configuration` |
+| Sessions, session segments, flash messages, cookies | `runtime/sessions-and-cookies` |
+| Per-request tenant, auth and locale | `runtime/request-context` |
+| Which implementation a contract resolves to | `di/contract-resolution` |
+| The Twig cache under long-running workers | `rendering/template-cache` |
 
-- routing and payload handling rules
-- module structure
-- runtime behavior
-- service contracts and DI
-- request, session, and validation mechanics
-- attribute reference
-
-## Start Here
-
-- `ADDING_ROUTES.md`
-- `MODULE_STRUCTURE.md`
-- `RUNNING.md`
-- `SERVICE_CONTRACTS.md`
-- `RELEASE_NOTES.md`
-- `PAYLOAD_VALIDATION.md`
-- `attributes/README.md`
-
-If a root-level document repeats one of these topics, treat the root document as a wrapper or navigation page unless it explicitly defines additional repository-specific constraints.
+Every attribute this package defines is listed, generated from the source,
+in `reference/attributes-core.md`.
