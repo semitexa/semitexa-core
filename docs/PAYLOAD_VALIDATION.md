@@ -32,10 +32,10 @@ These helpers are still useful, but they no longer imply that every payload must
 ## Example
 
 ```php
-use Semitexa\Core\Attribute\AsPayload;
+use Semitexa\Core\Attribute\AsPublicPayload;
 use Semitexa\Core\Exception\ValidationException;
 
-#[AsPayload(path: '/contact', methods: ['POST'], responseWith: ContactFormResource::class)]
+#[AsPublicPayload(path: '/contact', methods: ['POST'], responseWith: ContactFormResource::class)]
 class ContactFormPayload
 {
     protected string $email = '';
