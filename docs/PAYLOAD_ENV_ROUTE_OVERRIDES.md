@@ -10,12 +10,12 @@ This is useful when:
 
 ## The mechanism
 
-`#[AsPayload]` accepts env-resolved string values.
+`#[AsPublicPayload]` accepts env-resolved string values.
 
 The most common case is `path`:
 
 ```php
-#[AsPayload(
+#[AsPublicPayload(
     path: 'env::DOCS_PRODUCT_ROUTE_PATH::/docs/products',
     methods: ['GET'],
     responseWith: ProductDocsResource::class,
@@ -39,7 +39,7 @@ path: 'env::DOCS_PRODUCT_ROUTE_PATH::/docs/products'
 
 ## What can be overridden
 
-Any string field on `#[AsPayload]` can use env resolution, but the most valuable ones for routing are:
+Any string field on `#[AsPublicPayload]` can use env resolution, but the most valuable ones for routing are:
 
 - `path`
 - `name`
@@ -50,7 +50,7 @@ In practice, `path` is the main one you should expose for environment-level URL 
 ## Example: keep code stable, move the URL per environment
 
 ```php
-#[AsPayload(
+#[AsPublicPayload(
     path: 'env::DEMO_BASIC_ROUTE_PATH::/demo/routing/basic',
     methods: ['GET'],
     responseWith: DemoFeatureResource::class,
@@ -88,5 +88,5 @@ If the env key is absent, Semitexa falls back to:
 
 ## Related
 
-- [AsPayload attribute](attributes/AsPayload.md)
+- [Core attributes](../../docs/docs/en/reference/attributes-core.md) — generated from the attribute classes
 - [Adding routes](ADDING_ROUTES.md)

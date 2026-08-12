@@ -1,6 +1,6 @@
 # Service contracts and active implementation
 
-Service contracts are interfaces bound to implementations in the **Semitexa DI container**. Only types discovered via **#[AsServiceContract(of: SomeInterface::class)]** (and bootstrap entries like `Environment`) are in the container. Dependency injection is **only via protected properties** with **#[InjectAsReadonly]**, **#[InjectAsMutable]**, or **#[InjectAsFactory]** — see **src/Container/README.md** for full rules.
+Service contracts are interfaces bound to implementations in the **Semitexa DI container**. Only types discovered via **#[SatisfiesServiceContract(of: SomeInterface::class)]** (and bootstrap entries like `Environment`) are in the container. Dependency injection is **only via protected properties** with **#[InjectAsReadonly]**, **#[InjectAsMutable]**, or **#[InjectAsFactory]** — see **src/Container/README.md** for full rules.
 
 When several modules provide an implementation for the same interface, the **active** one is chosen by module "extends" order (child module wins).
 
@@ -30,7 +30,7 @@ Output is JSON: `contracts[]` with `contract`, `active`, and `implementations` (
 
 ## How it works
 
-- Implementations are discovered via **#[AsServiceContract(of: SomeInterface::class)]** on classes (in modules).
+- Implementations are discovered via **#[SatisfiesServiceContract(of: SomeInterface::class)]** on classes (in modules).
 - **Single implementation:** the container binds the interface directly to that class.
 - **Multiple implementations:** a **registry resolver** is generated in `src/registry/Contracts/` (e.g. `ItemListProviderResolver`). The resolver receives all implementations via constructor and exposes `getContract()`; the container uses it to obtain the chosen implementation. By default the resolver returns the implementation chosen by module "extends" order; you can edit `getContract()` to pick another. Resolver is **optional**: if the class does not exist, the container uses the registry’s active implementation directly.
 - **Generate resolvers:** run **`bin/semitexa registry:sync:contracts`** (or **`bin/semitexa registry:sync`** to sync payloads and contracts together). Only interfaces with **2+ implementations** get a resolver; single-implementation contracts are not generated. The container discovers resolvers by convention (`App\Registry\Contracts\{InterfaceShortName}Resolver`), no manifest needed.

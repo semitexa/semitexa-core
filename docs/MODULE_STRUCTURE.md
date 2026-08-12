@@ -8,7 +8,7 @@ This is the canonical Semitexa module layout for request payloads, handlers, and
 
 | Subfolder | Purpose | Attribute / usage |
 |-----------|---------|-------------------|
-| **Request** | HTTP request DTOs (route + methods) | `#[AsPayload(path, methods, responseWith)]`; require entry in `src/registry/Payloads/` |
+| **Request** | HTTP request DTOs (route + methods) | `#[AsPublicPayload(path, methods, responseWith)]`; require entry in `src/registry/Payloads/` |
 | **Session** | Session segment DTOs | `#[SessionSegment('name')]`; `SessionInterface::getPayload()` / `setPayload()` |
 | **Event** | Event DTOs for dispatch | Used with `EventDispatcher::create(EventClass::class, [...])` and `dispatch()` |
 
@@ -16,7 +16,7 @@ This is the canonical Semitexa module layout for request payloads, handlers, and
 
 Do **not** put these in `Application/Session/` or other ad-hoc module-root folders. Use **`Application/Payload/Request/`**, **`Payload/Session/`**, **`Payload/Event/`** only.
 
-Request DTOs can declare pipeline requirements: `#[RequiresAuth]`, `#[RequiresAbility('ability')]`.
+Request DTOs declare access through one of `#[AsPublicPayload]` / `#[AsProtectedPayload]` / `#[AsServicePayload]`, and finer requirements through `#[RequiresPermission('name')]` or `#[RequiresCapability('name')]`.
 
 ---
 

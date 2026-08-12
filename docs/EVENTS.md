@@ -8,8 +8,8 @@ The request pipeline is a fixed sequence of phases: **Auth → Access → Handle
 
 | Phase | Event Class | Purpose |
 |-------|------------|---------|
-| Auth | `Pipeline\AuthCheck` | Runs auth handlers via `AuthBootstrapper`. Checks `#[RequiresAuth]` on request DTOs. |
-| Access | `Pipeline\AccessCheck` | Reads `#[RequiresAbility]` from request DTO, calls `Gate::authorize()`. |
+| Auth | `Pipeline\AuthCheck` | Runs auth handlers via `AuthBootstrapper`. Checks the payload's access attribute — `#[AsProtectedPayload]` or `#[AsServicePayload]`. |
+| Access | `Pipeline\AccessCheck` | Reads `#[RequiresPermission]` / `#[RequiresCapability]` from the request DTO, calls `Gate::authorize()`. |
 | Handle | `Pipeline\HandleRequest` | Runs route-specific handlers (PayloadHandler) and any registered pipeline listeners. |
 
 Pipeline listeners use `#[AsPipelineListener(phase: AuthCheck::class, priority: 0)]` and implement `PipelineListenerInterface`.
