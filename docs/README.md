@@ -1,29 +1,21 @@
-# Semitexa Core Docs
+# core docs
 
-This directory is **not** the canonical documentation for `semitexa/core`.
-Documentation lives in `semitexa/docs`, filed by subject rather than by the
-package that implements it — see its `workspace/DOCUMENTATION_OWNERSHIP.md`.
-What remains here is being moved there; nothing new belongs in this directory.
+The documentation for this package lives in the documentation hub
+(`semitexa/docs`), served at `/docs`. This folder keeps only the package's
+own release record.
 
-The attribute reference that used to live in `docs/attributes/` is gone. It is
-generated now, from the attribute classes themselves, by
-`bin/semitexa docs:reference:generate` — signature, targets, parameters and a
-usage quoted from the codebase. Five of its seven pages documented attributes
-that no longer exist (`AsEntity`, `AsPayload`, `AsRequest`, `AsRequestHandler`,
-`AsDomainPart`), and the two that were real described them alongside a
-surrounding API that is not: `BaseEntity`, a `doc:` parameter,
-<!-- docs-lint-ignore -->
-`#[AsEntity]`.
-Hand-written reference is the kind that rots first, because a signature changes
-without anybody thinking of the page.
+| Subject | Page |
+|---|---|
+| Creating a module and its first route | `routing/adding-routes` |
+| Moving a route's URL through `.env` | `routing/env-route-override` |
+| The canonical module folder layout | `get-started/module-structure` |
+| Payload validation, rules and hydration | `validation/payload-validation` |
+| Request pipeline events and server lifecycle hooks | `events/pipeline` |
+| Sync vs async dispatch, the async worker | `events/dispatch-configuration` |
+| Sessions, session segments, flash messages, cookies | `runtime/sessions-and-cookies` |
+| Per-request tenant, auth and locale | `runtime/request-context` |
+| Which implementation a contract resolves to | `di/contract-resolution` |
+| The Twig cache under long-running workers | `rendering/template-cache` |
 
-## Start Here
-
-- `ADDING_ROUTES.md`
-- `MODULE_STRUCTURE.md`
-- `RUNNING.md`
-- `SERVICE_CONTRACTS.md`
-- `RELEASE_NOTES.md`
-- `PAYLOAD_VALIDATION.md`
-
-If a root-level document repeats one of these topics, treat the root document as a wrapper or navigation page unless it explicitly defines additional repository-specific constraints.
+Every attribute this package defines is listed, generated from the source,
+in `reference/attributes-core.md`.
