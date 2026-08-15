@@ -110,8 +110,12 @@ final class LintResponsesCommand extends BaseCommand
                 // project may legitimately override the binding from a module
                 // (child-module priority). The path allowlist above only knows
                 // the framework's own mappers, so recognise the rest by what
-                // the class declares rather than where it sits. (#100)
-                if (preg_match('/implements[^{;]*\bExceptionResponseMapperInterface\b/s', $content)) {
+                // the class DECLARES rather than where it sits — matched on
+                // tokenizer-stripped source, so the interface name inside a
+                // comment or a string cannot smuggle a file past the lint.
+                // File-level scope is deliberate: PSR-4 autoloading already
+                // holds this codebase to one class per file. (#100)
+                if (preg_match('/\bimplements[^{;]*\bExceptionResponseMapperInterface\b/s', self::codeOnly($content))) {
                     continue;
                 }
 
@@ -140,5 +144,27 @@ final class LintResponsesCommand extends BaseCommand
         }
         $io->error(sprintf('%d violation(s) found.', count($errors)));
         return self::FAILURE;
+    }
+
+    /**
+     * The file's source with comments and string literals blanked out, so
+     * declaration-level regexes cannot be satisfied by prose or data.
+     */
+    private static function codeOnly(string $content): string
+    {
+        $out = '';
+        foreach (token_get_all($content) as $token) {
+            if (!is_array($token)) {
+                $out .= $token;
+                continue;
+            }
+            [$id, $text] = $token;
+            if ($id === T_COMMENT || $id === T_DOC_COMMENT || $id === T_CONSTANT_ENCAPSED_STRING || $id === T_ENCAPSED_AND_WHITESPACE) {
+                continue;
+            }
+            $out .= $text;
+        }
+
+        return $out;
     }
 }

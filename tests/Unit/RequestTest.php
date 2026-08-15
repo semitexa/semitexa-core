@@ -39,9 +39,19 @@ final class RequestTest extends TestCase
         $this->assertSame('https', $request->getScheme());
     }
 
+    private string|false $originalTrustedProxies = false;
+
+    protected function setUp(): void
+    {
+        $this->originalTrustedProxies = getenv('TRUSTED_PROXIES');
+        putenv('TRUSTED_PROXIES');
+    }
+
     protected function tearDown(): void
     {
-        putenv('TRUSTED_PROXIES');
+        $this->originalTrustedProxies === false
+            ? putenv('TRUSTED_PROXIES')
+            : putenv('TRUSTED_PROXIES=' . $this->originalTrustedProxies);
     }
 
     private function forwardedHttps(string $remoteAddr): Request
@@ -86,6 +96,17 @@ final class RequestTest extends TestCase
         putenv('TRUSTED_PROXIES=not-an-ip, 172.18.0.0/99, /16, ');
 
         $this->assertSame('http', $this->forwardedHttps('172.18.0.3')->getScheme());
+    }
+
+    public function testPartialByteCidrMaskIsExact(): void
+    {
+        // /25 ends mid-octet: the mask branch itself is what separates
+        // .127 (inside) from .128 (outside) — a mask regression here would
+        // trust an unconfigured peer's X-Forwarded-Proto.
+        putenv('TRUSTED_PROXIES=192.0.2.0/25');
+
+        $this->assertSame('https', $this->forwardedHttps('192.0.2.127')->getScheme());
+        $this->assertSame('http', $this->forwardedHttps('192.0.2.128')->getScheme());
     }
 
     public function testTrustedProxiesIpv6Cidr(): void

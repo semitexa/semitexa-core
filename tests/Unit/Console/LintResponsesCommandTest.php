@@ -112,6 +112,53 @@ PHP);
     }
 
     #[Test]
+    public function a_comment_mentioning_the_interface_exempts_nothing(): void
+    {
+        $this->write('CommentedService.php', <<<'PHP'
+<?php
+namespace Demo;
+use Semitexa\Core\HttpResponse;
+// This service implements ExceptionResponseMapperInterface in spirit only.
+final class CommentedService
+{
+    public function out(): HttpResponse
+    {
+        return HttpResponse::json(['nope' => true]);
+    }
+}
+PHP);
+
+        $tester = $this->run_();
+
+        self::assertSame(1, $tester->getStatusCode());
+        self::assertStringContainsString('CommentedService.php', $tester->getDisplay());
+    }
+
+    #[Test]
+    public function a_string_mentioning_the_interface_exempts_nothing(): void
+    {
+        $this->write('StringyService.php', <<<'PHP'
+<?php
+namespace Demo;
+use Semitexa\Core\HttpResponse;
+final class StringyService
+{
+    public function out(): HttpResponse
+    {
+        $label = 'implements ExceptionResponseMapperInterface';
+
+        return HttpResponse::json(['label' => $label]);
+    }
+}
+PHP);
+
+        $tester = $this->run_();
+
+        self::assertSame(1, $tester->getStatusCode());
+        self::assertStringContainsString('StringyService.php', $tester->getDisplay());
+    }
+
+    #[Test]
     public function the_mapper_exemption_does_not_leak_onto_neighbours(): void
     {
         $this->write('LoginRedirectMapper.php', <<<'PHP'
