@@ -151,13 +151,73 @@ readonly class Request
         return $this->getScheme() . '://' . $host;
     }
 
+    /**
+     * Whether the peer that handed us this request may speak for the client.
+     *
+     * Loopback is always trusted — a proxy on the same host. Anything else is
+     * trusted only when the operator lists it in TRUSTED_PROXIES (comma-
+     * separated IPs and/or CIDR blocks, e.g. `172.18.0.0/16, 10.0.0.5`): in
+     * the containerised topology the compose files themselves ship, the
+     * reverse proxy is a sibling container on a bridge network, so its
+     * X-Forwarded-Proto used to be silently dropped and every URL built from
+     * the request came out http:// on an https-only site — and the session
+     * cookie lost its Secure flag the same way (#102). The default stays
+     * loopback-only: trusting private ranges implicitly would let any
+     * container on the bridge spoof the scheme.
+     */
     private function isTrustedForwardedRequest(): bool
     {
         $remoteAddr = strtolower(trim($this->getServer('remote_addr')));
 
-        return $remoteAddr === '127.0.0.1'
-            || $remoteAddr === '::1'
-            || $remoteAddr === 'localhost';
+        if ($remoteAddr === '127.0.0.1' || $remoteAddr === '::1' || $remoteAddr === 'localhost') {
+            return true;
+        }
+
+        foreach (explode(',', (string) Environment::getEnvValue('TRUSTED_PROXIES', '')) as $entry) {
+            $entry = trim($entry);
+            if ($entry !== '' && self::ipMatchesEntry($remoteAddr, $entry)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /** One TRUSTED_PROXIES entry — a bare IP or a CIDR block, IPv4 or IPv6. */
+    private static function ipMatchesEntry(string $ip, string $entry): bool
+    {
+        $ipBin = @inet_pton($ip);
+        if ($ipBin === false) {
+            return false;
+        }
+
+        if (!str_contains($entry, '/')) {
+            $entryBin = @inet_pton($entry);
+
+            return $entryBin !== false && $entryBin === $ipBin;
+        }
+
+        [$subnet, $bits] = explode('/', $entry, 2);
+        $subnetBin = @inet_pton(trim($subnet));
+        if ($subnetBin === false || strlen($subnetBin) !== strlen($ipBin) || !ctype_digit(trim($bits))) {
+            return false;
+        }
+        $bits = (int) trim($bits);
+        if ($bits < 0 || $bits > strlen($ipBin) * 8) {
+            return false;
+        }
+
+        $fullBytes = intdiv($bits, 8);
+        if ($fullBytes > 0 && substr($ipBin, 0, $fullBytes) !== substr($subnetBin, 0, $fullBytes)) {
+            return false;
+        }
+        $remainder = $bits % 8;
+        if ($remainder === 0) {
+            return true;
+        }
+        $mask = ~((1 << (8 - $remainder)) - 1) & 0xFF;
+
+        return ((ord($ipBin[$fullBytes]) ^ ord($subnetBin[$fullBytes])) & $mask) === 0;
     }
     
     public function getQuery(string $key, string $default = ''): string
