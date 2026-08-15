@@ -105,6 +105,16 @@ final class LintResponsesCommand extends BaseCommand
                 $filesChecked++;
                 $content = file_get_contents($path);
 
+                // An exception mapper is sanctioned wherever it lives — the
+                // interface CONTRACT returns HttpResponse, and a consumer
+                // project may legitimately override the binding from a module
+                // (child-module priority). The path allowlist above only knows
+                // the framework's own mappers, so recognise the rest by what
+                // the class declares rather than where it sits. (#100)
+                if (preg_match('/implements[^{;]*\bExceptionResponseMapperInterface\b/s', $content)) {
+                    continue;
+                }
+
                 // Check for HttpResponse:: static calls
                 if (preg_match('/HttpResponse::(json|html|text|notFound|redirect)\s*\(/', $content)) {
                     $relativePath = str_replace($root . '/', '', $path);
