@@ -41,6 +41,18 @@ final class StaticContainerAccessRule implements Rule
         'Semitexa\\Scheduler\\Application\\Service\\RunExecutor',
     ];
 
+    /**
+     * Compared with `===`, never as a prefix: a prefix entry would also bless
+     * every class NAMED LIKE the exception (ReplayRunnerHelper, RunExecutorX),
+     * which is exactly the drift an exact blessing exists to prevent. The
+     * replay sandbox's whole job is building an isolated request scope around
+     * a handler resolved from a recorded route — the queue-consumer tier.
+     * Nothing else in semitexa-dev gets this.
+     */
+    private const ALLOWED_EXACT_CLASSES = [
+        'Semitexa\\Dev\\Application\\Service\\Trace\\ReplayRunner',
+    ];
+
     public function getNodeType(): string
     {
         return StaticCall::class;
@@ -60,6 +72,10 @@ final class StaticContainerAccessRule implements Rule
 
         $currentClass = $scope->getClassReflection()?->getName() ?? '';
         $currentNamespace = $scope->getNamespace() ?? '';
+
+        if (in_array($currentClass, self::ALLOWED_EXACT_CLASSES, true)) {
+            return [];
+        }
 
         foreach (self::ALLOWED_NAMESPACES as $allowed) {
             if (str_starts_with($currentClass, $allowed) || str_starts_with($currentNamespace . '\\', $allowed)) {
