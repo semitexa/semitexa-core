@@ -87,8 +87,11 @@ class QueueWorker
                 $this->updateStats('failed');
                 return;
             }
-            if (!is_array($data)) {
-                $this->log('❌ Queued message is not an object', 'error');
+            // The raw first character, not array_is_list(): assoc decoding
+            // maps both [] and {} to the same empty array, so only the JSON
+            // root can tell a (valid, empty) object from an array message.
+            if (!is_array($data) || !str_starts_with(ltrim($payload), '{')) {
+                $this->log('❌ Queued message is not a JSON object', 'error');
                 $this->updateStats('failed');
                 return;
             }
