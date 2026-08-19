@@ -75,7 +75,10 @@ final class StaticFacadeAccessRule implements Rule
             return [];
         }
 
-        $className = $scope->resolveName($node->class);
+        // resolveName() can hand back a leading backslash on fully-qualified
+        // call sites; GUARDED_FACADES keys are stored without one - normalise,
+        // as the sibling rules do, or \\Fqcn::call() bypasses the guard.
+        $className = ltrim($scope->resolveName($node->class), '\\');
         if (!isset(self::GUARDED_FACADES[$className])) {
             return [];
         }
@@ -88,7 +91,10 @@ final class StaticFacadeAccessRule implements Rule
         }
 
         foreach ($allowed as $prefix) {
-            if (str_starts_with($currentClass, $prefix)) {
+            // Exact class, or a namespace boundary after the entry — a bare
+            // str_starts_with would also admit name-suffix lookalikes
+            // (SseServerHelper riding the SseServer entry).
+            if ($currentClass === $prefix || str_starts_with($currentClass, $prefix . '\\')) {
                 return [];
             }
         }
