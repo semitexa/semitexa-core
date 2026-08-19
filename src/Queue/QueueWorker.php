@@ -74,6 +74,11 @@ class QueueWorker
     {
         CoroutineLocal::beginRequest();
 
+        // Optional dev observer: one consumed message is one 'job' process in
+        // the Observatory journal (kind=queue), named by the listener or
+        // handler it dispatches to. Journal-only — no trace buffer opens.
+        $tracer = $this->resolveTracer();
+
         try {
             try {
                 $data = json_decode($payload, true, 512, JSON_THROW_ON_ERROR);
@@ -82,20 +87,51 @@ class QueueWorker
                 $this->updateStats('failed');
                 return;
             }
+            if (!is_array($data)) {
+                $this->log('❌ Queued message is not an object', 'error');
+                $this->updateStats('failed');
+                return;
+            }
 
             $type = $data['type'] ?? 'handler';
+            $target = $data['listenerClass'] ?? $data['handlerClass'] ?? $type;
+            $tracer?->begin('job', [
+                'kind' => 'queue',
+                'route' => is_string($target) ? $target : 'queue-message',
+                'path' => $this->currentQueue,
+            ]);
             if ($type === QueuedEventListenerMessage::TYPE) {
                 $this->processEventPayload($payload);
             } else {
                 $this->processHandlerPayload($payload);
             }
         } finally {
+            // Closes the journal process when one was opened; a decode failure
+            // never opened one, and end() is a no-op then.
+            $tracer?->end('job');
             // Per-message lifecycle reset — same contract as Application::handleRequest.
             // Without this, a long-running queue worker carries authorization-decision
             // state from one job to the next (real production leak in CLI mode).
             PerRequestStateRegistry::resetAll();
             CoroutineLocal::endRequest();
         }
+    }
+
+    /**
+     * The optional dev tracer, wrapped so it can never throw into message
+     * processing. This class lives in Semitexa\Core\Queue\, the rule's blessed
+     * dynamic-dispatch tier — resolving from the container here is its job.
+     */
+    private function resolveTracer(): ?\Semitexa\Core\Pipeline\RequestTracerInterface
+    {
+        $container = ContainerFactory::get();
+        $resolved = $container->has(\Semitexa\Core\Pipeline\RequestTracerInterface::class)
+            ? $container->get(\Semitexa\Core\Pipeline\RequestTracerInterface::class)
+            : null;
+
+        return \Semitexa\Core\Pipeline\SafeRequestTracer::wrap(
+            $resolved instanceof \Semitexa\Core\Pipeline\RequestTracerInterface ? $resolved : null,
+        );
     }
 
     private function processEventPayload(string $payload): void
