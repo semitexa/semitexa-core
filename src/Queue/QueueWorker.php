@@ -124,14 +124,21 @@ class QueueWorker
      */
     private function resolveTracer(): ?\Semitexa\Core\Pipeline\RequestTracerInterface
     {
-        $container = ContainerFactory::get();
-        $resolved = $container->has(\Semitexa\Core\Pipeline\RequestTracerInterface::class)
-            ? $container->get(\Semitexa\Core\Pipeline\RequestTracerInterface::class)
-            : null;
+        // Wrapped whole: get() can throw even after has() said true (a broken
+        // binding), and an optional observer failing to RESOLVE must degrade
+        // to "no observer", never abort the work it wanted to watch.
+        try {
+            $container = ContainerFactory::get();
+            $resolved = $container->has(\Semitexa\Core\Pipeline\RequestTracerInterface::class)
+                ? $container->get(\Semitexa\Core\Pipeline\RequestTracerInterface::class)
+                : null;
 
-        return \Semitexa\Core\Pipeline\SafeRequestTracer::wrap(
-            $resolved instanceof \Semitexa\Core\Pipeline\RequestTracerInterface ? $resolved : null,
-        );
+            return \Semitexa\Core\Pipeline\SafeRequestTracer::wrap(
+                $resolved instanceof \Semitexa\Core\Pipeline\RequestTracerInterface ? $resolved : null,
+            );
+        } catch (\Throwable) {
+            return null;
+        }
     }
 
     private function processEventPayload(string $payload): void

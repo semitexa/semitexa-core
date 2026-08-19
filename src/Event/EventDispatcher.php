@@ -121,14 +121,21 @@ final class EventDispatcher implements EventDispatcherInterface
      */
     private function resolveTracer(): ?\Semitexa\Core\Pipeline\RequestTracerInterface
     {
-        $container = ContainerFactory::get();
-        $resolved = $container->has(\Semitexa\Core\Pipeline\RequestTracerInterface::class)
-            ? $container->get(\Semitexa\Core\Pipeline\RequestTracerInterface::class)
-            : null;
+        // Wrapped whole: get() can throw even after has() said true (a broken
+        // binding), and an optional observer failing to RESOLVE must degrade
+        // to "no observer", never abort the dispatch it wanted to watch.
+        try {
+            $container = ContainerFactory::get();
+            $resolved = $container->has(\Semitexa\Core\Pipeline\RequestTracerInterface::class)
+                ? $container->get(\Semitexa\Core\Pipeline\RequestTracerInterface::class)
+                : null;
 
-        return \Semitexa\Core\Pipeline\SafeRequestTracer::wrap(
-            $resolved instanceof \Semitexa\Core\Pipeline\RequestTracerInterface ? $resolved : null,
-        );
+            return \Semitexa\Core\Pipeline\SafeRequestTracer::wrap(
+                $resolved instanceof \Semitexa\Core\Pipeline\RequestTracerInterface ? $resolved : null,
+            );
+        } catch (\Throwable) {
+            return null;
+        }
     }
 
     private function runListenerSync(array $meta, object $event, ?\Semitexa\Core\Pipeline\RequestTracerInterface $tracer = null): void
@@ -189,14 +196,6 @@ final class EventDispatcher implements EventDispatcherInterface
         $transportName = $meta['transport'] ?? QueueConfig::defaultTransport();
         $queueName = $meta['queue'] ?? QueueConfig::defaultQueueName($meta['event'] ?? 'event');
 
-        // A mark, not a span: the work happens in another process; what this
-        // request can attest to is only that it was handed off, and where.
-        $tracer?->mark('event.listener.queued', [
-            'listener' => $meta['class'],
-            'event' => get_class($event),
-            'queue' => $queueName,
-        ]);
-
         $message = new \Semitexa\Core\Queue\Message\QueuedEventListenerMessage(
             listenerClass: $meta['class'],
             eventClass: get_class($event),
@@ -205,6 +204,15 @@ final class EventDispatcher implements EventDispatcherInterface
 
         $transport = QueueTransportRegistry::create($transportName);
         $transport->publish($queueName, $message->toJson());
+
+        // AFTER publish, deliberately: the mark attests a handoff that
+        // happened. Serialization or publish throwing must not leave a trace
+        // claiming a message that never reached the queue.
+        $tracer?->mark('event.listener.queued', [
+            'listener' => $meta['class'],
+            'event' => get_class($event),
+            'queue' => $queueName,
+        ]);
     }
 
     /**
