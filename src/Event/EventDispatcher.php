@@ -84,12 +84,19 @@ final class EventDispatcher implements EventDispatcherInterface
         $eventClass = get_class($event);
         $listeners = $this->eventListenerRegistry->getListeners($eventClass);
 
+        // Optional dev-only observer — same shape as RouteExecutor's: absent in
+        // production, one has() per dispatch otherwise. Answers the deep-dive
+        // questions "which events fired during this request, and which listeners
+        // ran on them" that the static event map (ai:ask event) cannot.
+        $tracer = $this->resolveTracer();
+        $tracer?->mark('event.dispatch', ['event' => $eventClass, 'listeners' => count($listeners)]);
+
         foreach ($listeners as $meta) {
             $execution = EventExecution::fromAttributeValue((string) ($meta['execution'] ?? EventExecution::Sync->value));
             match ($execution) {
-                EventExecution::Sync => $this->runListenerSync($meta, $event),
+                EventExecution::Sync => $this->runListenerSync($meta, $event, $tracer),
                 EventExecution::Async => $this->runListenerDefer($meta, $event),
-                EventExecution::Queued => $this->enqueueListener($meta, $event),
+                EventExecution::Queued => $this->enqueueListener($meta, $event, $tracer),
             };
         }
 
@@ -106,7 +113,25 @@ final class EventDispatcher implements EventDispatcherInterface
         }
     }
 
-    private function runListenerSync(array $meta, object $event): void
+    /**
+     * The optional dev tracer, wrapped so it can never throw into a dispatch.
+     * Resolved per dispatch rather than injected: this dispatcher is built
+     * before the tracer's package may have registered, and one has() is the
+     * whole production cost.
+     */
+    private function resolveTracer(): ?\Semitexa\Core\Pipeline\RequestTracerInterface
+    {
+        $container = ContainerFactory::get();
+        $resolved = $container->has(\Semitexa\Core\Pipeline\RequestTracerInterface::class)
+            ? $container->get(\Semitexa\Core\Pipeline\RequestTracerInterface::class)
+            : null;
+
+        return \Semitexa\Core\Pipeline\SafeRequestTracer::wrap(
+            $resolved instanceof \Semitexa\Core\Pipeline\RequestTracerInterface ? $resolved : null,
+        );
+    }
+
+    private function runListenerSync(array $meta, object $event, ?\Semitexa\Core\Pipeline\RequestTracerInterface $tracer = null): void
     {
         /** @var \Semitexa\Core\Container\SemitexaContainer $container */
         $container = ContainerFactory::get();
@@ -123,7 +148,17 @@ final class EventDispatcher implements EventDispatcherInterface
                 $meta['class'],
             ));
         }
-        $listener->handle($event);
+
+        // A span, not a mark: which listener a request's milliseconds went to
+        // is exactly the question a slow-event hunt opens the trace to answer.
+        // Deferred runs re-resolve nothing: no tracer is handed in, and by then
+        // the buffer is closed anyway, so bracketing would record into nothing.
+        $tracer?->begin('event.listener', ['listener' => $meta['class'], 'event' => get_class($event)]);
+        try {
+            $listener->handle($event);
+        } finally {
+            $tracer?->end('event.listener');
+        }
     }
 
     /** Run listener after response is sent (Swoole defer). Falls back to sync if Swoole not available. */
@@ -149,10 +184,18 @@ final class EventDispatcher implements EventDispatcherInterface
         }
     }
 
-    private function enqueueListener(array $meta, object $event): void
+    private function enqueueListener(array $meta, object $event, ?\Semitexa\Core\Pipeline\RequestTracerInterface $tracer = null): void
     {
         $transportName = $meta['transport'] ?? QueueConfig::defaultTransport();
         $queueName = $meta['queue'] ?? QueueConfig::defaultQueueName($meta['event'] ?? 'event');
+
+        // A mark, not a span: the work happens in another process; what this
+        // request can attest to is only that it was handed off, and where.
+        $tracer?->mark('event.listener.queued', [
+            'listener' => $meta['class'],
+            'event' => get_class($event),
+            'queue' => $queueName,
+        ]);
 
         $message = new \Semitexa\Core\Queue\Message\QueuedEventListenerMessage(
             listenerClass: $meta['class'],

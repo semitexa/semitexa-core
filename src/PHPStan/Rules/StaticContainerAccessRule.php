@@ -39,6 +39,11 @@ final class StaticContainerAccessRule implements Rule
         'Semitexa\\Core\\Event\\EventDispatcher',
         'Semitexa\\Core\\Queue\\',
         'Semitexa\\Scheduler\\Application\\Service\\RunExecutor',
+        // The replay sandbox's whole job is building an isolated request
+        // scope around a handler resolved from a recorded route — the same
+        // dynamic-dispatch tier as the queue consumers above. Exact class:
+        // nothing else in semitexa-dev gets this.
+        'Semitexa\\Dev\\Application\\Service\\Trace\\ReplayRunner',
     ];
 
     public function getNodeType(): string

@@ -168,7 +168,14 @@ class RouteExecutor
             if (!$isOptions) {
                 $tracer?->begin('payload.hydrate_and_validate', ['payload' => $reqDto::class]);
                 [$reqDto, $validationResponse] = $this->fillAndValidatePayload($reqDto, $request);
-                $tracer?->end('payload.hydrate_and_validate', ['rejected' => $validationResponse !== null]);
+                // The hydrated DTO rides along as an object; the tracer decides
+                // what of its state survives (redacted, size-bounded snapshot).
+                // Passing values here would force the executor to know the
+                // redaction rules, which belong to the observer, not the path.
+                $tracer?->end('payload.hydrate_and_validate', [
+                    'rejected' => $validationResponse !== null,
+                    'payload_snapshot' => $reqDto,
+                ]);
                 if ($validationResponse) {
                     // Ends the request. Recorded as a mark so the trace shows why
                     // it stops here rather than simply running out of spans.
