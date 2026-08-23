@@ -34,6 +34,44 @@ class ClassDiscovery
     /** @var array<string, int> Coroutine id owning each in-flight gate (reentrancy guard). */
     private array $coroutineGateOwners = [];
 
+    /**
+     * What discovery found, shared by every instance in this PROCESS, keyed by project root.
+     *
+     * The per-instance caches below are correct but far too small a unit. A worker holds ONE
+     * classmap's worth of truth for its whole life — the filesystem does not change under it —
+     * yet `new ClassDiscovery()` is the normal way to reach discovery from a service that has
+     * no container (41 call sites do it through `new OrmManager()` alone). Every one of those
+     * instances used to redo the entire PSR-4 walk: open every source directory, read every
+     * PHP file, autoload every class in the map.
+     *
+     * That is fine once at boot and ruinous on a timer. Measured before this existed: a 5s
+     * task tick reached settings through a fresh OrmManager, so worker 0 rebuilt the mapper
+     * registry — and therefore rescanned every file — every five seconds, holding 60-75% of a
+     * core and reading 12 MB/s, for as long as the server ran. One project's worker had read
+     * 15 GB doing nothing. At PHP's default 128M limit the same worker instead reached the
+     * memory cap mid-scan and was respawned into the next scan, forever.
+     *
+     * Keyed by project root, which is what makes this safe without an invalidation hook: a
+     * test that chdirs into a fixture root simply reads a different bucket. Deliberately NOT
+     * cleared from {@see ProjectRoot::reset()} — that call does not mean "the project moved".
+     * {@see \Semitexa\Orm\OrmManager::createPool()} makes it under Swoole just to re-read
+     * DB_* out of the env files, once per manager instance, so hanging invalidation off it
+     * would wipe this cache on the very path it exists to protect. A caller that really did
+     * change the sources under a running process calls {@see resetSharedCache()} itself.
+     *
+     * @var array<string, array<class-string, string>>
+     */
+    private static array $sharedClassMaps = [];
+
+    /**
+     * Attribute lookups shared across instances, keyed by project root then by attribute cache
+     * key. Worth sharing separately from the classmap: {@see computeClassesWithAttribute()}
+     * autoloads and reflects over EVERY class in the map, which is the expensive half.
+     *
+     * @var array<string, array<string, list<class-string>>>
+     */
+    private static array $sharedAttributeCaches = [];
+
     private array $allowedNamespacePrefixes = [
         'Semitexa\\' => true,
         'App\\' => true,
@@ -82,7 +120,18 @@ class ClassDiscovery
 
     private function runInitialization(): void
     {
-        $composerDir = ProjectRoot::get() . '/vendor/composer';
+        $projectRoot = ProjectRoot::get();
+        if (isset(self::$sharedClassMaps[$projectRoot])) {
+            // Another instance in this process already walked this root. Skipping
+            // refreshComposerAutoloader() with it is deliberate: that call mutates the
+            // process-wide Composer ClassLoader, so the instance that populated the cache
+            // already applied it and repeating it would add nothing.
+            $this->classMap = self::$sharedClassMaps[$projectRoot];
+
+            return;
+        }
+
+        $composerDir = $projectRoot . '/vendor/composer';
         $composerClassMap = $this->loadComposerClassMap($composerDir . '/autoload_classmap.php');
         $composerPsr4Map = $this->loadComposerPsr4Map($composerDir . '/autoload_psr4.php');
 
@@ -103,6 +152,21 @@ class ClassDiscovery
         }
 
         $this->mergePsr4ClassCandidates($composerPsr4Map);
+
+        self::$sharedClassMaps[$projectRoot] = $this->classMap;
+    }
+
+    /**
+     * Drop everything discovery has learned in this process.
+     *
+     * Only needed when sources change under a LIVE process and the project root stays the
+     * same — a test that rewrites fixture files in place, essentially. Moving the root needs
+     * nothing: the caches are keyed by root, so the new root starts empty on its own.
+     */
+    public static function resetSharedCache(): void
+    {
+        self::$sharedClassMaps = [];
+        self::$sharedAttributeCaches = [];
     }
 
     /**
@@ -204,11 +268,18 @@ class ClassDiscovery
 
         $this->initialize();
 
+        $projectRoot = ProjectRoot::get();
+        if (isset(self::$sharedAttributeCaches[$projectRoot][$cacheKey])) {
+            return $this->attributeCache[$cacheKey] = self::$sharedAttributeCaches[$projectRoot][$cacheKey];
+        }
+
         $this->runOncePerKey(
             'attr:' . $cacheKey,
             fn (): bool => isset($this->attributeCache[$cacheKey]),
-            function () use ($attributeClass, $instanceof, $cacheKey): void {
-                $this->attributeCache[$cacheKey] = $this->computeClassesWithAttribute($attributeClass, $instanceof);
+            function () use ($attributeClass, $instanceof, $cacheKey, $projectRoot): void {
+                $computed = $this->computeClassesWithAttribute($attributeClass, $instanceof);
+                $this->attributeCache[$cacheKey] = $computed;
+                self::$sharedAttributeCaches[$projectRoot][$cacheKey] = $computed;
             },
         );
 
