@@ -10,6 +10,7 @@ use ReflectionMethod;
 use ReflectionProperty;
 use Semitexa\Core\Discovery\ClassDiscovery;
 use Semitexa\Core\Support\ProjectRoot;
+use Swoole\Coroutine;
 
 /**
  * Discovery is a per-process fact, not a per-object one.
@@ -127,6 +128,80 @@ final class SharedDiscoveryCacheTest extends TestCase
             $found,
             $second->findClassesWithAttribute(\Semitexa\Core\Attribute\AsService::class),
         );
+    }
+
+
+    #[Test]
+    public function two_instances_racing_in_two_coroutines_produce_once(): void
+    {
+        // Reviewer's case on semitexa-core#111: sharing the RESULT is not enough while the gate
+        // that elects a producer is per-object. Two coroutines holding two fresh instances would
+        // each see an empty shared cache, each find its own gate free, and each run the scan.
+        //
+        // Driving runOncePerKey directly with a counting producer tests that election on its own,
+        // without depending on how long a real scan happens to take. The producer must contain a
+        // suspension point, or the first coroutine finishes before the second starts and there is
+        // no race to observe.
+        if (!class_exists(Coroutine::class)) {
+            self::markTestSkipped('Swoole extension is required.');
+        }
+
+        $produced = 0;
+        $done = false;
+        $first = new ClassDiscovery();
+        $second = new ClassDiscovery();
+
+        Coroutine\run(static function () use ($first, $second, &$produced, &$done): void {
+            // By REFERENCE, deliberately: an arrow function would capture $done by value, the
+            // predicate would never turn true, and the retry loop would spin on a closed gate
+            // forever. That is a bug in the test, not the gate — but it is an easy one to write.
+            $isDone = static function () use (&$done): bool {
+                return $done;
+            };
+            $produce = static function () use (&$produced, &$done): void {
+                $produced++;
+                Coroutine::sleep(0.01);
+                $done = true;
+            };
+
+            foreach ([$first, $second] as $discovery) {
+                Coroutine::create(static function () use ($discovery, $isDone, $produce): void {
+                    $method = new ReflectionMethod(ClassDiscovery::class, 'runOncePerKey');
+                    $method->setAccessible(true);
+                    $method->invoke($discovery, '@race-probe', $isDone, $produce);
+                });
+            }
+        });
+
+        self::assertSame(
+            1,
+            $produced,
+            'both instances ran the producer — the gate elects per object again, so a concurrent '
+                . 'boot would scan the whole tree once per instance',
+        );
+    }
+
+    #[Test]
+    public function a_waiter_woken_by_another_instance_adopts_its_answer(): void
+    {
+        // The other half of the same fix: the predicate and the post-gate hydration have to look
+        // at the SHARED cache. A waiter that only consults its own empty state concludes nothing
+        // was produced and scans anyway, which puts the duplicate work straight back.
+        self::seedSharedClassMap(self::SENTINEL);
+
+        $discovery = new ClassDiscovery();
+        $discovery->initialize();
+
+        self::assertSame(self::SENTINEL, self::classMapOf($discovery));
+        self::assertTrue(self::isInitialized($discovery), 'the instance must consider itself ready');
+    }
+
+    private static function isInitialized(ClassDiscovery $discovery): bool
+    {
+        $property = new ReflectionProperty(ClassDiscovery::class, 'initialized');
+        $property->setAccessible(true);
+
+        return (bool) $property->getValue($discovery);
     }
 
     /** @param array<string, string> $classMap */

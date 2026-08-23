@@ -27,12 +27,22 @@ class ClassDiscovery
      * single producer per key; every other coroutine suspends on the channel
      * and resumes once the cache is fully populated.
      *
+     * STATIC, and keyed by project root, for the same reason the caches below are shared: an
+     * instance-local gate only elects one producer per OBJECT. Once discovery results are
+     * process-wide, two coroutines holding two fresh instances would each pass the shared-cache
+     * check, each find its own gate empty, and each run the full scan — the very herd this
+     * mechanism exists to prevent, just spread across objects instead of coroutines.
+     *
+     * The predicates handed to {@see runOncePerKey()} therefore have to consult the SHARED
+     * cache, not instance state: a waiter that resumes on another instance would otherwise see
+     * its own empty cache, decide nothing had been produced, and scan anyway.
+     *
      * @var array<string, \Swoole\Coroutine\Channel>
      */
-    private array $coroutineGates = [];
+    private static array $coroutineGates = [];
 
     /** @var array<string, int> Coroutine id owning each in-flight gate (reentrancy guard). */
-    private array $coroutineGateOwners = [];
+    private static array $coroutineGateOwners = [];
 
     /**
      * What discovery found, shared by every instance in this PROCESS, keyed by project root.
@@ -108,14 +118,23 @@ class ClassDiscovery
 
     public function initialize(): void
     {
+        $projectRoot = ProjectRoot::get();
+
         $this->runOncePerKey(
             '@init',
-            fn (): bool => $this->initialized,
+            fn (): bool => $this->initialized || isset(self::$sharedClassMaps[$projectRoot]),
             function (): void {
                 $this->runInitialization();
                 $this->initialized = true;
             },
         );
+
+        // A waiter woken by another INSTANCE's producer leaves the gate with the shared cache
+        // populated but its own state untouched. Adopt it here rather than scanning again.
+        if (!$this->initialized && isset(self::$sharedClassMaps[$projectRoot])) {
+            $this->classMap = self::$sharedClassMaps[$projectRoot];
+            $this->initialized = true;
+        }
     }
 
     private function runInitialization(): void
@@ -167,6 +186,11 @@ class ClassDiscovery
     {
         self::$sharedClassMaps = [];
         self::$sharedAttributeCaches = [];
+        // The gates go with them. A closed gate left behind by a completed production would
+        // outlive the cache it guarded: the next caller finds the predicate false, finds a
+        // gate, pops a closed channel (which returns at once), loops, and spins forever.
+        self::$coroutineGates = [];
+        self::$coroutineGateOwners = [];
     }
 
     /**
@@ -275,13 +299,19 @@ class ClassDiscovery
 
         $this->runOncePerKey(
             'attr:' . $cacheKey,
-            fn (): bool => isset($this->attributeCache[$cacheKey]),
+            fn (): bool => isset($this->attributeCache[$cacheKey])
+                || isset(self::$sharedAttributeCaches[$projectRoot][$cacheKey]),
             function () use ($attributeClass, $instanceof, $cacheKey, $projectRoot): void {
                 $computed = $this->computeClassesWithAttribute($attributeClass, $instanceof);
                 $this->attributeCache[$cacheKey] = $computed;
                 self::$sharedAttributeCaches[$projectRoot][$cacheKey] = $computed;
             },
         );
+
+        // Woken by another instance's producer — take its answer instead of recomputing.
+        if (!isset($this->attributeCache[$cacheKey]) && isset(self::$sharedAttributeCaches[$projectRoot][$cacheKey])) {
+            $this->attributeCache[$cacheKey] = self::$sharedAttributeCaches[$projectRoot][$cacheKey];
+        }
 
         return $this->attributeCache[$cacheKey] ?? [];
     }
@@ -353,6 +383,10 @@ class ClassDiscovery
      */
     private function runOncePerKey(string $key, callable $isDone, callable $produce): void
     {
+        // Root-scoped, because the gates are process-wide: two project roots in one process
+        // (a test that chdirs into a fixture) must not queue behind each other's production.
+        $key = ProjectRoot::get() . "\0" . $key;
+
         while (true) {
             if ($isDone()) {
                 return;
@@ -368,9 +402,9 @@ class ClassDiscovery
             /** @var int $currentCid Swoole\Coroutine::getCid() is int (its stub is untyped) */
             $currentCid = \Swoole\Coroutine::getCid();
 
-            if (isset($this->coroutineGates[$key])) {
+            if (isset(self::$coroutineGates[$key])) {
                 // Reentrant call on the producing coroutine must not wait on itself.
-                if (($this->coroutineGateOwners[$key] ?? -1) === $currentCid) {
+                if ((self::$coroutineGateOwners[$key] ?? -1) === $currentCid) {
                     return;
                 }
                 // Another coroutine owns production — block until it closes the
@@ -378,13 +412,13 @@ class ClassDiscovery
                 // circuit; a failed one dropped the gate, so this coroutine
                 // retries as the new producer rather than continuing on an
                 // incomplete cache.
-                $this->coroutineGates[$key]->pop();
+                self::$coroutineGates[$key]->pop();
                 continue;
             }
 
             $gate = new \Swoole\Coroutine\Channel(1);
-            $this->coroutineGates[$key] = $gate;
-            $this->coroutineGateOwners[$key] = $currentCid;
+            self::$coroutineGates[$key] = $gate;
+            self::$coroutineGateOwners[$key] = $currentCid;
 
             // We are the elected producer; no other coroutine can have produced
             // between the top guard and here (no suspension point above), so the
@@ -395,14 +429,14 @@ class ClassDiscovery
                 // Failed production must not wedge waiters behind a permanently
                 // closed gate, nor let them proceed on incomplete state — drop
                 // the gate and wake them so the next caller retries.
-                unset($this->coroutineGates[$key], $this->coroutineGateOwners[$key]);
+                unset(self::$coroutineGates[$key], self::$coroutineGateOwners[$key]);
                 $gate->close();
                 throw $e;
             }
 
             // Success: wake every waiter. The closed gate stays in the map so late
             // arrivals resolve via the cheap $isDone() short-circuit above.
-            unset($this->coroutineGateOwners[$key]);
+            unset(self::$coroutineGateOwners[$key]);
             $gate->close();
             return;
         }
