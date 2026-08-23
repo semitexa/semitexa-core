@@ -76,6 +76,12 @@ class SwooleBootstrap
         $sessionTable->create();
         SwooleSessionTableHolder::setTable($sessionTable);
 
+        // Allocated BEFORE start() so the shared table survives the fork: the manager
+        // writes each crash, and the worker Swoole respawns in its place reads its own
+        // history back. Created here rather than in a listener because a listener runs
+        // inside the very worker whose boot we may need to distrust.
+        $crashLoopBreaker = new WorkerCrashLoopBreaker($env->swooleWorkerNum);
+
         $corsHandler = new CorsHandler($env);
         $healthHandler = new HealthCheckHandler();
         $metricsHandler = new MetricsHandler($server);
@@ -93,7 +99,7 @@ class SwooleBootstrap
         );
         $lifecycleInvoker->invokePhase(ServerLifecyclePhase::PreStart, $bootstrapContext, false);
 
-        $server->on(SwooleEvent::WorkerStart->value, function (Server $server, int $workerId) use ($bootstrapState, $lifecycleInvoker) {
+        $server->on(SwooleEvent::WorkerStart->value, function (Server $server, int $workerId) use ($bootstrapState, $lifecycleInvoker, $crashLoopBreaker) {
             self::syncInheritedComposerAutoloader();
             Environment::syncEnvFromFiles();
             $workerEnv = Environment::create();
@@ -103,6 +109,7 @@ class SwooleBootstrap
                 environment: $workerEnv,
                 bootstrapState: $bootstrapState,
                 container: ContainerFactory::get(),
+                recentWorkerCrashes: $crashLoopBreaker->crashCount($workerId, time()),
             );
             $lifecycleInvoker->invokePhase(ServerLifecyclePhase::WorkerStartBeforeContainer, $context, false);
             ContainerFactory::create();
@@ -193,8 +200,18 @@ class SwooleBootstrap
             $lifecycleInvoker->invokePhase(ServerLifecyclePhase::WorkerStop, $context, true);
         });
 
-        $server->on(SwooleEvent::WorkerError->value, function (Server $server, int $workerId, int $workerPid, int $exitCode, int $signal) use ($bootstrapState, $lifecycleInvoker) {
+        $server->on(SwooleEvent::WorkerError->value, function (Server $server, int $workerId, int $workerPid, int $exitCode, int $signal) use ($bootstrapState, $lifecycleInvoker, $crashLoopBreaker) {
             ServerLifecycleFallbackLogger::logWorkerError($workerId, $workerPid, $exitCode, $signal);
+            // This handler runs in the MANAGER, the one process that outlives every
+            // worker and therefore the only one that can tell a repeat from a one-off.
+            $crashes = $crashLoopBreaker->recordCrash($workerId, time());
+            if (WorkerCrashLoopBreaker::shouldAlarm($crashes)) {
+                ServerLifecycleFallbackLogger::logWorkerCrashLoop(
+                    $workerId,
+                    $crashes,
+                    WorkerCrashLoopBreaker::WINDOW_SECONDS,
+                );
+            }
             $context = new ServerLifecycleContext(
                 server: $server,
                 workerId: $workerId,
@@ -203,6 +220,7 @@ class SwooleBootstrap
                 workerPid: $workerPid,
                 exitCode: $exitCode,
                 signal: $signal,
+                recentWorkerCrashes: $crashes,
             );
             $lifecycleInvoker->invokePhase(ServerLifecyclePhase::WorkerError, $context, false);
         });
