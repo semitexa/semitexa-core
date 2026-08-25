@@ -51,8 +51,16 @@ final class RoutePhase
 
     public function execute(RequestLifecycleContext $context): HttpResponse
     {
-        $request = $context->request;
         $routingPath = $context->getRoutingPath();
+        // A locale prefix is stripped for MATCHING, so it must be stripped for
+        // EXECUTION too. Path parameters are hydrated by re-matching the route
+        // pattern against the request's own path (PayloadHydrator), and that
+        // pattern never carries the prefix — so a request that still says
+        // /uk/listing/{id} matches no pattern and every parameter arrives null.
+        // Rebuilding the request on the routing path keeps the two in step, and
+        // the untouched $server keeps the original URI available to anything
+        // that needs to know which locale the visitor actually asked for.
+        $request = $context->request->withPath($routingPath);
 
         /** @var HandlerRegistry|null $handlerRegistry */
         $handlerRegistry = $this->container->has(HandlerRegistry::class)
