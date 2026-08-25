@@ -53,6 +53,24 @@ final class StaticLoggerBridge
     }
 
     /**
+     * Track R · Gap C-3 — the level between "forensics only" (debug, usually
+     * filtered out in production) and "wake someone up" (warning+, which
+     * log-reading alerters digest). A self-healing subsystem announcing that it
+     * healed belongs exactly here: visible in app.log, never an incident.
+     *
+     * @param array<string, mixed> $context
+     */
+    public static function info(string $channel, string $message, array $context = []): void
+    {
+        $logger = self::resolveLogger();
+        if ($logger === null) {
+            return;
+        }
+
+        $logger->info($message, self::withChannelContext($channel, $context));
+    }
+
+    /**
      * @param array<string, mixed> $context
      */
     public static function debug(string $channel, string $message, array $context = []): void
