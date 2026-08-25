@@ -9,6 +9,7 @@ use Semitexa\Core\HttpResponse;
 use Semitexa\Core\Http\ContentType;
 use Semitexa\Core\Http\ContentNegotiator;
 use Semitexa\Core\Http\HttpStatus;
+use Semitexa\Locale\Context\LocaleContextStore;
 use Semitexa\Core\Http\Response\ResponseFormat;
 use Semitexa\Core\Http\Exception\NegotiationFailedException;
 use Semitexa\Core\Discovery\DiscoveredRoute;
@@ -59,6 +60,7 @@ final class ResponseRenderer
             } else {
                 $redirectUrl = '';
             }
+            $redirectUrl = self::inCurrentLocale($redirectUrl);
             $statusCode = method_exists($resDto, 'getStatusCode') ? $resDto->getStatusCode() : HttpStatus::Found->value;
             return HttpResponse::redirect(
                 $redirectUrl,
@@ -321,6 +323,52 @@ final class ResponseRenderer
      * @param array<string, mixed> $context
      * @return array<string, mixed>
      */
+
+    /**
+     * A root-relative redirect target, addressed in the locale being served.
+     *
+     * Under URL-prefixed locales a redirect is the one internal link the
+     * application does not write by hand — every href goes through a template
+     * helper and every generated URL through RouteUrlBuilder, but
+     * `setRedirect('/app')` is a bare string. Left alone it sends a Ukrainian
+     * visitor to the English page after every form submission, which is how a
+     * language quietly gets lost mid-session.
+     *
+     * Only root-relative paths are touched. Absolute and scheme-relative URLs
+     * belong to another host (the validation above has already decided which
+     * are allowed) and a path that already opens with a supported locale is
+     * left as it is, so this can never prefix twice.
+     */
+    private static function inCurrentLocale(string $url): string
+    {
+        if (!class_exists(LocaleContextStore::class)) {
+            return $url;
+        }
+
+        if ($url === '' || $url[0] !== '/' || str_starts_with($url, '//')) {
+            return $url;
+        }
+
+        if (!LocaleContextStore::isUrlPrefixEnabled()) {
+            return $url;
+        }
+
+        $locale = LocaleContextStore::getLocale();
+
+        if ($locale === LocaleContextStore::getDefaultLocale()) {
+            return $url;
+        }
+
+        $firstSegment = explode('/', ltrim(parse_url($url, PHP_URL_PATH) ?: '/', '/'), 2)[0];
+        $supported = LocaleContextStore::getSupportedLocales();
+
+        if ($supported !== [] && in_array($firstSegment, $supported, true)) {
+            return $url;
+        }
+
+        return '/' . $locale . $url;
+    }
+
     private function withPageDocumentContext(array $context, Request $request, DiscoveredRoute $route): array
     {
         $htmlQuery = $request->query;
