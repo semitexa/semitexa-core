@@ -75,6 +75,41 @@ readonly class Request
     {
         return parse_url($this->uri, PHP_URL_QUERY) ?: '';
     }
+
+    /**
+     * The same request addressed by another path, query string preserved.
+     *
+     * Used when something ahead of the handler rewrites the path the router
+     * works on — a locale prefix being stripped, say. Path parameters are
+     * hydrated by re-matching the route pattern against the request's own
+     * path, so a rewritten route path that is not carried on the request
+     * leaves every parameter null.
+     *
+     * $server is copied verbatim: REQUEST_URI still holds what the client
+     * actually asked for, which is what a language switcher or an access log
+     * needs to see.
+     */
+    public function withPath(string $path): self
+    {
+        if ($path === $this->getPath()) {
+            return $this;
+        }
+
+        $queryString = $this->getQueryString();
+
+        return new self(
+            method: $this->method,
+            uri: $queryString !== '' ? $path . '?' . $queryString : $path,
+            headers: $this->headers,
+            query: $this->query,
+            post: $this->post,
+            server: $this->server,
+            cookies: $this->cookies,
+            content: $this->content,
+            files: $this->files,
+            strictHydration: $this->strictHydration,
+        );
+    }
     
     public function getHeader(string $name): ?string
     {
