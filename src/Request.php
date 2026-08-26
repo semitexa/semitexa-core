@@ -71,9 +71,29 @@ readonly class Request
         return parse_url($this->uri, PHP_URL_PATH) ?: '/';
     }
     
+    /**
+     * The query string of this request, however it arrived.
+     *
+     * Under Swoole the uri is built from `request_uri`, which carries the path
+     * and nothing else — the parameters come separately, in `get`. So parsing
+     * the uri found nothing and this returned '' for every real request on a
+     * Swoole server, which is most of them.
+     *
+     * That was invisible until something built a URL out of it. Both locale
+     * redirects did: `/en/gallery?sort=price_asc` answered with a Location of
+     * `/gallery`, quietly dropping the filter the visitor had applied, and a
+     * bookmark with a month in it lost the month. Falling back to the parsed
+     * parameters keeps the promise the method's name makes.
+     */
     public function getQueryString(): string
     {
-        return parse_url($this->uri, PHP_URL_QUERY) ?: '';
+        $fromUri = parse_url($this->uri, PHP_URL_QUERY) ?: '';
+
+        if ($fromUri !== '') {
+            return $fromUri;
+        }
+
+        return $this->query === [] ? '' : http_build_query($this->query);
     }
 
     /**
