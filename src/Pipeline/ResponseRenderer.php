@@ -47,6 +47,7 @@ final class ResponseRenderer
                         if ($redirectHost !== $requestHost
                             && $redirectHost !== 'localhost'
                             && $redirectHost !== '127.0.0.1'
+                            && !self::isSiblingHost($redirectHost, $requestHost)
                             && !in_array($redirectHost, $allowedExternalHosts, true)) {
                             $redirectUrl = '/';
                         }
@@ -433,4 +434,36 @@ final class ResponseRenderer
 
         return str_contains(strtolower($request->getHeader('Accept') ?? ''), 'application/json');
     }
+
+    /**
+     * Is this redirect target another host of the SAME site?
+     *
+     * An application can be split across hosts on purpose — a public site on
+     * the apex and a cabinet on `account.`, say — and moving a visitor between
+     * them is ordinary navigation, not an open redirect. The guard above had no
+     * way to say that: its allow-list is a fixed set of OAuth providers, so an
+     * application redirecting to its own sibling host had the target silently
+     * replaced with '/', which looks like the redirect simply not working.
+     *
+     * The dot is the whole point. Matching on a bare suffix is the classic
+     * version of this bug: `evil-example.com` ends with `example.com`, and an
+     * attacker who can register that name gets exactly the open redirect this
+     * check exists to prevent. Only a real label boundary counts, in either
+     * direction — parent to child, child to parent.
+     */
+    private static function isSiblingHost(string $redirectHost, string $requestHost): bool
+    {
+        if ($redirectHost === '' || $requestHost === '') {
+            return false;
+        }
+
+        // A single label ("localhost", "app") has no site to be a sibling of.
+        if (!str_contains($redirectHost, '.') || !str_contains($requestHost, '.')) {
+            return false;
+        }
+
+        return str_ends_with($requestHost, '.' . $redirectHost)
+            || str_ends_with($redirectHost, '.' . $requestHost);
+    }
+
 }
