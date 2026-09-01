@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Discovery;
 
+use Semitexa\Core\Lifecycle\WorkerDrainSignal;
 use Semitexa\Core\Support\ProjectRoot;
 
 class ClassDiscovery
@@ -324,7 +325,19 @@ class ClassDiscovery
         $reflectionFlags = $instanceof ? \ReflectionAttribute::IS_INSTANCEOF : 0;
         $classes = [];
 
+        $scanned = 0;
         foreach ($this->classMap as $className => $filePath) {
+            // Same contract as the PSR-4 scan: between units, never inside one. Each
+            // iteration autoloads a class, which is file I/O and therefore uncancellable.
+            if ($this->shouldAbortScan()) {
+                throw new DiscoveryInterruptedException(sprintf(
+                    'Attribute discovery for %s stood down: the worker is draining (%d class(es) scanned).',
+                    $attributeClass,
+                    $scanned,
+                ), $scanned);
+            }
+            ++$scanned;
+
             try {
                 $exists = class_exists($className, true) || interface_exists($className, true) || trait_exists($className, true);
             } catch (\Throwable $e) {
@@ -449,6 +462,31 @@ class ClassDiscovery
     }
 
     /**
+     * Whether this scan should stand down because its worker is draining.
+     *
+     * `Coroutine::cancel()` cannot interrupt a coroutine parked in hooked file I/O, and
+     * under SWOOLE_HOOK_ALL both scans below are thousands of such parks in a row — 3517
+     * files for this project. So the drain asks, is refused, and the scan reads on:
+     * measured, that held one worker 22 minutes past its exit, and the forced termination
+     * that ends it appears 1303 times in swoole.log.
+     *
+     * ⚠️ The obvious probe does not work here. `Coroutine::isCanceled()` is the documented
+     * way to cooperate with a drain, and a refused `cancel()` never sets it — measured on
+     * Swoole 6.2.0, a cancelled coroutine parked on a read went on to finish all 400
+     * remaining files with the flag still false. The signal has to come from the worker,
+     * not from the coroutine; see {@see WorkerDrainSignal}.
+     *
+     * Protected as a test seam. What an interrupted scan LEAVES BEHIND is the dangerous
+     * part, and it must be provable without the Swoole extension — the neighbouring drain
+     * diagnostics test skips itself where Swoole is absent, and a regression this
+     * expensive should not be provable only on machines that happen to have it.
+     */
+    protected function shouldAbortScan(): bool
+    {
+        return WorkerDrainSignal::isDraining();
+    }
+
+    /**
      * @return array<class-string, string>
      */
     public function getClassMap(): array
@@ -493,6 +531,7 @@ class ClassDiscovery
         uksort($psr4Map, static fn (string $a, string $b): int => strlen($b) <=> strlen($a));
 
         $seenRealPaths = [];
+        $scanned = 0;
         foreach ($psr4Map as $namespace => $dirs) {
             if (!$this->isNamespaceAllowed($namespace)) {
                 continue;
@@ -522,6 +561,18 @@ class ClassDiscovery
                         continue;
                     }
 
+                    // Between two file reads, which is the only place this loop can stop:
+                    // the read itself is uninterruptible. The signal is sticky, so it does
+                    // not matter how many suspension points the iterator adds before this
+                    // point — that would NOT be true of Swoole's own cancellation flag.
+                    if ($this->shouldAbortScan()) {
+                        throw new DiscoveryInterruptedException(sprintf(
+                            'Class discovery stood down while scanning PSR-4 sources: the worker is draining (%d file(s) scanned).',
+                            $scanned,
+                        ), $scanned);
+                    }
+
+                    ++$scanned;
                     $className = self::extractDeclaredClassName($fileInfo->getPathname());
                     if ($className === null
                         || !$this->isNamespaceAllowed($className)

@@ -8,6 +8,7 @@ use JsonException;
 use Semitexa\Core\Application;
 use Semitexa\Core\Container\ContainerFactory;
 use Semitexa\Core\Environment;
+use Semitexa\Core\Lifecycle\WorkerDrainSignal;
 use Semitexa\Core\Log\StaticLoggerBridge;
 use Semitexa\Core\ErrorHandler;
 use Semitexa\Core\Http\HttpStatus;
@@ -81,6 +82,9 @@ class SwooleBootstrap
         // history back. Created here rather than in a listener because a listener runs
         // inside the very worker whose boot we may need to distrust.
         $crashLoopBreaker = new WorkerCrashLoopBreaker($env->swooleWorkerNum);
+        // Built here, before start(), so every worker forks its own copy: the drain it
+        // reports on is the worker's own last few seconds and must not be shared.
+        $drainReporter = new WorkerExitDrainReporter();
 
         $corsHandler = new CorsHandler($env);
         $healthHandler = new HealthCheckHandler();
@@ -124,7 +128,7 @@ class SwooleBootstrap
             $lifecycleInvoker->invokePhase(ServerLifecyclePhase::WorkerStartFinalize, $context, true);
         });
 
-        $server->on(SwooleEvent::WorkerExit->value, function (Server $server, int $workerId) use ($bootstrapState, $lifecycleInvoker) {
+        $server->on(SwooleEvent::WorkerExit->value, function (Server $server, int $workerId) use ($bootstrapState, $lifecycleInvoker, $drainReporter) {
             // Framework guarantee: a worker asked to exit must be ABLE to exit.
             // This fires (repeatedly) during the reload_async drain window while
             // the event loop still holds resources. Two things keep workers
@@ -135,6 +139,13 @@ class SwooleBootstrap
             // timer and cancel every parked coroutine: cancellation turns an
             // immortal wait into a catchable failure on code that already
             // handles transport errors.
+            // FIRST, before any cancellation is attempted: work that cancel() cannot reach
+            // stands down by reading this instead. cancel() is an attempt, not a signal —
+            // when it is refused it leaves nothing behind, so a coroutine parked on file
+            // I/O would otherwise read on to completion and hold the worker to its exit
+            // timeout. See WorkerDrainSignal for the measurement.
+            WorkerDrainSignal::begin();
+
             \Swoole\Timer::clearAll();
             $current = \Swoole\Coroutine::getCid();
             $cancelled = 0;
@@ -170,14 +181,22 @@ class SwooleBootstrap
                     'cancelled' => $cancelled,
                 ]);
             }
-            foreach ($stubborn as $cid => $where) {
+            // WorkerExit re-fires for the whole drain window, so this loop used to
+            // re-state an unchanging fact on every pass: measured, 97 stuck coroutines
+            // wrote 110061 lines and buried every real error in the same file. The
+            // reporter keeps the first sighting and re-alarms on a clock, so a worker
+            // held hostage still says so — with how long it has been held, which is the
+            // fact that explains a restart that appears to hang.
+            foreach ($drainReporter->report($stubborn, microtime(true)) as $sighting) {
                 // Warning, not info: this is the coroutine that will hold the
                 // worker to its exit timeout, and the frame trail is the only
                 // thing that says which one.
                 StaticLoggerBridge::warning('lifecycle', 'Worker exit: coroutine refused cancellation', [
                     'worker_id' => $workerId,
-                    'cid' => $cid,
-                    'parked_at' => $where,
+                    'cid' => $sighting['cid'],
+                    'parked_at' => $sighting['where'],
+                    'stuck_for_seconds' => $sighting['stuck_for'],
+                    'repeat' => $sighting['repeat'],
                 ]);
             }
 
@@ -190,7 +209,19 @@ class SwooleBootstrap
             $lifecycleInvoker->invokePhase(ServerLifecyclePhase::WorkerExit, $context, true);
         });
 
-        $server->on(SwooleEvent::WorkerStop->value, function (Server $server, int $workerId) use ($bootstrapState, $lifecycleInvoker) {
+        $server->on(SwooleEvent::WorkerStop->value, function (Server $server, int $workerId) use ($bootstrapState, $lifecycleInvoker, $drainReporter) {
+            // The only hook that runs once the drain is actually over, so it is the only
+            // place that can say what the episode cost. Printing the suppressed count is
+            // what keeps the throttle honest: an operator can see what was withheld.
+            $drainSummary = $drainReporter->summary(microtime(true));
+            if ($drainSummary !== null) {
+                StaticLoggerBridge::warning(
+                    'lifecycle',
+                    'Worker exit drain finished with coroutines that refused cancellation',
+                    ['worker_id' => $workerId] + $drainSummary,
+                );
+            }
+
             $context = new ServerLifecycleContext(
                 server: $server,
                 workerId: $workerId,

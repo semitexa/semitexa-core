@@ -7,6 +7,7 @@ namespace Semitexa\Core\Log;
 use Semitexa\Core\Attribute\SatisfiesServiceContract;
 use Semitexa\Core\Attribute\InjectAsReadonly;
 use Semitexa\Core\Environment;
+use Semitexa\Core\Server\SwooleLogRetention;
 
 /**
  * Logger that writes JSON lines to a file. Under Swoole, writes are deferred so the request is not blocked.
@@ -22,6 +23,19 @@ final class AsyncJsonLogger implements LoggerInterface
 
     private ?int $minLevel = null;
     private ?string $logFile = null;
+    private ?AppLogRotation $rotation = null;
+
+    /**
+     * Bytes appended since the last size check. Rotation needs the file size, and a
+     * stat per flush would be a syscall on the request path for a question whose answer
+     * cannot change by more than what this worker just wrote. Counting locally and only
+     * asking the filesystem once a slice's worth has accumulated keeps the check off the
+     * hot path while still bounding the overshoot to roughly that slice per worker.
+     */
+    private int $bytesSinceSizeCheck = 0;
+
+    /** How much this worker may append before it re-reads the real file size. */
+    private const SIZE_CHECK_EVERY_BYTES = 1_048_576;
     /** @var list<array<string, mixed>> */
     private array $buffer = [];
     private bool $deferScheduled = false;
@@ -38,6 +52,10 @@ final class AsyncJsonLogger implements LoggerInterface
         $this->minLevel = LogLevel::toValue($levelName);
         $logFile = Environment::getEnvValue('LOG_FILE');
         $this->logFile = $logFile !== null && $logFile !== '' ? $logFile : self::DEFAULT_LOG_FILE;
+        $this->rotation = new AppLogRotation(
+            AppLogRotation::maxBytesFromEnv(Environment::getEnvValue('LOG_MAX_BYTES')),
+            SwooleLogRetention::daysFromEnv(Environment::getEnvValue('LOG_RETENTION_DAYS')),
+        );
     }
 
     /** @param array<string, mixed> $context */
@@ -163,6 +181,39 @@ final class AsyncJsonLogger implements LoggerInterface
                 count($entries),
                 $errorMessage,
             ));
+
+            return;
+        }
+
+        $this->rotateIfFull($path, strlen($line));
+    }
+
+    /**
+     * Keep the application log bounded. Measured before this existed: app.log reached
+     * 360 MB on the dev host while swoole.log, the file the framework does rotate, held
+     * 1.2 MB — the policy was attached to the log that does not grow.
+     *
+     * Failure here is deliberately silent. This runs inside the logger, so a throw would
+     * turn every diagnostic into an outage; an unrotated file is a disk problem, and a
+     * logger that raises during teardown is a much worse one.
+     */
+    private function rotateIfFull(string $path, int $appended): void
+    {
+        $rotation = $this->rotation;
+        if ($rotation === null || !$rotation->isEnabled()) {
+            return;
+        }
+
+        $this->bytesSinceSizeCheck += $appended;
+        if ($this->bytesSinceSizeCheck < self::SIZE_CHECK_EVERY_BYTES) {
+            return;
+        }
+        $this->bytesSinceSizeCheck = 0;
+
+        clearstatcache(true, $path);
+        $size = @filesize($path);
+        if ($size !== false && $rotation->shouldRotate($size)) {
+            $rotation->rotate($path);
         }
     }
 
