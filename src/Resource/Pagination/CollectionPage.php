@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Resource\Pagination;
 
+use Semitexa\Core\Resource\Exception\MalformedCollectionEnvelopeException;
+
 /**
  * Resolved pagination metadata attached to a collection
  * response envelope. Computed from a {@see CollectionPageRequest}
@@ -63,6 +65,67 @@ final readonly class CollectionPage
             hasPrevious: $request->page > 1,
             mode:        $mode,
         );
+    }
+
+    /**
+     * Read back what {@see toArray()} wrote.
+     *
+     * The exact inverse, and it has to stay that way: the two directions are the only
+     * declaration of this shape anywhere, so they can drift apart silently. A round-trip
+     * test pins them together — change one and change the other.
+     *
+     * `mode` stays optional here for the same reason it is optional there: a route with no
+     * declared `#[CollectionPaginated]` policy omits the key entirely.
+     *
+     * @param array<string, mixed> $meta
+     */
+    public static function fromArray(array $meta): self
+    {
+        return new self(
+            page:        self::intAt($meta, 'page'),
+            perPage:     self::intAt($meta, 'perPage'),
+            total:       self::intAt($meta, 'total'),
+            pageCount:   self::intAt($meta, 'pageCount'),
+            hasNext:     self::boolAt($meta, 'hasNext'),
+            hasPrevious: self::boolAt($meta, 'hasPrevious'),
+            mode:        self::optionalStringAt($meta, 'mode'),
+        );
+    }
+
+    /** @param array<string, mixed> $meta */
+    private static function intAt(array $meta, string $key): int
+    {
+        $value = $meta[$key] ?? throw MalformedCollectionEnvelopeException::missingKey($key, 'meta.pagination');
+        if (!is_int($value)) {
+            throw MalformedCollectionEnvelopeException::wrongType($key, 'an int', $value, 'meta.pagination');
+        }
+
+        return $value;
+    }
+
+    /** @param array<string, mixed> $meta */
+    private static function boolAt(array $meta, string $key): bool
+    {
+        $value = $meta[$key] ?? throw MalformedCollectionEnvelopeException::missingKey($key, 'meta.pagination');
+        if (!is_bool($value)) {
+            throw MalformedCollectionEnvelopeException::wrongType($key, 'a bool', $value, 'meta.pagination');
+        }
+
+        return $value;
+    }
+
+    /** @param array<string, mixed> $meta */
+    private static function optionalStringAt(array $meta, string $key): ?string
+    {
+        if (!array_key_exists($key, $meta)) {
+            return null;
+        }
+        $value = $meta[$key];
+        if (!is_string($value)) {
+            throw MalformedCollectionEnvelopeException::wrongType($key, 'a string', $value, 'meta.pagination');
+        }
+
+        return $value;
     }
 
     /**
