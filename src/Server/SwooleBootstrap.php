@@ -187,7 +187,7 @@ class SwooleBootstrap
             // reporter keeps the first sighting and re-alarms on a clock, so a worker
             // held hostage still says so — with how long it has been held, which is the
             // fact that explains a restart that appears to hang.
-            foreach ($drainReporter->report($stubborn, microtime(true)) as $sighting) {
+            foreach ($drainReporter->report($stubborn, self::monotonicSeconds()) as $sighting) {
                 // Warning, not info: this is the coroutine that will hold the
                 // worker to its exit timeout, and the frame trail is the only
                 // thing that says which one.
@@ -213,7 +213,7 @@ class SwooleBootstrap
             // The only hook that runs once the drain is actually over, so it is the only
             // place that can say what the episode cost. Printing the suppressed count is
             // what keeps the throttle honest: an operator can see what was withheld.
-            $drainSummary = $drainReporter->summary(microtime(true));
+            $drainSummary = $drainReporter->summary(self::monotonicSeconds());
             if ($drainSummary !== null) {
                 StaticLoggerBridge::warning(
                     'lifecycle',
@@ -489,6 +489,20 @@ class SwooleBootstrap
      * design: introspection must never be the reason a worker fails to exit, so
      * any failure degrades to a placeholder rather than propagating.
      */
+    /**
+     * Seconds from a clock that only moves forward.
+     *
+     * The drain measures elapsed time and gates a re-alarm on it, and `microtime()` follows
+     * the system clock — an NTP correction or a manual change mid-drain would produce
+     * negative durations and could postpone the re-alarm by the size of the jump. `hrtime()`
+     * has no absolute meaning, which is fine: nothing here reports a wall-clock instant,
+     * only distances between two readings of the same clock.
+     */
+    private static function monotonicSeconds(): float
+    {
+        return \hrtime(true) / 1_000_000_000;
+    }
+
     private static function describeCoroutine(int $cid): string
     {
         try {

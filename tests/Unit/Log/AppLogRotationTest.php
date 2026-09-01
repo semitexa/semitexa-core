@@ -116,6 +116,38 @@ final class AppLogRotationTest extends TestCase
     }
 
     #[Test]
+    public function an_exhausted_collision_window_refuses_to_rotate_rather_than_overwrite(): void
+    {
+        // Review finding: POSIX rename() REPLACES an existing destination, so the old
+        // fallback to the base path silently destroyed an already-rotated slice. Refusing
+        // costs one oversized file, which is the cheaper failure by far.
+        $rotation = new AppLogRotation(maxBytes: 1);
+
+        $target = $rotation->rotatedPath($this->dir . '/app.log', 1_767_225_600, static fn (): bool => true);
+
+        self::assertNull($target, 'no free name means no rotation, never an overwrite');
+    }
+
+    #[Test]
+    public function the_collision_search_walks_forward_until_it_finds_a_free_slot(): void
+    {
+        $path = $this->dir . '/app.log';
+        $now = 1_767_225_600;
+        $taken = [];
+        for ($offset = 0; $offset < 120; ++$offset) {
+            $taken[$path . '.' . date(AppLogRotation::SUFFIX_FORMAT, $now + $offset)] = true;
+        }
+
+        $target = (new AppLogRotation(maxBytes: 1))
+            ->rotatedPath($path, $now, static fn (string $c): bool => isset($taken[$c]));
+
+        // Past the old 60-second window, and still a suffix the pruner will recognise.
+        self::assertNotNull($target);
+        self::assertSame($path . '.' . date(AppLogRotation::SUFFIX_FORMAT, $now + 120), $target);
+        self::assertMatchesRegularExpression('/^\d{6,14}$/', substr($target, strlen($path) + 1));
+    }
+
+    #[Test]
     public function a_malformed_ceiling_falls_back_instead_of_rotating_every_write(): void
     {
         // '32e6' casts to 32 under is_numeric-style parsing, which would rotate the log

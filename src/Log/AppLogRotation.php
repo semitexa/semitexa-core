@@ -70,29 +70,40 @@ final readonly class AppLogRotation
     }
 
     /**
-     * Where a full log file moves to. Collisions are resolved rather than overwritten:
-     * a burst can cross the ceiling twice inside one second, and losing the first slice
-     * would delete exactly the lines that explain the burst.
+     * How far forward a collision may borrow a suffix before rotation gives up. An hour of
+     * one-second slots; reaching the end means something other than this class is creating
+     * files with our exact naming.
      */
-    public function rotatedPath(string $path, int $now, ?callable $exists = null): string
+    public const int COLLISION_SEARCH_SECONDS = 3600;
+
+    /**
+     * Where a full log file moves to, or null when no free name exists.
+     *
+     * Collisions are resolved rather than overwritten: a burst can cross the ceiling twice
+     * inside one second, and losing the first slice would delete exactly the lines that
+     * explain the burst.
+     *
+     * ⚠️ Null is not a formality. POSIX `rename()` REPLACES an existing destination, so
+     * returning an occupied path here would silently destroy an already-rotated log. An
+     * earlier version fell back to the base path once its search window was exhausted,
+     * which did exactly that. Refusing to rotate costs one oversized file; the fallback
+     * cost a whole slice.
+     */
+    public function rotatedPath(string $path, int $now, ?callable $exists = null): ?string
     {
         $exists ??= static fn (string $candidate): bool => file_exists($candidate);
-        $base = $path . '.' . date(self::SUFFIX_FORMAT, $now);
-        if (!$exists($base)) {
-            return $base;
-        }
 
         // Keep the digits-only suffix intact — a '-2' would fall outside the retention
         // guard and the file would never be pruned. Second-resolution collisions borrow
         // from the next second instead, which stays sortable and stays prunable.
-        for ($offset = 1; $offset <= 60; ++$offset) {
+        for ($offset = 0; $offset <= self::COLLISION_SEARCH_SECONDS; ++$offset) {
             $candidate = $path . '.' . date(self::SUFFIX_FORMAT, $now + $offset);
             if (!$exists($candidate)) {
                 return $candidate;
             }
         }
 
-        return $base;
+        return null;
     }
 
     /**
@@ -112,6 +123,11 @@ final readonly class AppLogRotation
 
         $now ??= time();
         $target = $this->rotatedPath($path, $now);
+        if ($target === null) {
+            // Every candidate name is taken. Leaving the log oversized is the safe failure:
+            // rename() would replace whatever occupies the destination.
+            return null;
+        }
         if (!@rename($path, $target)) {
             // Lost the race to another worker, which already moved it. Nothing to do:
             // the file is rotated either way, and that was the entire goal.

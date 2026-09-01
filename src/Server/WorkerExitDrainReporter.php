@@ -60,7 +60,9 @@ final class WorkerExitDrainReporter
      * Filter one drain pass down to the coroutines that have earned a line.
      *
      * @param array<int, string> $stubborn cid => where the coroutine is parked
-     * @param float              $now      monotonic-ish seconds; the caller owns the clock
+     * @param float              $now      MONOTONIC seconds; the caller owns the clock, and
+     *                                     must not hand this a wall clock: a backwards jump
+     *                                     would yield negative ages and stall the re-alarm
      *
      * @return list<array{cid: int, where: string, stuck_for: float, repeat: bool}>
      */
