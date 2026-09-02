@@ -16,11 +16,48 @@ use ReflectionClass;
 
 class Application extends SymfonyApplication
 {
+    /**
+     * Run the container-dependent wiring a CLI process needs.
+     *
+     * A command builds the same container a worker does and then does real work
+     * with it, but none of the worker's lifecycle ever ran — so anything wired
+     * at WorkerStartAfterContainer was simply absent here. That is how a skill
+     * run from a terminal wrote a row whose change event reached nobody, while
+     * the same skill through the console behaved. Its own phase, because worker
+     * listeners start timers and bind servers that a one-shot process must not
+     * inherit.
+     */
+    private static function bootLifecycle(\Psr\Container\ContainerInterface $container): void
+    {
+        try {
+            $registry = $container->get(\Semitexa\Core\Server\Lifecycle\ServerLifecycleRegistry::class);
+            if (!$registry instanceof \Semitexa\Core\Server\Lifecycle\ServerLifecycleRegistry) {
+                return;
+            }
+
+            $invoker = new \Semitexa\Core\Server\Lifecycle\ServerLifecycleInvoker($registry);
+            $invoker->invokePhase(
+                \Semitexa\Core\Server\Lifecycle\ServerLifecyclePhase::ConsoleStartAfterContainer,
+                new \Semitexa\Core\Server\Lifecycle\ServerLifecycleContext(
+                    server: null,
+                    workerId: null,
+                    environment: $container->get(\Semitexa\Core\Environment::class),
+                    container: $container instanceof \Semitexa\Core\Container\SemitexaContainer ? $container : null,
+                ),
+                true,
+            );
+        } catch (\Throwable) {
+            // Boot wiring is opportunistic: a command must still run on an
+            // install where one listener is unhappy.
+        }
+    }
+
     public function __construct()
     {
         parent::__construct('Semitexa', '1.1.31');
 
         $container = ContainerFactory::get();
+        self::bootLifecycle($container);
         /** @var ClassDiscovery $classDiscovery */
         $classDiscovery = $container->get(ClassDiscovery::class);
         $commandClasses = $classDiscovery->findClassesWithAttribute(AsCommand::class);
