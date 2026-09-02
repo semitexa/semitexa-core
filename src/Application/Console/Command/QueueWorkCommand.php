@@ -31,7 +31,7 @@ class QueueWorkCommand extends Command
         $queue = $input->getArgument('queue');
 
         $io->title('Events worker (queue)');
-        
+
         try {
             $worker = new \Semitexa\Core\Queue\QueueWorker();
             $worker->setOutput($output);

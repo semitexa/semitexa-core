@@ -80,15 +80,15 @@ class TestHandlerCommand extends BaseCommand
     private function inspectHandler(SymfonyStyle $io, object $handler, string $handlerClass): void
     {
         $reflection = new \ReflectionClass($handler);
-        
+
         $io->text('Class: ' . get_class($handler));
         $io->text('Properties:');
-        
+
         foreach ($reflection->getProperties() as $property) {
             $property->setAccessible(true);
             $name = $property->getName();
             $value = $property->getValue($handler);
-            
+
             $attrs = [];
             if (!empty($property->getAttributes(InjectAsReadonly::class))) {
                 $attrs[] = 'InjectAsReadonly';
@@ -100,7 +100,7 @@ class TestHandlerCommand extends BaseCommand
                 $attrs[] = 'InjectAsFactory';
             }
             $injectMark = $attrs !== [] ? ' [' . implode(', ', $attrs) . ']' : '';
-            
+
             if ($value === null) {
                 $io->text("  ❌ {$name}: NULL (not initialized){$injectMark}");
             } else {

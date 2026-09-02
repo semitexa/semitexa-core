@@ -34,7 +34,7 @@ readonly class HttpResponse implements ResourceInterface
     {
         return $this->alreadySent;
     }
-    
+
     /**
      * @param array<array-key, mixed> $data
      */
@@ -50,7 +50,7 @@ readonly class HttpResponse implements ResourceInterface
             headers: ['Content-Type' => 'application/json']
         );
     }
-    
+
     public static function text(string $content, int $statusCode = HttpStatus::Ok->value): self
     {
         return new self(
@@ -59,7 +59,7 @@ readonly class HttpResponse implements ResourceInterface
             headers: ['Content-Type' => 'text/plain']
         );
     }
-    
+
     public static function html(string $content, int $statusCode = HttpStatus::Ok->value): self
     {
         return new self(
@@ -68,7 +68,7 @@ readonly class HttpResponse implements ResourceInterface
             headers: ['Content-Type' => 'text/html; charset=utf-8']
         );
     }
-    
+
     public static function notFound(string $message = 'Not Found'): self
     {
         return self::json([
@@ -76,7 +76,7 @@ readonly class HttpResponse implements ResourceInterface
             'message' => $message
         ], HttpStatus::NotFound->value);
     }
-    
+
     public static function redirect(string $url, int $statusCode = HttpStatus::Found->value): self
     {
         return new self(
@@ -85,17 +85,17 @@ readonly class HttpResponse implements ResourceInterface
             headers: ['Location' => $url]
         );
     }
-    
+
     public function getContent(): string
     {
         return $this->content;
     }
-    
+
     public function getStatusCode(): int
     {
         return $this->statusCode;
     }
-    
+
     /**
      * @return array<string, HeaderValue>
      */

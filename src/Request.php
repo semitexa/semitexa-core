@@ -46,7 +46,7 @@ readonly class Request
          */
         public bool $strictHydration = false,
     ) {}
-    
+
     /**
      * Create Request using Factory (recommended)
      */
@@ -54,23 +54,23 @@ readonly class Request
     {
         return RequestFactory::create($source);
     }
-    
-    
+
+
     public function getMethod(): string
     {
         return $this->method;
     }
-    
+
     public function getUri(): string
     {
         return $this->uri;
     }
-    
+
     public function getPath(): string
     {
         return parse_url($this->uri, PHP_URL_PATH) ?: '/';
     }
-    
+
     /**
      * The query string of this request, however it arrived.
      *
@@ -130,7 +130,7 @@ readonly class Request
             strictHydration: $this->strictHydration,
         );
     }
-    
+
     public function getHeader(string $name): ?string
     {
         // Try exact match first
@@ -274,7 +274,7 @@ readonly class Request
 
         return ((ord($ipBin[$fullBytes]) ^ ord($subnetBin[$fullBytes])) & $mask) === 0;
     }
-    
+
     public function getQuery(string $key, string $default = ''): string
     {
         $value = $this->query[$key] ?? null;
@@ -286,7 +286,7 @@ readonly class Request
         $value = $this->post[$key] ?? null;
         return is_string($value) ? $value : $default;
     }
-    
+
     public function getServer(string $key, string $default = ''): string
     {
         $normalizedKey = strtolower($key);
@@ -320,47 +320,47 @@ readonly class Request
 
         return $default;
     }
-    
+
     public function getCookie(string $key, string $default = ''): string
     {
         return $this->cookies[$key] ?? $default;
     }
-    
+
     public function getContent(): ?string
     {
         return $this->content;
     }
-    
+
     public function isMethod(string $method): bool
     {
         return strtoupper($this->method) === strtoupper($method);
     }
-    
+
     public function isGet(): bool
     {
         return $this->isMethod('GET');
     }
-    
+
     public function isPost(): bool
     {
         return $this->isMethod('POST');
     }
-    
+
     public function isPut(): bool
     {
         return $this->isMethod('PUT');
     }
-    
+
     public function isDelete(): bool
     {
         return $this->isMethod('DELETE');
     }
-    
+
     public function isAjax(): bool
     {
         return $this->getHeader('X-Requested-With') === 'XMLHttpRequest';
     }
-    
+
     public function isJson(): bool
     {
         $contentType = $this->getHeader('Content-Type');
@@ -374,7 +374,7 @@ readonly class Request
         $lower = strtolower($ct);
         return str_contains($lower, 'application/xml') || str_contains($lower, 'text/xml');
     }
-    
+
     /**
      * Get parsed JSON body as array (object → assoc, array → list).
      *
