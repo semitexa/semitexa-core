@@ -160,6 +160,33 @@ final class CollectionEnvelopeTest extends TestCase
     }
 
     #[Test]
+    public function a_data_member_that_is_not_an_object_is_named_and_rejected(): void
+    {
+        // Review finding: checking only the outer list let {"data":["bad"]} parse cleanly,
+        // and item(0) then returned a string through an array return type - a TypeError
+        // deep in the caller instead of an exception naming the real problem.
+        $this->expectException(MalformedCollectionEnvelopeException::class);
+        $this->expectExceptionMessage('data[1]');
+
+        CollectionEnvelope::fromArray(['data' => [['id' => 'ok'], 'bad']]);
+    }
+
+    #[Test]
+    public function an_unimplemented_pagination_mode_is_not_relabelled_as_offset(): void
+    {
+        // Review finding: CollectionEnvelope routes everything that is not 'cursor' here,
+        // so accepting any string meant mode:'token' silently became offset pagination.
+        $this->expectException(MalformedCollectionEnvelopeException::class);
+        $this->expectExceptionMessage("the literal 'page'");
+
+        CollectionEnvelope::fromArray([
+            'data' => [],
+            'meta' => ['pagination' => ['mode' => 'token', 'page' => 1, 'perPage' => 5,
+                                        'total' => 5, 'pageCount' => 1, 'hasNext' => false, 'hasPrevious' => false]],
+        ]);
+    }
+
+    #[Test]
     public function a_non_json_body_is_reported_as_such(): void
     {
         $this->expectException(MalformedCollectionEnvelopeException::class);

@@ -59,6 +59,8 @@ final readonly class CollectionEnvelope
         if (!is_array($decoded)) {
             throw MalformedCollectionEnvelopeException::wrongType('<root>', 'an object', $decoded, 'the envelope');
         }
+        // json_decode gives array<mixed, mixed>; every key in a JSON object is a string.
+        /** @var array<string, mixed> $decoded */
 
         return self::fromArray($decoded);
     }
@@ -74,6 +76,20 @@ final readonly class CollectionEnvelope
         if (!is_array($data) || !array_is_list($data)) {
             throw MalformedCollectionEnvelopeException::wrongType('data', 'a list', $data, 'the envelope');
         }
+        // Each member too, not just the outer shape. Checking only the list meant
+        // {"data":["bad"]} parsed cleanly and then item(0) returned a string through an
+        // array return type - a TypeError from deep inside the caller instead of a
+        // MalformedCollectionEnvelopeException naming the real problem here.
+        foreach ($data as $index => $row) {
+            if (!is_array($row)) {
+                throw MalformedCollectionEnvelopeException::wrongType(
+                    'data[' . $index . ']',
+                    'an object',
+                    $row,
+                    'the envelope',
+                );
+            }
+        }
         /** @var list<array<string, mixed>> $data */
 
         $meta = $envelope['meta'] ?? [];
@@ -87,6 +103,7 @@ final readonly class CollectionEnvelope
             if (!is_array($raw)) {
                 throw MalformedCollectionEnvelopeException::wrongType('pagination', 'an object', $raw, 'meta');
             }
+            /** @var array<string, mixed> $raw */
             // The discriminator the two page types already agree on: cursor mode always
             // writes mode:'cursor', offset mode writes 'page' or omits the key entirely.
             $pagination = ($raw['mode'] ?? null) === 'cursor'
@@ -98,6 +115,7 @@ final readonly class CollectionEnvelope
         if (!is_array($filterOptions)) {
             throw MalformedCollectionEnvelopeException::wrongType('filterOptions', 'an object', $filterOptions, 'meta');
         }
+        /** @var array<string, mixed> $filterOptions */
 
         return new self($data, $pagination, $filterOptions);
     }

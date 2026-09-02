@@ -88,7 +88,7 @@ final readonly class CollectionPage
             pageCount:   self::intAt($meta, 'pageCount'),
             hasNext:     self::boolAt($meta, 'hasNext'),
             hasPrevious: self::boolAt($meta, 'hasPrevious'),
-            mode:        self::optionalStringAt($meta, 'mode'),
+            mode:        self::offsetModeAt($meta),
         );
     }
 
@@ -114,15 +114,30 @@ final readonly class CollectionPage
         return $value;
     }
 
-    /** @param array<string, mixed> $meta */
-    private static function optionalStringAt(array $meta, string $key): ?string
+    /**
+     * The offset mode, which is 'page' or absent - never anything else.
+     *
+     * Accepting any string here let a payload carrying mode:'token' through as offset
+     * pagination, because CollectionEnvelope routes everything that is not 'cursor' to this
+     * class. A mode nobody implements would then be silently relabelled as one that is.
+     * 'page' is the only value CollectionPaginationPolicy produces; absent is the
+     * byte-identical form used by routes with no declared policy.
+     *
+     * @param array<string, mixed> $meta
+     */
+    private static function offsetModeAt(array $meta): ?string
     {
-        if (!array_key_exists($key, $meta)) {
+        if (!array_key_exists('mode', $meta)) {
             return null;
         }
-        $value = $meta[$key];
-        if (!is_string($value)) {
-            throw MalformedCollectionEnvelopeException::wrongType($key, 'a string', $value, 'meta.pagination');
+        $value = $meta['mode'];
+        if ($value !== 'page') {
+            throw MalformedCollectionEnvelopeException::wrongType(
+                'mode',
+                "the literal 'page' or no key at all",
+                $value,
+                'meta.pagination',
+            );
         }
 
         return $value;
