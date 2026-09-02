@@ -187,6 +187,36 @@ final class CollectionEnvelopeTest extends TestCase
     }
 
     #[Test]
+    public function a_present_but_null_optional_member_is_rejected_rather_than_ignored(): void
+    {
+        // Review finding: ?? and isset() both read present-null as absent, so
+        // {"meta": null} parsed cleanly. Our producer never emits that, so accepting it is
+        // leniency toward a shape that can only come from a bug.
+        $this->expectException(MalformedCollectionEnvelopeException::class);
+        $this->expectExceptionMessage('"meta"');
+
+        CollectionEnvelope::fromArray(['data' => [], 'meta' => null]);
+    }
+
+    #[Test]
+    public function a_null_pagination_block_is_rejected_rather_than_read_as_absent(): void
+    {
+        $this->expectException(MalformedCollectionEnvelopeException::class);
+        $this->expectExceptionMessage('"pagination"');
+
+        CollectionEnvelope::fromArray(['data' => [], 'meta' => ['pagination' => null]]);
+    }
+
+    #[Test]
+    public function a_null_filter_options_block_is_rejected_too(): void
+    {
+        $this->expectException(MalformedCollectionEnvelopeException::class);
+        $this->expectExceptionMessage('"filterOptions"');
+
+        CollectionEnvelope::fromArray(['data' => [], 'meta' => ['filterOptions' => null]]);
+    }
+
+    #[Test]
     public function a_non_json_body_is_reported_as_such(): void
     {
         $this->expectException(MalformedCollectionEnvelopeException::class);

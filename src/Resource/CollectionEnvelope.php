@@ -92,13 +92,17 @@ final readonly class CollectionEnvelope
         }
         /** @var list<array<string, mixed>> $data */
 
-        $meta = $envelope['meta'] ?? [];
+        // array_key_exists, not ??: a present-but-null member is malformed, not absent.
+        // Our producer never emits {"meta": null}, so accepting it would be leniency toward
+        // a shape that can only come from a bug. Same distinction CollectionCursorPage
+        // already makes for nextCursor, where present-null carries meaning.
+        $meta = array_key_exists('meta', $envelope) ? $envelope['meta'] : [];
         if (!is_array($meta)) {
             throw MalformedCollectionEnvelopeException::wrongType('meta', 'an object', $meta, 'the envelope');
         }
 
         $pagination = null;
-        if (isset($meta['pagination'])) {
+        if (array_key_exists('pagination', $meta)) {
             $raw = $meta['pagination'];
             if (!is_array($raw)) {
                 throw MalformedCollectionEnvelopeException::wrongType('pagination', 'an object', $raw, 'meta');
@@ -111,7 +115,7 @@ final readonly class CollectionEnvelope
                 : CollectionPage::fromArray($raw);
         }
 
-        $filterOptions = $meta['filterOptions'] ?? [];
+        $filterOptions = array_key_exists('filterOptions', $meta) ? $meta['filterOptions'] : [];
         if (!is_array($filterOptions)) {
             throw MalformedCollectionEnvelopeException::wrongType('filterOptions', 'an object', $filterOptions, 'meta');
         }
