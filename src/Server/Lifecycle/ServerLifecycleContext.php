@@ -12,7 +12,11 @@ use Swoole\Http\Server;
 readonly class ServerLifecycleContext
 {
     public function __construct(
-        public Server $server,
+        /**
+         * Null in {@see ServerLifecyclePhase::ConsoleStartAfterContainer}: a CLI
+         * process has a container and no server. Worker phases always carry one.
+         */
+        public ?Server $server,
         public ?int $workerId,
         public Environment $environment,
         public ?ServerBootstrapState $bootstrapState = null,
