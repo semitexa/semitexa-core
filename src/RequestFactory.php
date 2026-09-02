@@ -19,12 +19,12 @@ class RequestFactory
         if ($source instanceof \Swoole\Http\Request) {
             return self::fromSwoole($source);
         }
-        
+
         throw new \InvalidArgumentException('RequestFactory::create requires a Swoole\\Http\\Request in Swoole-only mode');
     }
-    
+
     // fromGlobals removed in Swoole-only mode
-    
+
     /**
      * Create Request from Swoole request object
      */

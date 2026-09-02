@@ -44,7 +44,7 @@ readonly class Environment
         public string $swooleLogRotation = 'daily',
         public int $swooleLogRetentionDays = 14,
     ) {}
-    
+
     public static function create(): self
     {
         $fileEnv = self::loadEnv();
@@ -53,7 +53,7 @@ readonly class Environment
             $value = getenv($key);
             return $value !== false ? $value : ($fileEnv[$key] ?? $default);
         };
-        
+
         $redisPoolSize = self::parsePositiveInt($get('REDIS_POOL_SIZE', '16'), 'REDIS_POOL_SIZE');
         // Resolved through typed locals rather than an inline cast: $get() returns
         // mixed, and a bad value here decides whether logs rotate at all.
@@ -91,7 +91,7 @@ readonly class Environment
             swooleLogRetentionDays: SwooleLogRetention::daysFromEnv($logRetention),
         );
     }
-    
+
     private static function loadEnv(): array
     {
         $env = [];
@@ -109,7 +109,7 @@ readonly class Environment
 
         return $env;
     }
-    
+
     private static function parseEnvFile(string $file): array
     {
         $env = [];
@@ -118,26 +118,26 @@ readonly class Environment
         if ($lines === false) {
             return [];
         }
-        
+
         foreach ($lines as $line) {
             if (strpos($line, '#') === 0) {
                 continue; // Skip comments
             }
-            
+
             if (strpos($line, '=') !== false) {
                 [$key, $value] = explode('=', $line, 2);
                 $key = trim($key);
                 $value = trim($value);
-                
+
                 // Remove quotes if present
                 if (($value[0] ?? '') === '"' && ($value[-1] ?? '') === '"') {
                     $value = substr($value, 1, -1);
                 }
-                
+
                 $env[$key] = $value;
             }
         }
-        
+
         return $env;
     }
 
@@ -149,7 +149,7 @@ readonly class Environment
 
         return (int) $value;
     }
-    
+
     public function get(string $key, string $default = ''): string
     {
         return match($key) {
@@ -180,17 +180,17 @@ readonly class Environment
             default => $default
         };
     }
-    
+
     public function isDev(): bool
     {
         return $this->appEnv === 'dev';
     }
-    
+
     public function isDebug(): bool
     {
         return $this->appDebug;
     }
-    
+
     /**
      * Get any environment variable value (not just predefined ones).
      * Checks getenv() first, then cached .env.default/.env values.

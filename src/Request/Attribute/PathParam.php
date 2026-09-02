@@ -8,9 +8,9 @@ use Attribute;
 
 /**
  * PathParam attribute
- * 
+ *
  * Marks a property as a path parameter extracted from the URL route pattern
- * 
+ *
  * Example:
  * ```php
  * #[AsRequest(path: '/api/users/{id}')]

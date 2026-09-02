@@ -45,7 +45,7 @@ class QueueWorker
     {
         $this->statsFile = ProjectRoot::get() . '/var/queue-stats.json';
         @mkdir(dirname($this->statsFile), 0777, true);
-        
+
         // Initialize stats if file doesn't exist
         if (!file_exists($this->statsFile)) {
             file_put_contents($this->statsFile, json_encode([
@@ -232,12 +232,12 @@ class QueueWorker
             $this->updateStats('processed');
         } catch (\Throwable $e) {
             $this->log("❌ Error executing handler: {$e->getMessage()}", 'error');
-            
+
             if ($message->attempts < $message->maxRetries) {
                 $message->attempts++;
                 $delay = $message->retryDelay;
                 $this->log("ℹ️  Retrying handler ({$message->attempts}/{$message->maxRetries}) in {$delay}s...", 'warning');
-                
+
                 if ($delay > 0) {
                     if (\Swoole\Coroutine::getCid() > 0) {
                         \Swoole\Coroutine::sleep($delay);
@@ -245,7 +245,7 @@ class QueueWorker
                         sleep($delay);
                     }
                 }
-                
+
                 if ($this->currentTransport && $this->currentQueue) {
                     $transport = QueueTransportRegistry::create($this->currentTransport);
                     $transport->publish($this->currentQueue, $message->toJson());
@@ -314,7 +314,7 @@ class QueueWorker
         $stats[$type] = ($stats[$type] ?? 0) + 1;
         file_put_contents($this->statsFile, json_encode($stats));
     }
-    
+
 
     /**
      * @param array<string, mixed> $payload
