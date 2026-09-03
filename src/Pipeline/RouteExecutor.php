@@ -216,8 +216,12 @@ class RouteExecutor
             $pipelineExecutor->execute($context);
             // The method beside the class: the trace viewer opens the source of
             // what ran, and a handler is entered through handle() by contract
-            // (TypedHandlerInterface / PipelineListenerInterface alike).
-            $tracer?->end('pipeline', ['handler' => $context->lastHandlerClass, 'method' => 'handle']);
+            // (TypedHandlerInterface / PipelineListenerInterface alike). Only
+            // when a handler actually ran - a pipeline whose every handler was
+            // queued has no class, and must not claim a method either.
+            $tracer?->end('pipeline', $context->lastHandlerClass === null
+                ? ['handler' => null]
+                : ['handler' => $context->lastHandlerClass, 'method' => 'handle']);
             $resDto = $context->resourceDto;
             if (!is_object($resDto)) {
                 throw new PipelineException('Pipeline did not produce a response DTO.');
