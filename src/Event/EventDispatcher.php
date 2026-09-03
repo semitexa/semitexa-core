@@ -160,7 +160,7 @@ final class EventDispatcher implements EventDispatcherInterface
         // is exactly the question a slow-event hunt opens the trace to answer.
         // Deferred runs re-resolve nothing: no tracer is handed in, and by then
         // the buffer is closed anyway, so bracketing would record into nothing.
-        $tracer?->begin('event.listener', ['listener' => $meta['class'], 'event' => get_class($event)]);
+        $tracer?->begin('event.listener', ['listener' => $meta['class'], 'method' => 'handle', 'event' => get_class($event)]);
         try {
             $listener->handle($event);
         } finally {

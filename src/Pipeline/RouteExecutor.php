@@ -153,7 +153,7 @@ class RouteExecutor
             if ($this->container->has(PreHydrationAuthGateInterface::class)) {
                 /** @var PreHydrationAuthGateInterface $gate */
                 $gate = $this->container->get(PreHydrationAuthGateInterface::class);
-                $tracer?->begin('auth.pre_hydration_gate', ['gate' => $gate::class]);
+                $tracer?->begin('auth.pre_hydration_gate', ['gate' => $gate::class, 'method' => 'gate']);
                 $gate->gate($reqDto, $request, $this->authBootstrapper);
                 $tracer?->end('auth.pre_hydration_gate');
             } else {
@@ -214,7 +214,14 @@ class RouteExecutor
             $pipelineExecutor = new PipelineExecutor($this->requestScopedContainer, $this->container);
             $tracer?->begin('pipeline');
             $pipelineExecutor->execute($context);
-            $tracer?->end('pipeline', ['handler' => $context->lastHandlerClass]);
+            // The method beside the class: the trace viewer opens the source of
+            // what ran, and a handler is entered through handle() by contract
+            // (TypedHandlerInterface / PipelineListenerInterface alike). Only
+            // when a handler actually ran - a pipeline whose every handler was
+            // queued has no class, and must not claim a method either.
+            $tracer?->end('pipeline', $context->lastHandlerClass === null
+                ? ['handler' => null]
+                : ['handler' => $context->lastHandlerClass, 'method' => 'handle']);
             $resDto = $context->resourceDto;
             if (!is_object($resDto)) {
                 throw new PipelineException('Pipeline did not produce a response DTO.');
