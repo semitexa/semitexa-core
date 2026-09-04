@@ -211,16 +211,11 @@ class RouteExecutor
             );
 
             // 4. Execute Pipeline
-            // The tracer goes in, so the pipeline is not one opaque span: the
-            // executor opens a span per phase, per listener and per handler,
-            // each naming the class (and method) it ran. The outer 'pipeline'
-            // span stays as the container the inner ones nest under; it no
-            // longer names a handler itself - on a multi-handler route that
-            // named only the LAST one and sent the reader to the wrong code.
+            // The tracer goes in: the executor opens the 'pipeline' root and a
+            // span per phase, listener and handler under it, each naming the
+            // class (and method) it ran.
             $pipelineExecutor = new PipelineExecutor($this->requestScopedContainer, $this->container, $tracer);
-            $tracer?->begin('pipeline');
             $pipelineExecutor->execute($context);
-            $tracer?->end('pipeline');
             $resDto = $context->resourceDto;
             if (!is_object($resDto)) {
                 throw new PipelineException('Pipeline did not produce a response DTO.');
@@ -357,17 +352,15 @@ class RouteExecutor
             // 4. Execute the pipeline (AuthCheck → HandleRequest). The AuthCheck
             //    phase re-authorizes the re-established subject before the route
             //    handlers (data resolvers) run.
-            // Same optional tracer as execute(): a re-run inside a traced SSE
-            // connection lands its handler spans in that connection's trace.
-            /** @var RequestTracerInterface|null $reRunTracer */
-            $reRunTracer = $this->container->has(RequestTracerInterface::class)
-                ? $this->container->get(RequestTracerInterface::class)
-                : null;
-            $pipelineExecutor = new PipelineExecutor(
-                $this->requestScopedContainer,
-                $this->container,
-                SafeRequestTracer::wrap($reRunTracer),
-            );
+            // Deliberately UNTRACED. A re-run tick executes in the coroutine
+            // that still holds the connection's own pipeline.handler span open,
+            // so its spans would carry the same names on the same cid and
+            // overwrite the outer span's start (TraceBuffer keys open spans by
+            // cid+name) - the SSE handler would lose its duration. A traced tick
+            // would also add ~16 events per second to a connection-long trace
+            // and hit the event cap in minutes. Tracing re-runs needs its own
+            // span identity first; until then the first run shows the shape.
+            $pipelineExecutor = new PipelineExecutor($this->requestScopedContainer, $this->container);
             $pipelineExecutor->execute($context);
             $resDto = $context->resourceDto;
             if (!is_object($resDto)) {

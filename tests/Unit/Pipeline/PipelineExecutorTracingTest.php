@@ -39,10 +39,9 @@ final class PipelineExecutorTracingTest extends TestCase
         }
     }
 
-    protected function tearDown(): void
-    {
-        HandlerReflectionCache::reset();
-    }
+    // No tearDown reset: HandlerReflectionCache is one static shared by the
+    // whole PHPUnit process, and reset() would empty EVERY warmed handler, not
+    // the three above - a test that passes alone and reddens the suite.
 
     #[Test]
     public function every_phase_listener_and_handler_is_a_named_span_in_call_order(): void
@@ -53,6 +52,7 @@ final class PipelineExecutorTracingTest extends TestCase
         $this->executor($tracer, [AuthCheck::class => [TracingListener::class]])->execute($context);
 
         self::assertSame([
+            'begin pipeline',
             'begin pipeline.auth_check',
             'begin pipeline.listener',
             'end pipeline.listener',
@@ -64,10 +64,13 @@ final class PipelineExecutorTracingTest extends TestCase
             'end pipeline.handler',
             'end pipeline.handle_request',
             'begin pipeline.handler_completed',
+            'mark pipeline.handler_completed.skipped',
             'end pipeline.handler_completed',
+            'end pipeline',
         ], $tracer->sequence());
 
-        self::assertSame(AuthCheck::class, $tracer->contextOf('begin pipeline.auth_check', 0)['phase']);
+        self::assertSame(['route' => 'traced'], $tracer->contextOf('begin pipeline', 0), 'the root is opened by the executor, so every entry point nests the same way');
+        self::assertSame(['phase' => 'AuthCheck'], $tracer->contextOf('begin pipeline.auth_check', 0), 'a short name, not a class-shaped value: a marker class ran nothing worth linking to');
         self::assertSame(
             ['listener' => TracingListener::class, 'method' => 'handle'],
             $tracer->contextOf('begin pipeline.listener', 0),
@@ -78,7 +81,8 @@ final class PipelineExecutorTracingTest extends TestCase
             'the FIRST handler is named on its own span - not only the last one on the outer span',
         );
         self::assertSame(TracingHandlerB::class, $tracer->contextOf('begin pipeline.handler', 1)['handler']);
-        self::assertSame(['dispatched' => false], $tracer->contextOf('end pipeline.handler_completed', 0));
+        self::assertSame(['reason' => 'no_render_handle'], $tracer->contextOf('mark pipeline.handler_completed.skipped', 0), 'the span says WHY nothing fired, not just that it did not');
+        self::assertSame([], $tracer->contextOf('end pipeline.handler_completed', 0));
         self::assertSame(TracingHandlerB::class, $context->lastHandlerClass);
     }
 
@@ -96,13 +100,38 @@ final class PipelineExecutorTracingTest extends TestCase
         }
 
         self::assertSame([
+            'begin pipeline',
             'begin pipeline.auth_check',
             'end pipeline.auth_check',
             'begin pipeline.handle_request',
             'begin pipeline.handler',
             'end pipeline.handler',
             'end pipeline.handle_request',
-        ], $tracer->sequence(), 'finally closes the handler and the phase; handler_completed never opens');
+            'end pipeline',
+        ], $tracer->sequence(), 'every enclosing span closes; handler_completed never opens');
+        self::assertSame(['unfinished' => true], $tracer->contextOf('end pipeline.handler', 0), 'the span that died says so');
+        self::assertSame(['unfinished' => true], $tracer->contextOf('end pipeline.handle_request', 0));
+        self::assertSame(['unfinished' => true], $tracer->contextOf('end pipeline', 0));
+    }
+
+    #[Test]
+    public function a_listener_that_cannot_be_resolved_is_still_named(): void
+    {
+        $tracer = new PipelineRecordingTracer();
+        $context = $this->context([TracingHandlerA::class]);
+
+        try {
+            $this->executor($tracer, [AuthCheck::class => ['App\\Nope\\UnresolvableListener']])->execute($context);
+            self::fail('an unresolvable listener must throw');
+        } catch (\Throwable) {
+        }
+
+        self::assertSame(
+            ['listener' => 'App\\Nope\\UnresolvableListener', 'method' => 'handle'],
+            $tracer->contextOf('begin pipeline.listener', 0),
+            'resolution happens inside the span, so a listener that fails to construct is charged to itself and named',
+        );
+        self::assertSame(['unfinished' => true], $tracer->contextOf('end pipeline.listener', 0));
     }
 
     #[Test]
@@ -118,13 +147,17 @@ final class PipelineExecutorTracingTest extends TestCase
     }
 
     #[Test]
-    public function without_a_tracer_the_pipeline_runs_exactly_as_before(): void
+    public function the_tracer_is_optional_and_its_absence_is_the_default(): void
     {
         $context = $this->context([TracingHandlerA::class]);
+        $resource = $context->resourceDto;
 
-        (new PipelineExecutor($this->requestScope(), $this->container([]), null))->execute($context);
+        // Two-argument construction is what production code without a tracer
+        // does; the pipeline must run to completion and hand back the resource.
+        (new PipelineExecutor($this->requestScope(), $this->container([])))->execute($context);
 
         self::assertSame(TracingHandlerA::class, $context->lastHandlerClass);
+        self::assertSame($resource, $context->resourceDto, 'the handler returned the resource it was given');
     }
 
     /**
@@ -280,6 +313,7 @@ final class TracingResource implements ResourceInterface
 {
 }
 
+/** A and B are byte-identical on purpose: two classes so "first" and "last" are distinguishable in the spans. */
 final class TracingHandlerA implements TypedHandlerInterface
 {
     public function handle(TracingPayload $payload, TracingResource $resource): TracingResource

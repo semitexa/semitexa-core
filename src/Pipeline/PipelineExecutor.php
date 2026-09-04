@@ -28,8 +28,9 @@ use Semitexa\Core\Queue\QueueDispatcher;
  * that say WHERE inside it the time went. Every span names the class (and
  * method) it ran, so a trace viewer can open the code behind it.
  *
- * Spans are closed in `finally`: a listener that throws still leaves a trace
- * that shows which listener it was.
+ * Every span closes however its work leaves, and one that was left by an
+ * exception closes with `unfinished`: a listener that throws still leaves a
+ * trace that shows which listener it was, and says that it died there.
  */
 final class PipelineExecutor
 {
@@ -41,32 +42,59 @@ final class PipelineExecutor
     }
 
     /**
-     * @return list<class-string>
+     * Phase marker class → its span name. Data, not derivation: the span name
+     * is a wire contract (the trace viewer and ai:observe key on it), so it must
+     * not silently follow a class rename.
      */
-    protected function getPhases(): array
-    {
-        return [AuthCheck::class, HandleRequest::class];
-    }
+    private const PHASE_SPANS = [
+        AuthCheck::class => 'pipeline.auth_check',
+        HandleRequest::class => 'pipeline.handle_request',
+    ];
 
     public function execute(RequestPipelineContext $context): void
     {
-        foreach ($this->getPhases() as $phaseClass) {
-            // pipeline.auth_check, pipeline.handle_request: the phase reads as a
-            // step in the viewer, and the FQCN rides in the context for the link.
-            $span = 'pipeline.' . self::snake(self::short($phaseClass));
-            $this->tracer?->begin($span, ['phase' => $phaseClass]);
-            try {
-                $this->dispatchPhase($phaseClass, $context);
-            } finally {
-                $this->tracer?->end($span);
+        // The root the inner spans nest under lives here, not at the call site,
+        // so every entry point that runs a pipeline produces the same tree.
+        $this->span('pipeline', ['route' => $context->route->name], function () use ($context): void {
+            foreach (self::PHASE_SPANS as $phaseClass => $span) {
+                // The short name, not the FQCN: a marker class ran nothing, and a
+                // class-shaped value would become a link to an empty file.
+                $this->span($span, ['phase' => substr($phaseClass, (int) strrpos($phaseClass, '\\') + 1)], function () use ($phaseClass, $context): void {
+                    $this->dispatchPhase($phaseClass, $context);
+                });
             }
+
+            $this->span('pipeline.handler_completed', [], function () use ($context): void {
+                $this->dispatchHandlerCompleted($context);
+            });
+        });
+    }
+
+    /**
+     * Run $work inside a span that closes however $work leaves.
+     *
+     * The closing context says `unfinished` when $work threw: with the plain
+     * `finally { end() }` this replaced, the span closed clean and the reader
+     * could not tell a handler that completed from one that died — the flag
+     * SafeRequestTracer would have set was pre-empted by the explicit end.
+     *
+     * @param array<string, mixed> $context
+     */
+    private function span(string $name, array $context, callable $work): void
+    {
+        if ($this->tracer === null) {
+            $work();
+
+            return;
         }
 
-        $this->tracer?->begin('pipeline.handler_completed');
+        $this->tracer->begin($name, $context);
+        $ok = false;
         try {
-            $this->dispatchHandlerCompleted($context);
+            $work();
+            $ok = true;
         } finally {
-            $this->tracer?->end('pipeline.handler_completed', ['dispatched' => $context->handlerCompletedDispatched]);
+            $this->tracer->end($name, $ok ? [] : ['unfinished' => true]);
         }
     }
 
@@ -76,32 +104,18 @@ final class PipelineExecutor
         $registry = $this->container->get(PipelineListenerRegistry::class);
         $listeners = $registry->getListeners($phaseClass);
         foreach ($listeners as $meta) {
-            $instance = $this->requestScopedContainer->get($meta['class']);
-            // The listener is entered through handle() by contract
-            // (PipelineListenerInterface); the span says so for the source link.
-            $this->tracer?->begin('pipeline.listener', ['listener' => $meta['class'], 'method' => 'handle']);
-            try {
-                $this->invokeListener($instance, $context);
-            } finally {
-                $this->tracer?->end('pipeline.listener');
-            }
+            // Resolution inside the span, like handlers: a listener that fails or
+            // is slow to construct is charged to that listener and NAMED — the
+            // exact case a re-run hits when the execution context is not ready.
+            // Entered through handle() by contract (PipelineListenerInterface).
+            $this->span('pipeline.listener', ['listener' => $meta['class'], 'method' => 'handle'], function () use ($meta, $context): void {
+                $this->invokeListener($this->requestScopedContainer->get($meta['class']), $context);
+            });
         }
 
         if ($phaseClass === HandleRequest::class) {
             $this->executeRouteHandlers($context);
         }
-    }
-
-    private static function short(string $fqcn): string
-    {
-        $pos = strrpos($fqcn, '\\');
-
-        return $pos === false ? $fqcn : substr($fqcn, $pos + 1);
-    }
-
-    private static function snake(string $name): string
-    {
-        return strtolower((string) preg_replace('/(?<!^)[A-Z]/', '_$0', $name));
     }
 
     /**
@@ -180,19 +194,19 @@ final class PipelineExecutor
 
             // Resolution inside the span: a handler whose constructor is the
             // slow part is still charged to that handler, not to the phase.
-            $this->tracer?->begin('pipeline.handler', ['handler' => $handlerClass, 'method' => 'handle']);
-            try {
-                try {
-                    $handler = $this->requestScopedContainer->get($handlerClass);
-                } catch (\Throwable $e) {
-                    throw new PipelineException("Failed to resolve handler {$handlerClass}: " . $e->getMessage(), $e);
-                }
-
-                $this->invokeListener($handler, $context);
+            $this->span('pipeline.handler', ['handler' => $handlerClass, 'method' => 'handle'], function () use ($handlerClass, $context): void {
+                $this->invokeListener($this->resolveHandler($handlerClass), $context);
                 $context->lastHandlerClass = $handlerClass;
-            } finally {
-                $this->tracer?->end('pipeline.handler');
-            }
+            });
+        }
+    }
+
+    private function resolveHandler(string $handlerClass): object
+    {
+        try {
+            return $this->requestScopedContainer->get($handlerClass);
+        } catch (\Throwable $e) {
+            throw new PipelineException("Failed to resolve handler {$handlerClass}: " . $e->getMessage(), $e);
         }
     }
 
@@ -202,11 +216,17 @@ final class PipelineExecutor
      */
     private function dispatchHandlerCompleted(RequestPipelineContext $context): void
     {
+        // Each way out says WHY nothing fired: "why did no SSE push happen" is
+        // the question this span is opened to answer, and a bare false cannot.
         if (!$context->lastHandlerClass) {
+            $this->tracer?->mark('pipeline.handler_completed.skipped', ['reason' => 'no_handler_ran']);
+
             return;
         }
 
         if (!is_object($context->resourceDto)) {
+            $this->tracer?->mark('pipeline.handler_completed.skipped', ['reason' => 'no_resource']);
+
             return;
         }
 
@@ -215,21 +235,26 @@ final class PipelineExecutor
             : null;
 
         if (!is_string($handle) || $handle === '') {
+            $this->tracer?->mark('pipeline.handler_completed.skipped', ['reason' => 'no_render_handle']);
+
             return;
         }
 
         try {
             $events = $this->container->get(EventDispatcherInterface::class);
         } catch (\Throwable) {
+            $this->tracer?->mark('pipeline.handler_completed.skipped', ['reason' => 'no_dispatcher']);
+
             return;
         }
 
         if (!$events instanceof EventDispatcherInterface) {
+            $this->tracer?->mark('pipeline.handler_completed.skipped', ['reason' => 'no_dispatcher']);
+
             return;
         }
 
         $sessionId = $this->getSessionIdForAsyncDelivery($context->request);
-        $context->handlerCompletedDispatched = true;
         $events->dispatch(new HandlerCompleted(
             $context->lastHandlerClass,
             $context->resourceDto,
