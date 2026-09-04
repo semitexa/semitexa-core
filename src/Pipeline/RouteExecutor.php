@@ -211,17 +211,16 @@ class RouteExecutor
             );
 
             // 4. Execute Pipeline
-            $pipelineExecutor = new PipelineExecutor($this->requestScopedContainer, $this->container);
+            // The tracer goes in, so the pipeline is not one opaque span: the
+            // executor opens a span per phase, per listener and per handler,
+            // each naming the class (and method) it ran. The outer 'pipeline'
+            // span stays as the container the inner ones nest under; it no
+            // longer names a handler itself - on a multi-handler route that
+            // named only the LAST one and sent the reader to the wrong code.
+            $pipelineExecutor = new PipelineExecutor($this->requestScopedContainer, $this->container, $tracer);
             $tracer?->begin('pipeline');
             $pipelineExecutor->execute($context);
-            // The method beside the class: the trace viewer opens the source of
-            // what ran, and a handler is entered through handle() by contract
-            // (TypedHandlerInterface / PipelineListenerInterface alike). Only
-            // when a handler actually ran - a pipeline whose every handler was
-            // queued has no class, and must not claim a method either.
-            $tracer?->end('pipeline', $context->lastHandlerClass === null
-                ? ['handler' => null]
-                : ['handler' => $context->lastHandlerClass, 'method' => 'handle']);
+            $tracer?->end('pipeline');
             $resDto = $context->resourceDto;
             if (!is_object($resDto)) {
                 throw new PipelineException('Pipeline did not produce a response DTO.');
@@ -358,7 +357,17 @@ class RouteExecutor
             // 4. Execute the pipeline (AuthCheck → HandleRequest). The AuthCheck
             //    phase re-authorizes the re-established subject before the route
             //    handlers (data resolvers) run.
-            $pipelineExecutor = new PipelineExecutor($this->requestScopedContainer, $this->container);
+            // Same optional tracer as execute(): a re-run inside a traced SSE
+            // connection lands its handler spans in that connection's trace.
+            /** @var RequestTracerInterface|null $reRunTracer */
+            $reRunTracer = $this->container->has(RequestTracerInterface::class)
+                ? $this->container->get(RequestTracerInterface::class)
+                : null;
+            $pipelineExecutor = new PipelineExecutor(
+                $this->requestScopedContainer,
+                $this->container,
+                SafeRequestTracer::wrap($reRunTracer),
+            );
             $pipelineExecutor->execute($context);
             $resDto = $context->resourceDto;
             if (!is_object($resDto)) {

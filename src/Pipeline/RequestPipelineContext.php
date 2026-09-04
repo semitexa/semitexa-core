@@ -26,6 +26,13 @@ class RequestPipelineContext
     public ?AuthResult $authResult = null;
     public ?string $lastHandlerClass = null;
 
+    /**
+     * Whether the post-pipeline HandlerCompleted event was actually dispatched
+     * (a route without a render handle dispatches nothing). Read by the tracer
+     * so the closing span can say which of the two happened.
+     */
+    public bool $handlerCompletedDispatched = false;
+
     public function __construct(
         public readonly object $requestDto,
         public readonly DiscoveredRoute $route,

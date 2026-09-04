@@ -18,12 +18,25 @@ use Semitexa\Core\Queue\QueueDispatcher;
  *
  * Pipeline listeners are always synchronous — the response depends on their result.
  * Domain events (HandlerCompleted) are dispatched after the pipeline completes.
+ *
+ * ## Tracing
+ *
+ * The optional tracer sees the pipeline from the inside: one span per phase,
+ * one per pipeline listener, one per route handler, one around the
+ * HandlerCompleted dispatch. Measured on a warm page request, the pipeline
+ * held ~89% of the wall time as a single opaque span; these are the spans
+ * that say WHERE inside it the time went. Every span names the class (and
+ * method) it ran, so a trace viewer can open the code behind it.
+ *
+ * Spans are closed in `finally`: a listener that throws still leaves a trace
+ * that shows which listener it was.
  */
 final class PipelineExecutor
 {
     public function __construct(
         private readonly ContainerInterface $requestScopedContainer,
         private readonly ContainerInterface $container,
+        private readonly ?RequestTracerInterface $tracer = null,
     ) {
     }
 
@@ -38,10 +51,23 @@ final class PipelineExecutor
     public function execute(RequestPipelineContext $context): void
     {
         foreach ($this->getPhases() as $phaseClass) {
-            $this->dispatchPhase($phaseClass, $context);
+            // pipeline.auth_check, pipeline.handle_request: the phase reads as a
+            // step in the viewer, and the FQCN rides in the context for the link.
+            $span = 'pipeline.' . self::snake(self::short($phaseClass));
+            $this->tracer?->begin($span, ['phase' => $phaseClass]);
+            try {
+                $this->dispatchPhase($phaseClass, $context);
+            } finally {
+                $this->tracer?->end($span);
+            }
         }
 
-        $this->dispatchHandlerCompleted($context);
+        $this->tracer?->begin('pipeline.handler_completed');
+        try {
+            $this->dispatchHandlerCompleted($context);
+        } finally {
+            $this->tracer?->end('pipeline.handler_completed', ['dispatched' => $context->handlerCompletedDispatched]);
+        }
     }
 
     private function dispatchPhase(string $phaseClass, RequestPipelineContext $context): void
@@ -51,12 +77,31 @@ final class PipelineExecutor
         $listeners = $registry->getListeners($phaseClass);
         foreach ($listeners as $meta) {
             $instance = $this->requestScopedContainer->get($meta['class']);
-            $this->invokeListener($instance, $context);
+            // The listener is entered through handle() by contract
+            // (PipelineListenerInterface); the span says so for the source link.
+            $this->tracer?->begin('pipeline.listener', ['listener' => $meta['class'], 'method' => 'handle']);
+            try {
+                $this->invokeListener($instance, $context);
+            } finally {
+                $this->tracer?->end('pipeline.listener');
+            }
         }
 
         if ($phaseClass === HandleRequest::class) {
             $this->executeRouteHandlers($context);
         }
+    }
+
+    private static function short(string $fqcn): string
+    {
+        $pos = strrpos($fqcn, '\\');
+
+        return $pos === false ? $fqcn : substr($fqcn, $pos + 1);
+    }
+
+    private static function snake(string $name): string
+    {
+        return strtolower((string) preg_replace('/(?<!^)[A-Z]/', '_$0', $name));
     }
 
     /**
@@ -123,21 +168,31 @@ final class PipelineExecutor
                     $context->resourceDto,
                     $sessionId
                 );
+                // A mark, not a span: the work happens elsewhere, later.
+                $this->tracer?->mark('pipeline.handler.queued', ['handler' => $handlerClass]);
                 continue;
             }
 
             if (!class_exists($handlerClass)) {
+                $this->tracer?->mark('pipeline.handler.missing', ['handler' => $handlerClass]);
                 continue;
             }
 
+            // Resolution inside the span: a handler whose constructor is the
+            // slow part is still charged to that handler, not to the phase.
+            $this->tracer?->begin('pipeline.handler', ['handler' => $handlerClass, 'method' => 'handle']);
             try {
-                $handler = $this->requestScopedContainer->get($handlerClass);
-            } catch (\Throwable $e) {
-                throw new PipelineException("Failed to resolve handler {$handlerClass}: " . $e->getMessage(), $e);
-            }
+                try {
+                    $handler = $this->requestScopedContainer->get($handlerClass);
+                } catch (\Throwable $e) {
+                    throw new PipelineException("Failed to resolve handler {$handlerClass}: " . $e->getMessage(), $e);
+                }
 
-            $this->invokeListener($handler, $context);
-            $context->lastHandlerClass = $handlerClass;
+                $this->invokeListener($handler, $context);
+                $context->lastHandlerClass = $handlerClass;
+            } finally {
+                $this->tracer?->end('pipeline.handler');
+            }
         }
     }
 
@@ -174,6 +229,7 @@ final class PipelineExecutor
         }
 
         $sessionId = $this->getSessionIdForAsyncDelivery($context->request);
+        $context->handlerCompletedDispatched = true;
         $events->dispatch(new HandlerCompleted(
             $context->lastHandlerClass,
             $context->resourceDto,
