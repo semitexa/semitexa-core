@@ -211,17 +211,11 @@ class RouteExecutor
             );
 
             // 4. Execute Pipeline
-            $pipelineExecutor = new PipelineExecutor($this->requestScopedContainer, $this->container);
-            $tracer?->begin('pipeline');
+            // The tracer goes in: the executor opens the 'pipeline' root and a
+            // span per phase, listener and handler under it, each naming the
+            // class (and method) it ran.
+            $pipelineExecutor = new PipelineExecutor($this->requestScopedContainer, $this->container, $tracer);
             $pipelineExecutor->execute($context);
-            // The method beside the class: the trace viewer opens the source of
-            // what ran, and a handler is entered through handle() by contract
-            // (TypedHandlerInterface / PipelineListenerInterface alike). Only
-            // when a handler actually ran - a pipeline whose every handler was
-            // queued has no class, and must not claim a method either.
-            $tracer?->end('pipeline', $context->lastHandlerClass === null
-                ? ['handler' => null]
-                : ['handler' => $context->lastHandlerClass, 'method' => 'handle']);
             $resDto = $context->resourceDto;
             if (!is_object($resDto)) {
                 throw new PipelineException('Pipeline did not produce a response DTO.');
@@ -358,6 +352,14 @@ class RouteExecutor
             // 4. Execute the pipeline (AuthCheck → HandleRequest). The AuthCheck
             //    phase re-authorizes the re-established subject before the route
             //    handlers (data resolvers) run.
+            // Deliberately UNTRACED. A re-run tick executes in the coroutine
+            // that still holds the connection's own pipeline.handler span open,
+            // so its spans would carry the same names on the same cid and
+            // overwrite the outer span's start (TraceBuffer keys open spans by
+            // cid+name) - the SSE handler would lose its duration. A traced tick
+            // would also add ~16 events per second to a connection-long trace
+            // and hit the event cap in minutes. Tracing re-runs needs its own
+            // span identity first; until then the first run shows the shape.
             $pipelineExecutor = new PipelineExecutor($this->requestScopedContainer, $this->container);
             $pipelineExecutor->execute($context);
             $resDto = $context->resourceDto;
