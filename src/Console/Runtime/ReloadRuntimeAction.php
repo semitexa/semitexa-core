@@ -12,6 +12,17 @@ final class ReloadRuntimeAction
     public function __construct(private readonly SymfonyStyle $io) {}
 
     /**
+     * Is there a running Swoole master to signal?
+     *
+     * Lets a caller tell "nothing to reload" from "the reload failed" without
+     * provoking an error message the situation does not warrant.
+     */
+    public function hasRunningServer(): bool
+    {
+        return $this->findMasterPid() !== null;
+    }
+
+    /**
      * Send SIGUSR1 to Swoole master for graceful worker reload.
      * Returns false on failure.
      */
