@@ -11,15 +11,40 @@ final class ReloadRuntimeAction
 {
     public function __construct(private readonly SymfonyStyle $io) {}
 
+    /** No pidfile at all: there is nothing running, and nothing to reload. */
+    public const PRESENCE_ABSENT = 'absent';
+
+    /** A verified master PID: a reload can be signalled. */
+    public const PRESENCE_RUNNING = 'running';
+
     /**
-     * Is there a running Swoole master to signal?
-     *
-     * Lets a caller tell "nothing to reload" from "the reload failed" without
-     * provoking an error message the situation does not warrant.
+     * A pidfile exists but could not be read or verified. Something may well be
+     * running; we simply cannot tell.
      */
-    public function hasRunningServer(): bool
+    public const PRESENCE_UNKNOWN = 'unknown';
+
+    /**
+     * Whether there is a Swoole master to signal — and, when there is not, why.
+     *
+     * Deliberately three-valued. `findMasterPid()` answers null both for "no
+     * server" and for "there is a pidfile but it is unreadable, or the process
+     * behind it cannot be verified", and a caller that folds those together
+     * reports success without reloading anything: the operator is told nothing
+     * holds a compiled template while a live worker still does.
+     */
+    public function serverPresence(): string
     {
-        return $this->findMasterPid() !== null;
+        if ($this->findMasterPid() !== null) {
+            return self::PRESENCE_RUNNING;
+        }
+
+        foreach ($this->pidfileCandidates() as $path) {
+            if (file_exists($path)) {
+                return self::PRESENCE_UNKNOWN;
+            }
+        }
+
+        return self::PRESENCE_ABSENT;
     }
 
     /**
@@ -104,15 +129,22 @@ final class ReloadRuntimeAction
         }
     }
 
-    private function findMasterPid(): ?int
+    /** @return list<string> */
+    private function pidfileCandidates(): array
     {
         $root = ProjectRoot::get();
-        $candidates = [
+
+        return [
             $root . '/var/run/semitexa.pid',
             $root . '/var/swoole.pid',
         ];
+    }
 
-        foreach ($candidates as $path) {
+    private function findMasterPid(): ?int
+    {
+        $root = ProjectRoot::get();
+
+        foreach ($this->pidfileCandidates() as $path) {
             if (is_readable($path)) {
                 $pidRaw = file_get_contents($path);
                 if ($pidRaw === false) {

@@ -133,11 +133,22 @@ class CacheClearCommand extends BaseCommand
         }
 
         $reload = new ReloadRuntimeAction($io);
+        $presence = $reload->serverPresence();
 
-        if (!$reload->hasRunningServer()) {
+        if ($presence === ReloadRuntimeAction::PRESENCE_ABSENT) {
             $io->text('No running server found — nothing holds a compiled template in memory.');
 
             return Command::SUCCESS;
+        }
+
+        if ($presence === ReloadRuntimeAction::PRESENCE_UNKNOWN) {
+            // A pidfile exists but could not be read or verified. Saying "no
+            // running server" here would be a guess dressed as a fact, and the
+            // guess that costs the operator: a live worker keeps serving the
+            // template we just deleted while the command reports success.
+            $io->warning('A pidfile exists but the Swoole master could not be verified, so the workers were NOT reloaded. Disk cache is clear; run server:reload (or server:restart) before trusting what the page shows.');
+
+            return Command::FAILURE;
         }
 
         if (!$reload->execute()) {
