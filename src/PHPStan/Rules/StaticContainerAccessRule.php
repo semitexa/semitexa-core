@@ -27,18 +27,21 @@ final class StaticContainerAccessRule implements Rule
      * is resolving an arbitrary, runtime-named #[AsService] class (queue
      * consumers, the scheduler's job executor). Dynamic dispatch is what the
      * container is FOR; there is no attribute-injection shape for a class
-     * name that only exists in a database row. Entries here are exact class
-     * prefixes — bless the dispatch chokepoint, never a whole package.
+     * name that only exists in a database row.
+     *
+     * Every entry here is a NAMESPACE and must end in a backslash. A class name
+     * used as a prefix blesses more than it names: 'Semitexa\\Core\\Application'
+     * sat here to permit the Application class and silently permitted the whole
+     * 'Semitexa\\Core\\Application\\' namespace with it — TestHandlerCommand was
+     * exempt without anyone deciding that — and would equally have permitted a
+     * future 'ApplicationWorker'. Class names belong in
+     * {@see ALLOWED_EXACT_CLASSES}, which compares with ===.
      */
     private const ALLOWED_NAMESPACES = [
         'Semitexa\\Core\\Container\\',
-        'Semitexa\\Core\\Log\\StaticLoggerBridge',
-        'Semitexa\\Core\\Application',
         'Semitexa\\Core\\Console\\',
         'Semitexa\\Core\\Server\\',
-        'Semitexa\\Core\\Event\\EventDispatcher',
         'Semitexa\\Core\\Queue\\',
-        'Semitexa\\Scheduler\\Application\\Service\\RunExecutor',
     ];
 
     /**
@@ -50,6 +53,18 @@ final class StaticContainerAccessRule implements Rule
      * Nothing else in semitexa-dev gets this.
      */
     private const ALLOWED_EXACT_CLASSES = [
+        // The dynamic-dispatch tier, each named rather than inherited from a
+        // prefix. Moved here 2026-09-06 from ALLOWED_NAMESPACES, where they were
+        // class names doing prefix matching.
+        'Semitexa\\Core\\Application',
+        'Semitexa\\Core\\Log\\StaticLoggerBridge',
+        'Semitexa\\Core\\Event\\EventDispatcher',
+        'Semitexa\\Scheduler\\Application\\Service\\RunExecutor',
+        // Was exempt only as collateral of the 'Semitexa\\Core\\Application'
+        // prefix. It is a diagnostic that resolves a handler class named on the
+        // command line — genuinely the dispatch tier — so it is named here on
+        // purpose instead of inherited by accident.
+        'Semitexa\\Core\\Application\\Console\\Command\\TestHandlerCommand',
         'Semitexa\\Dev\\Application\\Service\\Trace\\ReplayRunner',
     ];
 
