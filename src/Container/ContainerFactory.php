@@ -56,6 +56,13 @@ class ContainerFactory
     {
         $container->set(\Semitexa\Core\Environment::class, \Semitexa\Core\Environment::create());
         $container->set(\Psr\Container\ContainerInterface::class, $container);
+        // Also under its own type. Callers that need resolve() — the
+        // dynamic-dispatch tier, resolving a class named at runtime — cannot
+        // express that through PSR-11, and without this entry the container
+        // would try to CONSTRUCT a second SemitexaContainer when asked for one.
+        // Their alternative was reaching for ContainerFactory:: statically,
+        // which is what semitexa.staticContainerAccess exists to forbid.
+        $container->set(SemitexaContainer::class, $container);
 
         $connectionRegistry = new \Semitexa\Orm\Application\Service\Connection\ConnectionRegistry();
         $container->set(\Semitexa\Orm\Application\Service\Connection\ConnectionRegistry::class, $connectionRegistry);
