@@ -58,7 +58,20 @@ final class SafeRequestTracer implements RequestTracerInterface
      */
     private bool $silent = false;
 
-    /** @var list<string> Names of spans opened and not yet closed, outermost first. */
+    /**
+     * Spans opened and not yet closed, outermost first, each carrying whether
+     * its begin() actually REACHED the inner tracer.
+     *
+     * Silenced spans are still stacked — end() unwinds against this and a
+     * recording opened later by a nested span must find the nesting intact —
+     * but the inner tracer never saw them begin. Forwarding their end() would
+     * hand it a close for a span it never opened, unbalancing its stack. That
+     * is reachable: an untraced request silences its children, then an SSE span
+     * inside it starts recording and clears the silence, and the children
+     * opened in between would have closed against the new recording.
+     *
+     * @var list<array{name: string, dispatched: bool}>
+     */
     private array $stack = [];
 
     private function __construct(
@@ -86,17 +99,18 @@ final class SafeRequestTracer implements RequestTracerInterface
             return;
         }
 
-        // The stack is kept even while silent: end() unwinds against it, and a
-        // recording opened later by a nested span must find the nesting intact.
-        if ($this->silent && !$this->wantedWhileSilent($name)) {
-            $this->stack[] = $name;
-
-            return;
-        }
-
+        // Inside the try, including the silence decision: wantedWhileSilent()
+        // is a call INTO the inner tracer, and this class exists so that no
+        // inner call can throw out into the request being observed.
         try {
+            if ($this->silent && !$this->wantedWhileSilent($name)) {
+                $this->stack[] = ['name' => $name, 'dispatched' => false];
+
+                return;
+            }
+
             $this->inner->begin($name, $context);
-            $this->stack[] = $name;
+            $this->stack[] = ['name' => $name, 'dispatched' => true];
             $this->refreshSilence();
         } catch (\Throwable) {
             $this->fail();
@@ -109,18 +123,16 @@ final class SafeRequestTracer implements RequestTracerInterface
             return;
         }
 
-        // A span the tracer wants while silent was opened through the inner
-        // tracer, so its close has to reach it too — otherwise a journal process
-        // is opened and never closed.
-        if ($this->silent && !$this->wantedWhileSilent($name)) {
-            $this->popTo($name);
-
-            return;
-        }
-
         try {
-            $this->closeUnfinishedAbove($name);
-            $this->inner->end($name, $context);
+            $dispatched = $this->closeUnfinishedAbove($name);
+
+            // null: the span was never on our stack. Passed through untouched
+            // rather than guessed at — the caller knows something this wrapper
+            // does not. false: we silenced its begin(), so its end() is ours to
+            // swallow, not the inner tracer's to reconcile.
+            if ($dispatched !== false) {
+                $this->inner->end($name, $context);
+            }
         } catch (\Throwable) {
             $this->fail();
         }
@@ -157,20 +169,6 @@ final class SafeRequestTracer implements RequestTracerInterface
             && $this->inner->wantsWhileSilent($name);
     }
 
-    /**
-     * Unwind the stack to the innermost span with this name, without telling the
-     * inner tracer: while silent it was never told they opened.
-     */
-    private function popTo(string $name): void
-    {
-        $matches = array_keys($this->stack, $name, true);
-        if ($matches === []) {
-            return;
-        }
-
-        array_splice($this->stack, (int) end($matches));
-    }
-
     private function fail(): void
     {
         // Deliberately silent. There is nowhere to report this that is not
@@ -187,22 +185,38 @@ final class SafeRequestTracer implements RequestTracerInterface
      * and inventing a stack entry for it would corrupt the nesting it is here to
      * protect.
      */
-    private function closeUnfinishedAbove(string $name): void
+    /**
+     * @return bool|null whether the matched span's begin() reached the inner
+     *                   tracer, or null when it was never on the stack
+     */
+    private function closeUnfinishedAbove(string $name): ?bool
     {
         // Innermost match, not the first: a span name can legitimately nest inside
         // itself, and closing the outer one would discard the inner span's work.
-        $matches = array_keys($this->stack, $name, true);
-        if ($matches === []) {
-            return;
+        $at = null;
+        foreach ($this->stack as $index => $entry) {
+            if ($entry['name'] === $name) {
+                $at = $index;
+            }
         }
-        $at = (int) end($matches);
+
+        if ($at === null) {
+            return null;
+        }
 
         while (count($this->stack) > $at + 1) {
             $unfinished = array_pop($this->stack);
-            $this->inner->end((string) $unfinished, ['unfinished' => true]);
+            // Only spans the inner tracer actually opened.
+            if ($unfinished['dispatched']) {
+                $this->inner->end($unfinished['name'], ['unfinished' => true]);
+            }
         }
 
-        array_pop($this->stack);
-    }
+        // $at came from this array, so the pop cannot be empty — but say so
+        // rather than assume it: an unbalanced caller is exactly the case this
+        // class exists to survive.
+        $matched = array_pop($this->stack);
 
+        return $matched !== null ? $matched['dispatched'] : null;
+    }
 }
