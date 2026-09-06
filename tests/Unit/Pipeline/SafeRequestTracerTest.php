@@ -6,6 +6,7 @@ namespace Semitexa\Core\Tests\Unit\Pipeline;
 
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
+use Semitexa\Core\Pipeline\RecordingAwareTracerInterface;
 use Semitexa\Core\Pipeline\RequestTracerInterface;
 use Semitexa\Core\Pipeline\SafeRequestTracer;
 
@@ -170,6 +171,119 @@ final class SafeRequestTracerTest extends TestCase
 
         self::assertSame([['end', 'sse', []]], $inner->events);
     }
+    /**
+     * The bug silencing introduced: a span skipped while silent must never be
+     * closed against the inner tracer.
+     *
+     * Reachable, not theoretical. An untraced request silences its children;
+     * an SSE span nested inside it then STARTS a recording, which clears the
+     * silence; and every child opened in between would have closed against a
+     * recording that never saw it open.
+     */
+    #[Test]
+    public function a_span_silenced_on_the_way_in_is_not_closed_on_the_way_out(): void
+    {
+        $inner = new class implements RequestTracerInterface, RecordingAwareTracerInterface {
+            /** @var list<string> */
+            public array $calls = [];
+
+            public bool $recording = false;
+
+            public function begin(string $name, array $context = []): void
+            {
+                $this->calls[] = 'begin:' . $name;
+                if ($name === 'sse') {
+                    $this->recording = true; // the nested span opens a trace
+                }
+            }
+
+            public function end(string $name, array $context = []): void
+            {
+                $this->calls[] = 'end:' . $name . (($context['unfinished'] ?? false) ? ':unfinished' : '');
+            }
+
+            public function mark(string $name, array $context = []): void
+            {
+                $this->calls[] = 'mark:' . $name;
+            }
+
+            public function isRecording(): bool
+            {
+                return $this->recording;
+            }
+
+            public function wantsWhileSilent(string $name): bool
+            {
+                return $name === 'request' || $name === 'sse';
+            }
+        };
+
+        $tracer = SafeRequestTracer::wrap($inner);
+        self::assertNotNull($tracer);
+
+        $tracer->begin('request');   // dispatched; inner not recording -> silence
+        $tracer->begin('pipeline');  // silenced: the inner never sees it
+        $tracer->mark('ignored');    // silenced
+        $tracer->begin('sse');       // wanted while silent; starts recording
+        $tracer->end('sse');
+        $tracer->end('pipeline');    // must NOT reach the inner
+        $tracer->end('request');
+
+        self::assertSame(
+            ['begin:request', 'begin:sse', 'end:sse', 'end:request'],
+            $inner->calls,
+            'a span the wrapper silenced was closed against the inner tracer',
+        );
+    }
+
+    /**
+     * The wrapper's one promise is that nothing it wraps can throw into the
+     * request. wantsWhileSilent() is an inner call like any other.
+     */
+    #[Test]
+    public function a_throwing_silence_check_cannot_escape(): void
+    {
+        $inner = new class implements RequestTracerInterface, RecordingAwareTracerInterface {
+            public function begin(string $name, array $context = []): void
+            {
+            }
+
+            public function end(string $name, array $context = []): void
+            {
+            }
+
+            public function mark(string $name, array $context = []): void
+            {
+            }
+
+            public function isRecording(): bool
+            {
+                return false;
+            }
+
+            public function wantsWhileSilent(string $name): bool
+            {
+                throw new \RuntimeException('the tracer is broken');
+            }
+        };
+
+        $tracer = SafeRequestTracer::wrap($inner);
+        self::assertNotNull($tracer);
+
+        $tracer->begin('request');
+        $tracer->begin('pipeline');
+        $tracer->end('pipeline');
+        $tracer->end('request');
+
+        // Reaching here at all is the point — nothing escaped. The latch is
+        // asserted too, because swallowing the throw and then calling the
+        // broken tracer forever would also "not throw".
+        self::assertTrue(
+            (new \ReflectionProperty(SafeRequestTracer::class, 'broken'))->getValue($tracer),
+            'the wrapper swallowed the failure but did not stop calling the tracer',
+        );
+    }
+
 }
 
 final class RecordingTracer implements RequestTracerInterface
