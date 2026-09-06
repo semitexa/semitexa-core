@@ -43,6 +43,21 @@ final class SafeRequestTracer implements RequestTracerInterface
 {
     private bool $broken = false;
 
+    /**
+     * Set once the inner tracer says it is recording nothing.
+     *
+     * An untraced request in dev still walked the whole chain per span, and the
+     * pipeline-span work made that chain run about thirty-four times a page.
+     * MEASURED here: 44.7 us of tracer traffic on a request that records
+     * nothing — four times the estimate this was filed against, and a floor,
+     * since it was taken on the path where the coroutine is never consulted.
+     *
+     * Spans that can OPEN a recording are still passed through, so this cannot
+     * silence a trace that has not started yet — which is the normal case for
+     * SSE, whose span begins after the surrounding request already declined.
+     */
+    private bool $silent = false;
+
     /** @var list<string> Names of spans opened and not yet closed, outermost first. */
     private array $stack = [];
 
@@ -67,23 +82,101 @@ final class SafeRequestTracer implements RequestTracerInterface
 
     public function begin(string $name, array $context = []): void
     {
-        $this->guard(function () use ($name, $context): void {
+        if ($this->broken) {
+            return;
+        }
+
+        // The stack is kept even while silent: end() unwinds against it, and a
+        // recording opened later by a nested span must find the nesting intact.
+        if ($this->silent && !$this->wantedWhileSilent($name)) {
+            $this->stack[] = $name;
+
+            return;
+        }
+
+        try {
             $this->inner->begin($name, $context);
             $this->stack[] = $name;
-        });
+            $this->refreshSilence();
+        } catch (\Throwable) {
+            $this->fail();
+        }
     }
 
     public function end(string $name, array $context = []): void
     {
-        $this->guard(function () use ($name, $context): void {
+        if ($this->broken) {
+            return;
+        }
+
+        // A span the tracer wants while silent was opened through the inner
+        // tracer, so its close has to reach it too — otherwise a journal process
+        // is opened and never closed.
+        if ($this->silent && !$this->wantedWhileSilent($name)) {
+            $this->popTo($name);
+
+            return;
+        }
+
+        try {
             $this->closeUnfinishedAbove($name);
             $this->inner->end($name, $context);
-        });
+        } catch (\Throwable) {
+            $this->fail();
+        }
     }
 
     public function mark(string $name, array $context = []): void
     {
-        $this->guard(fn () => $this->inner->mark($name, $context));
+        if ($this->broken || $this->silent) {
+            return;
+        }
+
+        try {
+            $this->inner->mark($name, $context);
+        } catch (\Throwable) {
+            $this->fail();
+        }
+    }
+
+    /**
+     * Ask the inner tracer whether anything is being recorded, after every span
+     * that reached it. Re-asked rather than latched once: a span can open a
+     * recording at any depth, and a tracer that started recording must not stay
+     * silenced by an earlier answer.
+     */
+    private function refreshSilence(): void
+    {
+        $this->silent = $this->inner instanceof RecordingAwareTracerInterface
+            && !$this->inner->isRecording();
+    }
+
+    private function wantedWhileSilent(string $name): bool
+    {
+        return $this->inner instanceof RecordingAwareTracerInterface
+            && $this->inner->wantsWhileSilent($name);
+    }
+
+    /**
+     * Unwind the stack to the innermost span with this name, without telling the
+     * inner tracer: while silent it was never told they opened.
+     */
+    private function popTo(string $name): void
+    {
+        $matches = array_keys($this->stack, $name, true);
+        if ($matches === []) {
+            return;
+        }
+
+        array_splice($this->stack, (int) end($matches));
+    }
+
+    private function fail(): void
+    {
+        // Deliberately silent. There is nowhere to report this that is not
+        // itself part of the request being observed, and the whole point is
+        // that the request does not notice.
+        $this->broken = true;
     }
 
     /**
@@ -112,19 +205,4 @@ final class SafeRequestTracer implements RequestTracerInterface
         array_pop($this->stack);
     }
 
-    private function guard(callable $call): void
-    {
-        if ($this->broken) {
-            return;
-        }
-
-        try {
-            $call();
-        } catch (\Throwable) {
-            // Deliberately silent. There is nowhere to report this that is not
-            // itself part of the request being observed, and the whole point is
-            // that the request does not notice.
-            $this->broken = true;
-        }
-    }
 }
