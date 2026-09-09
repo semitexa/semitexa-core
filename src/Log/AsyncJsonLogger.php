@@ -34,6 +34,34 @@ final class AsyncJsonLogger implements LoggerInterface
      */
     private int $bytesSinceSizeCheck = 0;
 
+    /**
+     * Whether this worker has looked at the real file size even once.
+     *
+     * The counter above assumes the file was within bounds when the worker
+     * started, and answers "has MY writing pushed it over". It cannot answer
+     * "was it already over before I arrived", and that is the state a fresh
+     * worker actually finds: nothing resets the file, so an oversized log stays
+     * oversized across every restart.
+     *
+     * MEASURED on the dev host: `app.log` reached 380 MB — 12x the 32 MB ceiling
+     * — with no rotated sibling, a week after the size policy shipped. Each
+     * worker would have had to append a megabyte on its own before it so much as
+     * stat'ed the file, and on a quiet host, restarted often, none ever did. The
+     * policy was correct and simply never ran.
+     *
+     * So the first flush of every worker checks unconditionally; the counter
+     * takes over from there and keeps the stat off the hot path.
+     *
+     * ⚠️ Rotation renames the log aside and the NEXT writer recreates it, owning
+     * it. Where one uid writes the log and another runs the tests — the dev
+     * workspace does exactly this, app as root and phpunit as 1000:1000 — the
+     * loser is locked out and its logging silently stops. That is an ownership
+     * problem, not a logging one, and is fixed the way the release stack already
+     * fixes it at startup: chown var/log to the host user, chmod u+rwX,g+rwX.
+     * Doing it from here would mean a logger that chowns files, which is worse.
+     */
+    private bool $sizeCheckedOnce = false;
+
     /** How much this worker may append before it re-reads the real file size. */
     private const SIZE_CHECK_EVERY_BYTES = 1_048_576;
     /** @var list<array<string, mixed>> */
@@ -205,9 +233,10 @@ final class AsyncJsonLogger implements LoggerInterface
         }
 
         $this->bytesSinceSizeCheck += $appended;
-        if ($this->bytesSinceSizeCheck < self::SIZE_CHECK_EVERY_BYTES) {
+        if ($this->sizeCheckedOnce && $this->bytesSinceSizeCheck < self::SIZE_CHECK_EVERY_BYTES) {
             return;
         }
+        $this->sizeCheckedOnce = true;
         $this->bytesSinceSizeCheck = 0;
 
         clearstatcache(true, $path);
