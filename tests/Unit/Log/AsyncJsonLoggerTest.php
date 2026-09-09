@@ -69,6 +69,57 @@ final class AsyncJsonLoggerTest extends TestCase
         @unlink($absolutePath);
     }
 
+    /**
+     * REGRESSION. A worker that finds an ALREADY oversized log must rotate it, not
+     * wait to write a megabyte of its own first.
+     *
+     * The size check is throttled by a per-instance byte counter, which answers
+     * "has my writing pushed the file over" and cannot answer "was it over before
+     * I started". Nothing resets the file between workers, so on the dev host
+     * app.log reached 380 MB — 12x the 32 MB ceiling — with no rotated sibling, a
+     * week after the policy shipped: every worker was restarted long before it
+     * appended the megabyte that would have made it look.
+     */
+    #[Test]
+    public function a_worker_rotates_a_log_that_was_already_oversized_when_it_started(): void
+    {
+        ProjectRoot::reset();
+        $relativePath = 'var/tmp/async-json-logger-oversized-' . bin2hex(random_bytes(6)) . '.log';
+        $absolutePath = ProjectRoot::get() . '/' . $relativePath;
+
+        putenv('LOG_FILE=' . $relativePath);
+        putenv('LOG_LEVEL=debug');
+        putenv('LOG_MAX_BYTES=1024');
+
+        @mkdir(dirname($absolutePath), 0o755, true);
+        file_put_contents($absolutePath, str_repeat('x', 4096));
+
+        try {
+            $logger = new AsyncJsonLogger();
+            $this->injectEnvironment($logger);
+
+            // One short line — far less than the throttle's slice.
+            $logger->error('short');
+            $logger->flush();
+
+            $rotated = glob($absolutePath . '.*') ?: [];
+            self::assertCount(1, $rotated, 'the oversized log was never moved aside');
+
+            // Moved, not truncated: the bytes that were there have to survive
+            // under the rotated name, or rotation is just deletion with a nicer
+            // message. rename() also leaves the live path absent until the next
+            // write recreates it, which is why nothing is asserted about it here.
+            $moved = (string) file_get_contents($rotated[0]);
+            self::assertStringContainsString(str_repeat('x', 4096), $moved, 'the bytes that were already there did not survive');
+            self::assertStringContainsString('short', $moved, 'the line written before rotation was dropped');
+        } finally {
+            putenv('LOG_MAX_BYTES');
+            foreach (glob($absolutePath . '*') ?: [] as $leftover) {
+                @unlink($leftover);
+            }
+        }
+    }
+
     private function injectEnvironment(AsyncJsonLogger $logger): void
     {
         $property = new \ReflectionProperty($logger, 'environment');
