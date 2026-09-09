@@ -14,6 +14,7 @@ final class AsyncJsonLoggerTest extends TestCase
 {
     private ?string $previousLogFile = null;
     private ?string $previousLogLevel = null;
+    private ?string $previousLogMaxBytes = null;
 
     protected function setUp(): void
     {
@@ -21,12 +22,18 @@ final class AsyncJsonLoggerTest extends TestCase
 
         $this->previousLogFile = getenv('LOG_FILE') !== false ? (string) getenv('LOG_FILE') : null;
         $this->previousLogLevel = getenv('LOG_LEVEL') !== false ? (string) getenv('LOG_LEVEL') : null;
+        $this->previousLogMaxBytes = getenv('LOG_MAX_BYTES') !== false ? (string) getenv('LOG_MAX_BYTES') : null;
     }
 
     protected function tearDown(): void
     {
         $this->restoreEnv('LOG_FILE', $this->previousLogFile);
         $this->restoreEnv('LOG_LEVEL', $this->previousLogLevel);
+        // The rotation test sets LOG_MAX_BYTES and used to clear it outright, so
+        // a value the suite arrived with was wiped for every later test in the
+        // process. putenv() is process-wide; a test that unsets what it did not
+        // set poisons whatever runs after it.
+        $this->restoreEnv('LOG_MAX_BYTES', $this->previousLogMaxBytes);
 
         parent::tearDown();
     }
@@ -113,7 +120,7 @@ final class AsyncJsonLoggerTest extends TestCase
             self::assertStringContainsString(str_repeat('x', 4096), $moved, 'the bytes that were already there did not survive');
             self::assertStringContainsString('short', $moved, 'the line written before rotation was dropped');
         } finally {
-            putenv('LOG_MAX_BYTES');
+            // tearDown() restores whatever the suite arrived with.
             foreach (glob($absolutePath . '*') ?: [] as $leftover) {
                 @unlink($leftover);
             }
