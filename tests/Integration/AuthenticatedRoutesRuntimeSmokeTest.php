@@ -9,6 +9,7 @@ use PHPUnit\Framework\TestCase;
 use Semitexa\Auth\Context\AuthContextStore;
 use Semitexa\Authorization\Application\Service\PayloadAccessPolicyResolver;
 use Semitexa\Core\Application;
+use Semitexa\Core\Attribute\TransportType;
 use Semitexa\Core\Auth\PayloadAccessType;
 use Semitexa\Core\Container\ContainerFactory;
 use Semitexa\Core\Discovery\AttributeDiscovery;
@@ -63,6 +64,33 @@ final class AuthenticatedRoutesRuntimeSmokeTest extends TestCase
         '/__semitexa_kiss' => 'long-lived SSE keep-alive stream; would block.',
         '/__semitexa_hug'  => 'SSR fallback streamed via TransportType::Sse; would block.',
     ];
+
+    /**
+     * A route that holds a connection open cannot be smoked by a synthetic
+     * request: there is no socket for it to write to, so the handler either
+     * blocks or answers that it cannot stream here.
+     *
+     * The sibling AllRoutesRuntimeSmokeTest has skipped these on the
+     * DECLARATION since it was written; this one only had the path list above,
+     * so every new SSE endpoint had to remember to edit it, and the first one
+     * that did not turned a release gate red. The declaration is the framework's
+     * own answer to "does this hold a stream open" — RouteDeclarationGuard
+     * proves at boot that every SSE route carries it — so trust it here too.
+     *
+     * @param array<string, mixed> $route
+     */
+    private function isNotSmokable(array $route): bool
+    {
+        $path = (string) ($route['path'] ?? '');
+
+        if (isset(self::SKIP[$path])) {
+            return true;
+        }
+
+        $transport = $route['transport'] ?? null;
+
+        return ($transport instanceof TransportType ? $transport->value : (string) $transport) === TransportType::Sse->value;
+    }
 
     /**
      * Routes that require domain fixtures (DB seeds, tenant context, etc.) to
@@ -422,7 +450,7 @@ final class AuthenticatedRoutesRuntimeSmokeTest extends TestCase
                 continue;
             }
             $path = (string) $route['path'];
-            if (isset(self::SKIP[$path])) {
+            if ($this->isNotSmokable($route)) {
                 continue;
             }
             $methods = $route['methods'] ?? ['GET'];
@@ -470,7 +498,7 @@ final class AuthenticatedRoutesRuntimeSmokeTest extends TestCase
                 continue;
             }
             $path = (string) $route['path'];
-            if (isset(self::SKIP[$path])) {
+            if ($this->isNotSmokable($route)) {
                 continue;
             }
             $methods = $route['methods'] ?? ['GET'];
@@ -532,7 +560,7 @@ final class AuthenticatedRoutesRuntimeSmokeTest extends TestCase
         $failures = [];
         foreach ($sample as $route) {
             $path = (string) $route['path'];
-            if (isset(self::SKIP[$path]) || isset(self::NEEDS_FIXTURES[$path])) {
+            if ($this->isNotSmokable($route) || isset(self::NEEDS_FIXTURES[$path])) {
                 continue;
             }
             $method = strtoupper((string) ($route['methods'][0] ?? 'GET'));
@@ -573,7 +601,7 @@ final class AuthenticatedRoutesRuntimeSmokeTest extends TestCase
                 continue;
             }
             $path = (string) $route['path'];
-            if (isset(self::SKIP[$path])) {
+            if ($this->isNotSmokable($route)) {
                 continue;
             }
             $method = strtoupper((string) ($route['methods'][0] ?? 'GET'));
@@ -600,7 +628,7 @@ final class AuthenticatedRoutesRuntimeSmokeTest extends TestCase
                 continue;
             }
             $path = (string) $route['path'];
-            if (isset(self::SKIP[$path]) || isset(self::NEEDS_FIXTURES[$path])) {
+            if ($this->isNotSmokable($route) || isset(self::NEEDS_FIXTURES[$path])) {
                 continue;
             }
             $method = strtoupper((string) ($route['methods'][0] ?? 'GET'));
