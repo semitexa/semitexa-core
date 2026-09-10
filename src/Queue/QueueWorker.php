@@ -21,6 +21,15 @@ class QueueWorker
     private ?string $currentQueue = null;
     private ?\Symfony\Component\Console\Output\OutputInterface $output = null;
 
+    /**
+     * Outcome of the message being processed, for the Observatory journal.
+     * Every failure path here already calls updateStats('failed') and logs
+     * the reason, so both are captured there rather than by touching each
+     * catch block; reset per message in processPayload().
+     */
+    private ?string $messageStatus = null;
+    private ?string $messageProblem = null;
+
     public function setOutput(?\Symfony\Component\Console\Output\OutputInterface $output): void
     {
         $this->output = $output;
@@ -28,6 +37,10 @@ class QueueWorker
 
     private function log(string $message, string $level = 'info'): void
     {
+        if ($level === 'error' || $level === 'warning') {
+            // Strip the emoji prefix: the journal line is read by a machine.
+            $this->messageProblem = trim((string) preg_replace('/^[^\\p{L}\\p{N}]+/u', '', $message));
+        }
         if ($this->output) {
             $tag = match ($level) {
                 'error' => 'error',
@@ -78,6 +91,8 @@ class QueueWorker
         // the Observatory journal (kind=queue), named by the listener or
         // handler it dispatches to. Journal-only — no trace buffer opens.
         $tracer = $this->resolveTracer();
+        $this->messageStatus = null;
+        $this->messageProblem = null;
 
         try {
             try {
@@ -111,7 +126,13 @@ class QueueWorker
         } finally {
             // Closes the journal process when one was opened; a decode failure
             // never opened one, and end() is a no-op then.
-            $tracer?->end('job');
+            // Status and reason ride the end line so the live panel can show a
+            // failed job as failed, with why, instead of as one more finished dot.
+            $failed = $this->messageStatus === 'failed';
+            $tracer?->end('job', array_filter([
+                'status' => $failed ? 'failed' : 'success',
+                'error' => $failed ? mb_substr((string) $this->messageProblem, 0, 200) : null,
+            ], static fn ($v) => $v !== null && $v !== ''));
             // Per-message lifecycle reset — same contract as Application::handleRequest.
             // Without this, a long-running queue worker carries authorization-decision
             // state from one job to the next (real production leak in CLI mode).
@@ -306,6 +327,7 @@ class QueueWorker
 
     private function updateStats(string $type): void
     {
+        $this->messageStatus = $type;
         $stats = json_decode(file_get_contents($this->statsFile), true) ?: [
             'processed' => 0,
             'failed' => 0,
