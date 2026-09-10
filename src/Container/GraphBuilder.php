@@ -7,6 +7,7 @@ namespace Semitexa\Core\Container;
 use Semitexa\Core\Container\Exception\ContainerBuildException;
 use Semitexa\Core\Container\Exception\InjectionException;
 use Semitexa\Core\Exception\ContainerException;
+use Semitexa\Core\Contract\InitializesAfterInjectionInterface;
 use Semitexa\Core\Registry\RegistryContractResolverGenerator;
 use ReflectionClass;
 use ReflectionNamedType;
@@ -288,10 +289,13 @@ final class GraphBuilder
      * class is therefore treated as an attempt to use the constructor as a DI
      * channel and rejected.
      *
-     * This does not ban constructors. A parameterless __construct on a
-     * container-managed class is inert (the container never calls it) but
-     * tolerated. Constructors are unrestricted on value objects, DTOs,
-     * payloads, resources, and any class not managed by this container.
+     * This does not ban constructors outright. A parameterless __construct on a
+     * container-managed class is never called — so an EMPTY one is harmless and
+     * allowed, while one with a body is a silent no-op and is rejected by
+     * `lint:di` and the phpstan rule. Initialization belongs in
+     * {@see InitializesAfterInjectionInterface::initialize()}, which this class
+     * calls once injection is complete. Constructors are unrestricted on value
+     * objects, DTOs, payloads, resources, and any class not managed here.
      *
      * @param class-string $class
      * @param InjectionsMap $injections
@@ -335,6 +339,8 @@ final class GraphBuilder
             $injectionAnalyzer->injectConfigProperties($instance, $class, $ref);
         }
         $this->injectPropertiesInto($instance, $class, $injections, $readonlyInstances, $idToClass, $executionScopedClasses);
+        $this->initializeAfterInjection($instance, $class);
+
         return $instance;
     }
 
@@ -414,7 +420,39 @@ final class GraphBuilder
             $idToClass,
             array_fill_keys(array_keys($executionScopedPrototypes), true),
         );
+        $this->initializeAfterInjection($instance, $class);
+
         return $instance;
+    }
+
+    /**
+     * Run the one hook a container-managed class has for initialization.
+     *
+     * The constructor is not it: these objects are built with
+     * newInstanceWithoutConstructor(), so anything written in one never runs. A
+     * class that needs to do work after its dependencies arrive implements
+     * {@see InitializesAfterInjectionInterface} and gets called here — after
+     * every property is populated, before anyone holds the object.
+     *
+     * A throw is not swallowed. Half-initialized is the state this whole design
+     * exists to make unreachable, so the failure names the class and stops.
+     *
+     * @param class-string $class
+     */
+    private function initializeAfterInjection(object $instance, string $class): void
+    {
+        if (!$instance instanceof InitializesAfterInjectionInterface) {
+            return;
+        }
+
+        try {
+            $instance->initialize();
+        } catch (\Throwable $e) {
+            throw new ContainerException(
+                "Container: {$class}::initialize() failed after injection: " . $e->getMessage(),
+                $e,
+            );
+        }
     }
 
     /**
