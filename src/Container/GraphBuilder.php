@@ -89,7 +89,7 @@ final class GraphBuilder
     ): void {
         $order = $this->topologicalOrder(array_keys($executionScopedClasses), $injections, $resolveToClass);
         foreach ($order as $class) {
-            $prototype = $this->createInstance($class, $injections, $readonlyInstances, $idToClass, $executionScopedClasses, $injectionAnalyzer);
+            $prototype = $this->createInstance($class, $injections, $readonlyInstances, $idToClass, $executionScopedClasses, $injectionAnalyzer, deferInitialization: true);
             $executionScopedPrototypes[$class] = $prototype;
             $idToClass[$class] = $class;
             foreach ($idToClass as $id => $c) {
@@ -310,6 +310,7 @@ final class GraphBuilder
         array $idToClass,
         array $executionScopedClasses,
         ?InjectionAnalyzer $injectionAnalyzer = null,
+        bool $deferInitialization = false,
     ): object {
         $ref = new ReflectionClass($class);
 
@@ -339,7 +340,15 @@ final class GraphBuilder
             $injectionAnalyzer->injectConfigProperties($instance, $class, $ref);
         }
         $this->injectPropertiesInto($instance, $class, $injections, $readonlyInstances, $idToClass, $executionScopedClasses);
-        $this->initializeAfterInjection($instance, $class);
+        // Deferred for an execution-scoped PROTOTYPE: its #[InjectAsMutable] and
+        // factory properties are populated per execution, on the clone, by
+        // SemitexaContainer — so initializing here would run against
+        // uninitialized typed properties at boot and never run at all for the
+        // clone anyone actually receives. The container calls
+        // {@see initializeInstance()} there instead.
+        if (!$deferInitialization) {
+            $this->initializeAfterInjection($instance, $class);
+        }
 
         return $instance;
     }
@@ -439,6 +448,22 @@ final class GraphBuilder
      *
      * @param class-string $class
      */
+    /**
+     * Run initialize() on an execution-scoped clone, once the container has
+     * finished populating its per-execution properties.
+     *
+     * Public because the completion of injection for these classes happens in
+     * {@see SemitexaContainer}, not here: the prototype built at boot is only
+     * half of the object, and the half that varies per execution is attached
+     * on the clone.
+     *
+     * @param class-string $class
+     */
+    public function initializeInstance(object $instance, string $class): void
+    {
+        $this->initializeAfterInjection($instance, $class);
+    }
+
     private function initializeAfterInjection(object $instance, string $class): void
     {
         if (!$instance instanceof InitializesAfterInjectionInterface) {

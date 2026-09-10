@@ -11,6 +11,7 @@ use Semitexa\Core\Container\Exception\InjectionException;
 use Semitexa\Core\Container\Store\InjectionMap;
 use Semitexa\Core\Container\Store\InstanceStore;
 use Semitexa\Core\Container\Store\TypeMap;
+use Semitexa\Core\Contract\InitializesAfterInjectionInterface;
 use Semitexa\Core\Exception\ContainerException;
 use Semitexa\Core\Cookie\CookieJarInterface;
 use Semitexa\Core\Locale\LocaleContextInterface;
@@ -267,6 +268,7 @@ final class SemitexaContainer implements ContainerInterface, ExecutionContextAwa
                 if (isset($this->instanceStore->prototypes[$activeClass])) {
                     $clone = clone $active;
                     $this->injectMutableProperties($clone, $activeClass);
+                    $this->initializeExecutionScoped($clone, $activeClass);
                     return $clone;
                 }
                 return $active;
@@ -285,6 +287,7 @@ final class SemitexaContainer implements ContainerInterface, ExecutionContextAwa
             if (isset($this->instanceStore->prototypes[$class])) {
                 $clone = clone $this->instanceStore->prototypes[$class];
                 $this->injectMutableProperties($clone, $class);
+                $this->initializeExecutionScoped($clone, $class);
                 return $clone;
             }
         }
@@ -418,6 +421,35 @@ final class SemitexaContainer implements ContainerInterface, ExecutionContextAwa
     }
 
     /**
+     * Finish an execution-scoped object the moment its per-execution properties
+     * are in place.
+     *
+     * The boot-time prototype is deliberately NOT initialized (see
+     * GraphBuilder::createInstance): its #[InjectAsMutable] and factory
+     * properties do not exist yet there. Every clone this container hands out
+     * is initialized here instead, which is what makes the interface's promise
+     * true — initialize() runs after every injected property is populated, and
+     * once per object anyone can hold.
+     *
+     * @param class-string $class
+     */
+    private function initializeExecutionScoped(object $instance, string $class): void
+    {
+        if (!$instance instanceof InitializesAfterInjectionInterface) {
+            return;
+        }
+
+        try {
+            $instance->initialize();
+        } catch (\Throwable $e) {
+            throw new ContainerException(
+                "Container: {$class}::initialize() failed after injection: " . $e->getMessage(),
+                $e,
+            );
+        }
+    }
+
+    /**
      * Re-inject all #[InjectAsMutable] properties from the current execution context
      * and execution-scoped service pool. Called on each clone at execution time.
      *
@@ -466,6 +498,7 @@ final class SemitexaContainer implements ContainerInterface, ExecutionContextAwa
                     // properties; skipping this recursion would leave its typed properties
                     // uninitialized and trigger "must not be accessed before initialization".
                     $this->injectMutableProperties($nestedClone, $nestedClass, $visited);
+                    $this->initializeExecutionScoped($nestedClone, $nestedClass);
                     $this->assignProperty($ref, $instance, $propName, $nestedClone);
                     continue;
                 }
