@@ -79,12 +79,21 @@ final class LintDiCommand extends BaseCommand
             }
 
             // Check: no constructor-based injection on container-managed classes.
-            // A parameterless __construct is fine (the container ignores it); a
-            // __construct with parameters is the unambiguous signal that the
+            // A __construct with parameters is the unambiguous signal that the
             // constructor is being used as a DI channel, which One Way forbids.
             $ctor = $ref->getConstructor();
             if ($ctor !== null && $ctor->getNumberOfParameters() > 0) {
-                $errors[] = "{$class}: __construct has parameters. Container-managed classes receive dependencies through #[InjectAsReadonly] / #[InjectAsMutable] / #[InjectAsFactory] / #[Config] properties, not constructor arguments. A parameterless __construct for local initialization is still allowed.";
+                $errors[] = "{$class}: __construct has parameters. Container-managed classes receive dependencies through #[InjectAsReadonly] / #[InjectAsMutable] / #[InjectAsFactory] / #[Config] properties, not constructor arguments. An empty parameterless __construct is still allowed; initialization belongs in Semitexa\\Core\\Contract\\InitializesAfterInjectionInterface::initialize().";
+            }
+
+            // Check: a parameterless constructor that DOES something. The
+            // container builds these with newInstanceWithoutConstructor(), so the
+            // body never runs — it is code that reads as if it does. Reflection
+            // cannot show a body, so this reads the source between the braces;
+            // the phpstan rule (semitexa.inertConstructorBody) is the precise
+            // one, and this is the check a developer gets without running it.
+            if ($ctor !== null && $ctor->getNumberOfParameters() === 0 && self::constructorHasBody($ctor)) {
+                $errors[] = "{$class}: the body of __construct() never runs — the container builds container-managed classes with newInstanceWithoutConstructor(). Move the work into initialize() and implement Semitexa\\Core\\Contract\\InitializesAfterInjectionInterface, which is called once every injected property is populated.";
             }
 
             // Check all properties
@@ -159,6 +168,55 @@ final class LintDiCommand extends BaseCommand
         }
         $io->error(sprintf('%d error(s) found in %d classes.', count($errors), $classesChecked));
         return self::FAILURE;
+    }
+
+    /**
+     * True when a constructor has anything between its braces but comments.
+     *
+     * Reflection exposes no body, so the source is read back. A file it cannot
+     * read, or a shape it cannot parse, answers FALSE: this check exists to name
+     * a specific mistake, and guessing would turn it into noise on generated or
+     * evaluated code where the answer is unknown.
+     */
+    private static function constructorHasBody(\ReflectionMethod $ctor): bool
+    {
+        $file = $ctor->getFileName();
+        $start = $ctor->getStartLine();
+        $end = $ctor->getEndLine();
+
+        if ($file === false || $start === false || $end === false || !is_readable($file)) {
+            return false;
+        }
+
+        $lines = @file($file, FILE_IGNORE_NEW_LINES);
+        if ($lines === false) {
+            return false;
+        }
+
+        $source = implode("\n", array_slice($lines, $start - 1, $end - $start + 1));
+        $open = strpos($source, '{');
+        $close = strrpos($source, '}');
+        if ($open === false || $close === false || $close <= $open) {
+            return false;
+        }
+
+        $body = substr($source, $open + 1, $close - $open - 1);
+        // Tokenize rather than strip with regexes: a brace or a semicolon inside
+        // a string literal would fool the naive version into either answer.
+        foreach (@token_get_all('<?php ' . $body) ?: [] as $token) {
+            if (is_array($token)) {
+                if (!in_array($token[0], [T_OPEN_TAG, T_WHITESPACE, T_COMMENT, T_DOC_COMMENT], true)) {
+                    return true;
+                }
+                continue;
+            }
+
+            if (trim($token) !== '') {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

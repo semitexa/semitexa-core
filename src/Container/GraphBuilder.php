@@ -7,6 +7,7 @@ namespace Semitexa\Core\Container;
 use Semitexa\Core\Container\Exception\ContainerBuildException;
 use Semitexa\Core\Container\Exception\InjectionException;
 use Semitexa\Core\Exception\ContainerException;
+use Semitexa\Core\Contract\InitializesAfterInjectionInterface;
 use Semitexa\Core\Registry\RegistryContractResolverGenerator;
 use ReflectionClass;
 use ReflectionNamedType;
@@ -88,7 +89,7 @@ final class GraphBuilder
     ): void {
         $order = $this->topologicalOrder(array_keys($executionScopedClasses), $injections, $resolveToClass);
         foreach ($order as $class) {
-            $prototype = $this->createInstance($class, $injections, $readonlyInstances, $idToClass, $executionScopedClasses, $injectionAnalyzer);
+            $prototype = $this->createInstance($class, $injections, $readonlyInstances, $idToClass, $executionScopedClasses, $injectionAnalyzer, deferInitialization: true);
             $executionScopedPrototypes[$class] = $prototype;
             $idToClass[$class] = $class;
             foreach ($idToClass as $id => $c) {
@@ -288,10 +289,13 @@ final class GraphBuilder
      * class is therefore treated as an attempt to use the constructor as a DI
      * channel and rejected.
      *
-     * This does not ban constructors. A parameterless __construct on a
-     * container-managed class is inert (the container never calls it) but
-     * tolerated. Constructors are unrestricted on value objects, DTOs,
-     * payloads, resources, and any class not managed by this container.
+     * This does not ban constructors outright. A parameterless __construct on a
+     * container-managed class is never called — so an EMPTY one is harmless and
+     * allowed, while one with a body is a silent no-op and is rejected by
+     * `lint:di` and the phpstan rule. Initialization belongs in
+     * {@see InitializesAfterInjectionInterface::initialize()}, which this class
+     * calls once injection is complete. Constructors are unrestricted on value
+     * objects, DTOs, payloads, resources, and any class not managed here.
      *
      * @param class-string $class
      * @param InjectionsMap $injections
@@ -306,6 +310,7 @@ final class GraphBuilder
         array $idToClass,
         array $executionScopedClasses,
         ?InjectionAnalyzer $injectionAnalyzer = null,
+        bool $deferInitialization = false,
     ): object {
         $ref = new ReflectionClass($class);
 
@@ -335,6 +340,16 @@ final class GraphBuilder
             $injectionAnalyzer->injectConfigProperties($instance, $class, $ref);
         }
         $this->injectPropertiesInto($instance, $class, $injections, $readonlyInstances, $idToClass, $executionScopedClasses);
+        // Deferred for an execution-scoped PROTOTYPE: its #[InjectAsMutable] and
+        // factory properties are populated per execution, on the clone, by
+        // SemitexaContainer — so initializing here would run against
+        // uninitialized typed properties at boot and never run at all for the
+        // clone anyone actually receives. The container calls
+        // {@see initializeInstance()} there instead.
+        if (!$deferInitialization) {
+            $this->initializeAfterInjection($instance, $class);
+        }
+
         return $instance;
     }
 
@@ -414,7 +429,55 @@ final class GraphBuilder
             $idToClass,
             array_fill_keys(array_keys($executionScopedPrototypes), true),
         );
+        $this->initializeAfterInjection($instance, $class);
+
         return $instance;
+    }
+
+    /**
+     * Run the one hook a container-managed class has for initialization.
+     *
+     * The constructor is not it: these objects are built with
+     * newInstanceWithoutConstructor(), so anything written in one never runs. A
+     * class that needs to do work after its dependencies arrive implements
+     * {@see InitializesAfterInjectionInterface} and gets called here — after
+     * every property is populated, before anyone holds the object.
+     *
+     * A throw is not swallowed. Half-initialized is the state this whole design
+     * exists to make unreachable, so the failure names the class and stops.
+     *
+     * @param class-string $class
+     */
+    /**
+     * Run initialize() on an execution-scoped clone, once the container has
+     * finished populating its per-execution properties.
+     *
+     * Public because the completion of injection for these classes happens in
+     * {@see SemitexaContainer}, not here: the prototype built at boot is only
+     * half of the object, and the half that varies per execution is attached
+     * on the clone.
+     *
+     * @param class-string $class
+     */
+    public function initializeInstance(object $instance, string $class): void
+    {
+        $this->initializeAfterInjection($instance, $class);
+    }
+
+    private function initializeAfterInjection(object $instance, string $class): void
+    {
+        if (!$instance instanceof InitializesAfterInjectionInterface) {
+            return;
+        }
+
+        try {
+            $instance->initialize();
+        } catch (\Throwable $e) {
+            throw new ContainerException(
+                "Container: {$class}::initialize() failed after injection: " . $e->getMessage(),
+                $e,
+            );
+        }
     }
 
     /**
