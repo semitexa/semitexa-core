@@ -264,6 +264,18 @@ final class SemitexaContainer implements ContainerInterface, ExecutionContextAwa
             $resolver = $this->instanceStore->readonly[$resolverClass] ?? null;
             if ($resolver !== null && method_exists($resolver, 'getContract')) {
                 $active = $resolver->getContract();
+                // Guarded rather than assumed: getContract() is reached through
+                // method_exists() on an untyped store entry, so nothing proves it
+                // returned an object. `clone` on a non-object fatals, and the
+                // class name below feeds the container's own error messages.
+                if (!is_object($active)) {
+                    throw new ContainerException(sprintf(
+                        'Container: resolver %s::getContract() returned %s, not an object, for "%s".',
+                        $resolverClass,
+                        get_debug_type($active),
+                        $id,
+                    ));
+                }
                 $activeClass = $active::class;
                 if (isset($this->instanceStore->prototypes[$activeClass])) {
                     $clone = clone $active;
