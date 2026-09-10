@@ -30,6 +30,19 @@ class QueueWorker
     private ?string $messageStatus = null;
     private ?string $messageProblem = null;
 
+    /**
+     * Whether {@see $messageProblem} came from an error-level line.
+     *
+     * A terminal failure logs the exception first and an operational follow-up
+     * after it ("Message moved to DLQ", "Retrying handler 2/3"). Letting the
+     * later line win put the follow-up on the journal instead of the reason,
+     * which is the one thing the record exists to carry.
+     */
+    private bool $messageProblemIsError = false;
+
+    /** Set when the attempt failed but the message was requeued rather than dropped. */
+    private bool $messageRetried = false;
+
     public function setOutput(?\Symfony\Component\Console\Output\OutputInterface $output): void
     {
         $this->output = $output;
@@ -37,9 +50,11 @@ class QueueWorker
 
     private function log(string $message, string $level = 'info'): void
     {
-        if ($level === 'error' || $level === 'warning') {
-            // Strip the emoji prefix: the journal line is read by a machine.
+        if (($level === 'error' || $level === 'warning') && !$this->messageProblemIsError) {
+            // First error wins, and a warning never displaces one. Strip the
+            // emoji prefix: the journal line is read by a machine.
             $this->messageProblem = trim((string) preg_replace('/^[^\\p{L}\\p{N}]+/u', '', $message));
+            $this->messageProblemIsError = $level === 'error';
         }
         if ($this->output) {
             $tag = match ($level) {
@@ -93,6 +108,8 @@ class QueueWorker
         $tracer = $this->resolveTracer();
         $this->messageStatus = null;
         $this->messageProblem = null;
+        $this->messageProblemIsError = false;
+        $this->messageRetried = false;
 
         try {
             try {
@@ -128,10 +145,15 @@ class QueueWorker
             // never opened one, and end() is a no-op then.
             // Status and reason ride the end line so the live panel can show a
             // failed job as failed, with why, instead of as one more finished dot.
-            $failed = $this->messageStatus === 'failed';
+            // A requeued attempt is a failed attempt. It does not touch the
+            // aggregate stats — the message has not finished — but the journal
+            // describes THIS execution, and calling it a success would hide a
+            // handler that threw.
+            $failed = $this->messageStatus === 'failed' || $this->messageRetried;
             $tracer?->end('job', array_filter([
                 'status' => $failed ? 'failed' : 'success',
-                'error' => $failed ? mb_substr((string) $this->messageProblem, 0, 200) : null,
+                'error' => $failed ? self::truncate((string) $this->messageProblem) : null,
+                'retry' => $this->messageRetried ? true : null,
             ], static fn ($v) => $v !== null && $v !== ''));
             // Per-message lifecycle reset — same contract as Application::handleRequest.
             // Without this, a long-running queue worker carries authorization-decision
@@ -255,6 +277,7 @@ class QueueWorker
             $this->log("❌ Error executing handler: {$e->getMessage()}", 'error');
 
             if ($message->attempts < $message->maxRetries) {
+                $this->messageRetried = true;
                 $message->attempts++;
                 $delay = $message->retryDelay;
                 $this->log("ℹ️  Retrying handler ({$message->attempts}/{$message->maxRetries}) in {$delay}s...", 'warning');
@@ -323,6 +346,21 @@ class QueueWorker
                 'message' => $e->getMessage(),
             ]);
         }
+    }
+
+    /**
+     * Truncate for the journal without reaching for mbstring.
+     *
+     * The extension is not in this package's requirements, and this runs while
+     * a job failure is already being handled — inside a finally block, before
+     * the per-message state reset. A fatal there would take the cleanup with
+     * it. PCRE's /u does the same job and ships with PHP; an invalid-UTF-8
+     * subject makes preg_match fail rather than throw, and the byte-wise
+     * fallback covers it.
+     */
+    private static function truncate(string $text, int $limit = 200): string
+    {
+        return preg_match('/^.{0,' . $limit . '}/us', $text, $m) === 1 ? $m[0] : substr($text, 0, $limit);
     }
 
     private function updateStats(string $type): void
