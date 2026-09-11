@@ -81,20 +81,42 @@ final class MapperTypeConversionRule implements Rule
 
         return [
             RuleErrorBuilder::message(sprintf(
-                '%s is a mapper and calls %s::%s(), which the ORM has already done. TypeCaster '
-                . 'converts a BINARY(16) column to a canonical uuid string on every read and back '
-                . 'to 16 bytes on every write, so the mapper is handed a 36-character string and '
-                . 'converting it again throws «Expected 16 bytes, got 36» — and the write engine '
-                . 'maps every persisted row back to its domain model, so one such mapper fails '
-                . 'every write of that table. Pass the field straight through in both directions. '
-                . 'The hydrator owns column-type conversion; a mapper owns the storage-shape '
-                . 'decisions the column type cannot express, such as a JSON string that becomes '
-                . 'an array — keep that half. Binding a value into a raw WHERE is not this: that '
-                . 'belongs in the repository, where nothing hydrates it.',
+                '%s is a mapper and calls %s::%s(), which the ORM has already done. %s '
+                . 'Pass the field straight through in both directions. The hydrator owns '
+                . 'column-type conversion; a mapper owns the storage-shape decisions the column '
+                . 'type cannot express, such as a JSON string that becomes an array — keep that '
+                . 'half. Binding a value into a raw WHERE is not this: that belongs in the '
+                . 'repository, where nothing hydrates it.',
                 $class->getName(),
                 $called,
                 $node->name->name,
+                self::whatGoesWrong($method),
             ))->identifier('semitexa.mapperTypeConversion')->build(),
         ];
+    }
+
+    /**
+     * The consequence, which is not the same in both directions.
+     *
+     * Saying «Expected 16 bytes, got 36» for `toBytes()` would send the reader
+     * looking for an exception that call does not raise: handed the canonical
+     * string, it returns 16 bytes quite happily. The damage is one step later
+     * and quieter, which is the harder half to find and so the half worth
+     * describing accurately.
+     */
+    private static function whatGoesWrong(string $method): string
+    {
+        if ($method === 'frombytes') {
+            return 'TypeCaster has already converted that BINARY(16) column to a canonical uuid '
+                . 'string, so the mapper is handed 36 characters and converting them again throws '
+                . '«Expected 16 bytes, got 36» — and the write engine maps every persisted row '
+                . 'back to its domain model, so one such mapper fails every write of that table, '
+                . 'not only its reads.';
+        }
+
+        return 'TypeCaster converts that column back to 16 bytes on the way to the database, so '
+            . 'the mapper hands it raw bytes where it expects the canonical string it handed out '
+            . '— a second conversion of an already-converted value, which is either a rejected '
+            . 'write or a corrupted identifier depending on the column.';
     }
 }
