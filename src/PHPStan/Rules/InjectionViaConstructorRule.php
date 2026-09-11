@@ -58,6 +58,11 @@ final class InjectionViaConstructorRule implements Rule
         SatisfiesRepositoryContract::class,
     ];
 
+    private function isConsoleCommand(\PHPStan\Reflection\ClassReflection $class): bool
+    {
+        return $class->getNativeReflection()->getAttributes(AsCommand::class) !== [];
+    }
+
     public function getNodeType(): string
     {
         return ClassMethod::class;
@@ -93,6 +98,23 @@ final class InjectionViaConstructorRule implements Rule
             }
 
             if (!$this->isContainerManaged($classReflection)) {
+                return [];
+            }
+
+            // Console commands are the exception, and the exception is real
+            // rather than a carve-out: Application::instantiateCommand() builds
+            // an attribute-only command with plain `new $className()` and only
+            // then hands it to the container for property injection. So a
+            // command's constructor DOES run, and reporting it as dead code
+            // sends an author to delete the one line that gives the command its
+            // name when something constructs it directly — which is what every
+            // command test does. MEASURED: 21 #[AsCommand] classes carry such a
+            // constructor, so this was not one stray case.
+            //
+            // Only THIS branch is exempt. Constructor INJECTION on a command is
+            // still reported below: the console supports it, calls it legacy,
+            // and property injection is the channel.
+            if ($this->isConsoleCommand($classReflection)) {
                 return [];
             }
 
