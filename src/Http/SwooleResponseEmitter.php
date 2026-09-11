@@ -27,7 +27,9 @@ final class SwooleResponseEmitter implements ResponseEmitterInterface
 
         $transport->status($response->getStatusCode());
 
-        foreach ($response->getHeaders() as $name => $value) {
+        $headers = self::withEncodingVary($response->getHeaders(), $response->getContent());
+
+        foreach ($headers as $name => $value) {
             if (is_array($value)) {
                 if (strtolower($name) === 'set-cookie') {
                     foreach ($value as $cookieLine) {
@@ -42,6 +44,76 @@ final class SwooleResponseEmitter implements ResponseEmitterInterface
         }
 
         $transport->end($response->getContent());
+    }
+
+    /**
+     * Declare that this response depends on Accept-Encoding, because it does.
+     *
+     * Swoole compresses a response it `end()`s whenever the client accepts an
+     * encoding and the body is at least `compression_min_length` — and it does
+     * NOT emit `Vary`. Measured on a live server: the gzip answer carried
+     * `Content-Encoding: gzip` and no Vary at all. Without it a shared cache
+     * may store whichever representation it saw first under the bare URL and
+     * hand it to everyone behind it — and in the bad direction that is a gzip
+     * body served to a client that told us it cannot read one.
+     *
+     * Declared from the RESPONSE, not from the request that arrived: Vary
+     * describes what this resource depends on, so a header that flipped with
+     * the caller's own Accept-Encoding would describe a different resource to
+     * each of them. The only input is the body length, which is a property of
+     * the response.
+     *
+     * The type is not consulted because Swoole does not consult it either:
+     * `http_compression_types` is null unless an application sets it, and the
+     * content-type filter is skipped entirely when it is — so every body over
+     * the floor is a candidate, whatever it contains.
+     *
+     * An existing Vary is extended rather than replaced. A response that
+     * already varies on Cookie or Accept-Language still varies on those, and
+     * overwriting that list would make a private response look shareable.
+     *
+     * @param array<string, mixed> $headers
+     * @return array<string, mixed>
+     */
+    private static function withEncodingVary(array $headers, string $content): array
+    {
+        // Swoole's SW_COMPRESSION_MIN_LENGTH_DEFAULT. Below it nothing is
+        // compressed, so nothing varies and a Vary would split a cache key for
+        // a resource that has exactly one representation.
+        if (strlen($content) < 20) {
+            return $headers;
+        }
+
+        foreach ($headers as $name => $value) {
+            if (strtolower($name) !== 'vary') {
+                continue;
+            }
+
+            $existing = is_array($value) ? implode(', ', array_map('strval', $value)) : (string) $value;
+
+            if ($existing === '*' || self::listsAcceptEncoding($existing)) {
+                return $headers;
+            }
+
+            $headers[$name] = $existing === '' ? 'Accept-Encoding' : $existing . ', Accept-Encoding';
+
+            return $headers;
+        }
+
+        $headers['Vary'] = 'Accept-Encoding';
+
+        return $headers;
+    }
+
+    private static function listsAcceptEncoding(string $vary): bool
+    {
+        foreach (explode(',', strtolower($vary)) as $field) {
+            if (trim($field) === 'accept-encoding') {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
