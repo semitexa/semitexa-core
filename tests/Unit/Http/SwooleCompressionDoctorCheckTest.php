@@ -67,14 +67,27 @@ final class SwooleCompressionDoctorCheckTest extends TestCase
         self::assertStringContainsString('gzip, brotli, zstd', $all->message);
     }
 
-    /** This host is healthy, and the live check agrees — the other half of the pair. */
+    /**
+     * The live check reads the constants it claims to read.
+     *
+     * Derived, not hardcoded to Pass. A fixed Pass would fail on exactly the
+     * build this check exists for — a Swoole without compression — so anyone
+     * running the suite on such an image would get a red test telling them
+     * their code is broken when what is actually true is that their image is
+     * old. That belongs in the doctor's own warning, which is what it says;
+     * turning it into a test failure conflates the two.
+     */
     #[Test]
-    public function the_live_check_passes_on_this_build(): void
+    public function the_live_check_agrees_with_what_this_build_actually_has(): void
     {
         if (!extension_loaded('swoole')) {
             self::markTestSkipped('ext-swoole is not loaded here');
         }
 
-        self::assertSame(DoctorStatus::Pass, (new SwooleCompressionDoctorCheck())->run()->status);
+        $expected = defined('SWOOLE_HAVE_COMPRESSION') && defined('SWOOLE_HAVE_ZLIB')
+            ? DoctorStatus::Pass
+            : DoctorStatus::Warn;
+
+        self::assertSame($expected, (new SwooleCompressionDoctorCheck())->run()->status);
     }
 }

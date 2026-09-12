@@ -31,32 +31,38 @@ final class ResponseEncodingVaryTest extends TestCase
      * @param array<string, mixed> $headers
      * @return array<string, mixed>
      */
-    private function headersFor(string $content, array $headers = []): array
+    private function headersFor(array $headers = []): array
     {
         $method = new ReflectionMethod(SwooleResponseEmitter::class, 'withEncodingVary');
 
-        return $method->invoke(null, $headers, $content);
+        return $method->invoke(null, $headers);
     }
 
     #[Test]
-    public function a_body_that_can_be_compressed_declares_the_dependency(): void
+    public function a_response_declares_the_dependency(): void
     {
-        $headers = $this->headersFor(str_repeat('a', 4096), ['Content-Type' => 'text/html']);
+        $headers = $this->headersFor(['Content-Type' => 'text/html']);
 
         self::assertSame('Accept-Encoding', $headers['Vary'] ?? null);
         self::assertSame('text/html', $headers['Content-Type'], 'other headers are left alone');
     }
 
     /**
-     * Below Swoole's floor nothing is compressed, so there is only one
-     * representation and claiming otherwise splits a cache key for nothing.
+     * Declared whatever the body weighs, because the threshold is not ours.
+     *
+     * The first version tested the body against 20 bytes — Swoole's default
+     * `compression_min_length`, copied into this codebase, where it would have
+     * to keep agreeing with a value it does not own. An application that lowers
+     * that setting would get compressed responses with no Vary, which is the
+     * exact cache-poisoning the header prevents. Over-declaring on a body too
+     * short to compress splits a cache key nobody uses; under-declaring hands a
+     * client bytes it cannot read. Only one of those is worth avoiding.
      */
     #[Test]
-    public function a_body_too_short_to_compress_declares_nothing(): void
+    public function the_declaration_does_not_depend_on_a_threshold_we_do_not_own(): void
     {
-        self::assertArrayNotHasKey('Vary', $this->headersFor('tiny'));
-        self::assertArrayNotHasKey('Vary', $this->headersFor(str_repeat('x', 19)));
-        self::assertArrayHasKey('Vary', $this->headersFor(str_repeat('x', 20)), 'exactly at the floor it can compress');
+        self::assertSame('Accept-Encoding', $this->headersFor()['Vary'] ?? null);
+        self::assertSame('Accept-Encoding', $this->headersFor(['Content-Length' => '3'])['Vary'] ?? null);
     }
 
     /**
@@ -67,10 +73,10 @@ final class ResponseEncodingVaryTest extends TestCase
     #[Test]
     public function an_existing_vary_is_extended_rather_than_replaced(): void
     {
-        $headers = $this->headersFor(str_repeat('a', 4096), ['Vary' => 'Cookie']);
+        $headers = $this->headersFor(['Vary' => 'Cookie']);
         self::assertSame('Cookie, Accept-Encoding', $headers['Vary']);
 
-        $listed = $this->headersFor(str_repeat('a', 4096), ['Vary' => 'Cookie, Accept-Language']);
+        $listed = $this->headersFor(['Vary' => 'Cookie, Accept-Language']);
         self::assertSame('Cookie, Accept-Language, Accept-Encoding', $listed['Vary']);
     }
 
@@ -79,29 +85,32 @@ final class ResponseEncodingVaryTest extends TestCase
     public function a_dependency_already_declared_is_not_repeated(): void
     {
         foreach (['Accept-Encoding', 'accept-encoding', 'Cookie,  Accept-Encoding'] as $existing) {
-            $headers = $this->headersFor(str_repeat('a', 4096), ['Vary' => $existing]);
+            $headers = $this->headersFor(['Vary' => $existing]);
             self::assertSame($existing, $headers['Vary'], $existing);
         }
 
-        $lowercase = $this->headersFor(str_repeat('a', 4096), ['vary' => 'accept-encoding']);
+        $lowercase = $this->headersFor(['vary' => 'accept-encoding']);
         self::assertSame('accept-encoding', $lowercase['vary']);
         self::assertArrayNotHasKey('Vary', $lowercase, 'the header name is case-insensitive; do not add a second one');
     }
 
-    /** `Vary: *` already says the response is uncacheable; narrowing it would be a lie. */
+    /**
+     * `Vary: *` already says the response is effectively uncacheable, and
+     * narrowing it into a list claims the opposite. Trimmed, because a
+     * hand-written header may carry spaces and « * » is still a wildcard.
+     */
     #[Test]
     public function a_wildcard_vary_is_left_exactly_as_it_is(): void
     {
-        $headers = $this->headersFor(str_repeat('a', 4096), ['Vary' => '*']);
-
-        self::assertSame('*', $headers['Vary']);
+        self::assertSame('*', $this->headersFor(['Vary' => '*'])['Vary']);
+        self::assertSame(' * ', $this->headersFor(['Vary' => ' * '])['Vary'], 'spacing does not make it a list');
     }
 
     /** A list-valued header survives the round trip as a single joined value. */
     #[Test]
     public function an_array_valued_vary_is_joined_and_extended(): void
     {
-        $headers = $this->headersFor(str_repeat('a', 4096), ['Vary' => ['Cookie', 'Accept-Language']]);
+        $headers = $this->headersFor(['Vary' => ['Cookie', 'Accept-Language']]);
 
         self::assertSame('Cookie, Accept-Language, Accept-Encoding', $headers['Vary']);
     }
