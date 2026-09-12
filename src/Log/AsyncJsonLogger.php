@@ -153,6 +153,21 @@ final class AsyncJsonLogger implements LoggerInterface
                 $entry['cid'] = $cid;
             }
         }
+
+        // Which process and which part of the pipeline this line came from,
+        // when anything is installed that can say. `cid` alone cannot answer
+        // it: a coroutine id is RECYCLED, so it identifies a line's neighbours
+        // for a moment and nothing at all an hour later. The process id is
+        // durable and the block is what a reader is actually looking for.
+        $origin = LogOrigin::current();
+        if ($origin !== null) {
+            if (isset($origin['process'])) {
+                $entry['process'] = $origin['process'];
+            }
+            if (isset($origin['block'])) {
+                $entry['block'] = $origin['block'];
+            }
+        }
         $this->buffer[] = $entry;
 
         // In CLI (e.g. queue worker) there is no Swoole event loop, so defer would never run — flush immediately.
