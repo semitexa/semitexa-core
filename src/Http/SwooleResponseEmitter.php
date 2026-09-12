@@ -7,6 +7,9 @@ namespace Semitexa\Core\Http;
 use Semitexa\Core\HttpResponse;
 use Swoole\Http\Response as SwooleResponse;
 
+/**
+ * @phpstan-import-type HeaderValue from HttpResponse
+ */
 final class SwooleResponseEmitter implements ResponseEmitterInterface
 {
     public function emit(HttpResponse $response, mixed $transport): void
@@ -73,8 +76,14 @@ final class SwooleResponseEmitter implements ResponseEmitterInterface
      * already varies on Cookie or Accept-Language still varies on those, and
      * overwriting that list would make a private response look shareable.
      *
-     * @param array<string, mixed> $headers
-     * @return array<string, mixed>
+     * Typed against the response's own header shape rather than a looser
+     * `mixed`. The first version declared `array<string, mixed>`, which widened
+     * what getHeaders() states precisely — and every cast below it, code this
+     * change never touched, turned into "cannot cast mixed to string". Five
+     * messages of apparent regression from one careless docblock.
+     *
+     * @param array<string, HeaderValue> $headers
+     * @return array<string, HeaderValue>
      */
     private static function withEncodingVary(array $headers): array
     {
