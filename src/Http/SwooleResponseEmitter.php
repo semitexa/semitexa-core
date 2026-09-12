@@ -27,7 +27,9 @@ final class SwooleResponseEmitter implements ResponseEmitterInterface
 
         $transport->status($response->getStatusCode());
 
-        foreach ($response->getHeaders() as $name => $value) {
+        $headers = self::withEncodingVary($response->getHeaders());
+
+        foreach ($headers as $name => $value) {
             if (is_array($value)) {
                 if (strtolower($name) === 'set-cookie') {
                     foreach ($value as $cookieLine) {
@@ -42,6 +44,74 @@ final class SwooleResponseEmitter implements ResponseEmitterInterface
         }
 
         $transport->end($response->getContent());
+    }
+
+    /**
+     * Declare that this response depends on Accept-Encoding, because it may.
+     *
+     * Swoole compresses a response it `end()`s whenever the client accepts an
+     * encoding and the body clears `compression_min_length` — and it does NOT
+     * emit `Vary`. Measured on a live server: the gzip answer carried
+     * `Content-Encoding: gzip` and no Vary at all. Without it a shared cache
+     * may store whichever representation it saw first under the bare URL and
+     * hand it to everyone behind it — and in the bad direction that is a gzip
+     * body served to a client that told us it cannot read one.
+     *
+     * Declared for EVERY response rather than only for bodies over some length.
+     * The first version tested `strlen($content) >= 20`, which is Swoole's
+     * default `compression_min_length` copied into this file — a second place
+     * that has to agree with a value it does not own and does not mention. An
+     * application may lower that setting, and the copy would then withhold the
+     * header from responses Swoole compresses, which is precisely the
+     * cache-poisoning this exists to prevent. Over-declaring on a body too
+     * short to compress splits a cache key for a resource nobody caches;
+     * under-declaring hands a client bytes it cannot read. Those are not
+     * comparable risks, so the cheap direction wins and the duplicated
+     * constant goes.
+     *
+     * An existing Vary is extended rather than replaced. A response that
+     * already varies on Cookie or Accept-Language still varies on those, and
+     * overwriting that list would make a private response look shareable.
+     *
+     * @param array<string, mixed> $headers
+     * @return array<string, mixed>
+     */
+    private static function withEncodingVary(array $headers): array
+    {
+        foreach ($headers as $name => $value) {
+            if (strtolower($name) !== 'vary') {
+                continue;
+            }
+
+            $existing = is_array($value) ? implode(', ', array_map('strval', $value)) : (string) $value;
+
+            // `*` already says the response is effectively uncacheable, and
+            // trimmed because a hand-written header may carry spaces — turning
+            // « * » into « * , Accept-Encoding » narrows a wildcard into a
+            // list, which claims the opposite of what it said.
+            if (trim($existing) === '*' || self::listsAcceptEncoding($existing)) {
+                return $headers;
+            }
+
+            $headers[$name] = trim($existing) === '' ? 'Accept-Encoding' : $existing . ', Accept-Encoding';
+
+            return $headers;
+        }
+
+        $headers['Vary'] = 'Accept-Encoding';
+
+        return $headers;
+    }
+
+    private static function listsAcceptEncoding(string $vary): bool
+    {
+        foreach (explode(',', strtolower($vary)) as $field) {
+            if (trim($field) === 'accept-encoding') {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
