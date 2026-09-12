@@ -6,6 +6,7 @@ namespace Semitexa\Core\Container;
 
 use Psr\Container\ContainerInterface;
 use Semitexa\Core\Redis\RedisConnectionPool;
+use Semitexa\Core\Redis\RedisSharedPool;
 
 /**
  * @internal Bootstrap-only. Application code uses #[InjectAs*] property injection.
@@ -74,18 +75,22 @@ class ContainerFactory
         $container->set(\Semitexa\Orm\Adapter\DatabaseAdapterInterface::class, $orm->getAdapter());
         $container->set(\Semitexa\Orm\Application\Service\Transaction\TransactionManager::class, $orm->getTransactionManager());
 
-        // Redis connection pool (worker-scoped singleton, boot() fills the channel)
+        // The worker's Redis connections have ONE owner. RedisSharedPool is
+        // registered unconditionally so subsystems can depend on it outright;
+        // it answers whether Redis is configured and builds the single pool on
+        // first use. Registering RedisConnectionPool directly would make the
+        // binding conditional, and a conditional binding is exactly what drove
+        // every subsystem to open a pool of its own.
         /** @var \Semitexa\Core\Environment $env */
         $env = $container->get(\Semitexa\Core\Environment::class);
-        $redisHost = \Semitexa\Core\Environment::getEnvValue('REDIS_HOST');
-        if ($redisHost !== null && $redisHost !== '') {
-            $redisPool = new RedisConnectionPool($env->redisPoolSize, [
-                'scheme'   => \Semitexa\Core\Environment::getEnvValue('REDIS_SCHEME', 'tcp') ?? 'tcp',
-                'host'     => $redisHost,
-                'port'     => (int) \Semitexa\Core\Environment::getEnvValue('REDIS_PORT', '6379'),
-                'password' => \Semitexa\Core\Environment::getEnvValue('REDIS_PASSWORD') ?? '',
-            ]);
-            $container->set(RedisConnectionPool::class, $redisPool);
+        $sharedRedis = RedisSharedPool::fromEnvironment($env->redisPoolSize);
+        $container->set(RedisSharedPool::class, $sharedRedis);
+
+        // Kept for the collaborators that already take the pool itself
+        // (SessionPhase, the webhook replay store). Same instance — asking
+        // either way lands on the same connections.
+        if ($sharedRedis->isConfigured()) {
+            $container->set(RedisConnectionPool::class, $sharedRedis->pool());
         }
     }
 
