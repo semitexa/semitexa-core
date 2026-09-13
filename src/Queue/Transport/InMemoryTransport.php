@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Queue\Transport;
 
+use Semitexa\Core\Support\StandingCoroutines;
 use Semitexa\Core\Queue\QueueTransportInterface;
 
 /**
@@ -28,6 +29,12 @@ class InMemoryTransport implements QueueTransportInterface
     public function consume(string $queueName, callable $callback): void
     {
         $queueName = $this->normalizeQueue($queueName);
+
+        StandingCoroutines::declare(
+            'queue consumer',
+            'waiting for work on queue ' . $queueName . ' — by design, never returns',
+        );
+
         while (true) {
             if (!empty($this->queues[$queueName])) {
                 $payload = array_shift($this->queues[$queueName]);
