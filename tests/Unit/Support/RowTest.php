@@ -1,0 +1,134 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Semitexa\Core\Tests\Unit\Support;
+
+use PHPUnit\Framework\Attributes\Test;
+use PHPUnit\Framework\TestCase;
+use Semitexa\Core\Support\Row;
+
+/**
+ * The narrowing that used to sit inline at eighty-three call sites.
+ *
+ * Two things are under test and only one of them is about types: a row whose
+ * column holds something unexpected must yield the DEFAULT, because the inline
+ * `(string) $row['col']` it replaces raised "Array to string conversion" and
+ * took the worker with it.
+ */
+final class RowTest extends TestCase
+{
+    #[Test]
+    public function a_string_column_reads_back_as_itself(): void
+    {
+        self::assertSame('abc', Row::of(['a' => 'abc'])->string('a'));
+    }
+
+    #[Test]
+    public function a_scalar_column_is_spelled_as_a_string(): void
+    {
+        self::assertSame('7', Row::of(['a' => 7])->string('a'));
+        self::assertSame('1', Row::of(['a' => true])->string('a'));
+        self::assertSame('1.5', Row::of(['a' => 1.5])->string('a'));
+    }
+
+    #[Test]
+    public function a_stringable_object_is_allowed_to_spell_itself(): void
+    {
+        $subject = new class () implements \Stringable {
+            public function __toString(): string
+            {
+                return 'from an object';
+            }
+        };
+
+        self::assertSame('from an object', Row::of(['a' => $subject])->string('a'));
+    }
+
+    /**
+     * The behavioural half. `(string) ['x']` is a PHP error, not a cast, so a
+     * malformed row killed the read instead of being skipped.
+     */
+    #[Test]
+    public function a_value_that_cannot_be_a_string_yields_the_default(): void
+    {
+        self::assertSame('', Row::of(['a' => ['x']])->string('a'));
+        self::assertSame('', Row::of(['a' => null])->string('a'));
+        self::assertSame('fallback', Row::of(['a' => new \stdClass()])->string('a', 'fallback'));
+        self::assertSame('fallback', Row::of([])->string('a', 'fallback'));
+    }
+
+    #[Test]
+    public function an_int_column_reads_back_as_itself(): void
+    {
+        self::assertSame(7, Row::of(['a' => 7])->int('a'));
+        self::assertSame(1, Row::of(['a' => true])->int('a'));
+    }
+
+    /**
+     * A Swoole\Table column declared as a string, holding a timestamp, is the
+     * common case; refusing it would only push the cast back to the call site.
+     */
+    #[Test]
+    public function a_numeric_string_is_an_int(): void
+    {
+        self::assertSame(1700000000, Row::of(['a' => '1700000000'])->int('a'));
+        self::assertSame(-3, Row::of(['a' => '-3'])->int('a'));
+    }
+
+    #[Test]
+    public function a_value_that_is_not_a_number_yields_the_default(): void
+    {
+        self::assertSame(0, Row::of(['a' => 'later'])->int('a'));
+        self::assertSame(0, Row::of(['a' => ['x']])->int('a'));
+        self::assertSame(0, Row::of(['a' => null])->int('a'));
+        self::assertSame(-1, Row::of([])->int('a', -1));
+        self::assertSame(-1, Row::of(['a' => NAN])->int('a', -1), 'NAN has no integer to be');
+        self::assertSame(-1, Row::of(['a' => INF])->int('a', -1));
+    }
+
+    /**
+     * Absence and emptiness are different questions: a reaper deciding whether
+     * a row was ever written needs the first one.
+     */
+    #[Test]
+    public function presence_is_asked_separately_from_value(): void
+    {
+        self::assertTrue(Row::of(['a' => ''])->has('a'));
+        self::assertTrue(Row::of(['a' => null])->has('a'), 'written, and written as null');
+        self::assertFalse(Row::of([])->has('a'));
+    }
+
+    /** Numeric-looking keys arrive from a table the same as any other. */
+    #[Test]
+    public function a_row_with_unknown_key_types_is_read_the_same_way(): void
+    {
+        self::assertSame('v', Row::of([0 => 'skip', 'a' => 'v'])->string('a'));
+    }
+
+    /**
+     * A JSON object and a JSON array both decode to `array`, the second with
+     * integer keys — so a frame that arrived as `[1,2]` reached every
+     * `array<string, mixed>` parameter downstream with the wrong key type.
+     */
+    #[Test]
+    public function a_list_is_renamed_into_a_string_keyed_map(): void
+    {
+        self::assertSame(['0' => 'a', '1' => 'b'], Row::keyedByName(['a', 'b']));
+    }
+
+    #[Test]
+    public function an_already_named_map_is_unchanged(): void
+    {
+        self::assertSame(['a' => 1, 'b' => 2], Row::keyedByName(['a' => 1, 'b' => 2]));
+    }
+
+    #[Test]
+    public function values_are_carried_through_untouched(): void
+    {
+        $nested = ['deep' => ['x']];
+
+        self::assertSame(['k' => $nested], Row::keyedByName(['k' => $nested]), 'this narrows KEYS, not values');
+        self::assertSame([], Row::keyedByName([]));
+    }
+}

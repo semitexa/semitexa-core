@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Support;
 
+use Semitexa\Core\Support\Row;
 /**
  * Coroutines that are SUPPOSED to sit parked for the life of the worker, and
  * what each of them is waiting for.
@@ -208,7 +209,7 @@ final class StandingCoroutines
             return null;
         }
 
-        $cid = (int) \Swoole\Coroutine::getCid();
+        $cid = Row::asInt(\Swoole\Coroutine::getCid());
 
         return $cid > 0 ? $cid : null;
     }

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Server;
 
+use Semitexa\Core\Support\Row;
 use Swoole\Table;
 
 /**
@@ -115,11 +116,12 @@ final class WorkerCrashLoopBreaker
             return 0;
         }
 
-        $lastAt = (int) ($row['last_at'] ?? 0);
+        $values = Row::of($row);
+        $lastAt = $values->int('last_at');
         if ($lastAt <= 0 || ($now - $lastAt) > self::WINDOW_SECONDS) {
             return 0;
         }
 
-        return (int) ($row['crashes'] ?? 0);
+        return $values->int('crashes');
     }
 }
