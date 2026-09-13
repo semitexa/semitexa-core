@@ -6,9 +6,8 @@ namespace Semitexa\Core\Tests\Unit\Queue;
 
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
-use Semitexa\Core\Attribute\AsPayloadHandler;
 use Semitexa\Core\Container\ContainerFactory;
-use Semitexa\Core\Discovery\ClassDiscovery;
+use Semitexa\Core\Discovery\AttributeDiscovery;
 
 /**
  * A queued handler is resolved through the container's allowlist, and only it.
@@ -29,14 +28,25 @@ use Semitexa\Core\Discovery\ClassDiscovery;
 final class QueueWorkerHandlerResolutionTest extends TestCase
 {
     /**
-     * The fact the reverted change got wrong: every discovered handler is
-     * already reachable through get(), so a fallback buys nothing.
+     * The fact the reverted change got wrong: every ACTIVE handler is already
+     * reachable through get(), so a fallback buys nothing.
+     *
+     * Read from AttributeDiscovery's handler registry, not from a raw
+     * ClassDiscovery sweep. The two differ exactly where it matters: discovery
+     * filters #[AsPayloadHandler] classes through ModuleRegistry::isClassActive(),
+     * and ServiceRegistrationPhase registers that filtered set. A raw sweep
+     * would list a disabled module's handlers, which the container rightly does
+     * not register — so the assertion would fail in precisely the supported
+     * configuration the production comment is about.
      */
     #[Test]
-    public function every_discovered_payload_handler_is_a_registered_service(): void
+    public function every_active_payload_handler_is_a_registered_service(): void
     {
         $container = ContainerFactory::get();
-        $handlers = (new ClassDiscovery())->findClassesWithAttribute(AsPayloadHandler::class);
+        $discovery = $container->get(AttributeDiscovery::class);
+        self::assertInstanceOf(AttributeDiscovery::class, $discovery);
+
+        $handlers = $discovery->getHandlerRegistry()->getHandlerClassNames();
 
         self::assertNotEmpty($handlers, 'nothing discovered would make this vacuous');
 
