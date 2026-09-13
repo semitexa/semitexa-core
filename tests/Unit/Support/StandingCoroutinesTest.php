@@ -1,0 +1,239 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Semitexa\Core\Tests\Unit\Support;
+
+use PHPUnit\Framework\Attributes\Test;
+use PHPUnit\Framework\TestCase;
+use Semitexa\Core\Support\StandingCoroutines;
+
+/**
+ * Some framework coroutines are supposed to sit in read() for the life of the
+ * worker: a pub/sub receiver, a lease heartbeat, a queue consumer. The
+ * Observatory judges a long-lived coroutine by what is behind it — an sse
+ * process means a session, an http process means a stuck request, nothing
+ * means a leak — and standing work has nothing behind it, so it lands in the
+ * leak bucket and is wrong there.
+ *
+ * This is how such a coroutine says what it is waiting for. It is a worker-wide
+ * map keyed by coroutine id, not request state, so a plain static is the right
+ * shape here rather than CoroutineLocal.
+ */
+final class StandingCoroutinesTest extends TestCase
+{
+    protected function setUp(): void
+    {
+        StandingCoroutines::reset();
+    }
+
+    protected function tearDown(): void
+    {
+        StandingCoroutines::reset();
+    }
+
+    #[Test]
+    public function nothing_is_standing_until_something_says_so(): void
+    {
+        self::assertSame([], StandingCoroutines::all());
+    }
+
+    #[Test]
+    public function a_declaration_carries_the_label_the_reason_and_when_it_parked(): void
+    {
+        StandingCoroutines::declareFor(7, 'live push receiver', 'subscribed to 3 channels');
+
+        $all = StandingCoroutines::all();
+
+        self::assertArrayHasKey(7, $all);
+        self::assertSame('live push receiver', $all[7]['label']);
+        self::assertSame('subscribed to 3 channels', $all[7]['reason']);
+        self::assertIsFloat($all[7]['since']);
+        self::assertGreaterThan(0.0, $all[7]['since']);
+    }
+
+    #[Test]
+    public function declaring_again_from_the_same_coroutine_replaces_rather_than_duplicates(): void
+    {
+        StandingCoroutines::declareFor(7, 'live push receiver', 'subscribed to 3 channels');
+        StandingCoroutines::declareFor(7, 'live push receiver', 'subscribed to 5 channels');
+
+        $all = StandingCoroutines::all();
+
+        self::assertCount(1, $all);
+        self::assertSame('subscribed to 5 channels', $all[7]['reason'], 'the newest reason is the true one');
+    }
+
+    #[Test]
+    public function a_coroutine_that_finished_is_forgotten(): void
+    {
+        StandingCoroutines::declareFor(7, 'live push receiver', 'subscribed');
+        StandingCoroutines::forgetFor(7);
+
+        self::assertSame([], StandingCoroutines::all());
+    }
+
+    /**
+     * A coroutine can end without its deferred cleanup running — a cancelled
+     * park is the case this runtime actually produces. The reader knows which
+     * coroutines exist, so it says so, and the entry goes.
+     */
+    #[Test]
+    public function declarations_for_coroutines_that_no_longer_exist_are_dropped(): void
+    {
+        StandingCoroutines::declareFor(7, 'receiver', 'subscribed');
+        StandingCoroutines::declareFor(9, 'heartbeat', 'renewing a lease');
+
+        $live = StandingCoroutines::all([9]);
+
+        self::assertSame([9], array_keys($live));
+        self::assertSame(
+            [9],
+            array_keys(StandingCoroutines::all()),
+            'the dead one is gone for good, not filtered out of one answer',
+        );
+    }
+
+    #[Test]
+    public function an_empty_live_set_clears_everything(): void
+    {
+        StandingCoroutines::declareFor(7, 'receiver', 'subscribed');
+
+        self::assertSame([], StandingCoroutines::all([]));
+        self::assertSame([], StandingCoroutines::all());
+    }
+
+    /**
+     * Declaring outside a coroutine has to be harmless: the CLI, the tests and
+     * any non-Swoole host all run this code, and an observability aid that
+     * throws there would be worse than the blindness it fixes.
+     */
+    #[Test]
+    public function declaring_outside_a_coroutine_is_a_no_op(): void
+    {
+        StandingCoroutines::declare('receiver', 'subscribed');
+        StandingCoroutines::forget();
+
+        self::assertSame([], StandingCoroutines::all());
+    }
+
+    /**
+     * The declaration has to be dropped when the coroutine ends, and it is
+     * registered through \Swoole\Coroutine::defer — the namespaced
+     * \Swoole\Coroutine\defer() is a convenience some builds do not define,
+     * and where it was missing nothing was registered at all: the entry
+     * outlived its coroutine, and once the runtime reused that cid the reader
+     * could not tell the stale label from a live one. Raised in review of
+     * core#135.
+     *
+     * Needs a real coroutine, so it skips where there is none rather than
+     * asserting against a stand-in for the thing under test.
+     */
+    #[Test]
+    public function a_coroutine_that_returns_drops_its_own_declaration(): void
+    {
+        if (!extension_loaded('swoole')) {
+            self::markTestSkipped('Swoole extension is required.');
+        }
+
+        $insideWhileRunning = [];
+
+        \Swoole\Coroutine\run(static function () use (&$insideWhileRunning): void {
+            \Swoole\Coroutine::create(static function () use (&$insideWhileRunning): void {
+                StandingCoroutines::declare('receiver', 'subscribed');
+                $insideWhileRunning = StandingCoroutines::all();
+            });
+        });
+
+        self::assertCount(1, $insideWhileRunning, 'the declaration has to be visible while the coroutine runs');
+        self::assertSame([], StandingCoroutines::all(), 'and gone once it returned, without the reader pruning');
+    }
+
+    /**
+     * A standing coroutine alternates between waiting, which the label
+     * describes, and doing the thing it waited for, which it does not. Left up
+     * across the work, a handler that hangs is reported as intentional — the
+     * one coroutine the panel exists to surface, hidden by the aid meant to
+     * clear the noise around it. Raised in review of core#135.
+     */
+    #[Test]
+    public function nothing_is_standing_while_the_work_it_waited_for_runs(): void
+    {
+        StandingCoroutines::declareFor(0, 'queue consumer', 'waiting for work');
+
+        $duringTheWork = null;
+        StandingCoroutines::busyFor(0, static function () use (&$duringTheWork): void {
+            $duringTheWork = StandingCoroutines::all();
+        });
+
+        self::assertSame([], $duringTheWork, 'a hung handler would read as waiting by design');
+        self::assertSame('queue consumer', StandingCoroutines::all()[0]['label'], 'and the wait resumes afterwards');
+    }
+
+    #[Test]
+    public function the_label_comes_back_even_when_the_work_throws(): void
+    {
+        StandingCoroutines::declareFor(0, 'queue consumer', 'waiting for work');
+
+        try {
+            StandingCoroutines::busyFor(0, static fn () => throw new \RuntimeException('the handler blew up'));
+            self::fail('the exception must reach the caller');
+        } catch (\RuntimeException) {
+            self::assertArrayHasKey(0, StandingCoroutines::all());
+        }
+    }
+
+    #[Test]
+    public function the_resumed_wait_is_dated_from_when_it_resumed(): void
+    {
+        StandingCoroutines::declareFor(0, 'queue consumer', 'waiting for work');
+        $firstPark = StandingCoroutines::all()[0]['since'];
+
+        usleep(2000);
+        StandingCoroutines::busyFor(0, static fn () => null);
+
+        self::assertGreaterThan(
+            $firstPark,
+            StandingCoroutines::all()[0]['since'],
+            'dating the new wait from the first park would age forever',
+        );
+    }
+
+    #[Test]
+    public function the_work_still_runs_and_its_value_is_returned_when_nothing_was_declared(): void
+    {
+        self::assertSame('done', StandingCoroutines::busy(static fn () => 'done'));
+        self::assertSame([], StandingCoroutines::all());
+    }
+
+    #[Test]
+    public function a_label_and_reason_are_trimmed_and_bounded(): void
+    {
+        StandingCoroutines::declareFor(7, '  receiver  ', str_repeat('x', 500));
+
+        $all = StandingCoroutines::all();
+
+        self::assertSame('receiver', $all[7]['label']);
+        self::assertLessThanOrEqual(200, strlen($all[7]['reason']), 'a reason is a sentence, not a payload');
+    }
+
+    /**
+     * Truncation uses no mbstring: this package declares none, and the first
+     * thing a standing coroutine does is declare itself — an
+     * undefined-function error there would stop the park rather than label it.
+     * It still must not leave half a character behind.
+     */
+    #[Test]
+    public function a_multibyte_reason_is_cut_on_a_character_boundary(): void
+    {
+        // Cyrillic: two bytes per character, so the 200-byte budget lands
+        // mid-character unless the cut is adjusted.
+        StandingCoroutines::declareFor(7, 'receiver', str_repeat('и', 300));
+
+        $reason = StandingCoroutines::all()[7]['reason'];
+
+        self::assertLessThanOrEqual(200, strlen($reason));
+        self::assertSame($reason, mb_convert_encoding($reason, 'UTF-8', 'UTF-8'), 'no broken sequence at the end');
+        self::assertNotSame('', $reason);
+    }
+}

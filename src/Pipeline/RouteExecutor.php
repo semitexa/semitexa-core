@@ -243,7 +243,15 @@ class RouteExecutor
             if ($exceptionMapper === null || $metadata === null) {
                 throw $e;
             }
-            return $this->decorateResponse($exceptionMapper->map($e, $request, $metadata), $request, $metadata);
+            // The status the exception BECAME, beside the class it came from.
+            // A gate declines by throwing — its only way to stop the pipeline —
+            // so without this a 401 and a service blowing up reach an observer
+            // as the same event. Publishing the status rather than a list of
+            // classes that mean refusal keeps readers of the trace out of the
+            // business of knowing which package throws what.
+            $mapped = $exceptionMapper->map($e, $request, $metadata);
+            $tracer?->mark('request.exception.mapped', ['status' => $mapped->statusCode]);
+            return $this->decorateResponse($mapped, $request, $metadata);
         } finally {
             // finally, not a line before each return: execute() leaves through
             // five different points including two rethrows, and a root span that

@@ -1,0 +1,215 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Semitexa\Core\Support;
+
+/**
+ * Coroutines that are SUPPOSED to sit parked for the life of the worker, and
+ * what each of them is waiting for.
+ *
+ * ## Why this exists
+ *
+ * The Observatory judges a long-lived coroutine by what is behind it: an `sse`
+ * process means a session, an `http` process means a stuck request, and nothing
+ * behind it means a leak. A framework coroutine born at worker start — a
+ * pub/sub receiver, a lease heartbeat, a queue consumer — has nothing behind
+ * it, so it lands in the leak bucket and is wrong there. Six of them on an idle
+ * machine teach an operator to ignore the hung count, and then it cannot warn
+ * about the seventh that is real.
+ *
+ * So standing work says so, in its own words, where the snapshot can read it.
+ *
+ * ## Shape
+ *
+ * A worker-wide map keyed by coroutine id. That is deliberately NOT
+ * {@see CoroutineLocal}: this is not per-request state that must not leak
+ * between coroutines, it is a register of coroutines, read by a different
+ * coroutine than the ones that write it.
+ *
+ * Entries are removed when the coroutine ends — by a deferred callback where
+ * the runtime allows one, and otherwise by the reader, which is the only thing
+ * that knows which coroutines still exist. Both paths matter: this runtime
+ * cancels parked coroutines on worker exit, and a cancelled park does not
+ * always run what it deferred.
+ *
+ * Everything here is a no-op outside Swoole. The CLI and the test suite run
+ * this code, and an observability aid that throws where it cannot observe
+ * would be worse than the blindness it fixes.
+ */
+final class StandingCoroutines
+{
+    /** A reason is a sentence for a human, not a payload. */
+    private const MAX_REASON = 200;
+    private const MAX_LABEL = 60;
+
+    /** @var array<int, array{label: string, reason: string, since: float}> */
+    private static array $standing = [];
+
+    /**
+     * Declare the CURRENT coroutine as standing work, and arrange for the
+     * declaration to be dropped when it ends.
+     */
+    public static function declare(string $label, string $reason): void
+    {
+        $cid = self::currentCid();
+        if ($cid === null) {
+            return;
+        }
+
+        self::declareFor($cid, $label, $reason);
+
+        // Best effort: a coroutine that is cancelled rather than returning may
+        // never run this, which is why the reader prunes as well.
+        //
+        // Through the class, which is the API the extension always defines.
+        // This used to go through the namespaced \Swoole\Coroutine\defer()
+        // function, a convenience some builds leave out — and where it was
+        // missing nothing was registered at all: the declaration outlived its
+        // coroutine, and once the runtime reused that cid the reader could not
+        // tell the stale label from live work. Raised in review of core#135.
+        // Reaching here means currentCid() found a coroutine, so the class is
+        // loaded and no guard is needed.
+        \Swoole\Coroutine::defer(static fn () => self::forgetFor($cid));
+    }
+
+    /** Drop the current coroutine's declaration. */
+    public static function forget(): void
+    {
+        $cid = self::currentCid();
+        if ($cid !== null) {
+            self::forgetFor($cid);
+        }
+    }
+
+    /**
+     * Run $work with this coroutine's standing label lifted.
+     *
+     * A standing coroutine alternates between waiting, which is what the label
+     * describes, and doing the thing it was waiting for, which it does not. A
+     * queue consumer that declares itself once and then calls a handler is
+     * labelled "waiting for work — by design" for as long as that handler
+     * runs, so a handler that hangs is reported as intentional: exactly the
+     * coroutine the panel exists to surface, hidden by the aid meant to clear
+     * the noise around it. Raised in review of core#135.
+     *
+     * The label comes back when $work returns, with a fresh `since` — the wait
+     * that resumes is a new one, and dating it from the first park would age
+     * forever. Nothing is registered or deferred here, so this is safe to call
+     * in a loop that never returns.
+     *
+     * @template T
+     * @param callable(): T $work
+     * @return T
+     */
+    public static function busy(callable $work): mixed
+    {
+        $cid = self::currentCid();
+
+        return $cid === null ? $work() : self::busyFor($cid, $work);
+    }
+
+    /**
+     * @template T
+     * @param callable(): T $work
+     * @return T
+     */
+    public static function busyFor(int $cid, callable $work): mixed
+    {
+        $entry = self::$standing[$cid] ?? null;
+        if ($entry === null) {
+            return $work();
+        }
+
+        self::forgetFor($cid);
+
+        try {
+            return $work();
+        } finally {
+            self::declareFor($cid, $entry['label'], $entry['reason']);
+        }
+    }
+
+    public static function declareFor(int $cid, string $label, string $reason): void
+    {
+        self::$standing[$cid] = [
+            'label' => self::clip(trim($label), self::MAX_LABEL),
+            'reason' => self::clip(trim($reason), self::MAX_REASON),
+            'since' => microtime(true),
+        ];
+    }
+
+    public static function forgetFor(int $cid): void
+    {
+        unset(self::$standing[$cid]);
+    }
+
+    /**
+     * Everything currently declared.
+     *
+     * Pass the coroutine ids that still exist and the declarations of the ones
+     * that do not are dropped for good, rather than filtered out of a single
+     * answer. The reader is the only caller that knows the live set, so it is
+     * the one that gets to say.
+     *
+     * @param list<int>|null $liveCids
+     * @return array<int, array{label: string, reason: string, since: float}>
+     */
+    public static function all(?array $liveCids = null): array
+    {
+        if ($liveCids !== null) {
+            $live = array_flip($liveCids);
+            foreach (array_keys(self::$standing) as $cid) {
+                if (!isset($live[$cid])) {
+                    unset(self::$standing[$cid]);
+                }
+            }
+        }
+
+        return self::$standing;
+    }
+
+    /** @internal Test seam: a worker never needs to forget everything at once. */
+    public static function reset(): void
+    {
+        self::$standing = [];
+    }
+
+    /**
+     * Cut to a byte budget without leaving half a character behind.
+     *
+     * Deliberately not mb_substr: this package declares no ext-mbstring, and
+     * the first thing a standing coroutine does is declare itself — an
+     * undefined-function error here would stop the park rather than label it,
+     * which is the opposite of what an observability aid may do. A trailing
+     * incomplete UTF-8 sequence is dropped so the panel never renders a broken
+     * glyph.
+     */
+    private static function clip(string $value, int $maxBytes): string
+    {
+        if (strlen($value) <= $maxBytes) {
+            return $value;
+        }
+
+        $cut = substr($value, 0, $maxBytes);
+        while ($cut !== '' && (ord($cut[strlen($cut) - 1]) & 0xC0) === 0x80) {
+            $cut = substr($cut, 0, -1); // a continuation byte: still mid-character
+        }
+        if ($cut !== '' && (ord($cut[strlen($cut) - 1]) & 0xC0) === 0xC0) {
+            $cut = substr($cut, 0, -1); // a lead byte whose sequence was cut off
+        }
+
+        return $cut;
+    }
+
+    private static function currentCid(): ?int
+    {
+        if (!class_exists(\Swoole\Coroutine::class, false)) {
+            return null;
+        }
+
+        $cid = (int) \Swoole\Coroutine::getCid();
+
+        return $cid > 0 ? $cid : null;
+    }
+}

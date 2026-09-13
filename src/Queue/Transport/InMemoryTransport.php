@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Queue\Transport;
 
+use Semitexa\Core\Support\StandingCoroutines;
 use Semitexa\Core\Queue\QueueTransportInterface;
 
 /**
@@ -28,10 +29,19 @@ class InMemoryTransport implements QueueTransportInterface
     public function consume(string $queueName, callable $callback): void
     {
         $queueName = $this->normalizeQueue($queueName);
+
+        StandingCoroutines::declare(
+            'queue consumer',
+            'waiting for work on queue ' . $queueName . ' — by design, never returns',
+        );
+
         while (true) {
             if (!empty($this->queues[$queueName])) {
                 $payload = array_shift($this->queues[$queueName]);
-                $callback($payload);
+                // Not standing while the handler runs: the label describes the
+                // WAIT, and leaving it up would report a stuck handler as
+                // waiting by design.
+                StandingCoroutines::busy(static fn () => $callback($payload));
             } else {
                 if (class_exists(\Swoole\Coroutine::class, false) && \Swoole\Coroutine::getCid() > 0) {
                     \Swoole\Coroutine::sleep(0.25);
