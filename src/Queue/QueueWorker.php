@@ -255,20 +255,22 @@ class QueueWorker
             $request = $this->hydrateDto($message->requestClass, $requestPayload);
             $response = $this->hydrateDto($message->responseClass, $responsePayload);
 
-            /** @var \Semitexa\Core\Container\SemitexaContainer $container */
             $container = ContainerFactory::get();
-            // Registered as a service, or resolved on the spot — the same
-            // resilience EventDispatcher::runListenerSync() already has.
+            // get() ALONE, deliberately — never a resolve() fallback.
             //
-            // A payload handler is not required to carry #[AsService]; plenty
-            // are plain classes the container can build. get() alone threw
-            // NotFoundException for those, which the catch below turned into
-            // "Error processing payload" and a failed message — a handler that
-            // works perfectly well over HTTP failing only when it is queued,
-            // and reported as if the payload were at fault.
-            $handler = $container->has($handlerClass)
-                ? $container->get($handlerClass)
-                : $container->resolve($handlerClass);
+            // ServiceRegistrationPhase registers every discovered payload
+            // handler by concrete class, so the container knows all 276 of
+            // them without any of them carrying #[AsService]. `has() === false`
+            // therefore does not mean "plain class the container could build";
+            // it means the class was not approved for THIS boot — a disabled
+            // module, a deleted handler, a message older than the deployment,
+            // or a name that never came from QueueDispatcher at all.
+            //
+            // Falling back to resolve() there would instantiate any autoloadable
+            // class with a handle() method named by the message, which is the
+            // allowlist AttributeDiscovery exists to enforce. A stale message is
+            // supposed to fail.
+            $handler = $container->get($handlerClass);
             if (!method_exists($handler, 'handle')) {
                 $this->log("⚠️  Handler {$handlerClass} has no handle() method", 'warning');
                 $this->updateStats('failed');

@@ -36,6 +36,13 @@ final class SandboxGuard
 {
     private static bool $active = false;
 
+    /**
+     * How many scopes are open. A nested enter() must not be able to disarm the
+     * sandbox when IT leaves while the outer scope is still running — that is
+     * the one failure mode where the flag being wrong sends real traffic.
+     */
+    private static int $depth = 0;
+
     private static string $reason = '';
 
     /** @var list<array{port: string, detail: array<string, mixed>, at: string}> */
@@ -47,15 +54,43 @@ final class SandboxGuard
      */
     public static function enter(string $reason): void
     {
+        // The OUTERMOST scope owns the reason and the ledger. A nested enter()
+        // neither restates why the sandbox is up nor clears what has already
+        // been withheld — wiping the ledger mid-replay would lose findings the
+        // outer run is about to report, silently.
+        if (self::$depth === 0) {
+            self::$reason = $reason;
+            self::$withheld = [];
+        }
+
+        self::$depth++;
         self::$active = true;
-        self::$reason = $reason;
-        self::$withheld = [];
     }
 
+    /**
+     * Leave one scope. The sandbox disarms only when the last one closes.
+     *
+     * Nesting is not hypothetical bookkeeping: enter() is public API in the one
+     * package everything requires, and a replayed handler is free to open a
+     * scope of its own. If the inner leave() cleared the flag, every outbound
+     * call the still-running outer replay made afterwards would go out for
+     * real — the exact thing the guard exists to prevent.
+     */
     public static function leave(): void
     {
+        self::$depth = max(0, self::$depth - 1);
+        if (self::$depth > 0) {
+            return;
+        }
+
         self::$active = false;
         self::$reason = '';
+    }
+
+    /** Open scopes — 0 when the sandbox is down. */
+    public static function depth(): int
+    {
+        return self::$depth;
     }
 
     public static function isActive(): bool
@@ -100,6 +135,7 @@ final class SandboxGuard
     public static function reset(): void
     {
         self::$active = false;
+        self::$depth = 0;
         self::$reason = '';
         self::$withheld = [];
     }

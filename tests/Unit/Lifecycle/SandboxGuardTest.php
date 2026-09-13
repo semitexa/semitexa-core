@@ -95,4 +95,67 @@ final class SandboxGuardTest extends TestCase
         self::assertFalse(SandboxGuard::isActive());
         self::assertSame('', SandboxGuard::reason());
     }
+
+    /**
+     * A nested scope's leave() must not disarm the outer one.
+     *
+     * enter() is public API in the package everything requires, and a replayed
+     * handler may open a scope of its own. If the inner leave() cleared the
+     * flag, every outbound call the still-running outer replay made afterwards
+     * would go out for real.
+     */
+    #[Test]
+    public function a_nested_leave_does_not_disarm_the_outer_sandbox(): void
+    {
+        SandboxGuard::enter('outer replay');
+        SandboxGuard::enter('inner replay');
+
+        SandboxGuard::leave();
+
+        self::assertTrue(SandboxGuard::isActive(), 'the outer replay is still running');
+        self::assertSame(1, SandboxGuard::depth());
+
+        SandboxGuard::leave();
+
+        self::assertFalse(SandboxGuard::isActive());
+        self::assertSame(0, SandboxGuard::depth());
+    }
+
+    /** The outermost scope owns the reason; a nested enter does not restate it. */
+    #[Test]
+    public function the_outermost_reason_is_the_one_reported(): void
+    {
+        SandboxGuard::enter('outer replay');
+        SandboxGuard::enter('inner replay');
+
+        self::assertSame('outer replay', SandboxGuard::reason());
+    }
+
+    /**
+     * And a nested enter does not wipe the ledger. enter() resets it so a
+     * worker cannot inherit another run's findings — but applying that to an
+     * inner scope would discard what the outer run is about to report.
+     */
+    #[Test]
+    public function a_nested_enter_keeps_what_has_already_been_withheld(): void
+    {
+        SandboxGuard::enter('outer replay');
+        SandboxGuard::withhold('mail', ['driver' => 'smtp']);
+
+        SandboxGuard::enter('inner replay');
+
+        self::assertCount(1, SandboxGuard::withheldCalls(), 'the outer run would have lost this');
+    }
+
+    /** An unbalanced leave() cannot drive the depth negative and wedge the flag. */
+    #[Test]
+    public function a_leave_without_an_enter_is_harmless(): void
+    {
+        SandboxGuard::leave();
+        self::assertSame(0, SandboxGuard::depth());
+
+        SandboxGuard::enter('replay');
+
+        self::assertTrue(SandboxGuard::isActive(), 'a stray leave must not have poisoned the counter');
+    }
 }

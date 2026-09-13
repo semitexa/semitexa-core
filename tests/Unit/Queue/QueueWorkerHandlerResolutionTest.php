@@ -6,71 +6,66 @@ namespace Semitexa\Core\Tests\Unit\Queue;
 
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
+use Semitexa\Core\Attribute\AsPayloadHandler;
 use Semitexa\Core\Container\ContainerFactory;
+use Semitexa\Core\Discovery\ClassDiscovery;
 
 /**
- * A queued handler must resolve the same way a dispatched listener does.
+ * A queued handler is resolved through the container's allowlist, and only it.
  *
- * A payload handler is not required to carry `#[AsService]` — plenty are plain
- * classes the container can build on demand, and they work perfectly well over
- * HTTP. `QueueWorker` asked the container with `get()` alone, which throws
- * NotFoundException for exactly those, and the surrounding catch reported it as
- * "Error processing payload" and failed the message. A handler that works when
- * called directly failing only when it is queued, blamed on the payload.
+ * `QueueWorker` briefly gained a `has() ? get() : resolve()` fallback, mirroring
+ * `EventDispatcher::runListenerSync()`, on the belief that a payload handler
+ * need not be a registered service. That belief was wrong, and these tests are
+ * the measurement that settles it.
  *
- * `EventDispatcher::runListenerSync()` has had the resilient form all along:
- * `has()` then `get()`, else `resolve()`. This pins that the container really
- * behaves that way, so the mirrored call in QueueWorker rests on something
- * measured rather than assumed.
+ * `ServiceRegistrationPhase` registers every discovered payload handler by
+ * concrete class — no `#[AsService]` required — so `get()` already answers for
+ * all of them. What `has() === false` actually means is that the class was not
+ * approved for THIS boot: a disabled module, a deleted handler, a message older
+ * than the deployment, or a class name that never came from `QueueDispatcher`.
+ * `resolve()` there would instantiate any autoloadable class with a `handle()`
+ * method that a queue message happens to name.
  */
 final class QueueWorkerHandlerResolutionTest extends TestCase
 {
+    /**
+     * The fact the reverted change got wrong: every discovered handler is
+     * already reachable through get(), so a fallback buys nothing.
+     */
     #[Test]
-    public function a_handler_that_is_not_a_registered_service_is_still_resolvable(): void
+    public function every_discovered_payload_handler_is_a_registered_service(): void
     {
         $container = ContainerFactory::get();
+        $handlers = (new ClassDiscovery())->findClassesWithAttribute(AsPayloadHandler::class);
 
-        self::assertFalse(
-            $container->has(UnregisteredQueueHandlerProbe::class),
-            'the probe must not be a registered service, or this proves nothing',
-        );
+        self::assertNotEmpty($handlers, 'nothing discovered would make this vacuous');
 
-        $resolved = $container->resolve(UnregisteredQueueHandlerProbe::class);
+        $unregistered = array_values(array_filter(
+            $handlers,
+            static fn (string $class): bool => !$container->has($class),
+        ));
 
-        self::assertInstanceOf(UnregisteredQueueHandlerProbe::class, $resolved);
-        self::assertTrue(method_exists($resolved, 'handle'));
+        self::assertSame([], $unregistered, 'a fallback would only ever fire for a handler nothing approved');
     }
 
     /**
-     * And the reason the old code failed: get() alone refuses it.
-     *
-     * Stated as a test because it is the whole justification for the change —
-     * if get() handled unregistered classes, the fallback would be noise.
+     * And the allowlist has teeth: a handler-shaped class nothing discovered is
+     * refused rather than built. This is the property the queue depends on —
+     * the class name arrives inside a broker message.
      */
     #[Test]
-    public function get_alone_refuses_an_unregistered_handler(): void
+    public function a_handler_shaped_class_that_was_never_discovered_is_refused(): void
     {
         $container = ContainerFactory::get();
+
+        self::assertFalse($container->has(UnregisteredQueueHandlerProbe::class));
 
         $this->expectException(\Throwable::class);
         $container->get(UnregisteredQueueHandlerProbe::class);
     }
-
-    /** The shape QueueWorker uses now, end to end. */
-    #[Test]
-    public function the_resilient_form_resolves_both_kinds(): void
-    {
-        $container = ContainerFactory::get();
-
-        $resolve = static fn (string $class): object => $container->has($class)
-            ? $container->get($class)
-            : $container->resolve($class);
-
-        self::assertInstanceOf(UnregisteredQueueHandlerProbe::class, $resolve(UnregisteredQueueHandlerProbe::class));
-    }
 }
 
-/** A plain handler-shaped class that nothing registers. */
+/** A plain handler-shaped class that nothing registers — and must stay refused. */
 final class UnregisteredQueueHandlerProbe
 {
     public function handle(object $request, object $response): object
