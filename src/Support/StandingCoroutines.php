@@ -78,8 +78,8 @@ final class StandingCoroutines
     public static function declareFor(int $cid, string $label, string $reason): void
     {
         self::$standing[$cid] = [
-            'label' => mb_substr(trim($label), 0, self::MAX_LABEL),
-            'reason' => mb_substr(trim($reason), 0, self::MAX_REASON),
+            'label' => self::clip(trim($label), self::MAX_LABEL),
+            'reason' => self::clip(trim($reason), self::MAX_REASON),
             'since' => microtime(true),
         ];
     }
@@ -118,6 +118,33 @@ final class StandingCoroutines
     public static function reset(): void
     {
         self::$standing = [];
+    }
+
+    /**
+     * Cut to a byte budget without leaving half a character behind.
+     *
+     * Deliberately not mb_substr: this package declares no ext-mbstring, and
+     * the first thing a standing coroutine does is declare itself — an
+     * undefined-function error here would stop the park rather than label it,
+     * which is the opposite of what an observability aid may do. A trailing
+     * incomplete UTF-8 sequence is dropped so the panel never renders a broken
+     * glyph.
+     */
+    private static function clip(string $value, int $maxBytes): string
+    {
+        if (strlen($value) <= $maxBytes) {
+            return $value;
+        }
+
+        $cut = substr($value, 0, $maxBytes);
+        while ($cut !== '' && (ord($cut[strlen($cut) - 1]) & 0xC0) === 0x80) {
+            $cut = substr($cut, 0, -1); // a continuation byte: still mid-character
+        }
+        if ($cut !== '' && (ord($cut[strlen($cut) - 1]) & 0xC0) === 0xC0) {
+            $cut = substr($cut, 0, -1); // a lead byte whose sequence was cut off
+        }
+
+        return $cut;
     }
 
     private static function currentCid(): ?int

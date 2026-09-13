@@ -87,4 +87,36 @@ final class LogOriginTest extends TestCase
         self::assertFalse(LogOrigin::isResolvable());
         self::assertNull(LogOrigin::current());
     }
+
+    /**
+     * AsyncJsonLogger copies these values straight into the entry, so one it
+     * cannot encode makes the whole line fall back to the generic shape — every
+     * structured field lost to save one bad value. Only the contract's keys
+     * survive, and only as non-empty strings.
+     */
+    #[Test]
+    public function a_value_the_logger_could_not_encode_is_dropped_rather_than_passed_on(): void
+    {
+        $handle = fopen('php://memory', 'rb');
+        LogOrigin::resolveWith(static fn (): array => ['process' => 'p-1', 'block' => $handle]);
+
+        try {
+            self::assertSame(['process' => 'p-1'], LogOrigin::current());
+        } finally {
+            fclose($handle);
+            LogOrigin::resolveWith(null);
+        }
+    }
+
+    #[Test]
+    public function an_origin_with_nothing_usable_is_no_origin(): void
+    {
+        LogOrigin::resolveWith(static fn (): array => ['process' => '', 'unexpected' => 'ignored']);
+
+        try {
+            self::assertNull(LogOrigin::current());
+        } finally {
+            LogOrigin::resolveWith(null);
+        }
+    }
 }

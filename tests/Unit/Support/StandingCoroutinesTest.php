@@ -127,4 +127,24 @@ final class StandingCoroutinesTest extends TestCase
         self::assertSame('receiver', $all[7]['label']);
         self::assertLessThanOrEqual(200, strlen($all[7]['reason']), 'a reason is a sentence, not a payload');
     }
+
+    /**
+     * Truncation uses no mbstring: this package declares none, and the first
+     * thing a standing coroutine does is declare itself — an
+     * undefined-function error there would stop the park rather than label it.
+     * It still must not leave half a character behind.
+     */
+    #[Test]
+    public function a_multibyte_reason_is_cut_on_a_character_boundary(): void
+    {
+        // Cyrillic: two bytes per character, so the 200-byte budget lands
+        // mid-character unless the cut is adjusted.
+        StandingCoroutines::declareFor(7, 'receiver', str_repeat('и', 300));
+
+        $reason = StandingCoroutines::all()[7]['reason'];
+
+        self::assertLessThanOrEqual(200, strlen($reason));
+        self::assertSame($reason, mb_convert_encoding($reason, 'UTF-8', 'UTF-8'), 'no broken sequence at the end');
+        self::assertNotSame('', $reason);
+    }
 }

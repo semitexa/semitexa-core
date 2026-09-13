@@ -92,16 +92,29 @@ final class RedisSharedPoolTest extends TestCase
     {
         $previous = getenv('REDIS_HOST');
 
-        putenv('REDIS_HOST=');
-        self::assertFalse(RedisSharedPool::fromEnvironment(4)->isConfigured(), 'empty host is not configured');
+        try {
+            putenv('REDIS_HOST=');
+            self::assertFalse(SharedRedisPoolProbe::configured(), 'empty host is not configured');
 
-        putenv('REDIS_HOST=redis.invalid');
-        self::assertTrue(RedisSharedPool::fromEnvironment(4)->isConfigured());
-
-        if ($previous === false) {
-            putenv('REDIS_HOST');
-        } else {
-            putenv('REDIS_HOST=' . $previous);
+            putenv('REDIS_HOST=redis.invalid');
+            self::assertTrue(SharedRedisPoolProbe::configured());
+        } finally {
+            // In a finally: a failed assertion above would otherwise leave the
+            // modified environment for every test that runs after this one.
+            if ($previous === false) {
+                putenv('REDIS_HOST');
+            } else {
+                putenv('REDIS_HOST=' . $previous);
+            }
         }
+    }
+}
+
+/** Keeps the factory call out of the assertion line, so the finally reads clearly. */
+final class SharedRedisPoolProbe
+{
+    public static function configured(): bool
+    {
+        return RedisSharedPool::fromEnvironment(4)->isConfigured();
     }
 }

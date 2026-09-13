@@ -79,6 +79,22 @@ final class LogOrigin
             return null;
         }
 
-        return is_array($origin) && $origin !== [] ? $origin : null;
+        if (!is_array($origin)) {
+            return null;
+        }
+
+        // Only the contract's own keys, and only as strings. AsyncJsonLogger
+        // copies these straight into the entry, and a value it cannot encode —
+        // a resource, an object — makes the whole line fall back to the generic
+        // shape, losing every structured field to save one. Dropping the bad
+        // value keeps the rest of the line.
+        $clean = [];
+        foreach (['process', 'block'] as $key) {
+            if (isset($origin[$key]) && is_string($origin[$key]) && $origin[$key] !== '') {
+                $clean[$key] = $origin[$key];
+            }
+        }
+
+        return $clean === [] ? null : $clean;
     }
 }
