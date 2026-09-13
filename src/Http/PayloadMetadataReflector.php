@@ -68,9 +68,12 @@ final class PayloadMetadataReflector
         // all extending AbstractPayloadRoute. Read off the concrete class directly
         // (same as PayloadMetadataFactory): path/methods/transport live on the
         // attribute the class declares.
-        $routeAttrs = class_exists(AbstractPayloadRoute::class)
-            ? $ref->getAttributes(AbstractPayloadRoute::class, ReflectionAttribute::IS_INSTANCEOF)
-            : [];
+        // AbstractPayloadRoute ships in this package, next to this reflector;
+        // asking whether it exists was asking whether semitexa/core is
+        // installed. The `?: []` it fell back to made every payload read as
+        // route-less, which is a quieter wrong answer than the fatal it was
+        // guarding against.
+        $routeAttrs = $ref->getAttributes(AbstractPayloadRoute::class, ReflectionAttribute::IS_INSTANCEOF);
         $route = $routeAttrs !== [] ? $routeAttrs[0]->newInstance() : null;
 
         $path = is_string($route?->path) ? $route->path : '/';
@@ -162,10 +165,6 @@ final class PayloadMetadataReflector
      */
     private static function resolveAccessType(ReflectionClass $ref): string
     {
-        if (!class_exists(AbstractPayloadRoute::class)) {
-            return 'protected';
-        }
-
         $current = $ref;
         while ($current !== false) {
             $attrs = $current->getAttributes(AbstractPayloadRoute::class, ReflectionAttribute::IS_INSTANCEOF);

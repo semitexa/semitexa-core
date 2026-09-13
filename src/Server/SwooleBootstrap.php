@@ -39,12 +39,41 @@ class SwooleBootstrap
     private const TABLE_COLUMN_INT_SIZE = 4;
 
     /** @return array{0: SwooleRequest, 1: SwooleResponse, 2: Server}|null */
+    /**
+     * The Swoole request/response bound to this coroutine, or null.
+     *
+     * The extension check lives HERE, not at the call sites. Two callers in
+     * semitexa/ssr guarded this with `class_exists(SwooleBootstrap::class)`,
+     * which asked the wrong question twice over: semitexa/core is a require of
+     * that package, so the class is always there, and what they actually needed
+     * to know was whether ext-swoole is loaded — because the line below calls
+     * Coroutine::getCid() unguarded, and without the extension that is a fatal
+     * rather than a null. Answered once, so every caller is covered rather than
+     * the two that happened to think of it.
+     *
+     * The SHAPE is stated because callers destructure it — `[$request,
+     * $response, $server]` — and a bare `?array` made every one of those three
+     * `mixed`, so `$request->server` read as a property access on mixed in a
+     * dozen files. It is written in exactly one place, the request handler
+     * below.
+     *
+     * @return array{0: SwooleRequest, 1: SwooleResponse, 2: Server}|null
+     */
     public static function getCurrentSwooleRequestResponse(): ?array
     {
-        if (Coroutine::getCid() < 0) {
+        if (!extension_loaded('swoole') || Coroutine::getCid() < 0) {
             return null;
         }
-        return Coroutine::getContext()[self::COROUTINE_CONTEXT_KEY] ?? null;
+
+        $context = Coroutine::getContext()[self::COROUTINE_CONTEXT_KEY] ?? null;
+        if (!is_array($context)
+            || !($context[0] ?? null) instanceof SwooleRequest
+            || !($context[1] ?? null) instanceof SwooleResponse
+            || !($context[2] ?? null) instanceof Server) {
+            return null;
+        }
+
+        return [$context[0], $context[1], $context[2]];
     }
 
     public static function run(): void
