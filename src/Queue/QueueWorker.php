@@ -255,8 +255,20 @@ class QueueWorker
             $request = $this->hydrateDto($message->requestClass, $requestPayload);
             $response = $this->hydrateDto($message->responseClass, $responsePayload);
 
+            /** @var \Semitexa\Core\Container\SemitexaContainer $container */
             $container = ContainerFactory::get();
-            $handler = $container->get($handlerClass);
+            // Registered as a service, or resolved on the spot — the same
+            // resilience EventDispatcher::runListenerSync() already has.
+            //
+            // A payload handler is not required to carry #[AsService]; plenty
+            // are plain classes the container can build. get() alone threw
+            // NotFoundException for those, which the catch below turned into
+            // "Error processing payload" and a failed message — a handler that
+            // works perfectly well over HTTP failing only when it is queued,
+            // and reported as if the payload were at fault.
+            $handler = $container->has($handlerClass)
+                ? $container->get($handlerClass)
+                : $container->resolve($handlerClass);
             if (!method_exists($handler, 'handle')) {
                 $this->log("⚠️  Handler {$handlerClass} has no handle() method", 'warning');
                 $this->updateStats('failed');
