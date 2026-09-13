@@ -256,6 +256,20 @@ class QueueWorker
             $response = $this->hydrateDto($message->responseClass, $responsePayload);
 
             $container = ContainerFactory::get();
+            // get() ALONE, deliberately — never a resolve() fallback.
+            //
+            // ServiceRegistrationPhase registers every discovered payload
+            // handler by concrete class, so the container knows all 276 of
+            // them without any of them carrying #[AsService]. `has() === false`
+            // therefore does not mean "plain class the container could build";
+            // it means the class was not approved for THIS boot — a disabled
+            // module, a deleted handler, a message older than the deployment,
+            // or a name that never came from QueueDispatcher at all.
+            //
+            // Falling back to resolve() there would instantiate any autoloadable
+            // class with a handle() method named by the message, which is the
+            // allowlist AttributeDiscovery exists to enforce. A stale message is
+            // supposed to fail.
             $handler = $container->get($handlerClass);
             if (!method_exists($handler, 'handle')) {
                 $this->log("⚠️  Handler {$handlerClass} has no handle() method", 'warning');
