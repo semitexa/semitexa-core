@@ -149,6 +149,63 @@ final class StandingCoroutinesTest extends TestCase
         self::assertSame([], StandingCoroutines::all(), 'and gone once it returned, without the reader pruning');
     }
 
+    /**
+     * A standing coroutine alternates between waiting, which the label
+     * describes, and doing the thing it waited for, which it does not. Left up
+     * across the work, a handler that hangs is reported as intentional — the
+     * one coroutine the panel exists to surface, hidden by the aid meant to
+     * clear the noise around it. Raised in review of core#135.
+     */
+    #[Test]
+    public function nothing_is_standing_while_the_work_it_waited_for_runs(): void
+    {
+        StandingCoroutines::declareFor(0, 'queue consumer', 'waiting for work');
+
+        $duringTheWork = null;
+        StandingCoroutines::busyFor(0, static function () use (&$duringTheWork): void {
+            $duringTheWork = StandingCoroutines::all();
+        });
+
+        self::assertSame([], $duringTheWork, 'a hung handler would read as waiting by design');
+        self::assertSame('queue consumer', StandingCoroutines::all()[0]['label'], 'and the wait resumes afterwards');
+    }
+
+    #[Test]
+    public function the_label_comes_back_even_when_the_work_throws(): void
+    {
+        StandingCoroutines::declareFor(0, 'queue consumer', 'waiting for work');
+
+        try {
+            StandingCoroutines::busyFor(0, static fn () => throw new \RuntimeException('the handler blew up'));
+            self::fail('the exception must reach the caller');
+        } catch (\RuntimeException) {
+            self::assertArrayHasKey(0, StandingCoroutines::all());
+        }
+    }
+
+    #[Test]
+    public function the_resumed_wait_is_dated_from_when_it_resumed(): void
+    {
+        StandingCoroutines::declareFor(0, 'queue consumer', 'waiting for work');
+        $firstPark = StandingCoroutines::all()[0]['since'];
+
+        usleep(2000);
+        StandingCoroutines::busyFor(0, static fn () => null);
+
+        self::assertGreaterThan(
+            $firstPark,
+            StandingCoroutines::all()[0]['since'],
+            'dating the new wait from the first park would age forever',
+        );
+    }
+
+    #[Test]
+    public function the_work_still_runs_and_its_value_is_returned_when_nothing_was_declared(): void
+    {
+        self::assertSame('done', StandingCoroutines::busy(static fn () => 'done'));
+        self::assertSame([], StandingCoroutines::all());
+    }
+
     #[Test]
     public function a_label_and_reason_are_trimmed_and_bounded(): void
     {

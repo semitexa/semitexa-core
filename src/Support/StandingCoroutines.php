@@ -82,6 +82,54 @@ final class StandingCoroutines
         }
     }
 
+    /**
+     * Run $work with this coroutine's standing label lifted.
+     *
+     * A standing coroutine alternates between waiting, which is what the label
+     * describes, and doing the thing it was waiting for, which it does not. A
+     * queue consumer that declares itself once and then calls a handler is
+     * labelled "waiting for work — by design" for as long as that handler
+     * runs, so a handler that hangs is reported as intentional: exactly the
+     * coroutine the panel exists to surface, hidden by the aid meant to clear
+     * the noise around it. Raised in review of core#135.
+     *
+     * The label comes back when $work returns, with a fresh `since` — the wait
+     * that resumes is a new one, and dating it from the first park would age
+     * forever. Nothing is registered or deferred here, so this is safe to call
+     * in a loop that never returns.
+     *
+     * @template T
+     * @param callable(): T $work
+     * @return T
+     */
+    public static function busy(callable $work): mixed
+    {
+        $cid = self::currentCid();
+
+        return $cid === null ? $work() : self::busyFor($cid, $work);
+    }
+
+    /**
+     * @template T
+     * @param callable(): T $work
+     * @return T
+     */
+    public static function busyFor(int $cid, callable $work): mixed
+    {
+        $entry = self::$standing[$cid] ?? null;
+        if ($entry === null) {
+            return $work();
+        }
+
+        self::forgetFor($cid);
+
+        try {
+            return $work();
+        } finally {
+            self::declareFor($cid, $entry['label'], $entry['reason']);
+        }
+    }
+
     public static function declareFor(int $cid, string $label, string $reason): void
     {
         self::$standing[$cid] = [

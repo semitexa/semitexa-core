@@ -38,7 +38,10 @@ class InMemoryTransport implements QueueTransportInterface
         while (true) {
             if (!empty($this->queues[$queueName])) {
                 $payload = array_shift($this->queues[$queueName]);
-                $callback($payload);
+                // Not standing while the handler runs: the label describes the
+                // WAIT, and leaving it up would report a stuck handler as
+                // waiting by design.
+                StandingCoroutines::busy(static fn () => $callback($payload));
             } else {
                 if (class_exists(\Swoole\Coroutine::class, false) && \Swoole\Coroutine::getCid() > 0) {
                     \Swoole\Coroutine::sleep(0.25);
