@@ -113,7 +113,7 @@ class RouteExecutor
         // work in unit tests and silently record nothing in a real worker.
         $tracer?->begin('request', [
             'method' => $request->getMethod(),
-            'path'   => $route->path ?? null,
+            'path'   => $route->path,
             'route'  => $route->name ?? null,
             'marker' => $this->traceMarker($request),
         ]);
