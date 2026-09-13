@@ -117,6 +117,38 @@ final class StandingCoroutinesTest extends TestCase
         self::assertSame([], StandingCoroutines::all());
     }
 
+    /**
+     * The declaration has to be dropped when the coroutine ends, and it is
+     * registered through \Swoole\Coroutine::defer — the namespaced
+     * \Swoole\Coroutine\defer() is a convenience some builds do not define,
+     * and where it was missing nothing was registered at all: the entry
+     * outlived its coroutine, and once the runtime reused that cid the reader
+     * could not tell the stale label from a live one. Raised in review of
+     * core#135.
+     *
+     * Needs a real coroutine, so it skips where there is none rather than
+     * asserting against a stand-in for the thing under test.
+     */
+    #[Test]
+    public function a_coroutine_that_returns_drops_its_own_declaration(): void
+    {
+        if (!extension_loaded('swoole')) {
+            self::markTestSkipped('Swoole extension is required.');
+        }
+
+        $insideWhileRunning = [];
+
+        \Swoole\Coroutine\run(static function () use (&$insideWhileRunning): void {
+            \Swoole\Coroutine::create(static function () use (&$insideWhileRunning): void {
+                StandingCoroutines::declare('receiver', 'subscribed');
+                $insideWhileRunning = StandingCoroutines::all();
+            });
+        });
+
+        self::assertCount(1, $insideWhileRunning, 'the declaration has to be visible while the coroutine runs');
+        self::assertSame([], StandingCoroutines::all(), 'and gone once it returned, without the reader pruning');
+    }
+
     #[Test]
     public function a_label_and_reason_are_trimmed_and_bounded(): void
     {

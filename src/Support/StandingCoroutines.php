@@ -61,9 +61,16 @@ final class StandingCoroutines
 
         // Best effort: a coroutine that is cancelled rather than returning may
         // never run this, which is why the reader prunes as well.
-        if (function_exists('\\Swoole\\Coroutine\\defer')) {
-            \Swoole\Coroutine\defer(static fn () => self::forgetFor($cid));
-        }
+        //
+        // Through the class, which is the API the extension always defines.
+        // This used to go through the namespaced \Swoole\Coroutine\defer()
+        // function, a convenience some builds leave out — and where it was
+        // missing nothing was registered at all: the declaration outlived its
+        // coroutine, and once the runtime reused that cid the reader could not
+        // tell the stale label from live work. Raised in review of core#135.
+        // Reaching here means currentCid() found a coroutine, so the class is
+        // loaded and no guard is needed.
+        \Swoole\Coroutine::defer(static fn () => self::forgetFor($cid));
     }
 
     /** Drop the current coroutine's declaration. */
