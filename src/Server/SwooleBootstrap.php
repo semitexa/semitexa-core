@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Server;
 
+use Semitexa\Core\Support\Row;
 use JsonException;
 use Semitexa\Core\Application;
 use Semitexa\Core\Container\ContainerFactory;
@@ -38,12 +39,41 @@ class SwooleBootstrap
     private const TABLE_COLUMN_INT_SIZE = 4;
 
     /** @return array{0: SwooleRequest, 1: SwooleResponse, 2: Server}|null */
+    /**
+     * The Swoole request/response bound to this coroutine, or null.
+     *
+     * The extension check lives HERE, not at the call sites. Two callers in
+     * semitexa/ssr guarded this with `class_exists(SwooleBootstrap::class)`,
+     * which asked the wrong question twice over: semitexa/core is a require of
+     * that package, so the class is always there, and what they actually needed
+     * to know was whether ext-swoole is loaded — because the line below calls
+     * Coroutine::getCid() unguarded, and without the extension that is a fatal
+     * rather than a null. Answered once, so every caller is covered rather than
+     * the two that happened to think of it.
+     *
+     * The SHAPE is stated because callers destructure it — `[$request,
+     * $response, $server]` — and a bare `?array` made every one of those three
+     * `mixed`, so `$request->server` read as a property access on mixed in a
+     * dozen files. It is written in exactly one place, the request handler
+     * below.
+     *
+     * @return array{0: SwooleRequest, 1: SwooleResponse, 2: Server}|null
+     */
     public static function getCurrentSwooleRequestResponse(): ?array
     {
-        if (Coroutine::getCid() < 0) {
+        if (!extension_loaded('swoole') || Coroutine::getCid() < 0) {
             return null;
         }
-        return Coroutine::getContext()[self::COROUTINE_CONTEXT_KEY] ?? null;
+
+        $context = Coroutine::getContext()[self::COROUTINE_CONTEXT_KEY] ?? null;
+        if (!is_array($context)
+            || !($context[0] ?? null) instanceof SwooleRequest
+            || !($context[1] ?? null) instanceof SwooleResponse
+            || !($context[2] ?? null) instanceof Server) {
+            return null;
+        }
+
+        return [$context[0], $context[1], $context[2]];
     }
 
     public static function run(): void
@@ -150,8 +180,10 @@ class SwooleBootstrap
             $current = \Swoole\Coroutine::getCid();
             $cancelled = 0;
             $stubborn = [];
-            foreach (\Swoole\Coroutine::listCoroutines() as $cid) {
-                $cid = (int) $cid;
+            // The stub types this `mixed`; an older runtime can return false.
+            $live = \Swoole\Coroutine::listCoroutines();
+            foreach (is_iterable($live) ? $live : [] as $cid) {
+                $cid = Row::asInt($cid);
                 if ($cid === $current) {
                     continue;
                 }
@@ -394,8 +426,16 @@ class SwooleBootstrap
         }
 
         try {
+            // `require` returns whatever the file returns — mixed, and an
+            // empty or half-written map file returns `1`. Guarded so a bad
+            // dump-autoload degrades to "no refresh" instead of a TypeError
+            // inside worker startup.
             $freshClassMap = require $classMapFile;
             $freshPsr4 = is_file($psr4File) ? require $psr4File : [];
+            // Both are `class/namespace => path(s)` maps; a dumped file that
+            // is neither becomes empty rather than half-applied.
+            $freshClassMap = self::stringMap(is_array($freshClassMap) ? $freshClassMap : []);
+            $freshPsr4 = is_array($freshPsr4) ? Row::keyedByName($freshPsr4) : [];
 
             foreach (spl_autoload_functions() as $loader) {
                 if (!is_array($loader) || !($loader[0] instanceof \Composer\Autoload\ClassLoader)) {
@@ -520,11 +560,31 @@ class SwooleBootstrap
             if (!is_array($frame)) {
                 continue;
             }
-            $call = (string) ($frame['class'] ?? '') . (string) ($frame['type'] ?? '') . (string) ($frame['function'] ?? '?');
-            $file = isset($frame['file']) ? basename((string) $frame['file']) : null;
-            $trail[] = $file !== null ? $call . ' (' . $file . ':' . (string) ($frame['line'] ?? '?') . ')' : $call;
+            $values = Row::of($frame);
+            $call = $values->string('class') . $values->string('type') . $values->string('function', '?');
+            $file = $values->has('file') ? basename($values->string('file')) : null;
+            $trail[] = $file !== null ? $call . ' (' . $file . ':' . $values->string('line', '?') . ')' : $call;
         }
 
         return $trail === [] ? 'unknown (unreadable frames)' : implode(' <- ', $trail);
+    }
+
+    /**
+     * A dumped classmap narrowed to the `class-string => path` shape composer
+     * declares, dropping any entry that is not one.
+     *
+     * @param array<mixed> $map
+     * @return array<string, string>
+     */
+    private static function stringMap(array $map): array
+    {
+        $out = [];
+        foreach ($map as $key => $value) {
+            if (is_string($value)) {
+                $out[(string) $key] = $value;
+            }
+        }
+
+        return $out;
     }
 }

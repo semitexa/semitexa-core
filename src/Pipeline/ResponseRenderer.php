@@ -370,6 +370,10 @@ final class ResponseRenderer
         return '/' . $locale . $url;
     }
 
+    /**
+     * @param array<string, mixed> $context
+     * @return array<string, mixed>
+     */
     private function withPageDocumentContext(array $context, Request $request, DiscoveredRoute $route): array
     {
         $htmlQuery = $request->query;
