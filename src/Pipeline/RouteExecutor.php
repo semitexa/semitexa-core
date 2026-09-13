@@ -292,6 +292,8 @@ class RouteExecutor
      * tenant/auth/locale) is re-established HERE via {@see establishReRunExecutionContext()},
      * after the auth gate and before the pipeline, so execution-scoped pipeline
      * listeners resolve (Track R · R8c-2 / Gap A).
+     *
+     * @param array<string, mixed> $filterOverride
      */
     public function reExecute(DiscoveredRoute $route, Request $request, object $cachedDto, array $filterOverride = []): ReRunResult
     {
