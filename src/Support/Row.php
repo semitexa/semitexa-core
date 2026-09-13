@@ -39,13 +39,29 @@ final readonly class Row
     }
 
     /**
-     * The same array, with its keys known to be strings.
+     * The entries of `$values` that are addressed BY NAME.
      *
      * A JSON object and a JSON ARRAY both decode to `array` — the second with
      * integer keys — so `json_decode(..., true)` is `array<mixed>` no matter
-     * what the sender meant. Every consumer downstream declares
-     * `array<string, mixed>`. One named conversion, rather than the question
-     * being reopened at each boundary.
+     * what the sender meant, while every consumer downstream declares
+     * `array<string, mixed>` and reads named fields out of it.
+     *
+     * This used to cast each key with `(string) $key`, which does not work and
+     * could not be tested: PHP converts a canonical numeric string key STRAIGHT
+     * BACK to an integer, so `['a', 'b']` came out with int keys and the
+     * declared `array<string, mixed>` was a claim the language will not honour.
+     * The test could not catch it either — `['0' => 'a']` and `[0 => 'a']` are
+     * the same array, so `assertSame` compared a value against itself. Raised
+     * in review of core#137.
+     *
+     * So this is a POLICY rather than a conversion: an entry whose key is not a
+     * name is not a named entry, and is dropped. Nothing observable is lost —
+     * a caller reading `$frame['streaming_id']` out of a list frame got null
+     * before and gets null now — and the returned shape is finally true.
+     *
+     * The one edge it also drops: a JSON object whose key is literally "0".
+     * PHP makes that an integer on the way in, so it is unreachable by name in
+     * any case.
      *
      * @param array<mixed> $values
      * @return array<string, mixed>
@@ -54,7 +70,9 @@ final readonly class Row
     {
         $out = [];
         foreach ($values as $key => $value) {
-            $out[(string) $key] = $value;
+            if (is_string($key)) {
+                $out[$key] = $value;
+            }
         }
 
         return $out;

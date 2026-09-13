@@ -107,14 +107,30 @@ final class RowTest extends TestCase
     }
 
     /**
-     * A JSON object and a JSON array both decode to `array`, the second with
-     * integer keys — so a frame that arrived as `[1,2]` reached every
-     * `array<string, mixed>` parameter downstream with the wrong key type.
+     * A list has no named entries, so it contributes none.
+     *
+     * The earlier version cast each key with `(string) $key` and claimed to
+     * produce string keys. PHP converts a canonical numeric string key straight
+     * back to an integer, so it did not — and the test could not tell, because
+     * `['0' => 'a']` and `[0 => 'a']` ARE the same array and assertSame was
+     * comparing a value with itself. Raised in review of core#137.
      */
     #[Test]
-    public function a_list_is_renamed_into_a_string_keyed_map(): void
+    public function a_list_contributes_no_named_entries(): void
     {
-        self::assertSame(['0' => 'a', '1' => 'b'], Row::keyedByName(['a', 'b']));
+        self::assertSame([], Row::keyedByName(['a', 'b']));
+    }
+
+    /** The property the old version claimed and could not deliver. */
+    #[Test]
+    public function every_surviving_key_is_really_a_string(): void
+    {
+        $out = Row::keyedByName(['a', 'name' => 'Ada', 7 => 'seven', 'id' => 3]);
+
+        foreach (array_keys($out) as $key) {
+            self::assertIsString($key, 'an int key here is what the cast used to produce');
+        }
+        self::assertSame(['name' => 'Ada', 'id' => 3], $out);
     }
 
     #[Test]
