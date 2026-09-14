@@ -31,6 +31,7 @@ use Semitexa\Core\Tenant\TenantContextStoreInterface;
 use Semitexa\Core\Tenant\TenancyBootstrapperInterface;
 use Semitexa\Core\Auth\AuthBootstrapperInterface;
 use Semitexa\Core\Contract\ExceptionResponseMapperInterface;
+use Semitexa\Core\Exception\PayloadValidationException;
 use Semitexa\Core\Contract\RouteResponseDecoratorInterface;
 use Semitexa\Core\Contract\RouteMetadataResolverInterface;
 use Semitexa\Core\Contract\ValidatablePayloadInterface;
@@ -167,20 +168,18 @@ class RouteExecutor
             //     type-level shape only; validate() is not reflected.
             if (!$isOptions) {
                 $tracer?->begin('payload.hydrate_and_validate', ['payload' => $reqDto::class]);
-                [$reqDto, $validationResponse] = $this->fillAndValidatePayload($reqDto, $request);
+                [$reqDto, $validationError] = $this->fillAndValidatePayload($reqDto, $request);
                 // The hydrated DTO rides along as an object; the tracer decides
                 // what of its state survives (redacted, size-bounded snapshot).
                 // Passing values here would force the executor to know the
                 // redaction rules, which belong to the observer, not the path.
                 $tracer?->end('payload.hydrate_and_validate', [
-                    'rejected' => $validationResponse !== null,
+                    'rejected' => $validationError !== null,
                     'payload_snapshot' => $reqDto,
                 ]);
-                if ($validationResponse) {
-                    // Ends the request. Recorded as a mark so the trace shows why
-                    // it stops here rather than simply running out of spans.
-                    $tracer?->mark('request.short_circuit', ['reason' => 'validation']);
-                    return $this->decorateResponse($validationResponse, $request, $metadata);
+                // After the span closes: an asymmetric begin/end is its own bug class.
+                if ($validationError !== null) {
+                    throw $validationError;
                 }
             } else {
                 $tracer?->mark('payload.hydrate_and_validate.skipped', ['reason' => 'OPTIONS probe']);
@@ -576,7 +575,7 @@ class RouteExecutor
      * instance is returned in both success and failure cases so validation
      * errors can reference the class the request was routed to.
      *
-     * @return array{0: object, 1: ?HttpResponse}
+     * @return array{0: object, 1: ?PayloadValidationException}
      */
     private function fillAndValidatePayload(object $reqDto, Request $request): array
     {
@@ -596,9 +595,10 @@ class RouteExecutor
                 }
             }
         } catch (\Semitexa\Core\Exception\ValidationException $e) {
-            return [$reqDto, HttpResponse::json(['errors' => $e->getErrorContext()['errors']], HttpStatus::UnprocessableEntity->value)];
+            // Re-typed, not rethrown: raised HERE it means a malformed request rather than a domain rule.
+            return [$reqDto, new PayloadValidationException($e->getErrors())];
         } catch (\Semitexa\Core\Http\Exception\TypeMismatchException $e) {
-            return [$reqDto, HttpResponse::json(['errors' => [$e->field => [$e->getMessage()]]], HttpStatus::UnprocessableEntity->value)];
+            return [$reqDto, new PayloadValidationException([$e->field => [$e->getMessage()]])];
         } catch (\Throwable $e) {
             // Security: suppress exception messages in production (VULN-007)
             // Only expose details in debug mode for development
@@ -606,7 +606,7 @@ class RouteExecutor
             $message = $httpRequest instanceof Request && self::isDebugMode($httpRequest)
                 ? $e->getMessage()
                 : 'Request body could not be processed';
-            return [$reqDto, HttpResponse::json(['errors' => ['_body' => [$message]]], HttpStatus::UnprocessableEntity->value)];
+            return [$reqDto, new PayloadValidationException(['_body' => [$message]])];
         }
 
         return [$reqDto, null];

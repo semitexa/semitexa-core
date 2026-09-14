@@ -9,6 +9,7 @@ use Semitexa\Core\Contract\ExceptionResponseMapperInterface;
 use Semitexa\Core\Discovery\ResolvedRouteMetadata;
 use Semitexa\Core\Error\ErrorRouteDispatcher;
 use Semitexa\Core\Exception\DomainException;
+use Semitexa\Core\Exception\PayloadValidationException;
 use Semitexa\Core\Exception\RateLimitException;
 use Semitexa\Core\Http\ContentNegotiator;
 use Semitexa\Core\Http\HttpStatus;
@@ -41,6 +42,25 @@ final class ExceptionMapper implements ExceptionResponseMapperInterface
      */
     public function map(\Throwable $e, Request $request, ResolvedRouteMetadata $metadata): HttpResponse
     {
+        // BEFORE the DomainException branch, because this IS one and the two
+        // answer differently on purpose. Pipeline validation — hydration or
+        // ValidatablePayloadInterface::validate() — has always replied with the
+        // flat `{errors: {field: [message]}}` and 422, and eleven test files
+        // pin that shape. A handler throwing ValidationException is stating a
+        // domain rule instead, and keeps the `{error, message, context}`
+        // envelope below.
+        //
+        // RouteExecutor used to write this body itself and return early, which
+        // is why an #[ExternalApi] route never got its own envelope: the
+        // mapper was never reached. Rendering it here keeps every route's error
+        // shape decided in one place.
+        if ($e instanceof PayloadValidationException) {
+            return HttpResponse::json(
+                ['errors' => $e->getErrors()],
+                HttpStatus::UnprocessableEntity->value,
+            );
+        }
+
         if ($e instanceof DomainException) {
             return $this->mapDomainException($e, $request, $metadata);
         }

@@ -25,4 +25,16 @@ class ValidationException extends DomainException
     {
         return ['errors' => $this->errors];
     }
+
+    /**
+     * The field map, typed. getErrorContext() is the generic DomainException
+     * bag and returns `array`, so reading ['errors'] off it is `mixed` to every
+     * caller that then has to re-narrow it.
+     *
+     * @return array<string, list<string>>
+     */
+    public function getErrors(): array
+    {
+        return $this->errors;
+    }
 }
