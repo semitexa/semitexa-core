@@ -184,6 +184,47 @@ final class InlineScriptScannerTest extends TestCase
         self::assertSame([], $this->scan($source));
     }
 
+    /**
+     * @return iterable<string, array{string}>
+     *
+     * Every one of these is a tag a browser executes and a nonce policy
+     * refuses, which the word-boundary rules used to read as safe. The word
+     * `nonce` is not a nonce, `data-src` is not a `src`, and
+     * `data-type="application/json"` is not a data block — in all three the
+     * lint reported the file clean while the script was blocked.
+     */
+    public static function tagsWearingSomebodyElsesAttribute(): iterable
+    {
+        yield 'data-nonce is a hint, not a nonce' => ['<script data-nonce="hint">go()</script>'];
+        yield 'nonce inside a value' => ['<script id="nonce-bootstrap">go()</script>'];
+        yield 'data-src still runs its own body' => ['<script data-src="/lazy.js">run()</script>'];
+        yield 'data-type is not the type' => ['<script data-type="application/json">go()</script>'];
+    }
+
+    #[Test]
+    #[DataProvider('tagsWearingSomebodyElsesAttribute')]
+    public function anAttributeThatMerelyLooksLikeTheRealOneIsStillAFinding(string $markup): void
+    {
+        self::assertCount(1, $this->scan($markup), $markup . ' is executable and carries no nonce');
+    }
+
+    #[Test]
+    public function caseDoesNotHideAnEmission(): void
+    {
+        // HTML tag names are case-insensitive and the tag pattern is too, so
+        // the closing-tag precheck must be. It was not, and an uppercase
+        // emission left the whole file unscanned.
+        $findings = $this->scan("<SCRIPT>alert(1)</SCRIPT>");
+
+        self::assertCount(1, $findings);
+    }
+
+    #[Test]
+    public function aTwigNonceVariableIsAnAsk(): void
+    {
+        self::assertSame([], $this->scan('<script{{ csp_nonce_attr() }}>go()</script>'));
+    }
+
     #[Test]
     public function aFileWithNoScriptsCostsNothing(): void
     {

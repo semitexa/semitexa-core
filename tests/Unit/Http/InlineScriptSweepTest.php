@@ -57,6 +57,18 @@ final class InlineScriptSweepTest extends TestCase
     }
 
     #[Test]
+    public function anUppercaseEmissionIsNotSkippedByThePrefilter(): void
+    {
+        // The prefilter is there to avoid scanning every file. It read
+        // `<script` case-sensitively while the rule it guards is
+        // case-insensitive, so this file was dropped before the scanner saw
+        // it and the sweep reported a clean tree.
+        $this->write('packages/semitexa-thing/src/Page.php', "echo '<SCRIPT>go()</SCRIPT>';");
+
+        self::assertCount(1, $this->sweep());
+    }
+
+    #[Test]
     public function aFileThatStampsItsOwnOutputIsNotAFinding(): void
     {
         // The OS apps are written as one nowdoc and nonce the finished

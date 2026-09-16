@@ -180,6 +180,53 @@ final class CspNonceTest extends TestCase
     }
 
     #[Test]
+    public function stampingReachesAnOpeningTagWrittenAcrossLines(): void
+    {
+        // A formatted document is not a defect, and the pattern that bounds a
+        // tag to one line exists for SOURCE, where a `>` after a newline is an
+        // arrow operator. Read a document with it and a wrapped tag is served
+        // nonce-less — refused by the browser, 200 on the server.
+        CspNonce::set('abc123');
+
+        $html = CspNonce::stamp("<script\n  type=\"module\"\n  defer>go()</script>");
+
+        self::assertStringContainsString('nonce="abc123"', $html);
+    }
+
+    #[Test]
+    public function stampingIsBlindToCase(): void
+    {
+        CspNonce::set('abc123');
+
+        $html = CspNonce::stamp('<SCRIPT>alert(1)</SCRIPT>');
+
+        self::assertStringContainsString('nonce="abc123"', $html, 'the fast path must not disagree with the rule it guards');
+    }
+
+    #[Test]
+    public function anAttributeThatMerelyContainsTheWordIsNotANonce(): void
+    {
+        // `stripos($attributes, 'nonce')` read all three of these as "already
+        // has one" and left them alone, which under a nonce policy is the
+        // silent block this class exists to prevent.
+        CspNonce::set('abc123');
+
+        foreach (['<script data-nonce="hint">a()</script>', '<script id="nonce-bootstrap">a()</script>'] as $markup) {
+            self::assertStringContainsString('nonce="abc123"', CspNonce::stamp($markup), $markup);
+        }
+    }
+
+    #[Test]
+    public function aLookalikeTypeAttributeDoesNotBuyAnExemption(): void
+    {
+        CspNonce::set('abc123');
+
+        $html = CspNonce::stamp('<script data-type="application/json">go()</script>');
+
+        self::assertStringContainsString('nonce="abc123"', $html, 'data-type is not the type; this tag executes');
+    }
+
+    #[Test]
     public function resetDropsBothTheProviderAndTheValue(): void
     {
         CspNonce::register(static fn (): string => 'worker-wide');

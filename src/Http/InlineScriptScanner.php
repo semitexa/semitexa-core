@@ -21,9 +21,12 @@ namespace Semitexa\Core\Http;
  *   - a non-executable  — `type="application/json"`, `application/ld+json` and
  *     `type`              friends are DATA. script-src does not govern them at
  *                         all, so they need no nonce and never will.
- *   - `nonce` anywhere  — the tag already asks for one, whether as a literal
- *     in the tag          attribute or as interpolation (`{$nonceAttr}`,
- *                         `' . CspNonce::attribute() . '`).
+ *   - a nonce ASKED FOR — the attribute written out, or code that will write
+ *                         one: `{$nonceAttr}`, `' . CspNonce::attribute() . '`,
+ *                         `{{ csp_nonce_attr() }}`. Asked for in CODE, which
+ *                         is not the same as the word appearing somewhere in
+ *                         the tag — `data-nonce` and `id="nonce-bootstrap"`
+ *                         are somebody else's attributes and are reported.
  *
  * WHAT IT CANNOT SEE, stated so nobody trusts it further than it goes: a tag
  * assembled from pieces far apart, a script written by a JS bundle at runtime,
@@ -76,7 +79,7 @@ final class InlineScriptScanner
         // contain a closer. Both keep PROSE out: a docblock or a help string
         // that mentions the tag never writes the closer, and a `>` reached by
         // crossing a newline is an arrow operator, not the end of a tag.
-        if (!str_contains($contents, self::CLOSING_TAG)
+        if (stripos($contents, self::CLOSING_TAG) === false
             || !preg_match_all(ScriptTag::PATTERN, $contents, $matches, PREG_OFFSET_CAPTURE)
         ) {
             return [];
@@ -116,7 +119,7 @@ final class InlineScriptScanner
      */
     private function isSafe(string $attributes): bool
     {
-        return ScriptTag::hasNonce($attributes)
+        return ScriptTag::asksForNonce($attributes)
             || ScriptTag::hasSrc($attributes)
             || !ScriptTag::isExecutable($attributes);
     }

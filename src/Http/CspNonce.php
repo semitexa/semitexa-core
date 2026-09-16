@@ -102,7 +102,7 @@ final class CspNonce
      * a handler, an app served into an iframe — where threading a variable
      * into a nowdoc means either interpolating a body full of `$` or writing
      * the attribute by hand in a dozen places. A no-op when the application
-     * has no nonce, so it costs a `str_contains` and nothing else.
+     * has no nonce, so it costs one substring search and nothing else.
      *
      * Executable is the operative word: a `type="application/json"` block is
      * data and is left exactly as it was. The rule is {@see ScriptTag}'s, the
@@ -111,16 +111,19 @@ final class CspNonce
     public static function stamp(string $html): string
     {
         $attribute = self::attribute();
-        if ($attribute === '' || !str_contains($html, '<script')) {
+        // stripos, not str_contains: the regex below is case-insensitive
+        // because HTML tag names are, and a fast path that disagrees with
+        // the rule it guards is just a way of skipping `<SCRIPT>` quietly.
+        if ($attribute === '' || stripos($html, '<script') === false) {
             return $html;
         }
 
         return (string) preg_replace_callback(
-            ScriptTag::PATTERN,
+            ScriptTag::DOCUMENT_PATTERN,
             static function (array $m) use ($attribute): string {
                 $attributes = (string) $m[1];
 
-                if (ScriptTag::hasNonce($attributes) || !ScriptTag::isExecutable($attributes)) {
+                if (ScriptTag::hasNonceAttribute($attributes) || !ScriptTag::isExecutable($attributes)) {
                     return $m[0];
                 }
 

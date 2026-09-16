@@ -38,7 +38,9 @@ final class InlineScriptSweep
 
             foreach ($this->files($root) as $absolute) {
                 $contents = @file_get_contents($absolute);
-                if ($contents === false || !str_contains($contents, '<script')) {
+                // Case-insensitively: the scanner's own rule is, and a prefilter
+                // stricter than the rule it guards drops files silently.
+                if ($contents === false || stripos($contents, '<script') === false) {
                     continue;
                 }
 
