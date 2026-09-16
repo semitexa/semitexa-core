@@ -165,7 +165,7 @@ final class InlineScriptScanner
     {
         return ScriptTag::asksForNonce($attributes)
             || ScriptTag::hasSrc($attributes)
-            || !ScriptTag::isExecutable($attributes);
+            || !ScriptTag::isExecutableInSource($attributes);
     }
 
     /**

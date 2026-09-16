@@ -45,14 +45,32 @@ final class ScriptTag
      */
     private const EXECUTABLE_TYPES = [
         '',
-        'text/javascript',
-        'application/javascript',
         'module',
+        // Governed by script-src exactly as a classic script is, and refused
+        // the same way — a page whose import map or speculation rules are
+        // blocked loses every ES module, or all its prefetching, with nothing
+        // in the markup to say why.
         'importmap',
-        // Governed by script-src exactly as an import map is, and refused the
-        // same way — a page whose speculation rules are blocked loses its
-        // prefetching with nothing in the markup to say why.
         'speculationrules',
+        // The JavaScript MIME essences from the MIME Sniffing Standard. The
+        // legacy spellings are not decoration: a browser runs them, so a nonce
+        // policy refuses them, and a short list called them data.
+        'application/ecmascript',
+        'application/javascript',
+        'application/x-ecmascript',
+        'application/x-javascript',
+        'text/ecmascript',
+        'text/javascript',
+        'text/javascript1.0',
+        'text/javascript1.1',
+        'text/javascript1.2',
+        'text/javascript1.3',
+        'text/javascript1.4',
+        'text/javascript1.5',
+        'text/jscript',
+        'text/livescript',
+        'text/x-ecmascript',
+        'text/x-javascript',
     ];
 
     /*
@@ -127,7 +145,11 @@ final class ScriptTag
                 $tags[] = ['start' => $at, 'length' => $tagEnd + 1 - $at, 'attributes' => $attributes];
             }
 
-            if (!in_array($name, self::RAW_TEXT_ELEMENTS, true) || str_ends_with(rtrim($attributes), '/')) {
+            // NO self-closing exception. `<script />` does not close a script
+            // element — HTML allows that syntax only in foreign content — so
+            // treating it as closed resumed markup scanning inside the body,
+            // and a literal `<script>` written in that body was stamped.
+            if (!in_array($name, self::RAW_TEXT_ELEMENTS, true)) {
                 $offset = $tagEnd + 1;
                 continue;
             }
@@ -322,7 +344,34 @@ final class ScriptTag
      */
     public static function hasNonceAttribute(string $attributes): bool
     {
-        return array_key_exists('nonce', self::attributes($attributes));
+        // A USABLE one. `nonce=""` and a bare `nonce` both parse to the empty
+        // string, and an empty nonce matches no policy — read as "already has
+        // one", they left the tag blocked and the lint quiet.
+        return trim(self::attributes($attributes)['nonce'] ?? '') !== '';
+    }
+
+    /**
+     * The attribute list with any unusable `nonce` removed.
+     *
+     * The stamper APPENDS, so it cannot simply skip the emptiness check: two
+     * `nonce` attributes on one tag is what the browser would then read, and
+     * it honours the first.
+     */
+    public static function withoutEmptyNonce(string $attributes): string
+    {
+        if (!array_key_exists('nonce', self::attributes($attributes))) {
+            return $attributes;
+        }
+
+        if (self::hasNonceAttribute($attributes)) {
+            return $attributes;
+        }
+
+        return (string) preg_replace(
+            '/(?<!\S)nonce(\s*=\s*(?:"[^"]*"|\'[^\']*\'|[^\s>]*))?/i',
+            '',
+            $attributes
+        );
     }
 
     /**
@@ -377,6 +426,32 @@ final class ScriptTag
         }
 
         return false;
+    }
+
+    /**
+     * The SOURCE rule for executability, which is the opposite default.
+     *
+     * A template writes `type="{{ scriptType }}"`, and the value is not known
+     * until it renders. Compared against the executable list it matched
+     * nothing and the tag was filed as a data block — so a script that renders
+     * as `module` was never reported. Here an unresolved type is EXECUTABLE
+     * unless the source says, statically, that it is data.
+     */
+    public static function isExecutableInSource(string $attributes): bool
+    {
+        $type = self::attributes($attributes)['type'] ?? null;
+        if ($type === null) {
+            return true;
+        }
+
+        $essence = strtolower(trim(explode(';', $type, 2)[0]));
+        if ($essence === '' || in_array($essence, self::EXECUTABLE_TYPES, true)) {
+            return true;
+        }
+
+        // A literal the browser will read as data — json, ld+json, a template
+        // type, anything with no interpolation left in it.
+        return preg_match('/[{$<]/', $type) === 1;
     }
 
     /** True when the tag loads its code from elsewhere: allowed by a source list, with or without a nonce. */

@@ -133,6 +133,11 @@ final class CspNonce
                 continue;
             }
 
+            // An EMPTY `nonce` is not a nonce, but it is still an attribute:
+            // appending beside it leaves two, and the browser honours the
+            // first — the empty one.
+            $attributes = ScriptTag::withoutEmptyNonce($attributes);
+
             // A self-closing `<script … />` puts the slash last: appending
             // after it produces `<script src="x"/ nonce="…">`, which the
             // parser reads as an attribute named `/`. Rare in HTML and

@@ -324,6 +324,48 @@ final class CspNonceTest extends TestCase
     }
 
     #[Test]
+    public function anEmptyNonceIsNotANonce(): void
+    {
+        // `nonce=""` and a bare `nonce` both parse to the empty string, and an
+        // empty nonce matches no policy. Read as "already has one" they left
+        // the tag blocked and the lint quiet; appending beside one leaves TWO,
+        // and the browser honours the first.
+        CspNonce::set('abc123');
+
+        foreach (['<script nonce="">a()</script>', '<script nonce>a()</script>'] as $markup) {
+            $html = CspNonce::stamp($markup);
+
+            self::assertSame(1, substr_count($html, 'nonce='), $markup);
+            self::assertStringContainsString('nonce="abc123"', $html, $markup);
+        }
+    }
+
+    #[Test]
+    public function aSolidusDoesNotCloseAScriptElement(): void
+    {
+        // HTML allows self-closing syntax only in foreign content, so
+        // `<script />` leaves the element OPEN. Treating it as closed resumed
+        // markup scanning inside the body and stamped the text there.
+        CspNonce::set('abc123');
+
+        $html = CspNonce::stamp('<script type="application/json" />{"t":"<script>"}</script>');
+
+        self::assertStringNotContainsString('{"t":"<script nonce', $html, 'the body is text, not markup');
+    }
+
+    #[Test]
+    public function aLegacyJavaScriptTypeStillExecutes(): void
+    {
+        CspNonce::set('abc123');
+
+        foreach (['text/ecmascript', 'application/x-javascript', 'text/jscript'] as $type) {
+            $html = CspNonce::stamp('<script type="' . $type . '">go()</script>');
+
+            self::assertStringContainsString('nonce="abc123"', $html, $type);
+        }
+    }
+
+    #[Test]
     public function resetDropsBothTheProviderAndTheValue(): void
     {
         CspNonce::register(static fn (): string => 'worker-wide');

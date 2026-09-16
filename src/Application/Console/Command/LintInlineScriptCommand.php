@@ -89,7 +89,7 @@ final class LintInlineScriptCommand extends Command
                     static fn (InlineScriptFinding $f): array => $f->toArray(),
                     $findings
                 ),
-            ], JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT));
+            ], JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT | JSON_INVALID_UTF8_SUBSTITUTE));
 
             return $blocking === [] ? Command::SUCCESS : Command::FAILURE;
         }

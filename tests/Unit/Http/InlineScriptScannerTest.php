@@ -242,6 +242,17 @@ final class InlineScriptScannerTest extends TestCase
     }
 
     #[Test]
+    public function aTypeTheTemplateHasNotResolvedYetIsTreatedAsExecutable(): void
+    {
+        // Source, not a document: `type="{{ scriptType }}"` is not known until
+        // it renders. Compared against the executable list it matched nothing
+        // and the tag was filed as a data block, so a script that renders as
+        // `module` was never reported.
+        self::assertCount(1, $this->scan('<script type="{{ scriptType }}">go()</script>'));
+        self::assertSame([], $this->scan('<script type="application/json">{}</script>'));
+    }
+
+    #[Test]
     public function aFileWithNoScriptsCostsNothing(): void
     {
         self::assertSame([], $this->scan('<?php return 1;'));
