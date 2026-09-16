@@ -43,7 +43,17 @@ final class ScriptTag
      * the map is governed too, and a page whose map is refused loses every ES
      * module on it at once.
      */
-    private const EXECUTABLE_TYPES = ['', 'text/javascript', 'application/javascript', 'module', 'importmap'];
+    private const EXECUTABLE_TYPES = [
+        '',
+        'text/javascript',
+        'application/javascript',
+        'module',
+        'importmap',
+        // Governed by script-src exactly as an import map is, and refused the
+        // same way — a page whose speculation rules are blocked loses its
+        // prefetching with nothing in the markup to say why.
+        'speculationrules',
+    ];
 
     /*
      * There is no attribute-boundary PATTERN here any more, and that is the
@@ -125,12 +135,45 @@ final class ScriptTag
             // Skip the raw-text CONTENT wholesale. Whatever it spells — a
             // closing tag in a JavaScript string, a whole document in a
             // <textarea> — it is text, and nothing in it is a tag.
-            $closer = '<' . '/' . $name;
-            $end = stripos($html, $closer, $tagEnd + 1);
-            $offset = $end === false ? $length : $end + strlen($closer);
+            $end = self::rawTextEnd($html, $name, $tagEnd + 1);
+            $offset = $end ?? $length;
         }
 
         return $tags;
+    }
+
+    /**
+     * Offset just past the raw-text closer for `$name`, or null when there is
+     * none.
+     *
+     * A closing tag for `scripture` starts with the same eight characters a
+     * closing tag for `script` does, and is NOT the end of a script.
+     * Accepted as one, the scan resumes inside the body and stamps the text
+     * that follows — which is how a JSON string holding markup came back with
+     * an attribute spliced into it. The name has to be followed by whitespace,
+     * `/` or `>`, the same boundary rule the region scanner already applies.
+     */
+    private static function rawTextEnd(string $html, string $name, int $from): ?int
+    {
+        $closer = '<' . '/' . $name;
+        $length = strlen($closer);
+        $offset = $from;
+
+        while (true) {
+            $at = stripos($html, $closer, $offset);
+            if ($at === false) {
+                return null;
+            }
+
+            $next = $html[$at + $length] ?? '>';
+            if ($next === '>' || $next === '/' || trim($next) === '') {
+                $tagEnd = strpos($html, '>', $at);
+
+                return $tagEnd === false ? null : $tagEnd + 1;
+            }
+
+            $offset = $at + $length;
+        }
     }
 
     /** The element name of a start tag at `$at`, or null when this is not one. */

@@ -54,8 +54,15 @@ final class LintInlineScriptCommand extends Command
         $json = (bool) $input->getOption('json');
 
         $projectRoot = ProjectRoot::get();
+        // vendor/semitexa is in the list because that is where the framework
+        // LIVES in the place this command will mostly run. Without it a
+        // consumer install has no `packages/` directory, the sweep sees only
+        // their own code, and the check reports a clean tree however the
+        // installed packages behave — a gate answering a question nobody
+        // asked. Missing roots are skipped, so the workspace is unaffected.
         $findings = (new InlineScriptSweep())->sweep($projectRoot, [
             $projectRoot . '/packages',
+            $projectRoot . '/vendor/semitexa',
             $projectRoot . '/src',
         ]);
 

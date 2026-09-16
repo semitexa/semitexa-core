@@ -62,15 +62,33 @@ final class InlineScriptSweep
     }
 
     /**
-     * A file under `packages/semitexa-*` is the framework's own emission: no
-     * consumer can fix it, so it blocks. Everything else belongs to the
-     * project reading the report.
+     * Where the framework's own emissions live, in a workspace and in an
+     * installed application.
+     *
+     * `vendor/semitexa/` is here because without it the check answers a
+     * different question in the place it will mostly run: a consumer has no
+     * `packages/` directory, so the sweep saw only their own code and reported
+     * a clean tree however the installed packages behaved. A framework finding
+     * there is still not theirs to patch — the remedy is an upgrade or a
+     * written exemption — but it is theirs to KNOW.
+     *
+     * @var list<string>
+     */
+    private const FRAMEWORK_PREFIXES = ['packages/semitexa-', 'vendor/semitexa/'];
+
+    /**
+     * A file the framework emits: no consumer can edit it, so it blocks.
+     * Everything else belongs to the project reading the report.
      */
     public static function ownerOf(string $relativePath): InlineScriptOwner
     {
-        return str_starts_with($relativePath, 'packages/semitexa-')
-            ? InlineScriptOwner::Framework
-            : InlineScriptOwner::Application;
+        foreach (self::FRAMEWORK_PREFIXES as $prefix) {
+            if (str_starts_with($relativePath, $prefix)) {
+                return InlineScriptOwner::Framework;
+            }
+        }
+
+        return InlineScriptOwner::Application;
     }
 
     /** @return iterable<string> */
