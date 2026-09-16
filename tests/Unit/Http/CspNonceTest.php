@@ -152,7 +152,9 @@ final class CspNonceTest extends TestCase
 
         $html = CspNonce::stamp('<script src="/a.js" />');
 
-        self::assertStringContainsString('<script src="/a.js" nonce="abc123"/>', $html);
+        // The author's spacing survives — the nonce is spliced in before the
+        // separator that was already there, not appended to a rebuilt tag.
+        self::assertSame('<script src="/a.js" nonce="abc123" />', $html);
         self::assertStringNotContainsString('/ nonce', $html, 'the slash would be read as an attribute name');
     }
 

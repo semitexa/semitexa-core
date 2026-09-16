@@ -133,29 +133,53 @@ final class CspNonce
                 continue;
             }
 
-            // An EMPTY `nonce` is not a nonce, but it is still an attribute:
-            // appending beside it leaves two, and the browser honours the
-            // first — the empty one.
-            $attributes = ScriptTag::withoutEmptyNonce($attributes);
+            $tagText = substr($html, $tag['start'], $tag['length']);
 
-            // A self-closing `<script … />` puts the slash last: appending
-            // after it produces `<script src="x"/ nonce="…">`, which the
-            // parser reads as an attribute named `/`. Rare in HTML and
-            // common in hand-written XHTML-ish markup, so it is cheaper to
-            // handle than to forbid.
-            //
-            // The slash counts only when something separates it from the
-            // attribute before it. In `<script src=/a.js/>` the trailing slash
-            // is the last character of an UNQUOTED value, and cutting it off
-            // would quietly change the URL being loaded.
-            $replacement = self::isSelfClosing($attributes)
-                ? '<script' . rtrim(substr(rtrim($attributes), 0, -1)) . $attribute . '/>'
-                : '<script' . $attributes . $attribute . '>';
-
-            $html = substr_replace($html, $replacement, $tag['start'], $tag['length']);
+            // SPLICED, never rebuilt. Reconstructing the tag as
+            // `'<script' . $attributes . …` rewrote things nobody asked it to:
+            // `<SCRIPT>` came back lowercased, and the space before a trailing
+            // `/` was eaten. Stamping is supposed to ADD a nonce and change
+            // nothing else, and a property test over many shapes is what made
+            // that rule enforceable rather than aspirational.
+            $html = substr_replace($html, self::stamped($tagText, $attribute), $tag['start'], $tag['length']);
         }
 
         return $html;
+    }
+
+    /**
+     * The same opening tag with the nonce in it, and everything else as it was.
+     *
+     * An unusable `nonce` — empty or bare — is REPLACED where it stands rather
+     * than removed and re-added, because removing it leaves the whitespace it
+     * was written with and appending beside it leaves two attributes.
+     */
+    private static function stamped(string $tagText, string $attribute): string
+    {
+        // An unusable nonce: `nonce=""`, `nonce=''`, or the bare attribute.
+        // The `=value` part is OPTIONAL — required, it missed the bare form,
+        // which then kept its place and took precedence over the real one.
+        $empty = '/(?<!\S)nonce(?:\s*=\s*(?:""|\'\'))?(?=[\s\/>])/i';
+        if (preg_match($empty, $tagText) === 1) {
+            return (string) preg_replace($empty, ltrim($attribute), $tagText, 1);
+        }
+
+        // Just before the `>`, or before the `/` of a self-closing tag — and
+        // before the whitespace that already separates it, so the tag keeps
+        // the spacing its author gave it.
+        $at = strlen($tagText) - 1;
+        $attributes = substr($tagText, strlen('<script'), $at - strlen('<script'));
+
+        if (self::isSelfClosing($attributes)) {
+            $slash = strrpos($tagText, '/', -1);
+            $at = $slash === false ? $at : $slash;
+        }
+
+        while ($at > 0 && trim($tagText[$at - 1]) === '') {
+            $at--;
+        }
+
+        return substr($tagText, 0, $at) . $attribute . substr($tagText, $at);
     }
 
     /** True when the tag closes itself, and the slash is not part of a value. */
