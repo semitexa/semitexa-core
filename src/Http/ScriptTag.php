@@ -28,19 +28,12 @@ final class ScriptTag
     public const PATTERN = '/<script\b([^>\n]*)>/i';
 
     /**
-     * Finished markup, where that ambiguity does not exist and an author may
-     * legitimately wrap a long opening tag:
+     * Elements whose CONTENT is text rather than markup. A `<script>` written
+     * inside one of these is a string that spells a tag, not a tag.
      *
-     *     <script
-     *       type="module"
-     *       defer>
-     *
-     * Scanning a document with {@see self::PATTERN} skips such a tag entirely,
-     * so it is served without a nonce and a nonce policy refuses it — silently,
-     * in the browser, which is the exact failure this whole class exists to
-     * prevent.
+     * @var list<string>
      */
-    public const DOCUMENT_PATTERN = '/<script\b([^>]*)>/i';
+    private const RAW_TEXT_ELEMENTS = ['script', 'style', 'textarea', 'title', 'iframe', 'noembed', 'noframes', 'xmp'];
 
     /**
      * Types the browser EXECUTES, and which script-src therefore governs.
@@ -52,30 +45,229 @@ final class ScriptTag
      */
     private const EXECUTABLE_TYPES = ['', 'text/javascript', 'application/javascript', 'module', 'importmap'];
 
-    /**
-     * An attribute name starts here — not in the middle of a longer one.
+    /*
+     * There is no attribute-boundary PATTERN here any more, and that is the
+     * point. Three were tried and each read somebody else's value as an
+     * attribute: `\b` matches after a hyphen (`data-src` answered for `src`),
+     * a whitespace lookbehind still matches inside `data-url="?nonce=old"`,
+     * and `x:nonce` is a different attribute ending in the same letters. Every
+     * one of those silently exempted an executable tag. {@see self::attributes()}
+     * parses the list instead.
      *
-     * `\b` is the wrong boundary for HTML: `-` is not a word character, so
-     * `\bsrc` matches inside `data-src` and `\btype` inside `data-type`. Both
-     * misreadings are silent and both fail OPEN: `<script data-type="application/json">`
-     * would be taken for a data block and left un-stamped, and an inline
-     * `<script data-src="/lazy.js">` with a body of its own would be taken
-     * for an external script and never reported.
-     *
-     * (The closing tag is not written anywhere in this file on purpose:
-     * the scanner needs one before it reads a file at all, and the regex
-     * literals above would then be findings against themselves.)
+     * (The closing tag is not written anywhere in this file on purpose: the
+     * scanner needs one before it reads a file at all, and the patterns here
+     * would then be findings against themselves.)
      */
-    private const ATTRIBUTE_START = '(?<![\w-])';
 
-    /** False for a data block — `application/json`, `application/ld+json` and friends. */
+    /**
+     * Every opening `<script …>` tag in a FINISHED document, in order.
+     *
+     * A regex is the wrong instrument here and the review that said so was
+     * right twice over. `([^>]*)` ends the tag at the first `>`, so
+     * `<script data-expr="a > b">` is cut in half and the nonce lands inside
+     * the quoted value — a malformed tag with no nonce, which is worse than
+     * the tag it replaced. And a pattern applied to the whole document also
+     * matches the TEXT `<script>` inside a script body, so
+     * `<script type="application/json">{"t":"<script>"}` came back with a
+     * nonce stamped into the JSON. That is not a missed nonce, it is a
+     * corrupted response.
+     *
+     * So: a small scanner that knows the two things a regex cannot. Quoted
+     * attribute values do not end a tag, and the CONTENT of a raw-text
+     * element is text — whatever it spells.
+     *
+     * Not an HTML parser, and it does not need to be: it answers one question
+     * about documents this framework itself rendered.
+     *
+     * @return list<array{start: int, length: int, attributes: string}>
+     */
+    public static function documentTags(string $html): array
+    {
+        $tags = [];
+        $length = strlen($html);
+        $offset = 0;
+
+        while ($offset < $length) {
+            $at = strpos($html, '<', $offset);
+            if ($at === false) {
+                break;
+            }
+
+            // A comment is text that looks like markup.
+            if (substr($html, $at, 4) === '<!--') {
+                $close = strpos($html, '-->', $at + 4);
+                $offset = $close === false ? $length : $close + 3;
+                continue;
+            }
+
+            $name = self::elementNameAt($html, $at);
+            if ($name === null) {
+                $offset = $at + 1;
+                continue;
+            }
+
+            $tagEnd = self::openingTagEnd($html, $at);
+            if ($tagEnd === null) {
+                break;
+            }
+
+            $attributes = substr($html, $at + 1 + strlen($name), $tagEnd - ($at + 1 + strlen($name)));
+
+            if ($name === 'script') {
+                $tags[] = ['start' => $at, 'length' => $tagEnd + 1 - $at, 'attributes' => $attributes];
+            }
+
+            if (!in_array($name, self::RAW_TEXT_ELEMENTS, true) || str_ends_with(rtrim($attributes), '/')) {
+                $offset = $tagEnd + 1;
+                continue;
+            }
+
+            // Skip the raw-text CONTENT wholesale. Whatever it spells — a
+            // closing tag in a JavaScript string, a whole document in a
+            // <textarea> — it is text, and nothing in it is a tag.
+            $closer = '<' . '/' . $name;
+            $end = stripos($html, $closer, $tagEnd + 1);
+            $offset = $end === false ? $length : $end + strlen($closer);
+        }
+
+        return $tags;
+    }
+
+    /** The element name of a start tag at `$at`, or null when this is not one. */
+    private static function elementNameAt(string $html, int $at): ?string
+    {
+        if (preg_match('/\G<([a-zA-Z][a-zA-Z0-9-]*)/', $html, $m, 0, $at) !== 1) {
+            return null;
+        }
+
+        return strtolower($m[1]);
+    }
+
+    /**
+     * Offset of the `>` that ends the opening tag at `$at`, respecting quoted
+     * attribute values, or null when the document ends first.
+     */
+    private static function openingTagEnd(string $html, int $at): ?int
+    {
+        $length = strlen($html);
+        $quote = null;
+
+        for ($i = $at + 1; $i < $length; $i++) {
+            $char = $html[$i];
+
+            if ($quote !== null) {
+                if ($char === $quote) {
+                    $quote = null;
+                }
+                continue;
+            }
+
+            if ($char === '"' || $char === "'") {
+                $quote = $char;
+                continue;
+            }
+
+            if ($char === '>') {
+                return $i;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * The attribute list of an opening tag, as a name => value map.
+     *
+     * Parsed rather than pattern-matched, because every regex tried here read
+     * somebody else's VALUE as an attribute. `\b` matches after a hyphen, so
+     * `data-src` answered for `src`; a lookbehind for whitespace still matches
+     * inside `data-url="?nonce=old"`, and `x:nonce` is a different attribute
+     * that ends in the same letters. Each of those silently exempted an
+     * executable tag from both the stamp and the lint.
+     *
+     * Names are lowercased, because HTML attribute names are case-insensitive.
+     * A bare attribute (`defer`) maps to the empty string.
+     *
+     * @return array<string, string>
+     */
+    public static function attributes(string $attributes): array
+    {
+        $out = [];
+        $length = strlen($attributes);
+        $i = 0;
+
+        while ($i < $length) {
+            if (ctype_space($attributes[$i]) || $attributes[$i] === '/') {
+                $i++;
+                continue;
+            }
+
+            $start = $i;
+            while ($i < $length && !ctype_space($attributes[$i]) && $attributes[$i] !== '=' && $attributes[$i] !== '/') {
+                $i++;
+            }
+
+            $name = strtolower(substr($attributes, $start, $i - $start));
+            if ($name === '') {
+                $i++;
+                continue;
+            }
+
+            while ($i < $length && ctype_space($attributes[$i])) {
+                $i++;
+            }
+
+            if ($i >= $length || $attributes[$i] !== '=') {
+                $out[$name] ??= '';
+                continue;
+            }
+
+            $i++;
+            while ($i < $length && ctype_space($attributes[$i])) {
+                $i++;
+            }
+
+            if ($i < $length && ($attributes[$i] === '"' || $attributes[$i] === "'")) {
+                $quote = $attributes[$i];
+                $i++;
+                $valueStart = $i;
+                while ($i < $length && $attributes[$i] !== $quote) {
+                    $i++;
+                }
+                $out[$name] ??= substr($attributes, $valueStart, $i - $valueStart);
+                $i++;
+                continue;
+            }
+
+            $valueStart = $i;
+            while ($i < $length && !ctype_space($attributes[$i])) {
+                $i++;
+            }
+            $out[$name] ??= substr($attributes, $valueStart, $i - $valueStart);
+        }
+
+        return $out;
+    }
+
+    /**
+     * False for a data block — `application/json`, `application/ld+json` and
+     * friends.
+     *
+     * The type is compared by its MIME ESSENCE, which is what a browser uses:
+     * `text/javascript; charset=utf-8` is a classic script and executes, and
+     * comparing the whole string against a short list called it data and left
+     * it nonce-less.
+     */
     public static function isExecutable(string $attributes): bool
     {
-        if (preg_match('/' . self::ATTRIBUTE_START . 'type\s*=\s*["\']?([^"\'\s>]*)/i', $attributes, $m) !== 1) {
+        $type = self::attributes($attributes)['type'] ?? null;
+        if ($type === null) {
             return true;
         }
 
-        return in_array(strtolower(trim($m[1])), self::EXECUTABLE_TYPES, true);
+        $essence = strtolower(trim(explode(';', $type, 2)[0]));
+
+        return in_array($essence, self::EXECUTABLE_TYPES, true);
     }
 
     /**
@@ -87,7 +279,7 @@ final class ScriptTag
      */
     public static function hasNonceAttribute(string $attributes): bool
     {
-        return preg_match('/' . self::ATTRIBUTE_START . 'nonce\s*=/i', $attributes) === 1;
+        return array_key_exists('nonce', self::attributes($attributes));
     }
 
     /**
@@ -119,8 +311,24 @@ final class ScriptTag
             return true;
         }
 
+        // Somebody else's ATTRIBUTE VALUE is blanked first, and only that:
+        // `<script id="{{ nonce }}">` names a nonce inside an unrelated
+        // attribute and writes no nonce at all, so reading it as an ask
+        // exempted an executable tag from the whole lint.
+        //
+        // Matched as `name=` followed by a quoted run, NOT as "any quoted run".
+        // This reads SOURCE, where a quote is as likely to be PHP's as the
+        // markup's: blanking every quoted span erased the framework's own
+        // idiom — `'<script' . CspNonce::attribute() . '>'` — and reported the
+        // one emission that is definitely correct.
+        $outsideValues = (string) preg_replace_callback(
+            '/[\w:.-]+\s*=\s*("[^"]*"|\'[^\']*\')/',
+            static fn (array $m): string => str_repeat(' ', strlen($m[0])),
+            $attributes
+        );
+
         foreach (self::NONCE_IN_CODE as $pattern) {
-            if (preg_match($pattern, $attributes) === 1) {
+            if (preg_match($pattern, $outsideValues) === 1) {
                 return true;
             }
         }
@@ -131,6 +339,6 @@ final class ScriptTag
     /** True when the tag loads its code from elsewhere: allowed by a source list, with or without a nonce. */
     public static function hasSrc(string $attributes): bool
     {
-        return preg_match('/' . self::ATTRIBUTE_START . 'src\s*=/i', $attributes) === 1;
+        return array_key_exists('src', self::attributes($attributes));
     }
 }

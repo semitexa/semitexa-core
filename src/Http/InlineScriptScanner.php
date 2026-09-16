@@ -45,7 +45,7 @@ final class InlineScriptScanner
      * A file that stamps its own finished document. Threading a nonce into a
      * nowdoc means either interpolating a page full of `$` or writing the
      * attribute by hand in a dozen places; `CspNonce::stamp()` does it to the
-     * output instead, and a file that calls it says so in its own source.
+     * output instead. Only a real CALL counts — see {@see self::callsStamp()}.
      */
     private const STAMPS_ITSELF = 'CspNonce::stamp(';
 
@@ -57,11 +57,55 @@ final class InlineScriptScanner
      */
     public const EXEMPTION_MARKER = 'csp-nonce-exempt:';
 
-    /** True when the file opts out or stamps its own output. */
+    /** True when the file opts out with a written reason, or really calls the stamper. */
     public static function isExempt(string $contents): bool
     {
         return str_contains($contents, self::EXEMPTION_MARKER)
-            || str_contains($contents, self::STAMPS_ITSELF);
+            || self::callsStamp($contents);
+    }
+
+    /**
+     * True when this file really CALLS `CspNonce::stamp()`.
+     *
+     * Tokens, not str_contains: the words in a docblock or inside a string
+     * used to exempt a file that calls nothing at all, which is a silent hole
+     * in a check whose whole argument is that nothing else can see the defect.
+     *
+     * WHAT THIS STILL DOES NOT PROVE, said plainly rather than implied: that
+     * the stamped document is the one carrying the tag below. Scoping the
+     * exemption to the METHOD holding the call was written and measured, and
+     * rejected: the dominant shape here is a private page() that builds the
+     * markup and a handle() that stamps what it returns, and the strict rule
+     * reported four correct handlers. Proving the emission reaches the stamp
+     * is dataflow, which this is not. A file that stamps one document and
+     * emits another bare is the gap that remains.
+     */
+    private static function callsStamp(string $contents): bool
+    {
+        if (!str_contains($contents, self::STAMPS_ITSELF)) {
+            return false;
+        }
+
+        $tokens = @token_get_all($contents);
+        $count = count($tokens);
+
+        for ($i = 2; $i < $count; $i++) {
+            $token = $tokens[$i];
+            if (!is_array($token) || $token[0] !== T_STRING || $token[1] !== 'stamp') {
+                continue;
+            }
+
+            $previous = $tokens[$i - 1];
+            $before = $tokens[$i - 2];
+
+            if (is_array($previous) && $previous[0] === T_DOUBLE_COLON
+                && is_array($before) && is_string($before[1]) && str_ends_with($before[1], 'CspNonce')
+            ) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

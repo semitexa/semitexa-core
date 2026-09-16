@@ -227,6 +227,76 @@ final class CspNonceTest extends TestCase
     }
 
     #[Test]
+    public function stampingNeverTouchesTextInsideAScript(): void
+    {
+        // The worst shape this class can produce is not a missing nonce, it is
+        // a CORRUPTED response: a pattern run over the whole document matches
+        // the TEXT `<script>` inside a body and writes an attribute into a
+        // JSON string or a JavaScript literal.
+        CspNonce::set('abc123');
+
+        $json = '<script type="application/json" id="d">{"tag":"<script>"}</script>';
+        self::assertSame($json, CspNonce::stamp($json), 'a data block and its contents are left alone');
+
+        $js = '<script>var open = "<script>";</script>';
+        $stamped = CspNonce::stamp($js);
+
+        self::assertStringContainsString('<script nonce="abc123">', $stamped);
+        self::assertStringContainsString('var open = "<script>";', $stamped, 'the body is not markup');
+        self::assertSame(1, substr_count($stamped, 'nonce='));
+    }
+
+    #[Test]
+    public function aQuotedAngleBracketDoesNotCutTheTagInHalf(): void
+    {
+        // `[^>]*` ends the tag at the first `>`, so the nonce landed inside the
+        // quoted value: a malformed tag with no nonce, which is worse than the
+        // one it replaced.
+        CspNonce::set('abc123');
+
+        $html = CspNonce::stamp('<script data-expression="a > b">go()</script>');
+
+        self::assertStringContainsString('data-expression="a > b"', $html, 'the value survived intact');
+        self::assertStringContainsString('nonce="abc123"', $html);
+        self::assertStringEndsWith('>go()</script>', $html);
+    }
+
+    #[Test]
+    public function aNonceSpeltInsideAnotherAttributesValueIsNotANonce(): void
+    {
+        CspNonce::set('abc123');
+
+        foreach ([
+            '<script data-url="?nonce=old">a()</script>',
+            '<script x:nonce="not-the-attribute">a()</script>',
+        ] as $markup) {
+            self::assertStringContainsString(' nonce="abc123"', CspNonce::stamp($markup), $markup);
+        }
+    }
+
+    #[Test]
+    public function aTypeWithParametersIsStillJavaScript(): void
+    {
+        // Browsers decide by MIME ESSENCE. Comparing the whole string against
+        // a short list called this a data block and served it nonce-less.
+        CspNonce::set('abc123');
+
+        $html = CspNonce::stamp('<script type="text/javascript; charset=utf-8">go()</script>');
+
+        self::assertStringContainsString('nonce="abc123"', $html);
+    }
+
+    #[Test]
+    public function aScriptWrittenInsideATextareaIsNotAScript(): void
+    {
+        CspNonce::set('abc123');
+
+        $html = '<textarea name="snippet"><script>go()</script></textarea>';
+
+        self::assertSame($html, CspNonce::stamp($html));
+    }
+
+    #[Test]
     public function resetDropsBothTheProviderAndTheValue(): void
     {
         CspNonce::register(static fn (): string => 'worker-wide');

@@ -107,39 +107,45 @@ final class CspNonce
      * Executable is the operative word: a `type="application/json"` block is
      * data and is left exactly as it was. The rule is {@see ScriptTag}'s, the
      * same one the lint reports against.
+     *
+     * Only real opening tags are touched. {@see ScriptTag::documentTags()}
+     * skips the CONTENT of a raw-text element, so a `<script>` written inside
+     * a JavaScript string or a JSON block stays a string: stamping it turned
+     * a valid response into a broken one, which is worse than the missing
+     * nonce this method exists to add.
      */
     public static function stamp(string $html): string
     {
         $attribute = self::attribute();
-        // stripos, not str_contains: the regex below is case-insensitive
+        // stripos, not str_contains: the scan below is case-insensitive
         // because HTML tag names are, and a fast path that disagrees with
         // the rule it guards is just a way of skipping `<SCRIPT>` quietly.
         if ($attribute === '' || stripos($html, '<script') === false) {
             return $html;
         }
 
-        return (string) preg_replace_callback(
-            ScriptTag::DOCUMENT_PATTERN,
-            static function (array $m) use ($attribute): string {
-                $attributes = (string) $m[1];
+        // Applied back to front, so each splice leaves the offsets of the ones
+        // still to come untouched.
+        foreach (array_reverse(ScriptTag::documentTags($html)) as $tag) {
+            $attributes = $tag['attributes'];
 
-                if (ScriptTag::hasNonceAttribute($attributes) || !ScriptTag::isExecutable($attributes)) {
-                    return $m[0];
-                }
+            if (ScriptTag::hasNonceAttribute($attributes) || !ScriptTag::isExecutable($attributes)) {
+                continue;
+            }
 
-                // A self-closing `<script … />` puts the slash last: appending
-                // after it produces `<script src="x"/ nonce="…">`, which the
-                // parser reads as an attribute named `/`. Rare in HTML and
-                // common in hand-written XHTML-ish markup, so it is cheaper to
-                // handle than to forbid.
-                if (str_ends_with(rtrim($attributes), '/')) {
-                    return '<script' . rtrim(substr(rtrim($attributes), 0, -1)) . $attribute . '/>';
-                }
+            // A self-closing `<script … />` puts the slash last: appending
+            // after it produces `<script src="x"/ nonce="…">`, which the
+            // parser reads as an attribute named `/`. Rare in HTML and
+            // common in hand-written XHTML-ish markup, so it is cheaper to
+            // handle than to forbid.
+            $replacement = str_ends_with(rtrim($attributes), '/')
+                ? '<script' . rtrim(substr(rtrim($attributes), 0, -1)) . $attribute . '/>'
+                : '<script' . $attributes . $attribute . '>';
 
-                return '<script' . $attributes . $attribute . '>';
-            },
-            $html
-        );
+            $html = substr_replace($html, $replacement, $tag['start'], $tag['length']);
+        }
+
+        return $html;
     }
 
     /** Test seam: drop both the provider and this coroutine's value. */

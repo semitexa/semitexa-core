@@ -75,10 +75,25 @@ final class InlineScriptSweepTest extends TestCase
         // document. The tags in the source are bare and correct.
         $this->write(
             'packages/semitexa-os/src/NotesAppHandler.php',
-            "\$html = <<<'HTML'\n<script>go()</script>\nHTML;\nreturn \$r->setContent(CspNonce::stamp(\$html));"
+            "<?php\n\$html = <<<'HTML'\n<script>go()</script>\nHTML;\nreturn \$r->setContent(CspNonce::stamp(\$html));"
         );
 
         self::assertSame([], $this->sweep());
+    }
+
+    #[Test]
+    public function talkingAboutTheStamperIsNotCallingIt(): void
+    {
+        // The exemption used to be str_contains, so a file that only MENTIONS
+        // the stamper — in a docblock explaining the rule, most likely — went
+        // unscanned. A silent hole in a check whose whole argument is that
+        // nothing else can see the defect.
+        $this->write(
+            'packages/semitexa-os/src/NotesAppHandler.php',
+            "<?php\n// Pages like this one should use CspNonce::stamp(\$html) one day.\necho '<script>go()</script>';"
+        );
+
+        self::assertCount(1, $this->sweep());
     }
 
     #[Test]

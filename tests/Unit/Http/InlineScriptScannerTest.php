@@ -226,6 +226,22 @@ final class InlineScriptScannerTest extends TestCase
     }
 
     #[Test]
+    public function aNonceSpeltInsideAnotherAttributesValueIsNotAnAsk(): void
+    {
+        // `<script id="{{ nonce }}">` writes no nonce at all. Read as an ask,
+        // it exempted an executable tag from the whole check.
+        self::assertCount(1, $this->scan('<script id="{{ nonce }}">go()</script>'));
+        self::assertCount(1, $this->scan('<script data-url="?nonce=old">go()</script>'));
+        self::assertCount(1, $this->scan('<script x:nonce="not-it">go()</script>'));
+    }
+
+    #[Test]
+    public function aTypeWithParametersIsNotADataBlock(): void
+    {
+        self::assertCount(1, $this->scan('<script type="text/javascript; charset=utf-8">go()</script>'));
+    }
+
+    #[Test]
     public function aFileWithNoScriptsCostsNothing(): void
     {
         self::assertSame([], $this->scan('<?php return 1;'));
