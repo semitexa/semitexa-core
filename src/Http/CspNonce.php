@@ -138,7 +138,12 @@ final class CspNonce
             // parser reads as an attribute named `/`. Rare in HTML and
             // common in hand-written XHTML-ish markup, so it is cheaper to
             // handle than to forbid.
-            $replacement = str_ends_with(rtrim($attributes), '/')
+            //
+            // The slash counts only when something separates it from the
+            // attribute before it. In `<script src=/a.js/>` the trailing slash
+            // is the last character of an UNQUOTED value, and cutting it off
+            // would quietly change the URL being loaded.
+            $replacement = self::isSelfClosing($attributes)
                 ? '<script' . rtrim(substr(rtrim($attributes), 0, -1)) . $attribute . '/>'
                 : '<script' . $attributes . $attribute . '>';
 
@@ -146,6 +151,19 @@ final class CspNonce
         }
 
         return $html;
+    }
+
+    /** True when the tag closes itself, and the slash is not part of a value. */
+    private static function isSelfClosing(string $attributes): bool
+    {
+        $trimmed = rtrim($attributes);
+        if (!str_ends_with($trimmed, '/')) {
+            return false;
+        }
+
+        $before = substr($trimmed, -2, 1);
+
+        return $before === '' || $before === false || trim($before) === '' || $before === '"' || $before === "'";
     }
 
     /** Test seam: drop both the provider and this coroutine's value. */

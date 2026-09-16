@@ -297,6 +297,33 @@ final class CspNonceTest extends TestCase
     }
 
     #[Test]
+    public function anUnquotedUrlKeepsItsTrailingSlash(): void
+    {
+        // The self-closing branch cuts the last character off. In
+        // `<script src=/a.js/>` that slash is the end of an UNQUOTED VALUE,
+        // not the close of the tag, and cutting it changed the URL being
+        // loaded — quietly, into one that may still resolve.
+        CspNonce::set('abc123');
+
+        $html = CspNonce::stamp('<script src=/a.js/>');
+
+        self::assertStringContainsString('src=/a.js/', $html);
+        self::assertStringContainsString('nonce="abc123"', $html);
+    }
+
+    #[Test]
+    public function aTagWithUnquotedAttributesIsStillClassified(): void
+    {
+        CspNonce::set('abc123');
+
+        self::assertStringContainsString('nonce="abc123"', CspNonce::stamp('<script type=module>go()</script>'));
+        self::assertSame(
+            '<script type=application/json>{}</script>',
+            CspNonce::stamp('<script type=application/json>{}</script>'),
+        );
+    }
+
+    #[Test]
     public function resetDropsBothTheProviderAndTheValue(): void
     {
         CspNonce::register(static fn (): string => 'worker-wide');
