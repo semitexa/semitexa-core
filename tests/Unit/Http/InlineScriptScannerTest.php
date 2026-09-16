@@ -1,0 +1,198 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Semitexa\Core\Tests\Unit\Http;
+
+use PHPUnit\Framework\Attributes\DataProvider;
+use PHPUnit\Framework\Attributes\Test;
+use PHPUnit\Framework\TestCase;
+use Semitexa\Core\Http\InlineScriptOwner;
+use Semitexa\Core\Http\InlineScriptScanner;
+
+/**
+ * What the scanner calls broken, and — just as load-bearing — what it leaves
+ * alone. A lint that cries about data blocks and docblocks gets switched off,
+ * and a switched-off lint is worse than none because it reads as coverage.
+ */
+final class InlineScriptScannerTest extends TestCase
+{
+    private InlineScriptScanner $scanner;
+
+    protected function setUp(): void
+    {
+        $this->scanner = new InlineScriptScanner();
+    }
+
+    #[Test]
+    public function aBareInlineScriptIsAFinding(): void
+    {
+        $findings = $this->scan("<html>\n<body>\n<script>alert(1)</script>\n</body>");
+
+        self::assertCount(1, $findings);
+        self::assertSame(3, $findings[0]->line);
+        self::assertSame('<script>', $findings[0]->snippet);
+        self::assertSame(InlineScriptOwner::Framework, $findings[0]->owner);
+    }
+
+    #[Test]
+    public function theRegressionThisWholeCheckExistsFor(): void
+    {
+        // The exact string semitexa/ssr shipped, which no server-side test
+        // could fail on and every nonce-enforcing consumer paid for.
+        $findings = $this->scan("return '<script>window.__SSR_DEFERRED=' . \$json . ';</script>';");
+
+        self::assertCount(1, $findings);
+    }
+
+    #[Test]
+    public function theShapeThatReplacedItIsClean(): void
+    {
+        $findings = $this->scan("'<script type=\"application/json\" data-ssr-deferred-manifest>' . \$json . '</script>'");
+
+        self::assertSame([], $findings);
+    }
+
+    /** @return iterable<string, array{string}> */
+    public static function safeTags(): iterable
+    {
+        yield 'external src' => ['<script src="/assets/app.js" defer></script>'];
+        yield 'json data block' => ['<script type="application/json" id="m">{}</script>'];
+        yield 'ld+json' => ['<script type="application/ld+json">{}</script>'];
+        yield 'literal nonce' => ['<script nonce="abc123">go()</script>'];
+        yield 'heredoc interpolation' => ['<script{$nonceAttr}>go()</script>'];
+        yield 'php concatenation' => ["'<script' . CspNonce::attribute() . '>go()</script>'"];
+        yield 'importmap with nonce' => ['<script type="importmap" nonce="abc">{}</script>'];
+        yield 'uppercase SRC' => ['<SCRIPT SRC="/a.js"></SCRIPT>'];
+    }
+
+    #[Test]
+    #[DataProvider('safeTags')]
+    public function safeTagsAreNotReported(string $markup): void
+    {
+        self::assertSame([], $this->scan($markup), $markup . ' must not be reported');
+    }
+
+    #[Test]
+    public function anImportMapWithoutANonceIsAFinding(): void
+    {
+        // importmap is not in the executable-type list by accident: script-src
+        // governs it, and a page whose map is refused loses every ES module
+        // on it, which looks nothing like a CSP problem from the outside.
+        $findings = $this->scan('<script type="importmap">{"imports":{}}</script>');
+
+        self::assertCount(1, $findings);
+    }
+
+    #[Test]
+    public function proseAboutScriptTagsIsNotCode(): void
+    {
+        $source = <<<'PHP'
+        <?php
+        /**
+         * Emits an empty `<script>` when the component has no events.
+         */
+        // <script> in a line comment is prose too
+        {# <script> in a Twig comment #}
+        PHP;
+
+        self::assertSame([], $this->scan($source));
+    }
+
+    #[Test]
+    public function proseOnTheSameLineAsRealCodeIsStillScanned(): void
+    {
+        // The prose rule keys on how the LINE starts, so a trailing comment
+        // cannot hide an emission that precedes it on the same line.
+        $findings = $this->scan("echo '<script>x()</script>'; // emits <script> for the widget");
+
+        self::assertCount(1, $findings);
+    }
+
+    #[Test]
+    public function everyFindingCarriesItsPathAndOwner(): void
+    {
+        $findings = $this->scanner->scan(
+            'src/modules/Console/templates/page.html.twig',
+            "<script>go()</script>",
+            InlineScriptOwner::Application,
+        );
+
+        self::assertSame('src/modules/Console/templates/page.html.twig', $findings[0]->path);
+        self::assertSame(InlineScriptOwner::Application, $findings[0]->owner);
+        self::assertSame(
+            ['path' => 'src/modules/Console/templates/page.html.twig', 'line' => 1, 'snippet' => '<script>', 'owner' => 'application'],
+            $findings[0]->toArray(),
+        );
+    }
+
+    #[Test]
+    public function severalTagsInOneFileAreReportedSeparatelyWithTheirOwnLines(): void
+    {
+        $source = "<script>a()</script>\n<script src=\"/b.js\"></script>\n<script>c()</script>";
+
+        $findings = $this->scan($source);
+
+        self::assertSame([1, 3], array_map(static fn ($f) => $f->line, $findings));
+    }
+
+    #[Test]
+    public function aLongTagIsTruncatedForDisplay(): void
+    {
+        $findings = $this->scan('<script data-x="' . str_repeat('y', 300) . '">go()</script>');
+
+        self::assertLessThanOrEqual(120, mb_strlen($findings[0]->snippet));
+        self::assertStringEndsWith('…', $findings[0]->snippet);
+    }
+
+    #[Test]
+    public function proseWithNoCloserIsNotAnEmission(): void
+    {
+        // The two shapes that produced every false positive on the first run
+        // over this repository: a help string and a regex literal. Neither
+        // file writes a closing tag, because neither emits anything.
+        $help = "->setDescription('Find inline <script> blocks a strict CSP refuses');";
+        $regex = "preg_match_all('/<script\\b([^>]*)>/i', \$contents, \$m);";
+
+        self::assertSame([], $this->scan($help));
+        self::assertSame([], $this->scan($regex));
+    }
+
+    #[Test]
+    public function aTagIsNotAssembledAcrossALineBreak(): void
+    {
+        // `$entry->` ends with a `>`. Without the newline bound the scanner
+        // read an arrow operator two lines down as the end of a tag and
+        // reported a helper call as a bare script.
+        $source = "str_contains(\$contents, '<script')
+    ? \$entry->attributes
+    : [];
+</script>";
+
+        self::assertSame([], $this->scan($source));
+    }
+
+    #[Test]
+    public function aNonceBearingHelperOnTheTagIsEnough(): void
+    {
+        // The scanner cannot evaluate a call, so it reads the name. Every
+        // framework helper that stamps a nonce says so in its own name —
+        // which is why AssetRenderer's private one was renamed rather than
+        // allowlisted here.
+        $source = "return '<script' . self::inlineScriptNonceAttributes(\$entry->attributes) . '>' . \$js . '</script>';";
+
+        self::assertSame([], $this->scan($source));
+    }
+
+    #[Test]
+    public function aFileWithNoScriptsCostsNothing(): void
+    {
+        self::assertSame([], $this->scan('<?php return 1;'));
+    }
+
+    /** @return list<\Semitexa\Core\Http\InlineScriptFinding> */
+    private function scan(string $contents): array
+    {
+        return $this->scanner->scan('packages/semitexa-x/src/Thing.php', $contents, InlineScriptOwner::Framework);
+    }
+}
