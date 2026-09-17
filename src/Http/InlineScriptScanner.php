@@ -49,6 +49,9 @@ final class InlineScriptScanner
      */
     private const STAMPS_ITSELF = 'CspNonce::stamp(';
 
+    /* STAMPS_ITSELF is documentation now: callsStamp() matches on tokens, so
+       the call may be spelled across lines or carry a comment inside it. */
+
     /**
      * An acknowledged exemption. Costs a written reason, which is the point:
      * the only honest case is markup no response of ours ever carries — a
@@ -82,30 +85,54 @@ final class InlineScriptScanner
      */
     private static function callsStamp(string $contents): bool
     {
-        if (!str_contains($contents, self::STAMPS_ITSELF)) {
+        // The prefilter is the CLASS NAME, not the whole call: PHP allows
+        // whitespace and comments between `CspNonce`, `::` and `stamp`, and a
+        // prefilter pinned to the compact spelling rejected a formatted call
+        // before the tokens were ever consulted — so the file was scanned and
+        // its correct inline script reported.
+        if (!str_contains($contents, 'CspNonce')) {
             return false;
         }
 
         $tokens = @token_get_all($contents);
         $count = count($tokens);
 
-        for ($i = 2; $i < $count; $i++) {
+        for ($i = 0; $i < $count; $i++) {
             $token = $tokens[$i];
-            if (!is_array($token) || $token[0] !== T_STRING || $token[1] !== 'stamp') {
+            if (!is_array($token) || $token[0] !== T_STRING || !str_ends_with($token[1], 'CspNonce')) {
                 continue;
             }
 
-            $previous = $tokens[$i - 1];
-            $before = $tokens[$i - 2];
+            $next = self::nextCodeToken($tokens, $i + 1, $count);
+            if ($next >= $count || !is_array($tokens[$next]) || $tokens[$next][0] !== T_DOUBLE_COLON) {
+                continue;
+            }
 
-            if (is_array($previous) && $previous[0] === T_DOUBLE_COLON
-                && is_array($before) && is_string($before[1]) && str_ends_with($before[1], 'CspNonce')
+            $method = self::nextCodeToken($tokens, $next + 1, $count);
+            if ($method < $count && is_array($tokens[$method])
+                && $tokens[$method][0] === T_STRING && $tokens[$method][1] === 'stamp'
             ) {
                 return true;
             }
         }
 
         return false;
+    }
+
+    /** The next token that is neither whitespace nor a comment. */
+    private static function nextCodeToken(array $tokens, int $from, int $count): int
+    {
+        for ($j = $from; $j < $count; $j++) {
+            if (!is_array($tokens[$j])) {
+                return $j;
+            }
+
+            if (!in_array($tokens[$j][0], [T_WHITESPACE, T_COMMENT, T_DOC_COMMENT], true)) {
+                return $j;
+            }
+        }
+
+        return $count;
     }
 
     /**
@@ -123,31 +150,31 @@ final class InlineScriptScanner
         // contain a closer. Both keep PROSE out: a docblock or a help string
         // that mentions the tag never writes the closer, and a `>` reached by
         // crossing a newline is an arrow operator, not the end of a tag.
-        if (stripos($contents, self::CLOSING_TAG) === false
-            || !preg_match_all(ScriptTag::PATTERN, $contents, $matches, PREG_OFFSET_CAPTURE)
-        ) {
+        if (stripos($contents, self::CLOSING_TAG) === false) {
             return [];
         }
 
         $findings = [];
 
-        foreach ($matches[0] as $index => [$tag, $offset]) {
-            $attributes = (string) $matches[1][$index][0];
+        foreach (ScriptTag::sourceTags($contents) as $found) {
+            $attributes = $found['attributes'];
+            $offset = $found['start'];
+            $tag = '<script' . $attributes . '>';
 
             if ($this->isSafe($attributes)) {
                 continue;
             }
 
-            $line = substr_count($contents, "\n", 0, (int) $offset) + 1;
+            $line = substr_count($contents, "\n", 0, $offset) + 1;
 
-            if ($this->isProse($contents, (int) $offset)) {
+            if ($this->isProse($contents, $offset)) {
                 continue;
             }
 
             $findings[] = new InlineScriptFinding(
                 path: $relativePath,
                 line: $line,
-                snippet: $this->snippet((string) $tag),
+                snippet: $this->snippet($tag),
                 owner: $owner,
             );
         }

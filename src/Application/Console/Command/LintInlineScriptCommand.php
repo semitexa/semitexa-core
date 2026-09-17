@@ -33,16 +33,24 @@ use Symfony\Component\Console\Style\SymfonyStyle;
  *     lines red is how a check gets switched off. `--strict` makes them fail
  *     too, which is the flag a project with a policy turns on.
  */
+// The ATTRIBUTE's description is what docs:reference:generate publishes — the
+// setDescription() call below is for `list`. Both are kept in step, and
+// neither carries a raw tag: the reference renderer leaves HTML as it is, so
+// an unescaped one opens a script block and swallows the rest of the page.
 #[AsCommand(
     name: 'lint:inline-script',
-    description: 'Find inline <script> blocks that a strict CSP would refuse.',
+    description: 'Find inline `<script>` blocks that a strict CSP would refuse.',
 )]
 final class LintInlineScriptCommand extends Command
 {
     protected function configure(): void
     {
         $this->setName('lint:inline-script')
-            ->setDescription('Find inline <script> blocks that a strict CSP would refuse.')
+            // No raw tag in the text: this description is the SOURCE of the
+            // generated reference page, and docs render Markdown with HTML
+            // left as it is — an unescaped tag there opens a script block and
+            // swallows the rest of the page.
+            ->setDescription('Find inline `<script>` blocks that a strict CSP would refuse.')
             ->addOption('strict', null, InputOption::VALUE_NONE, 'Fail on application findings too, not only framework ones')
             ->addOption('json', null, InputOption::VALUE_NONE, 'Output findings as JSON');
     }

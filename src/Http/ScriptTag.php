@@ -92,6 +92,74 @@ final class ScriptTag
      */
 
     /**
+     * Opening `<script …>` tags in SOURCE, quote-aware and still line-bound.
+     *
+     * The pattern this replaces had both halves of the problem the document
+     * scanner already solved. It stopped at a `>` inside a quoted value, so
+     * `<script data-x="a>b" nonce="ok">` handed the classifier only
+     * `data-x="a` — a correct, nonce-bearing tag reported as a finding. And it
+     * could not see a tag whose attributes wrap across lines, so one escaped
+     * the lint entirely.
+     *
+     * What it KEEPS is the newline bound, because source is not markup: a `>`
+     * reached by crossing a newline is an arrow operator two lines down, and
+     * reading it as the end of a tag reported a helper call as a bare script.
+     * The rule is therefore "quotes may not be crossed, and a newline OUTSIDE
+     * a quoted value ends the attempt" — which admits the wrapped tag and
+     * still refuses the arrow.
+     *
+     * @return list<array{start: int, attributes: string}>
+     */
+    public static function sourceTags(string $contents): array
+    {
+        $tags = [];
+        $length = strlen($contents);
+        $offset = 0;
+
+        while (($at = stripos($contents, '<script', $offset)) !== false) {
+            $offset = $at + 7;
+
+            $after = $contents[$at + 7] ?? '>';
+            if ($after !== '>' && $after !== '/' && trim($after) !== '') {
+                continue;
+            }
+
+            $quote = null;
+            for ($i = $at + 7; $i < $length; $i++) {
+                $char = $contents[$i];
+
+                if ($quote !== null) {
+                    if ($char === $quote) {
+                        $quote = null;
+                    }
+                    continue;
+                }
+
+                if ($char === '"' || $char === "'") {
+                    $quote = $char;
+                    continue;
+                }
+
+                if ($char === "\n") {
+                    // Outside a quoted value a newline ends the attempt: what
+                    // follows may be code, and a `>` down there is an arrow.
+                    // A tag wrapped INSIDE a quoted value is still read, which
+                    // is the case worth admitting.
+                    break;
+                }
+
+                if ($char === '>') {
+                    $tags[] = ['start' => $at, 'attributes' => substr($contents, $at + 7, $i - ($at + 7))];
+                    $offset = $i + 1;
+                    break;
+                }
+            }
+        }
+
+        return $tags;
+    }
+
+    /**
      * Every opening `<script …>` tag in a FINISHED document, in order.
      *
      * A regex is the wrong instrument here and the review that said so was

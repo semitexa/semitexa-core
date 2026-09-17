@@ -36,7 +36,45 @@ final class StampingIsAdditiveTest extends TestCase
         CspNonce::reset();
     }
 
-    /** @return iterable<string, array{string}> */
+    /**
+     * How many EXECUTABLE script tags each piece contributes — declared here
+     * rather than measured, so the assertion cannot agree with a scanner that
+     * sees nothing.
+     *
+     * Zero for a data block, and for markup written as TEXT: inside a comment,
+     * a textarea, a style, or a paragraph.
+     *
+     * @var array<string, int>
+     */
+    private const EXECUTABLE_TAGS = [
+        'plain' => 1,
+        'module' => 1,
+        'json with a tag inside' => 0,
+        'js string holding markup' => 1,
+        'quoted gt' => 1,
+        'unquoted url' => 1,
+        'unquoted url with slash' => 1,
+        'self closing' => 1,
+        'wrapped tag' => 1,
+        'uppercase' => 1,
+        'single quotes' => 0,
+        'data-nonce' => 1,
+        'real nonce' => 1,
+        'empty nonce' => 1,
+        'bare nonce' => 1,
+        'legacy type' => 1,
+        'type with charset' => 1,
+        'external' => 1,
+        'importmap' => 1,
+        'speculation' => 1,
+        'comment holding a tag' => 0,
+        'textarea holding a tag' => 0,
+        'style holding a tag' => 0,
+        'lookalike closer' => 1,
+        'prose' => 0,
+    ];
+
+    /** @return iterable<string, array{string, int}> */
     public static function documents(): iterable
     {
         $pieces = [
@@ -68,7 +106,10 @@ final class StampingIsAdditiveTest extends TestCase
         ];
 
         foreach ($pieces as $name => $piece) {
-            yield $name => ['<!doctype html><html><body>' . $piece . '</body></html>'];
+            yield $name => [
+                '<!doctype html><html><body>' . $piece . '</body></html>',
+                self::EXECUTABLE_TAGS[$name],
+            ];
         }
 
         // Ordered pairs, but only among the pieces where ORDER can matter:
@@ -96,6 +137,7 @@ final class StampingIsAdditiveTest extends TestCase
 
                 yield $first . ' + ' . $second => [
                     '<!doctype html><html><body>' . $pieces[$first] . "\n" . $pieces[$second] . '</body></html>',
+                    self::EXECUTABLE_TAGS[$first] + self::EXECUTABLE_TAGS[$second],
                 ];
             }
         }
@@ -103,7 +145,7 @@ final class StampingIsAdditiveTest extends TestCase
 
     #[Test]
     #[DataProvider('documents')]
-    public function stampingAddsNoncesAndChangesNothingElse(string $html): void
+    public function stampingAddsNoncesAndChangesNothingElse(string $html, int $expected): void
     {
         CspNonce::set('n0nc3');
 
@@ -118,7 +160,7 @@ final class StampingIsAdditiveTest extends TestCase
 
     #[Test]
     #[DataProvider('documents')]
-    public function everyExecutableTagEndsUpWithExactlyOneUsableNonce(string $html): void
+    public function everyExecutableTagEndsUpWithExactlyOneUsableNonce(string $html, int $expected): void
     {
         CspNonce::set('n0nc3');
 
@@ -142,9 +184,13 @@ final class StampingIsAdditiveTest extends TestCase
             );
         }
 
-        // A document with nothing executable in it is a real case worth
-        // stating rather than a test that quietly asserts nothing.
-        self::assertGreaterThanOrEqual(0, $executable);
+        // The EXPECTED count, declared by the fixture. `>= 0` was there only
+        // to keep PHPUnit from calling the case risky, and it asserted
+        // nothing — a scanner that found no tags at all passed it. Asking the
+        // scanner what it expects would be the same circle one step further
+        // out, so the number comes from the piece list instead, and an exact
+        // count also catches a document where only SOME tags were missed.
+        self::assertSame($expected, $executable, 'the document did not yield the executable tags it is built from');
     }
 
     /**

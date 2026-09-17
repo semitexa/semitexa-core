@@ -253,6 +253,39 @@ final class InlineScriptScannerTest extends TestCase
     }
 
     #[Test]
+    public function aQuotedAngleBracketDoesNotHideTheRestOfTheTag(): void
+    {
+        // The source pattern stopped at the `>` inside the value, so the
+        // classifier saw `data-x="a` and never reached the nonce — a correct,
+        // nonce-bearing tag reported as a finding. A lint that flags correct
+        // code is one people switch off.
+        self::assertSame([], $this->scan('<script data-x="a>b" nonce="ok">go()</script>'));
+        self::assertCount(1, $this->scan('<script data-x="a>b">go()</script>'));
+    }
+
+    #[Test]
+    public function aTagWrappedInsideAQuotedValueIsStillOneTag(): void
+    {
+        // A newline INSIDE a quoted value is part of the value, not the end of
+        // the attempt: the tag is still a tag.
+        $source = "<script data-json=\"{\n  \\\"a\\\": 1\n}\" nonce=\"ok\">go()</script>";
+
+        self::assertSame([], $this->scan($source));
+    }
+
+    #[Test]
+    public function aStampCallMayBeSpacedAndCommented(): void
+    {
+        // PHP allows whitespace and comments between the tokens. A prefilter
+        // pinned to the compact spelling rejected a formatted call before the
+        // tokens were consulted, and the file's correct emission was reported.
+        $source = "<?php\n\$html = '<script>go()</script>';\n"
+            . "return CspNonce /* the response's own */ :: stamp(\$html);";
+
+        self::assertSame([], $this->scan($source));
+    }
+
+    #[Test]
     public function aFileWithNoScriptsCostsNothing(): void
     {
         self::assertSame([], $this->scan('<?php return 1;'));

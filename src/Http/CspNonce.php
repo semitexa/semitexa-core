@@ -156,10 +156,12 @@ final class CspNonce
      */
     private static function stamped(string $tagText, string $attribute): string
     {
-        // An unusable nonce: `nonce=""`, `nonce=''`, or the bare attribute.
-        // The `=value` part is OPTIONAL — required, it missed the bare form,
-        // which then kept its place and took precedence over the real one.
-        $empty = '/(?<!\S)nonce(?:\s*=\s*(?:""|\'\'))?(?=[\s\/>])/i';
+        // An unusable nonce: `nonce=""`, `nonce='  '`, `nonce=` or the bare
+        // attribute. TRIMMED, to agree with hasNonceAttribute() — it calls a
+        // whitespace-only value unusable, and this did not, so such a tag got
+        // a SECOND nonce appended and the browser honoured the blank first one.
+        // The `=value` part is optional; required, it missed the bare form.
+        $empty = '/(?<!\S)nonce(?:\s*=\s*(?:"\s*"|\'\s*\'|(?=[\s\/>])))?(?=[\s\/>])/i';
         if (preg_match($empty, $tagText) === 1) {
             return (string) preg_replace($empty, ltrim($attribute), $tagText, 1);
         }
