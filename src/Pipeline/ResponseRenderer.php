@@ -124,7 +124,7 @@ final class ResponseRenderer
         }
 
         return match ($format) {
-            ResponseFormat::Json   => $this->renderJsonResponse($resDto, $request, $route, $handle, $context),
+            ResponseFormat::Json   => $this->renderJsonResponse($resDto, $request, $route, $handle, $context, $wantsPageDocumentJson),
             ResponseFormat::Layout => $this->renderLayout($resDto, $reqDto, $handle ?? '', $context, $rendererClass),
             ResponseFormat::Xml    => $this->renderXml($resDto, $context),
             ResponseFormat::Text   => $this->renderText($resDto, $context),
@@ -141,8 +141,9 @@ final class ResponseRenderer
         DiscoveredRoute $route,
         ?string $handle,
         array $context,
+        bool $wantsPageDocumentJson,
     ): object {
-        if ($handle && $this->wantsPageDocumentJson($request) && class_exists(\Semitexa\Ssr\Application\Service\Page\PageDocumentProjector::class)) {
+        if ($handle && $wantsPageDocumentJson && class_exists(\Semitexa\Ssr\Application\Service\Page\PageDocumentProjector::class)) {
             $context = \Semitexa\Ssr\Application\Service\Page\PageDocumentProjector::project(
                 $resDto,
                 $request,
@@ -440,6 +441,10 @@ final class ResponseRenderer
      * decides the response format a few lines below — asking it with
      * `text/html` declared first, so JSON has to be *preferred*, not merely
      * mentioned.
+     *
+     * Called once per render; the answer is passed down rather than recomputed,
+     * so the gate and the page-document projector cannot reach different
+     * conclusions about the same request.
      *
      * It used to be `str_contains($accept, 'application/json')`, which has no
      * notion of quality values, so it read two very different headers as a
