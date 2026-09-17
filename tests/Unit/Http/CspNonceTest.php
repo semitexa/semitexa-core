@@ -350,9 +350,43 @@ final class CspNonceTest extends TestCase
         // markup scanning inside the body and stamped the text there.
         CspNonce::set('abc123');
 
-        $html = CspNonce::stamp('<script type="application/json" />{"t":"<script>"}</script>');
+        $document = '<script type="application/json" />{"t":"<script>"}</script>';
 
-        self::assertStringNotContainsString('{"t":"<script nonce', $html, 'the body is text, not markup');
+        // Asserted EXACTLY, not by absence: the tag is a data block, so the
+        // whole document comes back byte for byte. The negative alone was
+        // satisfied by an empty string, so it could not fail if stamp()
+        // returned nothing at all for this input.
+        self::assertSame($document, CspNonce::stamp($document), 'a data block is returned unchanged, body included');
+    }
+
+    #[Test]
+    public function theWordNonceInsideAnotherAttributeIsNotANonceToReplace(): void
+    {
+        // The unusable-nonce branch searched the whole tag, so this matched
+        // the word inside someone else's VALUE and overwrote it: the document
+        // came back corrupted and the script still had no nonce, which is a
+        // stamp damaging the page it was meant to make safe.
+        CspNonce::set('abc123');
+
+        $html = CspNonce::stamp('<script data-desc="set the nonce here">go()</script>');
+
+        self::assertStringContainsString('data-desc="set the nonce here"', $html, 'the other value is untouched');
+        self::assertStringContainsString('nonce="abc123"', $html, 'and the tag really gets one');
+    }
+
+    #[Test]
+    public function anUnusableNonceIsStillReplacedWhenAnotherValueNamesIt(): void
+    {
+        // The ordering half of the same defect: with the word appearing first
+        // inside another value, the replacement landed there instead of on the
+        // real, empty nonce attribute.
+        CspNonce::set('abc123');
+
+        $html = CspNonce::stamp('<script data-desc="the nonce goes here" nonce="">go()</script>');
+
+        self::assertStringContainsString('data-desc="the nonce goes here"', $html);
+        self::assertStringContainsString('nonce="abc123"', $html);
+        self::assertStringNotContainsString('nonce=""', $html, 'the empty one is replaced, not left beside a new one');
     }
 
     #[Test]

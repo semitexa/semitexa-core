@@ -162,8 +162,24 @@ final class CspNonce
         // a SECOND nonce appended and the browser honoured the blank first one.
         // The `=value` part is optional; required, it missed the bare form.
         $empty = '/(?<!\S)nonce(?:\s*=\s*(?:"\s*"|\'\s*\'|(?=[\s\/>])))?(?=[\s\/>])/i';
-        if (preg_match($empty, $tagText) === 1) {
-            return (string) preg_replace($empty, ltrim($attribute), $tagText, 1);
+
+        // Searched in a copy whose quoted VALUES are blanked, and spliced back
+        // into the original at the offset found.
+        //
+        // Run against the raw tag, the pattern matched the word inside
+        // somebody else's value: `<script data-desc="set the nonce here">` had
+        // that word replaced with a nonce attribute, so the tag came back
+        // corrupted AND still without a usable nonce — a stamp that damages
+        // the document it was meant to make safe. Blanking preserves length,
+        // so the offset is the same in both copies.
+        $masked = (string) preg_replace_callback(
+            '/"[^"]*"|\'[^\']*\'/',
+            static fn (array $m): string => $m[0][0] . str_repeat(' ', strlen($m[0]) - 2) . $m[0][0],
+            $tagText
+        );
+
+        if (preg_match($empty, $masked, $found, PREG_OFFSET_CAPTURE) === 1) {
+            return substr_replace($tagText, ltrim($attribute), (int) $found[0][1], strlen((string) $found[0][0]));
         }
 
         // Just before the `>`, or before the `/` of a self-closing tag — and

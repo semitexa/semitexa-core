@@ -13,7 +13,11 @@ namespace Semitexa\Core\Http;
  */
 final class InlineScriptSweep
 {
-    private const EXTENSIONS = ['php', 'twig', 'html'];
+    // `htm` is here because the SCANNER treats it as markup, and a sweep that
+    // walks a narrower set than the scanner classifies drops files silently:
+    // a page.htm with a bare inline script was rejected before anything read
+    // it, and the lint reported a clean tree.
+    private const EXTENSIONS = ['php', 'twig', 'html', 'htm'];
 
     /** Directory names that never reach a browser. */
     private const SKIP_DIRS = ['vendor', 'node_modules', 'var', '.git', 'tests', 'Tests'];

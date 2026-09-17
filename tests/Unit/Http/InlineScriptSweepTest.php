@@ -139,6 +139,18 @@ final class InlineScriptSweepTest extends TestCase
 
     /** @return list<\Semitexa\Core\Http\InlineScriptFinding> */
     #[Test]
+    public function aMarkupExtensionTheScannerReadsIsAlsoOneTheSweepWalksInto(): void
+    {
+        // The two lists have to agree. The scanner classifies .htm as markup,
+        // the traversal did not list it, and the file was rejected before
+        // anything read it — so the lint reported a clean tree for a page
+        // carrying a bare inline script.
+        $this->write('packages/semitexa-thing/src/page.htm', '<script>go()</script>');
+
+        self::assertCount(1, $this->sweep());
+    }
+
+    #[Test]
     public function aCallerThatKnowsTheOwnerSaysSoInsteadOfLettingThePathGuess(): void
     {
         // The path rule reads `packages/semitexa-` and `vendor/semitexa/`,

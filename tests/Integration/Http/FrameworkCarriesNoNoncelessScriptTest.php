@@ -43,6 +43,12 @@ final class FrameworkCarriesNoNoncelessScriptTest extends TestCase
             ? [[$root . '/packages'], null]
             : [[$root . '/src'], InlineScriptOwner::Framework];
 
+        // The root is asserted to EXIST before the sweep. sweep() skips a root
+        // that is not there, so without this the final empty-array assertion
+        // passes having scanned nothing at all — the framework tree declared
+        // clean because it was never opened.
+        self::assertDirectoryExists($roots[0], 'the framework tree this test exists to guard must be there to scan');
+
         $findings = (new InlineScriptSweep())->sweep($root, $roots, $owner);
         $framework = array_values(array_filter(
             $findings,
