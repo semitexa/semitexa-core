@@ -480,13 +480,18 @@ final class ScriptTag
         // attribute and writes no nonce at all, so reading it as an ask
         // exempted an executable tag from the whole lint.
         //
-        // Matched as `name=` followed by a quoted run, NOT as "any quoted run".
+        // Matched as `name=` followed by a value, NOT as "any quoted run".
         // This reads SOURCE, where a quote is as likely to be PHP's as the
         // markup's: blanking every quoted span erased the framework's own
         // idiom — `'<script' . CspNonce::attribute() . '>'` — and reported the
         // one emission that is definitely correct.
+        //
+        // The value may be UNQUOTED — `<script id={{nonce}}>` — and reading
+        // only quoted runs left that interpolation in someone else's
+        // attribute looking like an ask, which exempted the tag. An unquoted
+        // value runs to the next space or `>`, which is HTML's own rule.
         $outsideValues = (string) preg_replace_callback(
-            '/[\w:.-]+\s*=\s*("[^"]*"|\'[^\']*\')/',
+            '/[\w:.-]+\s*=\s*("[^"]*"|\'[^\']*\'|[^\s>]+)/',
             static fn (array $m): string => str_repeat(' ', strlen($m[0])),
             $attributes
         );

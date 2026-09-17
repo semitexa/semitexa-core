@@ -138,6 +138,44 @@ final class InlineScriptSweepTest extends TestCase
     }
 
     /** @return list<\Semitexa\Core\Http\InlineScriptFinding> */
+    #[Test]
+    public function aCallerThatKnowsTheOwnerSaysSoInsteadOfLettingThePathGuess(): void
+    {
+        // The path rule reads `packages/semitexa-` and `vendor/semitexa/`,
+        // and outside those it cannot tell a framework tree from an
+        // application one: a package checked out ALONE has its code at
+        // `src/…`, exactly where a consumer's own code lives. Filed as
+        // Application it is reported and not blocking, so the framework's own
+        // emission stops failing anything — which is how the standalone
+        // checkout of every package repository was swept for nothing.
+        $this->write('src/Http/Page.php', "echo '<script>go()</script>';");
+
+        $guessed = (new InlineScriptSweep())->sweep($this->root, [$this->root . '/src']);
+        $told = (new InlineScriptSweep())->sweep($this->root, [$this->root . '/src'], InlineScriptOwner::Framework);
+
+        self::assertSame(InlineScriptOwner::Application, $guessed[0]->owner, 'a bare src/ is a consumer tree by default');
+        self::assertSame(InlineScriptOwner::Framework, $told[0]->owner);
+    }
+
+    #[Test]
+    public function anEligibleFileItCannotReadFailsTheSweep(): void
+    {
+        // A lint that suppresses the read error and moves on reports a clean
+        // tree for a file it never opened — the same silence the check exists
+        // to remove, now inside the check itself.
+        $this->write('packages/semitexa-thing/src/Page.php', "echo '<script>go()</script>';");
+        chmod($this->root . '/packages/semitexa-thing/src/Page.php', 0o000);
+
+        if (is_readable($this->root . '/packages/semitexa-thing/src/Page.php')) {
+            self::markTestSkipped('Running as a user that reads mode-000 files; the unreadable case cannot be staged.');
+        }
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessageMatches('/packages\/semitexa-thing\/src\/Page\.php/');
+
+        $this->sweep();
+    }
+
     private function sweep(): array
     {
         return (new InlineScriptSweep())->sweep($this->root, [$this->root . '/packages', $this->root . '/src']);

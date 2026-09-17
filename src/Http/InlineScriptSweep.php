@@ -23,11 +23,13 @@ final class InlineScriptSweep
     ) {}
 
     /**
-     * @param list<string> $roots absolute paths; missing ones are skipped
+     * @param list<string>        $roots absolute paths; missing ones are skipped
+     * @param InlineScriptOwner|null $owner who owns everything under these
+     *                                      roots, when the PATHS cannot say
      *
      * @return list<InlineScriptFinding>
      */
-    public function sweep(string $projectRoot, array $roots): array
+    public function sweep(string $projectRoot, array $roots, ?InlineScriptOwner $owner = null): array
     {
         $findings = [];
 
@@ -38,15 +40,28 @@ final class InlineScriptSweep
 
             foreach ($this->files($root) as $absolute) {
                 $contents = @file_get_contents($absolute);
+
+                // An eligible file that cannot be READ is not a clean file.
+                // Suppressing the failure and moving on is how this check
+                // reports a green tree for a directory it never opened — the
+                // exact silence it exists to remove. A permission or an I/O
+                // error is the operator's to fix, and it says which file.
+                if ($contents === false) {
+                    throw new \RuntimeException(sprintf(
+                        'lint:inline-script could not read %s. A file it cannot open is not a file it can clear.',
+                        $this->relativize($projectRoot, $absolute)
+                    ));
+                }
+
                 // Case-insensitively: the scanner's own rule is, and a prefilter
                 // stricter than the rule it guards drops files silently.
-                if ($contents === false || stripos($contents, '<script') === false) {
+                if (stripos($contents, '<script') === false) {
                     continue;
                 }
 
                 $relative = $this->relativize($projectRoot, $absolute);
 
-                foreach ($this->scanner->scan($relative, $contents, self::ownerOf($relative)) as $finding) {
+                foreach ($this->scanner->scan($relative, $contents, $owner ?? self::ownerOf($relative)) as $finding) {
                     $findings[] = $finding;
                 }
             }
@@ -79,6 +94,12 @@ final class InlineScriptSweep
     /**
      * A file the framework emits: no consumer can edit it, so it blocks.
      * Everything else belongs to the project reading the report.
+     *
+     * The rule is the PATH, and outside those two prefixes it cannot tell a
+     * framework tree from an application one — a package checked out on its
+     * own has its code at `src/Http/…`, which is also exactly where a
+     * consumer's own code lives. Guessing either way is wrong for the other,
+     * so a caller that KNOWS says so: {@see self::sweep()} takes an owner.
      */
     public static function ownerOf(string $relativePath): InlineScriptOwner
     {

@@ -99,7 +99,7 @@ final class InlineScriptScanner
 
         for ($i = 0; $i < $count; $i++) {
             $token = $tokens[$i];
-            if (!is_array($token) || $token[0] !== T_STRING || !str_ends_with($token[1], 'CspNonce')) {
+            if (!is_array($token) || !self::namesCspNonce($token)) {
                 continue;
             }
 
@@ -119,6 +119,31 @@ final class InlineScriptScanner
         return false;
     }
 
+    /**
+     * True when this token is the CspNonce class and not a lookalike.
+     *
+     * `str_ends_with($token, 'CspNonce')` was the test, and it accepts
+     * `FakeCspNonce::stamp()` — a test double, or any class a project happens
+     * to name that way, exempting a file from the whole lint while the real
+     * stamper is never called. The last segment must BE the class name.
+     *
+     * Qualified spellings are their own token types in PHP 8, so a file
+     * calling `\Semitexa\Core\Http\CspNonce::stamp()` was not matched at all
+     * and had its correct emission reported. Both are read here.
+     *
+     * @param array{0: int, 1: string, 2: int} $token
+     */
+    private static function namesCspNonce(array $token): bool
+    {
+        if (!in_array($token[0], [T_STRING, T_NAME_QUALIFIED, T_NAME_FULLY_QUALIFIED], true)) {
+            return false;
+        }
+
+        $segments = explode('\\', $token[1]);
+
+        return end($segments) === 'CspNonce';
+    }
+
     /** The next token that is neither whitespace nor a comment. */
     private static function nextCodeToken(array $tokens, int $from, int $count): int
     {
@@ -133,6 +158,38 @@ final class InlineScriptScanner
         }
 
         return $count;
+    }
+
+    /** Extensions whose whole content is markup, with no PHP around it. */
+    private const MARKUP_EXTENSIONS = ['twig', 'html', 'htm'];
+
+    /**
+     * Which tag scanner this file gets, and why the answer is not the same one.
+     *
+     * {@see ScriptTag::sourceTags()} stops at a newline outside a quoted value
+     * because in PHP a `>` one line down is an arrow operator, and reading it
+     * as the end of a tag reported a helper call as a bare script. That bound
+     * costs real tags: a template writing
+     *
+     *     <script
+     *         type="module">
+     *
+     * was not seen at all, which in a lint is the worse failure of the two.
+     *
+     * A template has no arrow operator, so it gets the document scanner, which
+     * spans lines and knows raw text. PHP keeps the line bound and keeps the
+     * gap with it: a multi-line tag inside a heredoc is still missed, and the
+     * honest reason is that nothing here can tell that `>` from the operator.
+     *
+     * @return list<array{start: int, attributes: string, ...}>
+     */
+    private static function tagsIn(string $relativePath, string $contents): array
+    {
+        $extension = strtolower(pathinfo($relativePath, PATHINFO_EXTENSION));
+
+        return in_array($extension, self::MARKUP_EXTENSIONS, true)
+            ? ScriptTag::documentTags($contents)
+            : ScriptTag::sourceTags($contents);
     }
 
     /**
@@ -156,7 +213,7 @@ final class InlineScriptScanner
 
         $findings = [];
 
-        foreach (ScriptTag::sourceTags($contents) as $found) {
+        foreach (self::tagsIn($relativePath, $contents) as $found) {
             $attributes = $found['attributes'];
             $offset = $found['start'];
             $tag = '<script' . $attributes . '>';

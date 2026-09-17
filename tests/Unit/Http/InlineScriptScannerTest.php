@@ -292,6 +292,54 @@ final class InlineScriptScannerTest extends TestCase
     }
 
     /** @return list<\Semitexa\Core\Http\InlineScriptFinding> */
+    #[Test]
+    public function aLookalikeStamperDoesNotExemptTheFile(): void
+    {
+        // The exemption used to be "a token ENDING in CspNonce", which a test
+        // double satisfies. A file that calls a fake stamps nothing, and the
+        // bare tag below reaches the browser exactly as if the check had
+        // never run.
+        $source = "<?php\n\$html = '<script>go()</script>';\nreturn FakeCspNonce::stamp(\$html);";
+
+        self::assertCount(1, $this->scan($source), 'FakeCspNonce is not the stamper');
+    }
+
+    #[Test]
+    public function aFullyQualifiedStamperExemptsTheFile(): void
+    {
+        // The other half of the same bug: a qualified name is its own token
+        // type in PHP 8, so a file calling the stamper by its full name was
+        // not matched at all and had its correct emission reported.
+        $source = "<?php\n\$html = '<script>go()</script>';\n"
+            . "return \\Semitexa\\Core\\Http\\CspNonce::stamp(\$html);";
+
+        self::assertSame([], $this->scan($source));
+    }
+
+    #[Test]
+    public function aTemplateTagSpanningLinesIsStillFound(): void
+    {
+        // Source keeps a newline bound because a `>` one line down is an
+        // arrow operator. A template has no arrow, and the bound cost it the
+        // finding entirely — silence, which for a lint is the worse failure.
+        $twig = "<div>\n<script\n    type=\"module\">\n  go();\n</script>\n</div>";
+
+        $findings = $this->scanner->scan('packages/semitexa-x/templates/page.html.twig', $twig, InlineScriptOwner::Framework);
+
+        self::assertCount(1, $findings, 'a wrapped opening tag in a template is an emission like any other');
+        self::assertSame(2, $findings[0]->line);
+    }
+
+    #[Test]
+    public function aNonceNamedInAnUnquotedAttributeIsNotAnAsk(): void
+    {
+        // `id={{nonce}}` writes an id, not a nonce. Only quoted values were
+        // blanked before the ask was read, so this interpolation looked like
+        // one and exempted an executable tag from the whole lint.
+        self::assertCount(1, $this->scan('<script id={{nonce}}>go()</script>'));
+        self::assertCount(1, $this->scan('<script data-x=nonce-bootstrap>go()</script>'));
+    }
+
     private function scan(string $contents): array
     {
         return $this->scanner->scan('packages/semitexa-x/src/Thing.php', $contents, InlineScriptOwner::Framework);

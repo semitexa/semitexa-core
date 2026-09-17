@@ -32,11 +32,18 @@ final class FrameworkCarriesNoNoncelessScriptTest extends TestCase
     {
         $root = ProjectRoot::get();
 
-        if (!is_dir($root . '/packages')) {
-            self::markTestSkipped('No packages/ tree here — this is a consumer install, not the workspace.');
-        }
+        // In the workspace the packages are under `packages/`, and the path
+        // rule files them as framework on its own. In a package checked out
+        // ALONE — which is how each repository is cloned and reviewed — the
+        // same code sits at `src/…`, indistinguishable by path from a
+        // consumer's own, so this test used to skip and the tree it exists to
+        // guard was never swept at all. The owner is passed instead of
+        // guessed: here it is known, and it is this repository.
+        [$roots, $owner] = is_dir($root . '/packages')
+            ? [[$root . '/packages'], null]
+            : [[$root . '/src'], InlineScriptOwner::Framework];
 
-        $findings = (new InlineScriptSweep())->sweep($root, [$root . '/packages']);
+        $findings = (new InlineScriptSweep())->sweep($root, $roots, $owner);
         $framework = array_values(array_filter(
             $findings,
             static fn ($f): bool => $f->owner === InlineScriptOwner::Framework
