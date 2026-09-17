@@ -1,0 +1,64 @@
+# The Semitexa PHPStan rules — one list, included by every gate that runs them.
+#
+# It lives beside the rules themselves (src/PHPStan/Rules/) so the list travels
+# with the code it names: a rule added to the package is a rule added here, in
+# the same commit and the same review.
+#
+# WHY THIS FILE EXISTS. The list used to be written out twice — in the
+# workspace's phpstan.neon and in semitexa-dev's phpstan-ai-verify-rules.neon —
+# with the documented convention that a new rule goes in both. MEASURED
+# 2026-09-17: of 24 rules, only 8 were in both. Five ran only on changed files
+# and never across the tree; eleven ran only on four packages and never on a
+# changed file elsewhere, so `ai:verify` on a handler outside core/orm/ssr/
+# tenancy never checked HandlerReturnsResponseRule — the rule most obviously
+# about handlers. Nothing failed when someone registered in one place, which is
+# why it drifted rather than being decided.
+#
+# Including a list is safe where copying a config is not: PHPStan resolves
+# `paths:` relative to the config file, which is why the workspace keeps real
+# copies of phpstan.neon rather than including one (see bin/phpstan-sync.sh).
+# `rules:` are class names. They resolve nowhere and can simply be shared.
+#
+# A rule that genuinely belongs to one gate only does NOT go here — it goes in
+# that gate's own config with the reason written next to it, so a deliberate
+# exception reads differently from an omission.
+rules:
+    # --- The DI channel: how a container-managed class receives its dependencies.
+    - Semitexa\Core\PHPStan\Rules\InjectionViaConstructorRule
+    - Semitexa\Core\PHPStan\Rules\InjectedPropertyVisibilityRule
+    - Semitexa\Core\PHPStan\Rules\InjectOnScalarTypeRule
+    - Semitexa\Core\PHPStan\Rules\UnannotatedServicePropertyRule
+    - Semitexa\Core\PHPStan\Rules\TraitInjectionRule
+    - Semitexa\Core\PHPStan\Rules\ExplicitOptionalDependencyRule
+    - Semitexa\Core\PHPStan\Rules\ConfigOnArrayTypeRule
+    - Semitexa\Core\PHPStan\Rules\ConfigOnClassTypeRule
+
+    # --- Reaching the container by the back door.
+    - Semitexa\Core\PHPStan\Rules\StaticContainerAccessRule
+    # Ships in semitexa/core (semitexa-core#108). The packages travel in
+    # lockstep everywhere this config runs (path repos in the workbench and
+    # release clone; consumer installs get exact pins via semitexa/ultimate),
+    # but when merging develop→master, land the core PR before this one.
+    - Semitexa\Core\PHPStan\Rules\StaticFacadeAccessRule
+
+    # --- Factories and contracts: what a module may own and hand out.
+    - Semitexa\Core\PHPStan\Rules\FactoryStringKeyRule
+    - Semitexa\Core\PHPStan\Rules\FactoryContractRule
+    - Semitexa\Core\PHPStan\Rules\FactoryClosedWorldRule
+    - Semitexa\Core\PHPStan\Rules\ModuleContractOwnershipRule
+
+    # --- The request pipeline: handlers, responses, events, discovery.
+    - Semitexa\Core\PHPStan\Rules\HandlerReturnsResponseRule
+    - Semitexa\Core\PHPStan\Rules\DirectResponseConstructionRule
+    - Semitexa\Core\PHPStan\Rules\EventListenerMissingExecutionRule
+    - Semitexa\Core\PHPStan\Rules\ExecutionScopedWithoutAttributeRule
+    - Semitexa\Core\PHPStan\Rules\DiscoveryCallSiteRule
+    - Semitexa\Core\PHPStan\Rules\WorkerServiceConnectionHandleRule
+
+    # --- Persistence: mappers and the models they map.
+    - Semitexa\Core\PHPStan\Rules\NoOpMapperRule
+    - Semitexa\Core\PHPStan\Rules\MapperTypeConversionRule
+    - Semitexa\Core\PHPStan\Rules\DomainModelEncapsulationRule
+
+    # --- House rules.
+    - Semitexa\Core\PHPStan\Rules\DisallowErrorLogRule
