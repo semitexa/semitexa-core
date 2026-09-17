@@ -175,6 +175,14 @@ final class InlineScriptScanner
      */
     private function isProse(string $contents, int $offset): bool
     {
+        // An HTML COMMENT is prose too, and the line-comment markers below do
+        // not see it: `<!-- <script>…</script> -->` in a template emits
+        // nothing, and reporting the note about a script is how a lint teaches
+        // people to ignore it.
+        if (self::isInsideHtmlComment($contents, $offset)) {
+            return true;
+        }
+
         $lineStart = strrpos(substr($contents, 0, $offset), "\n");
         $lineStart = $lineStart === false ? 0 : $lineStart + 1;
         $before = substr($contents, $lineStart, $offset - $lineStart);
@@ -190,6 +198,19 @@ final class InlineScriptScanner
         // <script> for the widget`. The space after the marker is what keeps
         // `https://…` and a `#fragment` out of this branch.
         return preg_match('~(^|\s)(//|\#|\{\#)\s~', $before) === 1;
+    }
+
+    /** True when `$offset` falls between an unclosed `<!--` and its `-->`. */
+    private static function isInsideHtmlComment(string $contents, int $offset): bool
+    {
+        $open = strrpos(substr($contents, 0, $offset), '<!--');
+        if ($open === false) {
+            return false;
+        }
+
+        $close = strpos($contents, '-->', $open);
+
+        return $close === false || $close > $offset;
     }
 
     private function snippet(string $tag): string

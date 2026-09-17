@@ -24,8 +24,12 @@ final class ScriptTag
     /**
      * Source scanning. Bounded to one line: a `>` reached by crossing a
      * newline is an arrow operator, not the end of a tag.
+     *
+     * The name ends where an element name ends — whitespace, `/` or `>`. `\b`
+     * matches before a hyphen too, so `<script-widget>` was read as a script
+     * and a valid custom element failed the lint.
      */
-    public const PATTERN = '/<script\b([^>\n]*)>/i';
+    public const PATTERN = '/<script(?=[\s\/>])([^>\n]*)>/i';
 
     /**
      * Elements whose CONTENT is text rather than markup. A `<script>` written
