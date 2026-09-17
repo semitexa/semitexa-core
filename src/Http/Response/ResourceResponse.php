@@ -49,6 +49,22 @@ class ResourceResponse implements ResourceInterface, LayoutRenderableInterface
         return $this;
     }
 
+    /**
+     * The headers set so far.
+     *
+     * A response that can set a header should be able to read one back: the
+     * alternative is every caller keeping its own shadow copy of what it
+     * already told this object, and a shadow copy is a thing that drifts.
+     * Added when the SSR shell needed to APPEND to Vary rather than overwrite
+     * whatever a page had already declared.
+     *
+     * @return array<string, string>
+     */
+    public function getHeaders(): array
+    {
+        return $this->headers;
+    }
+
     private bool $alreadySent = false;
 
     /**
