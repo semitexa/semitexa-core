@@ -97,13 +97,15 @@ final class ResponseRenderer
         $rendererClass = method_exists($resDto, 'getRendererClass') ? $resDto->getRendererClass() : null;
         $rendererClass = is_string($rendererClass) && $rendererClass !== '' ? $rendererClass : null;
 
-        if ($handle && $this->wantsPageDocumentJson($request)) {
+        $wantsPageDocumentJson = $handle !== null && $this->wantsPageDocumentJson($request);
+
+        if ($wantsPageDocumentJson) {
             $format = ResponseFormat::Json;
         }
 
         // Negotiate format when produces is set on the route and we have a render handle
         $produces = $route->produces;
-        if ($handle && !$this->wantsPageDocumentJson($request) && $produces !== null && $produces !== []) {
+        if ($handle && !$wantsPageDocumentJson && $produces !== null && $produces !== []) {
             try {
                 $defaultKey = $format !== null ? self::formatEnumToKey($format) : 'json';
                 $negotiatedKey = ContentNegotiator::negotiateResponseFormat($produces, $request, $defaultKey);
@@ -122,7 +124,7 @@ final class ResponseRenderer
         }
 
         return match ($format) {
-            ResponseFormat::Json   => $this->renderJsonResponse($resDto, $request, $route, $handle, $context),
+            ResponseFormat::Json   => $this->renderJsonResponse($resDto, $request, $route, $handle, $context, $wantsPageDocumentJson),
             ResponseFormat::Layout => $this->renderLayout($resDto, $reqDto, $handle ?? '', $context, $rendererClass),
             ResponseFormat::Xml    => $this->renderXml($resDto, $context),
             ResponseFormat::Text   => $this->renderText($resDto, $context),
@@ -139,8 +141,9 @@ final class ResponseRenderer
         DiscoveredRoute $route,
         ?string $handle,
         array $context,
+        bool $wantsPageDocumentJson,
     ): object {
-        if ($handle && $this->wantsPageDocumentJson($request) && class_exists(\Semitexa\Ssr\Application\Service\Page\PageDocumentProjector::class)) {
+        if ($handle && $wantsPageDocumentJson && class_exists(\Semitexa\Ssr\Application\Service\Page\PageDocumentProjector::class)) {
             $context = \Semitexa\Ssr\Application\Service\Page\PageDocumentProjector::project(
                 $resDto,
                 $request,
@@ -430,13 +433,48 @@ final class ResponseRenderer
         return array_values($alternates);
     }
 
+    /**
+     * Does this client positively want the page as a JSON document?
+     *
+     * `?_format=json` is an explicit request and always wins. Otherwise the
+     * question is a negotiation, and it is answered by the same negotiator that
+     * decides the response format a few lines below — asking it with
+     * `text/html` declared first, so JSON has to be *preferred*, not merely
+     * mentioned.
+     *
+     * Called once per render; the answer is passed down rather than recomputed,
+     * so the gate and the page-document projector cannot reach different
+     * conclusions about the same request.
+     *
+     * It used to be `str_contains($accept, 'application/json')`, which has no
+     * notion of quality values, so it read two very different headers as a
+     * request for JSON:
+     *
+     *   Accept: text/html,application/json;q=0.9   → the client prefers HTML
+     *   Accept: application/json;q=0               → the client REFUSES JSON
+     *
+     * Both were served page-document JSON, and because this gate also
+     * short-circuits the negotiation block, the route's own `produces` list
+     * never got a say. A missing Accept, an empty one and `*\/*` still mean
+     * "not specifically JSON" exactly as before.
+     */
     private function wantsPageDocumentJson(Request $request): bool
     {
         if ($request->getQuery('_format') === 'json') {
             return true;
         }
 
-        return str_contains(strtolower($request->getHeader('Accept') ?? ''), 'application/json');
+        try {
+            return ContentNegotiator::negotiateResponseFormat(
+                ['text/html', 'application/json'],
+                $request,
+                'html',
+            ) === 'json';
+        } catch (NegotiationFailedException) {
+            // Nothing the client will accept is html or json — so it is not
+            // asking for a page document either.
+            return false;
+        }
     }
 
     /**
