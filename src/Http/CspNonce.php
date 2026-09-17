@@ -37,7 +37,17 @@ final class CspNonce
 {
     private const KEY = 'core.csp_nonce';
 
-    /** @var (callable(): string)|null */
+    /**
+     * A worker-wide provider. It is EXPECTED to answer a string, and nothing
+     * makes it: {@see self::register()} takes `?callable`, which cannot carry
+     * a return type into the runtime. Declared as the narrow
+     * `(callable(): string)|null`, static analysis read the guard in
+     * {@see self::value()} as dead code — and removing it would turn a
+     * consumer's mistake into a TypeError on the CSP path rather than the
+     * empty nonce the guard yields. The annotation says what is true.
+     *
+     * @var callable|null
+     */
     private static $provider = null;
 
     /**
@@ -208,9 +218,13 @@ final class CspNonce
             return false;
         }
 
-        $before = substr($trimmed, -2, 1);
+        // `<script/>` is the whole tag minus the name: `$trimmed` is then just
+        // "/", and substr() answers '' rather than a character. Every other
+        // case has one, and only whitespace or a closing quote before the
+        // slash means the slash is punctuation rather than part of a value.
+        $before = strlen($trimmed) > 1 ? $trimmed[-2] : '';
 
-        return $before === '' || $before === false || trim($before) === '' || $before === '"' || $before === "'";
+        return $before === '' || trim($before) === '' || $before === '"' || $before === "'";
     }
 
     /** Test seam: drop both the provider and this coroutine's value. */

@@ -45,12 +45,13 @@ final class InlineScriptScanner
      * A file that stamps its own finished document. Threading a nonce into a
      * nowdoc means either interpolating a page full of `$` or writing the
      * attribute by hand in a dozen places; `CspNonce::stamp()` does it to the
-     * output instead. Only a real CALL counts — see {@see self::callsStamp()}.
+     * output instead. Only a real CALL counts — see {@see self::callsStamp()},
+     * which matches on TOKENS, so the call may be spelled across lines or
+     * carry a comment inside it. There is deliberately no `CspNonce::stamp(`
+     * constant to compare against: a compact spelling is not the rule, and a
+     * constant nothing reads is a claim about the code that the code does not
+     * make.
      */
-    private const STAMPS_ITSELF = 'CspNonce::stamp(';
-
-    /* STAMPS_ITSELF is documentation now: callsStamp() matches on tokens, so
-       the call may be spelled across lines or carry a comment inside it. */
 
     /**
      * An acknowledged exemption. Costs a written reason, which is the point:
@@ -144,7 +145,11 @@ final class InlineScriptScanner
         return end($segments) === 'CspNonce';
     }
 
-    /** The next token that is neither whitespace nor a comment. */
+    /**
+     * The next token that is neither whitespace nor a comment.
+     *
+     * @param list<array{0: int, 1: string, 2: int}|string> $tokens as token_get_all() returns them
+     */
     private static function nextCodeToken(array $tokens, int $from, int $count): int
     {
         for ($j = $from; $j < $count; $j++) {
