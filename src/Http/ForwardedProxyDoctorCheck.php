@@ -82,7 +82,7 @@ final class ForwardedProxyDoctorCheck implements DoctorCheckInterface
                 ),
                 'Set SESSION_COOKIE_SECURE=always for an HTTPS deployment, or auto to let the request '
                 . 'decide. The disabling values are for a deployment that really is plain HTTP. Confirm '
-                . 'with curl -sS -D - https://your-host/ | grep -i set-cookie — every line should say Secure.',
+                . 'with curl -sS -D - -o /dev/null https://your-host/ | grep -i \'^set-cookie:\' — every line should say Secure, and no output at all means no cookie was set, which is not a pass.',
             );
         }
 
@@ -103,7 +103,7 @@ final class ForwardedProxyDoctorCheck implements DoctorCheckInterface
                 . 'http, and the session and XSRF cookies go out WITHOUT Secure.',
                 'Set TRUSTED_PROXIES to the proxy address or CIDR (e.g. TRUSTED_PROXIES=172.18.0.0/16), '
                 . 'or, if every route to this app is HTTPS, SESSION_COOKIE_SECURE=always. Confirm with '
-                . 'curl -sS -D - https://your-host/ | grep -i set-cookie — every line should say Secure.',
+                . 'curl -sS -D - -o /dev/null https://your-host/ | grep -i \'^set-cookie:\' — every line should say Secure, and no output at all means no cookie was set, which is not a pass.',
             );
         }
 
