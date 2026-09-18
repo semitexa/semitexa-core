@@ -13,6 +13,7 @@ use Semitexa\Core\Lifecycle\WorkerDrainSignal;
 use Semitexa\Core\Log\StaticLoggerBridge;
 use Semitexa\Core\ErrorHandler;
 use Semitexa\Core\Http\HttpStatus;
+use Semitexa\Core\Http\StrictTransportSecurity;
 use Semitexa\Core\Http\SwooleResponseEmitter;
 use Semitexa\Core\Console\Runtime\RuntimePidfile;
 use Semitexa\Core\Request;
@@ -117,6 +118,10 @@ class SwooleBootstrap
         $drainReporter = new WorkerExitDrainReporter();
 
         $corsHandler = new CorsHandler($env);
+        // Read once at boot, not per request: it is a deployment setting, and
+        // resolving it on every response would put an env lookup in the hot path
+        // for a string that cannot change without a restart.
+        $hstsHeader = StrictTransportSecurity::headerValue();
         $healthHandler = new HealthCheckHandler();
         $metricsHandler = new MetricsHandler($server);
         /** @var ModuleRegistry $moduleRegistry */
@@ -344,7 +349,7 @@ class SwooleBootstrap
 
         $emitter = new SwooleResponseEmitter();
 
-        $server->on(SwooleEvent::Request->value, function (SwooleRequest $request, SwooleResponse $response) use ($emitter, $corsHandler, $healthHandler, $metricsHandler, $staticAssetHandler, $server) {
+        $server->on(SwooleEvent::Request->value, function (SwooleRequest $request, SwooleResponse $response) use ($emitter, $corsHandler, $healthHandler, $metricsHandler, $staticAssetHandler, $server, $hstsHeader) {
             $sent = false;
             $ensureResponseSent = function () use ($response, &$sent): void {
                 if ($sent) {
@@ -358,6 +363,14 @@ class SwooleBootstrap
                 } catch (\Throwable) {
                 }
             };
+
+            // Before every early return below, because HSTS has to be on the
+            // static asset and the health check too — a browser that learns the
+            // policy from one response applies it to the host, and a path that
+            // omits it is a path that leaves the first plaintext request open.
+            if ($hstsHeader !== null) {
+                $response->header(StrictTransportSecurity::HEADER, $hstsHeader);
+            }
 
             if ($healthHandler->handle($request, $response)) {
                 return;
