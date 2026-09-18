@@ -8,9 +8,12 @@ use PhpParser\Node;
 use PhpParser\Node\Arg;
 use PhpParser\Node\Expr;
 use PhpParser\Node\Expr\BinaryOp\Concat;
+use PhpParser\Node\Expr\CallLike;
 use PhpParser\Node\Expr\ClassConstFetch;
 use PhpParser\Node\Expr\ConstFetch;
 use PhpParser\Node\Expr\MethodCall;
+use PhpParser\Node\Expr\NullsafeMethodCall;
+use PhpParser\Node\Expr\StaticCall;
 use PhpParser\Node\Identifier;
 use PhpParser\Node\Scalar\String_;
 use PHPStan\Analyser\Scope;
@@ -54,7 +57,29 @@ use PHPStan\Rules\RuleErrorBuilder;
  * {@see \Semitexa\Dev\Application\Service\Ai\Verify\Phpstan\AcceptedViolations}
  * is where a call that has been looked at says so, with its reason.
  *
- * @implements Rule<MethodCall>
+ * ## Every spelling of the call
+ *
+ * `->whereRaw()`, `?->whereRaw()` and `Foo::whereRaw()` are three different
+ * parser nodes and one contract. A rule registered on `MethodCall` alone cannot
+ * see the nullsafe one — which is exactly the loosely-typed repository code the
+ * rule is written for — so it is registered on their common parent and picks
+ * the three call shapes out of it.
+ *
+ * A NULLSAFE call is analysed in more than one scope, so the same
+ * `?->whereRaw()` reaches this rule twice and was reported twice — noise for a
+ * reader, and two diagnostics against an allowance written for one. Reports are
+ * therefore deduplicated by source position, and only when the node carries one:
+ * a hand-built node in a unit test has no position and must never be silenced by
+ * the previous test's.
+ *
+ * A first-class callable (`$q->whereRaw(...)`) passes no fragment at all, and
+ * asking it for its arguments is fatal: PhpParser's `CallLike::getArgs()`
+ * asserts `!isFirstClassCallable()`, so with assertions on the rule dies with
+ * an AssertionError (PHPStan reports an internal error and the file stops being
+ * checked at all) and with them off it reads a VariadicPlaceholder as an Arg.
+ * A security rule that crashes is a security rule that is turned off.
+ *
+ * @implements Rule<CallLike>
  */
 final class BuiltSqlFragmentRule implements Rule
 {
@@ -64,18 +89,27 @@ final class BuiltSqlFragmentRule implements Rule
     private const ARGUMENT_POSITION = 0;
     private const ARGUMENT_NAME = 'sql';
 
+    /** @var array<string, true> file:offset of every call already reported */
+    private array $reported = [];
+
     public function getNodeType(): string
     {
-        return MethodCall::class;
+        return CallLike::class;
     }
 
     public function processNode(Node $node, Scope $scope): array
     {
-        if (!$node instanceof MethodCall) {
+        if (!$node instanceof MethodCall && !$node instanceof NullsafeMethodCall && !$node instanceof StaticCall) {
             return [];
         }
 
         if (!$node->name instanceof Identifier || strcasecmp($node->name->name, self::METHOD) !== 0) {
+            return [];
+        }
+
+        // `$q->whereRaw(...)` — a reference to the method, not a call of it.
+        // There is no fragment to judge, and getArgs() is fatal here.
+        if ($node->isFirstClassCallable()) {
             return [];
         }
 
@@ -87,6 +121,10 @@ final class BuiltSqlFragmentRule implements Rule
         }
 
         if (self::isWritten($fragment)) {
+            return [];
+        }
+
+        if ($this->alreadyReported($node, $scope)) {
             return [];
         }
 
@@ -103,6 +141,30 @@ final class BuiltSqlFragmentRule implements Rule
                 ->identifier('semitexa.builtSqlFragment')
                 ->build(),
         ];
+    }
+
+    /**
+     * Has this exact call already been reported in this run?
+     *
+     * PHPStan walks a nullsafe call in more than one scope, so the node arrives
+     * here twice. Position is the identity; a node without one — built by hand
+     * in a test — is always reported, or one test would silence the next.
+     */
+    private function alreadyReported(CallLike $node, Scope $scope): bool
+    {
+        $offset = $node->getAttribute('startFilePos');
+        if (!is_int($offset)) {
+            return false;
+        }
+
+        $key = $scope->getFile() . ':' . $offset;
+        if (isset($this->reported[$key])) {
+            return true;
+        }
+
+        $this->reported[$key] = true;
+
+        return false;
     }
 
     /**

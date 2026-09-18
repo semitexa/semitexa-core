@@ -337,6 +337,50 @@ final class JsonProfileKeepsItsOwnBodyTest extends TestCase
         self::assertSame('application/json', $rendered->getHeaders()['Content-Type'] ?? null);
     }
 
+    /**
+     * The renderer's own bookkeeping stays out of an API body.
+     *
+     * `__page_document_html_iri` and its two neighbours are added to every
+     * handle-bearing context, for the page document and for the template that
+     * renders <link rel="alternate">. The projector drops every `__` key on its
+     * way out; a context encoded without the projector has to drop them too.
+     *
+     * Stripped at encoding rather than never added, deliberately: the first cut
+     * skipped adding them for a JSON-profile route, which also took them off
+     * the HTML path of a route that serves BOTH — and those three demo pages
+     * would have quietly lost their alternates.
+     */
+    #[Test]
+    public function the_renderers_own_context_keys_do_not_reach_an_api_body(): void
+    {
+        $resource = new class {
+            private string $content = '';
+            /** @var array<string, string> */
+            private array $headers = [];
+
+            public function getRenderHandle(): string { return 'feed'; }
+            /** @return array<string, mixed> */
+            public function getRenderContext(): array { return ['data' => [1]]; }
+            public function getContent(): string { return $this->content; }
+            public function setContent(string $content): void { $this->content = $content; }
+            public function setHeader(string $name, string $value): void { $this->headers[$name] = $value; }
+            /** @return array<string, string> */
+            public function getHeaders(): array { return $this->headers; }
+        };
+
+        $rendered = (new ResponseRenderer())->render(
+            $resource,
+            null,
+            $this->get('application/json'),
+            $this->route(RenderProfile::Json),
+        );
+
+        $body = (string) $rendered->getContent();
+
+        self::assertSame('{"data":[1]}', $body);
+        self::assertStringNotContainsString('__page', $body);
+    }
+
     #[Test]
     public function the_declaration_check_reads_both_shapes_and_nothing_else(): void
     {

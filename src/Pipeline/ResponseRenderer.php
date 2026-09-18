@@ -78,10 +78,7 @@ final class ResponseRenderer
         /** @var array<string, mixed> $context */
         $context = is_array($context) ? $context : [];
 
-        // These three keys exist for the PAGE DOCUMENT and the template that
-        // renders alternates; a route that declares its own JSON never builds
-        // one, and adding them there only leaks `__page_*` into an API body.
-        if ($handle && !self::declaresJsonProfile($route)) {
+        if ($handle) {
             $context = $this->withPageDocumentContext($context, $request, $route);
             if (method_exists($resDto, 'setRenderContext')) {
                 $resDto->setRenderContext($context);
@@ -210,7 +207,14 @@ final class ResponseRenderer
         $existing = $keepExistingBody && method_exists($resDto, 'getContent') ? $resDto->getContent() : '';
 
         if (!is_string($existing) || $existing === '') {
-            $json = json_encode($context, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+            // `__page_document_html_iri` and its two neighbours are put on every
+            // handle-bearing context for the page document and for the template
+            // that renders <link rel="alternate">. PageDocumentProjector drops
+            // every `__` key on its way out; a context encoded WITHOUT the
+            // projector has to drop them too, or an API body carries the
+            // renderer's own bookkeeping. Stripped here rather than never added,
+            // so the HTML path keeps exactly the context it always had.
+            $json = json_encode(self::withoutInternalKeys($context), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
             if (method_exists($resDto, 'setContent')) {
                 $resDto->setContent($json ?: '');
             }
@@ -493,30 +497,25 @@ final class ResponseRenderer
     }
 
     /**
-     * Does this client positively want the page as a JSON document?
+     * The context without the renderer's own bookkeeping.
      *
-     * `?_format=json` is an explicit request and always wins. Otherwise the
-     * question is a negotiation, and it is answered by the same negotiator that
-     * decides the response format a few lines below — asking it with
-     * `text/html` declared first, so JSON has to be *preferred*, not merely
-     * mentioned.
+     * Same rule PageDocumentProjector::sanitizeContext() applies: a key that
+     * starts with `__` belongs to the framework, not to the response.
      *
-     * Called once per render; the answer is passed down rather than recomputed,
-     * so the gate and the page-document projector cannot reach different
-     * conclusions about the same request.
-     *
-     * It used to be `str_contains($accept, 'application/json')`, which has no
-     * notion of quality values, so it read two very different headers as a
-     * request for JSON:
-     *
-     *   Accept: text/html,application/json;q=0.9   → the client prefers HTML
-     *   Accept: application/json;q=0               → the client REFUSES JSON
-     *
-     * Both were served page-document JSON, and because this gate also
-     * short-circuits the negotiation block, the route's own `produces` list
-     * never got a say. A missing Accept, an empty one and `*\/*` still mean
-     * "not specifically JSON" exactly as before.
+     * @param array<string, mixed> $context
+     * @return array<string, mixed>
      */
+    private static function withoutInternalKeys(array $context): array
+    {
+        foreach (array_keys($context) as $key) {
+            if (str_starts_with((string) $key, '__')) {
+                unset($context[$key]);
+            }
+        }
+
+        return $context;
+    }
+
     /**
      * Does this route declare that JSON is one of ITS OWN representations?
      *
@@ -550,6 +549,31 @@ final class ResponseRenderer
         return false;
     }
 
+    /**
+     * Does this client positively want the page as a JSON document?
+     *
+     * `?_format=json` is an explicit request and always wins. Otherwise the
+     * question is a negotiation, and it is answered by the same negotiator that
+     * decides the response format a few lines below — asking it with
+     * `text/html` declared first, so JSON has to be *preferred*, not merely
+     * mentioned.
+     *
+     * Called once per render; the answer is passed down rather than recomputed,
+     * so the gate and the page-document projector cannot reach different
+     * conclusions about the same request.
+     *
+     * It used to be `str_contains($accept, 'application/json')`, which has no
+     * notion of quality values, so it read two very different headers as a
+     * request for JSON:
+     *
+     *   Accept: text/html,application/json;q=0.9   → the client prefers HTML
+     *   Accept: application/json;q=0               → the client REFUSES JSON
+     *
+     * Both were served page-document JSON, and because this gate also
+     * short-circuits the negotiation block, the route's own `produces` list
+     * never got a say. A missing Accept, an empty one and `*\/*` still mean
+     * "not specifically JSON" exactly as before.
+     */
     private function wantsPageDocumentJson(Request $request): bool
     {
         if ($request->getQuery('_format') === 'json') {

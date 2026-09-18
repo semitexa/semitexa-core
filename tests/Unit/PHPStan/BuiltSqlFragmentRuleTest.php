@@ -10,6 +10,8 @@ use PhpParser\Node\Expr\BinaryOp\Concat;
 use PhpParser\Node\Expr\ClassConstFetch;
 use PhpParser\Node\Expr\FuncCall;
 use PhpParser\Node\Expr\MethodCall;
+use PhpParser\Node\Expr\NullsafeMethodCall;
+use PhpParser\Node\Expr\StaticCall;
 use PhpParser\Node\Expr\PropertyFetch;
 use PhpParser\Node\Expr\Variable;
 use PhpParser\Node\Identifier;
@@ -17,6 +19,7 @@ use PhpParser\Node\InterpolatedStringPart;
 use PhpParser\Node\Name;
 use PhpParser\Node\Scalar\InterpolatedString;
 use PhpParser\Node\Scalar\String_;
+use PhpParser\Node\VariadicPlaceholder;
 use PHPStan\Analyser\Scope;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
@@ -186,6 +189,50 @@ final class BuiltSqlFragmentRuleTest extends TestCase
     public function a_call_with_no_fragment_says_nothing(): void
     {
         self::assertFalse($this->fire([]));
+    }
+
+    /**
+     * `->whereRaw()`, `?->whereRaw()` and `Foo::whereRaw()` are three parser
+     * nodes and one contract. Registered on MethodCall alone the rule could not
+     * see the nullsafe one — the shape most likely to appear in exactly the
+     * loosely-typed repository code it is written for.
+     */
+    #[Test]
+    public function a_nullsafe_and_a_static_call_are_the_same_contract(): void
+    {
+        $built = new Concat(new String_('`name` = '), new Variable('input'));
+        $rule = new BuiltSqlFragmentRule();
+        $scope = $this->createStub(Scope::class);
+
+        $nullsafe = new NullsafeMethodCall(new Variable('q'), new Identifier('whereRaw'), [$this->arg($built)]);
+        $static = new StaticCall(new Name('Builder'), new Identifier('whereRaw'), [$this->arg($built)]);
+
+        self::assertNotSame([], $rule->processNode($nullsafe, $scope), 'a nullsafe call is invisible to this rule');
+        self::assertNotSame([], $rule->processNode($static, $scope), 'a static call is invisible to this rule');
+
+        $writtenNullsafe = new NullsafeMethodCall(
+            new Variable('q'),
+            new Identifier('whereRaw'),
+            [$this->arg(new String_('`name` = ?')), $this->bindings()],
+        );
+
+        self::assertSame([], $rule->processNode($writtenNullsafe, $scope), 'and a written fragment is still silent');
+    }
+
+    /**
+     * `$q->whereRaw(...)` is a reference to the method, not a call of it, and
+     * asking it for its arguments is FATAL: PhpParser asserts
+     * `!isFirstClassCallable()` in getArgs(), so with assertions on the rule
+     * dies with an AssertionError — PHPStan reports an internal error and stops
+     * checking the file, which is the security rule turning itself off.
+     */
+    #[Test]
+    public function a_first_class_callable_is_not_a_fragment_and_does_not_crash(): void
+    {
+        $callable = new MethodCall(new Variable('q'), new Identifier('whereRaw'), [new VariadicPlaceholder()]);
+
+        self::assertTrue($callable->isFirstClassCallable(), 'the fixture must be the shape under test');
+        self::assertSame([], (new BuiltSqlFragmentRule())->processNode($callable, $this->createStub(Scope::class)));
     }
 
     #[Test]
