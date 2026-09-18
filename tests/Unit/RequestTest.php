@@ -98,6 +98,69 @@ final class RequestTest extends TestCase
         $this->assertSame('http', $this->forwardedHttps('172.18.0.3')->getScheme());
     }
 
+    /**
+     * The refusal that used to be silent.
+     *
+     * Dropping an untrusted X-Forwarded-Proto is right. Dropping it without
+     * telling anyone is how semitexa.com served Secure-less cookies over HTTPS
+     * for months after core#102 documented the exact failure mode.
+     */
+    public function testRefusedForwardedProtoNamesTheSchemeThatWasNotBelieved(): void
+    {
+        $this->assertSame('https', $this->forwardedHttps('172.18.0.3')->refusedForwardedProto());
+    }
+
+    public function testNothingIsRefusedWhenThePeerIsTrusted(): void
+    {
+        putenv('TRUSTED_PROXIES=172.18.0.0/16');
+
+        $this->assertNull($this->forwardedHttps('172.18.0.3')->refusedForwardedProto());
+    }
+
+    public function testNothingIsRefusedWhenLoopbackSpeaks(): void
+    {
+        $this->assertNull($this->forwardedHttps('127.0.0.1')->refusedForwardedProto());
+    }
+
+    public function testNothingIsRefusedWhenNoProxySpoke(): void
+    {
+        $bare = new Request('GET', '/', [], [], [], ['REMOTE_ADDR' => '172.18.0.3'], []);
+
+        $this->assertNull($bare->refusedForwardedProto());
+    }
+
+    public function testAGarbageForwardedProtoIsNotReportedAsARefusedScheme(): void
+    {
+        // Only http/https are schemes this can be about; anything else is noise
+        // and reporting it would send an operator after the wrong setting.
+        $weird = new Request(
+            'GET',
+            '/',
+            ['X-Forwarded-Proto' => 'gopher'],
+            [],
+            [],
+            ['REMOTE_ADDR' => '172.18.0.3'],
+            [],
+        );
+
+        $this->assertNull($weird->refusedForwardedProto());
+    }
+
+    public function testTheFirstHopWinsInAForwardedProtoList(): void
+    {
+        $chained = new Request(
+            'GET',
+            '/',
+            ['X-Forwarded-Proto' => 'https, http'],
+            [],
+            [],
+            ['REMOTE_ADDR' => '172.18.0.3'],
+            [],
+        );
+
+        $this->assertSame('https', $chained->refusedForwardedProto());
+    }
+
     public function testPartialByteCidrMaskIsExact(): void
     {
         // /25 ends mid-octet: the mask branch itself is what separates

@@ -13,6 +13,7 @@ use Semitexa\Locale\Context\LocaleContextStore;
 use Semitexa\Core\Http\Response\ResponseFormat;
 use Semitexa\Core\Http\Exception\NegotiationFailedException;
 use Semitexa\Core\Discovery\DiscoveredRoute;
+use Semitexa\Core\Resource\RenderProfile;
 
 final class ResponseRenderer
 {
@@ -97,9 +98,38 @@ final class ResponseRenderer
         $rendererClass = method_exists($resDto, 'getRendererClass') ? $resDto->getRendererClass() : null;
         $rendererClass = is_string($rendererClass) && $rendererClass !== '' ? $rendererClass : null;
 
-        $wantsPageDocumentJson = $handle !== null && $this->wantsPageDocumentJson($request);
+        // A page document is a projection OF A PAGE. A route that declares a
+        // JSON render profile has already said what its JSON is — its own
+        // response class renders it — so projecting it is not a second view of
+        // the same thing, it is a substitution: buildMainDocument() fills
+        // `content.data` from the RENDER CONTEXT, which a JSON resource does
+        // not use, and renderJson() then overwrites the body the resource
+        // produced.
+        //
+        // MEASURED 2026-09-18 on /playground/customers, the reference
+        // multi-profile route in this workspace:
+        //   Accept: application/ld+json  -> the real collection (Acme Corp, …)
+        //   Accept: application/json     -> {"page":…,"content":{"data":[]}}
+        // The same Accept the endpoint is documented with was the one that
+        // could not return its own data. The gate never asked what the route
+        // declared; it asked only what the client sent.
+        $wantsPageDocumentJson = $handle !== null
+            && !self::declaresJsonProfile($route)
+            && $this->wantsPageDocumentJson($request);
 
         if ($wantsPageDocumentJson) {
+            $format = ResponseFormat::Json;
+        }
+
+        // A route that renders its own JSON still has to be RENDERED as JSON.
+        // Skipping the page projection without this left the response on the
+        // layout path: the body was the handler's, correctly, and the label was
+        // `text/html` — measured on /playground/customers, which answered a
+        // perfectly good collection under an HTML content type. The negotiation
+        // is the same question the page-document gate asks, so the two cannot
+        // disagree about what "the client asked for JSON" means.
+        if (!$wantsPageDocumentJson && $handle !== null && self::declaresJsonProfile($route)
+            && $this->wantsPageDocumentJson($request)) {
             $format = ResponseFormat::Json;
         }
 
@@ -153,21 +183,54 @@ final class ResponseRenderer
             );
         }
 
-        return $this->renderJson($resDto, $context);
+        // The projected document IS the answer when it was asked for, so it
+        // replaces whatever the resource held. Only an UNPROJECTED body is the
+        // handler's own and must survive.
+        return $this->renderJson($resDto, $context, keepExistingBody: !$wantsPageDocumentJson);
     }
 
     /**
      * @param array<string, mixed> $context
      */
-    private function renderJson(object $resDto, array $context): object
+    private function renderJson(object $resDto, array $context, bool $keepExistingBody = true): object
     {
-        $json = json_encode($context, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-        if (method_exists($resDto, 'setContent')) {
-            $resDto->setContent($json ?: '');
+        // A BODY THE HANDLER ALREADY PRODUCED IS THE ANSWER, not a draft.
+        // This encoded the render context over the top of it, so a handler that
+        // did the work — built the collection, called setContent(), set its
+        // Deprecation and Sunset headers — had the collection replaced by the
+        // context, which for such a handler is empty. The headers survived and
+        // the body did not, which is the worst shape of all: a 200 that looks
+        // like a working API and carries nothing.
+        //
+        // Encoding the context is still what an ordinary JSON resource wants,
+        // and that is unchanged: it reaches here with no content of its own.
+        $existing = $keepExistingBody && method_exists($resDto, 'getContent') ? $resDto->getContent() : '';
+
+        if (!is_string($existing) || $existing === '') {
+            // `__page_document_html_iri` and its two neighbours are put on every
+            // handle-bearing context for the page document and for the template
+            // that renders <link rel="alternate">. PageDocumentProjector drops
+            // every `__` key on its way out; a context encoded WITHOUT the
+            // projector has to drop them too, or an API body carries the
+            // renderer's own bookkeeping. Stripped here rather than never added,
+            // so the HTML path keeps exactly the context it always had.
+            $json = json_encode(self::withoutInternalKeys($context), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+            if (method_exists($resDto, 'setContent')) {
+                $resDto->setContent($json ?: '');
+            }
         }
+
+        // The type is still set here unconditionally, as it always was. A
+        // handler that answers `application/ld+json` reaches the client through
+        // a route with no render handle, which returns before this point — and
+        // making the rule "keep a Content-Type the resource already carries"
+        // instead preserved the DEFAULT text/html a bare resource is born with,
+        // so /platform/calendar/events shipped JSON labelled as HTML. A default
+        // is not a declaration, and this had no way to tell them apart.
         if (method_exists($resDto, 'setHeader')) {
             $resDto->setHeader('Content-Type', 'application/json');
         }
+
         return $resDto;
     }
 
@@ -431,6 +494,59 @@ final class ResponseRenderer
         }
 
         return array_values($alternates);
+    }
+
+    /**
+     * The context without the renderer's own bookkeeping.
+     *
+     * Same rule PageDocumentProjector::sanitizeContext() applies: a key that
+     * starts with `__` belongs to the framework, not to the response.
+     *
+     * @param array<string, mixed> $context
+     * @return array<string, mixed>
+     */
+    private static function withoutInternalKeys(array $context): array
+    {
+        foreach (array_keys($context) as $key) {
+            if (str_starts_with((string) $key, '__')) {
+                unset($context[$key]);
+            }
+        }
+
+        return $context;
+    }
+
+    /**
+     * Does this route declare that JSON is one of ITS OWN representations?
+     *
+     * Only an explicit `renderProfile` counts, and only when it names Json.
+     * A page route declares none, so nothing about page rendering moves — the
+     * whole page-document path is exactly as it was for every route that did
+     * not opt in. `responsesByProfile` alone is not the signal either: the
+     * profiles list is what the route states it can BE, and the map is only how
+     * each one is built.
+     *
+     * @param DiscoveredRoute $route
+     */
+    private static function declaresJsonProfile(DiscoveredRoute $route): bool
+    {
+        $declared = $route->renderProfile;
+
+        if ($declared instanceof RenderProfile) {
+            return $declared === RenderProfile::Json;
+        }
+
+        if (!is_array($declared)) {
+            return false;
+        }
+
+        foreach ($declared as $profile) {
+            if ($profile instanceof RenderProfile && $profile === RenderProfile::Json) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

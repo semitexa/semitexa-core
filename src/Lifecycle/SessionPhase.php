@@ -12,6 +12,8 @@ use Semitexa\Core\Cookie\CookieJar;
 use Semitexa\Core\Cookie\CookieJarInterface;
 use Semitexa\Core\Csrf\CsrfToken;
 use Semitexa\Core\Environment;
+use Semitexa\Core\Http\SecureCookieMode;
+use Semitexa\Core\Http\SecureCookieSetting;
 use Semitexa\Core\Locale\DefaultLocaleContext;
 use Semitexa\Core\Locale\LocaleContextInterface;
 use Semitexa\Core\Log\FallbackErrorLogger;
@@ -32,6 +34,14 @@ use Semitexa\Core\Tenant\TenancyBootstrapperInterface;
  */
 final class SessionPhase
 {
+    /**
+     * Process-wide on purpose: this is a deployment fact, not request state,
+     * so it must NOT be a CoroutineLocal. One warning per worker is the
+     * whole design.
+     */
+    private static bool $refusedHttpsWarned = false;
+    private static bool $unrecognisedSecureModeWarned = false;
+
     private SessionHandlerInterface $sessionHandler;
 
     public function __construct(
@@ -118,9 +128,10 @@ final class SessionPhase
             // both the session and the XSRF cookie so the CSRF double-submit
             // stays consistent across those hosts too.
             $cookieDomain = (string) (Environment::getEnvValue('SESSION_COOKIE_DOMAIN') ?? '');
+            $secure = $this->cookieSecureFlag($request, $isHttps);
             $baseOptions = [
                 'path' => '/',
-                'secure' => $isHttps,
+                'secure' => $secure,
                 'sameSite' => 'lax',
                 'maxAge' => $sessionLifetime,
             ];
@@ -167,6 +178,127 @@ final class SessionPhase
             );
         }
         return new SwooleTableSessionHandler();
+    }
+
+    /**
+     * Whether the session and XSRF cookies get `Secure`.
+     *
+     * SESSION_COOKIE_SECURE overrides the scheme:
+     *   auto (default) — follow the request scheme, as before;
+     *   always         — an HTTPS-only deployment says so and stops depending
+     *                    on scheme detection working;
+     *   never          — plain HTTP on purpose, e.g. a local box behind a VPN.
+     *
+     * The warning is the point of this method. Dropping Secure because an
+     * untrusted peer claimed https is a DOWNGRADE, and until now it happened
+     * without a word: core#102 already recorded that the project's own
+     * containerised topology puts the proxy off loopback, TRUSTED_PROXIES was
+     * added as the remedy, it reached no shipped .env, and semitexa.com was
+     * still serving Secure-less cookies over HTTPS months later. Nothing was
+     * broken enough to notice, which is exactly why it needs to say something.
+     */
+    private function cookieSecureFlag(Request $request, bool $isHttps): bool
+    {
+        // One reader of this variable, shared with the doctor check that tells
+        // an operator what it will do. Two lists of accepted spellings had
+        // already drifted apart once.
+        $setting = SecureCookieSetting::fromEnvironment();
+
+        // A spelling nobody declared — `alway` — behaved as `auto`, which on a
+        // site behind an untrusted proxy means no Secure flag at all. Silently
+        // honouring a typo is the failure this setting exists to prevent, and a
+        // typo is not a reason to refuse to boot, so it is said once and then
+        // treated as auto.
+        if (!$setting->recognised) {
+            $this->warnAboutUnrecognisedSecureMode($setting->raw);
+        }
+
+        $secure = $setting->secureFor($isHttps);
+
+        // ONLY IN AUTO. The warning says an untrusted proxy cost the Secure flag
+        // and recommends TRUSTED_PROXIES — true when the scheme decides, and
+        // false when the operator turned the flag off: secureFor() ignores the
+        // detected scheme in Never mode, so trusting the proxy would change
+        // nothing and the remedy would send a reader to fix the wrong thing.
+        // The disabling values are reported where they belong, by
+        // ForwardedProxyDoctorCheck, which fails them outright on an https
+        // deployment.
+        if ($setting->mode === SecureCookieMode::Auto
+            && !$secure
+            && $request->refusedForwardedProto() === 'https'
+        ) {
+            $this->warnAboutRefusedHttps($request);
+        }
+
+        return $secure;
+    }
+
+    /**
+     * Once per worker, for the same reason as the proxy warning below: a value
+     * in the environment is wrong for every request or none of them.
+     */
+    private function warnAboutUnrecognisedSecureMode(string $configured): void
+    {
+        if (self::$unrecognisedSecureModeWarned) {
+            return;
+        }
+        self::$unrecognisedSecureModeWarned = true;
+
+        $this->warn(
+            sprintf(
+                'SESSION_COOKIE_SECURE is set to "%s", which is not a value this framework defines. '
+                . 'Falling back to auto, which decides from the request scheme — behind a proxy that '
+                . 'is not trusted, that means the session and XSRF cookies go out WITHOUT Secure.',
+                $configured,
+            ),
+            ['remedy' => 'Use one of: ' . SecureCookieSetting::documentedValues() . '.'],
+        );
+    }
+
+    /**
+     * Once per worker. A misconfigured proxy is true for every request, so one
+     * line per boot says it; one line per request buries it.
+     */
+    private function warnAboutRefusedHttps(Request $request): void
+    {
+        if (self::$refusedHttpsWarned) {
+            return;
+        }
+        self::$refusedHttpsWarned = true;
+
+        $this->warn(
+            'A proxy said X-Forwarded-Proto: https and was not trusted, so the session '
+            . 'and XSRF cookies are being sent WITHOUT the Secure flag.',
+            [
+                'remote_addr' => $request->getServer('remote_addr'),
+                'remedy' => 'Add that address to TRUSTED_PROXIES, or set SESSION_COOKIE_SECURE=always.',
+            ],
+        );
+    }
+
+    /**
+     * A warning that survives having no logger.
+     *
+     * Both cookie warnings fire during boot-shaped work, where the container
+     * may not carry a logger yet — and a warning about cookies going out
+     * unprotected is the last thing that should disappear because the thing
+     * meant to record it is missing.
+     *
+     * @param array<string, mixed> $context
+     */
+    private function warn(string $message, array $context): void
+    {
+        $logger = $this->container->has(\Semitexa\Core\Log\LoggerInterface::class)
+            ? $this->container->get(\Semitexa\Core\Log\LoggerInterface::class)
+            : null;
+
+        if ($logger instanceof \Semitexa\Core\Log\LoggerInterface) {
+            $logger->warning($message, $context);
+
+            return;
+        }
+
+        FallbackErrorLogger::log($message, $context);
     }
 
     private function logSessionPersistenceFailure(\Throwable $e, Request $request): void

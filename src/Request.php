@@ -72,6 +72,36 @@ readonly class Request
     }
 
     /**
+     * The path the client actually asked for, before anything rewrote it.
+     *
+     * `getPath()` answers what the ROUTER works on, and the two part company
+     * the moment something ahead of the handler rebases the request — today
+     * that is the locale layer stripping a URL prefix, so `/ka/gallery` routes
+     * as `/gallery`. That rewrite is right for matching a pattern and wrong
+     * for anything that tells the visitor where they are: `/gallery` under
+     * `LOCALE_URL_PREFIX=true` IS the default language, so handing it back as
+     * the current address turns the next reload into a different language.
+     *
+     * Read from `$server['request_uri']`, which `withPath()` copies verbatim
+     * for exactly this reason. Falls back to the routed path when a request
+     * carries no server entry — a hand-built one in a test, a replayed one —
+     * where the two are the same by construction anyway.
+     */
+    public function getServedPath(): string
+    {
+        $servedUri = $this->server['request_uri'] ?? $this->server['REQUEST_URI'] ?? null;
+
+        if (is_string($servedUri) && $servedUri !== '') {
+            $path = parse_url($servedUri, PHP_URL_PATH);
+            if (is_string($path) && $path !== '') {
+                return $path;
+            }
+        }
+
+        return $this->getPath();
+    }
+
+    /**
      * The query string of this request, however it arrived.
      *
      * Under Swoole the uri is built from `request_uri`, which carries the path
@@ -196,6 +226,34 @@ readonly class Request
         return 'http';
     }
 
+    /**
+     * The scheme a proxy claimed and this request refused to believe, if any.
+     *
+     * Refusing an untrusted X-Forwarded-Proto is correct — a peer that may not
+     * speak for the client must not choose the scheme. Refusing it SILENTLY is
+     * not, and that is the shape of the defect this exists to make audible:
+     * core#102 recorded that the containerised topology the project's own
+     * compose files ship puts the reverse proxy off loopback, so the header is
+     * dropped and the session cookie loses Secure. The knob (TRUSTED_PROXIES)
+     * was added; nothing tells an operator it is needed, and semitexa.com was
+     * still serving Secure-less cookies over HTTPS on 2026-09-18.
+     *
+     * Returns the refused value ('https' or 'http') so a caller can say which
+     * decision it is about to make differently, or null when there is nothing
+     * to report — no header, or a peer that is trusted and was believed.
+     */
+    public function refusedForwardedProto(): ?string
+    {
+        $header = trim($this->getHeader('X-Forwarded-Proto') ?? '');
+        if ($header === '' || $this->isTrustedForwardedRequest()) {
+            return null;
+        }
+
+        $first = strtolower(trim(explode(',', $header)[0]));
+
+        return $first === 'http' || $first === 'https' ? $first : null;
+    }
+
     public function getOrigin(): string
     {
         $host = $this->getHost();
@@ -239,8 +297,48 @@ readonly class Request
     }
 
     /** One TRUSTED_PROXIES entry — a bare IP or a CIDR block, IPv4 or IPv6. */
+    /**
+     * Could this TRUSTED_PROXIES entry ever match anything?
+     *
+     * The shape check on its own, so a diagnostic can ask the question without
+     * inventing a second parser: `not-an-ip` and `172.18.0.0/99` are silently
+     * inert here — they match no peer, ever — and a doctor check that only
+     * counted the entries reported such a list as healthy while the app went on
+     * dropping X-Forwarded-Proto.
+     *
+     * Shape only. Whether the entry names the RIGHT network is a question
+     * nothing but the deployment can answer.
+     */
+    public static function isUsableTrustedProxyEntry(string $entry): bool
+    {
+        $entry = trim($entry);
+        if ($entry === '') {
+            return false;
+        }
+
+        if (!str_contains($entry, '/')) {
+            return @inet_pton($entry) !== false;
+        }
+
+        [$subnet, $bits] = explode('/', $entry, 2);
+        $subnetBin = @inet_pton(trim($subnet));
+        if ($subnetBin === false || !ctype_digit(trim($bits))) {
+            return false;
+        }
+
+        $bits = (int) trim($bits);
+
+        return $bits >= 0 && $bits <= strlen($subnetBin) * 8;
+    }
+
     private static function ipMatchesEntry(string $ip, string $entry): bool
     {
+        // One reader of what an entry may look like, shared with the doctor
+        // check that reports on it.
+        if (!self::isUsableTrustedProxyEntry($entry)) {
+            return false;
+        }
+
         $ipBin = @inet_pton($ip);
         if ($ipBin === false) {
             return false;

@@ -60,5 +60,9 @@ rules:
     - Semitexa\Core\PHPStan\Rules\MapperTypeConversionRule
     - Semitexa\Core\PHPStan\Rules\DomainModelEncapsulationRule
 
+    # --- SQL construction.
+    - Semitexa\Core\PHPStan\Rules\UnquotedSqlIdentifierRule
+    - Semitexa\Core\PHPStan\Rules\BuiltSqlFragmentRule
+
     # --- House rules.
     - Semitexa\Core\PHPStan\Rules\DisallowErrorLogRule
