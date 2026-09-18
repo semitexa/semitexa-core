@@ -12,6 +12,7 @@ use Semitexa\Core\Cookie\CookieJar;
 use Semitexa\Core\Cookie\CookieJarInterface;
 use Semitexa\Core\Csrf\CsrfToken;
 use Semitexa\Core\Environment;
+use Semitexa\Core\Http\SecureCookieMode;
 use Semitexa\Core\Http\SecureCookieSetting;
 use Semitexa\Core\Locale\DefaultLocaleContext;
 use Semitexa\Core\Locale\LocaleContextInterface;
@@ -214,7 +215,18 @@ final class SessionPhase
 
         $secure = $setting->secureFor($isHttps);
 
-        if (!$secure && $request->refusedForwardedProto() === 'https') {
+        // ONLY IN AUTO. The warning says an untrusted proxy cost the Secure flag
+        // and recommends TRUSTED_PROXIES — true when the scheme decides, and
+        // false when the operator turned the flag off: secureFor() ignores the
+        // detected scheme in Never mode, so trusting the proxy would change
+        // nothing and the remedy would send a reader to fix the wrong thing.
+        // The disabling values are reported where they belong, by
+        // ForwardedProxyDoctorCheck, which fails them outright on an https
+        // deployment.
+        if ($setting->mode === SecureCookieMode::Auto
+            && !$secure
+            && $request->refusedForwardedProto() === 'https'
+        ) {
             $this->warnAboutRefusedHttps($request);
         }
 

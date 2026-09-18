@@ -181,4 +181,67 @@ final class ForwardedProxyDoctorCheckTest extends TestCase
 
         self::assertSame(DoctorStatus::Pass, (new ForwardedProxyDoctorCheck())->run()->status);
     }
+
+    /**
+     * COUNTING THE ENTRIES WAS NOT READING THEM. `not-an-ip,172.18.0.0/99` is
+     * two entries and trusts nobody — Request::ipMatchesEntry() rejects both,
+     * X-Forwarded-Proto keeps being dropped — and this check called it healthy
+     * on the strength of a comma.
+     */
+    #[Test]
+    public function entries_that_can_never_match_a_peer_are_not_proxy_trust(): void
+    {
+        putenv('APP_URL=https://semitexa.com');
+        putenv('TRUSTED_PROXIES=not-an-ip,172.18.0.0/99');
+
+        $result = (new ForwardedProxyDoctorCheck())->run();
+
+        self::assertSame(DoctorStatus::Fail, $result->status);
+        self::assertStringContainsString('not-an-ip', $result->message);
+        self::assertStringContainsString('172.18.0.0/99', $result->message);
+        self::assertStringContainsString('WITHOUT Secure', $result->message);
+    }
+
+    /** A hostname is the one people reach for, and it matches nothing. */
+    #[Test]
+    public function a_hostname_is_not_an_entry(): void
+    {
+        putenv('APP_URL=https://semitexa.com');
+        putenv('TRUSTED_PROXIES=proxy.internal');
+
+        $result = (new ForwardedProxyDoctorCheck())->run();
+
+        self::assertSame(DoctorStatus::Fail, $result->status);
+        self::assertStringContainsString('hostname', (string) $result->hint);
+    }
+
+    /**
+     * A list that half works is a warning, not a failure: the good entry still
+     * trusts its proxy. It is worth saying, because the inert half is what
+     * makes somebody delete the working entry later.
+     */
+    #[Test]
+    public function a_partly_usable_list_warns_and_names_the_inert_entries(): void
+    {
+        putenv('APP_URL=https://semitexa.com');
+        putenv('TRUSTED_PROXIES=172.18.0.7,nonsense');
+
+        $result = (new ForwardedProxyDoctorCheck())->run();
+
+        self::assertSame(DoctorStatus::Warn, $result->status);
+        self::assertStringContainsString('nonsense', $result->message);
+        self::assertStringNotContainsString('172.18.0.7', $result->message, 'the working entry is not the problem');
+    }
+
+    #[Test]
+    public function a_usable_list_passes_and_says_how_many(): void
+    {
+        putenv('APP_URL=https://semitexa.com');
+        putenv('TRUSTED_PROXIES=172.18.0.7, 2001:db8::/32');
+
+        $result = (new ForwardedProxyDoctorCheck())->run();
+
+        self::assertSame(DoctorStatus::Pass, $result->status);
+        self::assertStringContainsString('2 usable entries', $result->message);
+    }
 }

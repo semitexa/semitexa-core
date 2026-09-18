@@ -7,6 +7,7 @@ namespace Semitexa\Core\Http;
 use Semitexa\Core\Attribute\AsDoctorCheck;
 use Semitexa\Core\Contract\DoctorCheckInterface;
 use Semitexa\Core\Environment;
+use Semitexa\Core\Request;
 use Semitexa\Core\Support\DoctorResult;
 
 /**
@@ -107,13 +108,50 @@ final class ForwardedProxyDoctorCheck implements DoctorCheckInterface
             );
         }
 
-        $entries = substr_count($trusted, ',') + 1;
+        // COUNTING THE ENTRIES WAS NOT READING THEM. `not-an-ip,172.18.0.0/99`
+        // is two entries and trusts nobody: Request::ipMatchesEntry() rejects
+        // both, X-Forwarded-Proto keeps being dropped, and this check used to
+        // call that healthy on the strength of a comma. The entries are now put
+        // through the same shape test the request path uses.
+        $entries = array_values(array_filter(array_map('trim', explode(',', $trusted)), static fn (string $e): bool => $e !== ''));
+        $unusable = array_values(array_filter($entries, static fn (string $e): bool => !Request::isUsableTrustedProxyEntry($e)));
+        $usable = count($entries) - count($unusable);
+
+        if ($usable === 0) {
+            return DoctorResult::fail(
+                sprintf(
+                    'APP_URL is https and TRUSTED_PROXIES is set, but none of its entries can match a '
+                    . 'peer: %s. The header is dropped exactly as if the variable were empty, and the '
+                    . 'session and XSRF cookies go out WITHOUT Secure.',
+                    implode(', ', array_map(static fn (string $e): string => '"' . $e . '"', $unusable)),
+                ),
+                'An entry is an IP address or a CIDR block — 172.18.0.7 or 172.18.0.0/16. A hostname is '
+                . 'not one: the peer is compared by address, so a name that has to be resolved matches '
+                . 'nothing.',
+            );
+        }
+
+        if ($unusable !== []) {
+            return DoctorResult::warn(
+                sprintf(
+                    'APP_URL is https and TRUSTED_PROXIES has %d usable entr%s, but %s cannot match any '
+                    . 'peer and %s doing nothing.',
+                    $usable,
+                    $usable === 1 ? 'y' : 'ies',
+                    implode(', ', array_map(static fn (string $e): string => '"' . $e . '"', $unusable)),
+                    count($unusable) === 1 ? 'is' : 'are',
+                ),
+                'Remove them or correct them to an IP address or CIDR block. They are not harmful, but a '
+                . 'list that reads as configured while half of it is inert is how the real entry gets '
+                . 'deleted by mistake later.',
+            );
+        }
 
         return DoctorResult::pass(sprintf(
-            'APP_URL is https and TRUSTED_PROXIES names %d entr%s, so a proxy behind one of them '
+            'APP_URL is https and TRUSTED_PROXIES names %d usable entr%s, so a proxy behind one of them '
             . 'can set the scheme.',
-            $entries,
-            $entries === 1 ? 'y' : 'ies',
+            $usable,
+            $usable === 1 ? 'y' : 'ies',
         ));
     }
 }

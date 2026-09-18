@@ -57,10 +57,26 @@ final class StrictTransportSecurityDoctorCheck implements DoctorCheckInterface
                 'APP_URL is https but no Strict-Transport-Security header is sent, so a visitor who '
                 . 'types the bare hostname makes one plaintext request before the redirect every time.',
                 'HSTS_MAX_AGE=31536000 turns it on. Read this before you do: a browser that has seen '
-                . 'the header refuses plaintext to this host for the full duration from its own cache, '
-                . 'whatever the server sends afterwards, so a lapsed certificate locks visitors out. '
-                . 'Start short — HSTS_MAX_AGE=300 — confirm with curl -sS -D - https://your-host/, and '
-                . 'raise it once you trust the renewal.',
+                . 'the header refuses plaintext to this host for the full duration from its own cache. '
+                . 'It can be withdrawn — HSTS_MAX_AGE=0 sends max-age=0 and browsers forget — but that '
+                . 'withdrawal only travels over working HTTPS, so a lapsed certificate leaves nothing to '
+                . 'carry it and locks visitors out until the certificate is valid again. Start short — '
+                . 'HSTS_MAX_AGE=300 — confirm with '
+                . 'curl -sS -D - -o /dev/null https://your-host/ | grep -i \'^strict-transport-security:\' '
+                . 'and raise it once you trust the renewal.',
+            );
+        }
+
+        // A withdrawal is a state of its own, and a deliberate one: the header
+        // IS being sent, and what it says is "forget this host". Reporting it
+        // as an ordinary configuration would hide the one moment when an
+        // operator most wants confirmation that the rollback is going out.
+        if (StrictTransportSecurity::configuredMaxAge() === 0) {
+            return DoctorResult::pass(
+                'HSTS_MAX_AGE=0 — Strict-Transport-Security: max-age=0 is being sent, which tells every '
+                . 'browser that reaches this site over working HTTPS to forget the policy. Leave it in '
+                . 'place until the longest max-age previously sent has expired for your visitors; '
+                . 'removing the variable instead stops sending the withdrawal and the old policy stands.',
             );
         }
 

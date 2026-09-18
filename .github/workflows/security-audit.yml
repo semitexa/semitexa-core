@@ -50,10 +50,13 @@ jobs:
           tools: composer:v2
           coverage: none
 
-      # --no-scripts because this package ships a Composer plugin of its own,
-      # and an audit has no business running it.
+      # --no-scripts AND --no-plugins. The first stops composer running the
+      # scripts a package declares; it does NOT stop a plugin, which is ordinary
+      # PHP that composer loads and executes as part of resolution — including
+      # the one this package ships and any a dependency brings with it. An audit
+      # that runs the code it is auditing is not an audit.
       - name: Resolve runtime dependencies
-        run: composer update --no-dev --no-scripts --no-interaction --no-progress --prefer-dist
+        run: composer update --no-dev --no-scripts --no-plugins --no-interaction --no-progress --prefer-dist
 
       - name: Audit
         run: composer audit --no-interaction

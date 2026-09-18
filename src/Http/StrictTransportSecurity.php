@@ -38,14 +38,6 @@ final class StrictTransportSecurity
     public const HEADER = 'Strict-Transport-Security';
 
     /**
-     * The header value, or null when HSTS is off.
-     *
-     * Off means HSTS_MAX_AGE unset, empty, zero or unparseable. A garbage value
-     * turns the header OFF rather than guessing a duration: guessing here would
-     * pick a number nobody chose, and the one thing that must not happen is a
-     * max-age the operator did not intend.
-     */
-    /**
      * The configured max-age in seconds, or null when there is no usable one.
      *
      * The single parser, because the doctor check has to reach the same verdict
@@ -68,10 +60,17 @@ final class StrictTransportSecurity
             return null;
         }
 
-        // Leading zeros are the operator's formatting, not a different number.
+        // ZERO IS A VALUE, AND IT IS THE ONLY WAY BACK. max-age=0 is the
+        // protocol's withdrawal: a browser that receives it forgets the policy.
+        // Treating it as "unset" meant the header was simply omitted, which
+        // clears nothing — the cached policy stands until it expires on its own,
+        // so an operator who wanted out had no way to say so through
+        // configuration at all. The template two packages away says "a server
+        // CAN withdraw it — send max-age=0"; this is the code that makes that
+        // sentence true.
         $digits = ltrim($raw, '0');
         if ($digits === '') {
-            return null; // 0, 00, 000 — off, as documented
+            return 0;
         }
 
         $maxAge = (int) $digits;
@@ -84,11 +83,28 @@ final class StrictTransportSecurity
         return $maxAge;
     }
 
+    /**
+     * The header value, or null when there is nothing to send.
+     *
+     * Null means HSTS_MAX_AGE is unset, empty or unusable — not zero. Zero is a
+     * deliberate instruction and produces `max-age=0`.
+     */
     public static function headerValue(): ?string
     {
         $maxAge = self::configuredMaxAge();
         if ($maxAge === null) {
             return null;
+        }
+
+        // A withdrawal carries nothing else. `includeSubDomains` alongside
+        // max-age=0 asks the browser to forget this host AND its subdomains,
+        // which is usually what somebody rolling back wants — but `preload`
+        // with a zero duration is a request to be REMOVED from the browsers'
+        // preload list, a slow and separate operation that nobody performs by
+        // editing an env var. Emitting the bare directive keeps the rollback
+        // one unambiguous thing.
+        if ($maxAge === 0) {
+            return 'max-age=0';
         }
 
         $value = 'max-age=' . $maxAge;

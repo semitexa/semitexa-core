@@ -8,6 +8,7 @@ use PhpParser\Node\Arg;
 use PhpParser\Node\Expr;
 use PhpParser\Node\Expr\BinaryOp\Concat;
 use PhpParser\Node\Expr\ClassConstFetch;
+use PhpParser\Node\Expr\ConstFetch;
 use PhpParser\Node\Expr\FuncCall;
 use PhpParser\Node\Expr\MethodCall;
 use PhpParser\Node\Expr\NullsafeMethodCall;
@@ -21,6 +22,8 @@ use PhpParser\Node\Scalar\InterpolatedString;
 use PhpParser\Node\Scalar\String_;
 use PhpParser\Node\VariadicPlaceholder;
 use PHPStan\Analyser\Scope;
+use PHPStan\Type\Constant\ConstantStringType;
+use PHPStan\Type\StringType;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Semitexa\Core\PHPStan\Rules\BuiltSqlFragmentRule;
@@ -304,6 +307,45 @@ final class BuiltSqlFragmentRuleTest extends TestCase
         );
 
         return $call;
+    }
+
+    /**
+     * A GLOBAL constant is not fixed at authoring time.
+     *
+     * `define('FRAGMENT', $requestValue)` is legal and runs at runtime, so
+     * `whereRaw(FRAGMENT)` can carry exactly the data this rule exists to
+     * catch. Treating every ConstFetch as written was a hole shaped like a
+     * safety guarantee.
+     */
+    #[Test]
+    public function a_global_constant_the_analyser_cannot_resolve_is_reported(): void
+    {
+        $call = new MethodCall(
+            new Variable('q'),
+            new Identifier('whereRaw'),
+            [$this->arg(new ConstFetch(new Name('FRAGMENT')))],
+        );
+
+        $scope = $this->createStub(Scope::class);
+        $scope->method('getType')->willReturn(new StringType());
+
+        self::assertNotSame([], (new BuiltSqlFragmentRule())->processNode($call, $scope));
+    }
+
+    /** And one it CAN resolve to a constant string is written, like a literal. */
+    #[Test]
+    public function a_global_constant_resolved_to_a_string_is_written(): void
+    {
+        $call = new MethodCall(
+            new Variable('q'),
+            new Identifier('whereRaw'),
+            [$this->arg(new ConstFetch(new Name('FRAGMENT')))],
+        );
+
+        $scope = $this->createStub(Scope::class);
+        $scope->method('getType')->willReturn(new ConstantStringType('`status` = ?'));
+
+        self::assertSame([], (new BuiltSqlFragmentRule())->processNode($call, $scope));
     }
 
     #[Test]

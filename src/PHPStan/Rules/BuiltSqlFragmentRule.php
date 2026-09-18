@@ -124,7 +124,7 @@ final class BuiltSqlFragmentRule implements Rule
             return [];
         }
 
-        if (self::isWritten($fragment)) {
+        if (self::isWritten($fragment, $scope)) {
             return [];
         }
 
@@ -205,14 +205,27 @@ final class BuiltSqlFragmentRule implements Rule
      * is two literals and one statement, and a wrapped long fragment is how
      * most of them are actually written.
      */
-    private static function isWritten(Expr $expr): bool
+    private static function isWritten(Expr $expr, Scope $scope): bool
     {
-        if ($expr instanceof String_ || $expr instanceof ClassConstFetch || $expr instanceof ConstFetch) {
+        // A class constant is fixed by the language: its value is a constant
+        // expression, evaluated once, and nothing at runtime can put a request
+        // into it.
+        if ($expr instanceof String_ || $expr instanceof ClassConstFetch) {
             return true;
         }
 
+        // A GLOBAL CONSTANT IS NOT. `define('FRAGMENT', $requestValue)` is legal
+        // and runs at runtime, so `whereRaw(FRAGMENT)` can carry exactly the
+        // data this rule exists to catch. It counts as written only when the
+        // analyser can prove it holds a constant string — the same evidence
+        // standard the identifier rule uses for its fence, and for the same
+        // reason: what the code says, not what it looks like.
+        if ($expr instanceof ConstFetch) {
+            return $scope->getType($expr)->getConstantStrings() !== [];
+        }
+
         if ($expr instanceof Concat) {
-            return self::isWritten($expr->left) && self::isWritten($expr->right);
+            return self::isWritten($expr->left, $scope) && self::isWritten($expr->right, $scope);
         }
 
         return false;

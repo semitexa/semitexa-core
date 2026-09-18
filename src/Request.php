@@ -297,8 +297,48 @@ readonly class Request
     }
 
     /** One TRUSTED_PROXIES entry — a bare IP or a CIDR block, IPv4 or IPv6. */
+    /**
+     * Could this TRUSTED_PROXIES entry ever match anything?
+     *
+     * The shape check on its own, so a diagnostic can ask the question without
+     * inventing a second parser: `not-an-ip` and `172.18.0.0/99` are silently
+     * inert here — they match no peer, ever — and a doctor check that only
+     * counted the entries reported such a list as healthy while the app went on
+     * dropping X-Forwarded-Proto.
+     *
+     * Shape only. Whether the entry names the RIGHT network is a question
+     * nothing but the deployment can answer.
+     */
+    public static function isUsableTrustedProxyEntry(string $entry): bool
+    {
+        $entry = trim($entry);
+        if ($entry === '') {
+            return false;
+        }
+
+        if (!str_contains($entry, '/')) {
+            return @inet_pton($entry) !== false;
+        }
+
+        [$subnet, $bits] = explode('/', $entry, 2);
+        $subnetBin = @inet_pton(trim($subnet));
+        if ($subnetBin === false || !ctype_digit(trim($bits))) {
+            return false;
+        }
+
+        $bits = (int) trim($bits);
+
+        return $bits >= 0 && $bits <= strlen($subnetBin) * 8;
+    }
+
     private static function ipMatchesEntry(string $ip, string $entry): bool
     {
+        // One reader of what an entry may look like, shared with the doctor
+        // check that reports on it.
+        if (!self::isUsableTrustedProxyEntry($entry)) {
+            return false;
+        }
+
         $ipBin = @inet_pton($ip);
         if ($ipBin === false) {
             return false;

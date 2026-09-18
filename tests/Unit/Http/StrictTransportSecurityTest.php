@@ -77,7 +77,8 @@ final class StrictTransportSecurityTest extends TestCase
     /** @return iterable<string, array{string}> */
     public static function valuesThatAreNotADuration(): iterable
     {
-        yield 'zero' => ['0'];
+        // NOT '0': zero is a value, and the only way to withdraw a policy a
+        // browser has already cached. It has its own test below.
         yield 'negative' => ['-1'];
         yield 'a boolean somebody assumed' => ['true'];
         yield 'a duration with a unit' => ['1y'];
@@ -224,7 +225,55 @@ final class StrictTransportSecurityTest extends TestCase
         self::assertSame(7, StrictTransportSecurity::configuredMaxAge());
 
         putenv('HSTS_MAX_AGE=000');
-        self::assertNull(StrictTransportSecurity::configuredMaxAge(), 'zero is off, however it is spelled');
+        self::assertSame(0, StrictTransportSecurity::configuredMaxAge(), 'zero is zero, however it is spelled');
+    }
+
+    /**
+     * ZERO IS THE ONLY WAY BACK, and it used to be treated as "unset".
+     *
+     * `max-age=0` is the protocol's withdrawal: a browser that receives it
+     * forgets the policy. Omitting the header instead clears nothing — the
+     * cached policy stands until it expires on its own — so an operator who
+     * wanted out had no way to say so through configuration at all, while the
+     * shipped .env template told them a server CAN withdraw it.
+     */
+    #[Test]
+    public function zero_sends_the_withdrawal_rather_than_nothing(): void
+    {
+        putenv('HSTS_MAX_AGE=0');
+
+        self::assertSame(0, StrictTransportSecurity::configuredMaxAge());
+        self::assertSame('max-age=0', StrictTransportSecurity::headerValue());
+    }
+
+    /**
+     * And it carries nothing else. `preload` with a zero duration is a request
+     * to be REMOVED from the browsers' preload list — a slow, separate
+     * operation nobody performs by editing an env var — so a rollback stays one
+     * unambiguous directive even when the flags are still set from before.
+     */
+    #[Test]
+    public function the_withdrawal_carries_no_flags(): void
+    {
+        putenv('HSTS_MAX_AGE=0');
+        putenv('HSTS_INCLUDE_SUBDOMAINS=true');
+        putenv('HSTS_PRELOAD=true');
+
+        self::assertSame('max-age=0', StrictTransportSecurity::headerValue());
+    }
+
+    /** The doctor names the withdrawal rather than reporting an ordinary configuration. */
+    #[Test]
+    public function the_doctor_says_a_withdrawal_is_going_out(): void
+    {
+        putenv('HSTS_MAX_AGE=0');
+        putenv('APP_URL=https://semitexa.com');
+
+        $result = (new StrictTransportSecurityDoctorCheck())->run();
+
+        self::assertSame(DoctorStatus::Pass, $result->status);
+        self::assertStringContainsString('max-age=0', $result->message);
+        self::assertStringContainsString('forget', $result->message);
     }
 
     /**
