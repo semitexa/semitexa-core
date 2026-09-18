@@ -62,6 +62,7 @@ rules:
 
     # --- SQL construction.
     - Semitexa\Core\PHPStan\Rules\UnquotedSqlIdentifierRule
+    - Semitexa\Core\PHPStan\Rules\BuiltSqlFragmentRule
 
     # --- House rules.
     - Semitexa\Core\PHPStan\Rules\DisallowErrorLogRule

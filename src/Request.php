@@ -72,6 +72,36 @@ readonly class Request
     }
 
     /**
+     * The path the client actually asked for, before anything rewrote it.
+     *
+     * `getPath()` answers what the ROUTER works on, and the two part company
+     * the moment something ahead of the handler rebases the request — today
+     * that is the locale layer stripping a URL prefix, so `/ka/gallery` routes
+     * as `/gallery`. That rewrite is right for matching a pattern and wrong
+     * for anything that tells the visitor where they are: `/gallery` under
+     * `LOCALE_URL_PREFIX=true` IS the default language, so handing it back as
+     * the current address turns the next reload into a different language.
+     *
+     * Read from `$server['request_uri']`, which `withPath()` copies verbatim
+     * for exactly this reason. Falls back to the routed path when a request
+     * carries no server entry — a hand-built one in a test, a replayed one —
+     * where the two are the same by construction anyway.
+     */
+    public function getServedPath(): string
+    {
+        $servedUri = $this->server['request_uri'] ?? $this->server['REQUEST_URI'] ?? null;
+
+        if (is_string($servedUri) && $servedUri !== '') {
+            $path = parse_url($servedUri, PHP_URL_PATH);
+            if (is_string($path) && $path !== '') {
+                return $path;
+            }
+        }
+
+        return $this->getPath();
+    }
+
+    /**
      * The query string of this request, however it arrived.
      *
      * Under Swoole the uri is built from `request_uri`, which carries the path

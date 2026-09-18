@@ -42,6 +42,43 @@ final class RequestWithPathTest extends TestCase
     }
 
     #[Test]
+    public function the_served_path_is_the_one_the_client_asked_for(): void
+    {
+        // What the ROUTER matched and what the VISITOR is looking at are two
+        // different questions once a prefix has been stripped, and anything
+        // that reports an address — the shell envelope the client pushState's
+        // — has to answer the second one.
+        $rebased = $this->get('/ka/gallery?sort=price_asc')->withPath('/gallery');
+
+        self::assertSame('/gallery', $rebased->getPath(), 'routing still works on the stripped path');
+        self::assertSame('/ka/gallery', $rebased->getServedPath());
+    }
+
+    #[Test]
+    public function an_untouched_request_serves_the_path_it_routes(): void
+    {
+        self::assertSame('/gallery', $this->get('/gallery')->getServedPath());
+    }
+
+    #[Test]
+    public function a_request_with_no_server_entry_falls_back_to_its_own_path(): void
+    {
+        // A hand-built request in a test, a replayed one from the Observatory:
+        // nothing rebased it, so the two answers are the same by construction.
+        $request = new Request(
+            method: 'GET',
+            uri: '/gallery',
+            headers: [],
+            query: [],
+            post: [],
+            server: [],
+            cookies: [],
+        );
+
+        self::assertSame('/gallery', $request->getServedPath());
+    }
+
+    #[Test]
     public function a_prefixed_path_hydrates_no_route_parameter(): void
     {
         // The defect this exists to prevent: the pattern never carries /uk, so
