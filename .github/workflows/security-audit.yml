@@ -1,0 +1,50 @@
+# Audit the dependencies this package asks a consumer to install.
+#
+# There is no lock file here — this is a library, so the versions a consumer
+# actually resolves depend on their own tree. The audit therefore resolves the
+# constraints fresh and checks the result, which is the closest a library can
+# get to "what would somebody installing this today receive".
+#
+# Runtime dependencies only (`--no-dev`): a development-time advisory in phpunit
+# is not something a consumer of this package is exposed to, and a gate that
+# fires on it teaches people to ignore the gate.
+#
+# The schedule matters more than the push trigger. An advisory is published
+# against code that has not changed, so a check that only runs on commit will
+# not see it until somebody happens to commit.
+name: Security audit
+
+on:
+  push:
+    branches: [master, develop]
+  pull_request:
+  schedule:
+    # Mondays, 06:00 UTC.
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+# Read-only, and no secrets are used: this workflow only ever needs the code it
+# is auditing.
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          tools: composer:v2
+          coverage: none
+
+      # --no-scripts because this package ships a Composer plugin of its own,
+      # and an audit has no business running it.
+      - name: Resolve runtime dependencies
+        run: composer update --no-dev --no-scripts --no-interaction --no-progress --prefer-dist
+
+      - name: Audit
+        run: composer audit --no-interaction
