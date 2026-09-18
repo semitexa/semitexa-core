@@ -32,6 +32,13 @@ use Semitexa\Core\Tenant\TenancyBootstrapperInterface;
  */
 final class SessionPhase
 {
+    /**
+     * Process-wide on purpose: this is a deployment fact, not request state,
+     * so it must NOT be a CoroutineLocal. One warning per worker is the
+     * whole design.
+     */
+    private static bool $refusedHttpsWarned = false;
+
     private SessionHandlerInterface $sessionHandler;
 
     public function __construct(
@@ -118,9 +125,10 @@ final class SessionPhase
             // both the session and the XSRF cookie so the CSRF double-submit
             // stays consistent across those hosts too.
             $cookieDomain = (string) (Environment::getEnvValue('SESSION_COOKIE_DOMAIN') ?? '');
+            $secure = $this->cookieSecureFlag($request, $isHttps);
             $baseOptions = [
                 'path' => '/',
-                'secure' => $isHttps,
+                'secure' => $secure,
                 'sameSite' => 'lax',
                 'maxAge' => $sessionLifetime,
             ];
@@ -167,6 +175,69 @@ final class SessionPhase
             );
         }
         return new SwooleTableSessionHandler();
+    }
+
+    /**
+     * Whether the session and XSRF cookies get `Secure`.
+     *
+     * SESSION_COOKIE_SECURE overrides the scheme:
+     *   auto (default) — follow the request scheme, as before;
+     *   always         — an HTTPS-only deployment says so and stops depending
+     *                    on scheme detection working;
+     *   never          — plain HTTP on purpose, e.g. a local box behind a VPN.
+     *
+     * The warning is the point of this method. Dropping Secure because an
+     * untrusted peer claimed https is a DOWNGRADE, and until now it happened
+     * without a word: core#102 already recorded that the project's own
+     * containerised topology puts the proxy off loopback, TRUSTED_PROXIES was
+     * added as the remedy, it reached no shipped .env, and semitexa.com was
+     * still serving Secure-less cookies over HTTPS months later. Nothing was
+     * broken enough to notice, which is exactly why it needs to say something.
+     */
+    private function cookieSecureFlag(Request $request, bool $isHttps): bool
+    {
+        $configured = strtolower(trim((string) (Environment::getEnvValue('SESSION_COOKIE_SECURE') ?? 'auto')));
+
+        $secure = match ($configured) {
+            'always', 'true', '1', 'on' => true,
+            'never', 'false', '0', 'off' => false,
+            default => $isHttps,
+        };
+
+        if (!$secure && $request->refusedForwardedProto() === 'https') {
+            $this->warnAboutRefusedHttps($request);
+        }
+
+        return $secure;
+    }
+
+    /**
+     * Once per worker. A misconfigured proxy is true for every request, so one
+     * line per boot says it; one line per request buries it.
+     */
+    private function warnAboutRefusedHttps(Request $request): void
+    {
+        if (self::$refusedHttpsWarned) {
+            return;
+        }
+        self::$refusedHttpsWarned = true;
+
+        $context = [
+            'remote_addr' => $request->getServer('remote_addr'),
+            'remedy' => 'Add that address to TRUSTED_PROXIES, or set SESSION_COOKIE_SECURE=always.',
+        ];
+        $message = 'A proxy said X-Forwarded-Proto: https and was not trusted, so the session '
+            . 'and XSRF cookies are being sent WITHOUT the Secure flag.';
+
+        $logger = $this->container->has(\Semitexa\Core\Log\LoggerInterface::class)
+            ? $this->container->get(\Semitexa\Core\Log\LoggerInterface::class)
+            : null;
+
+        if ($logger instanceof \Semitexa\Core\Log\LoggerInterface) {
+            $logger->warning($message, $context);
+        } else {
+            FallbackErrorLogger::log($message, $context);
+        }
     }
 
     private function logSessionPersistenceFailure(\Throwable $e, Request $request): void

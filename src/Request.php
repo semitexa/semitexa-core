@@ -196,6 +196,34 @@ readonly class Request
         return 'http';
     }
 
+    /**
+     * The scheme a proxy claimed and this request refused to believe, if any.
+     *
+     * Refusing an untrusted X-Forwarded-Proto is correct — a peer that may not
+     * speak for the client must not choose the scheme. Refusing it SILENTLY is
+     * not, and that is the shape of the defect this exists to make audible:
+     * core#102 recorded that the containerised topology the project's own
+     * compose files ship puts the reverse proxy off loopback, so the header is
+     * dropped and the session cookie loses Secure. The knob (TRUSTED_PROXIES)
+     * was added; nothing tells an operator it is needed, and semitexa.com was
+     * still serving Secure-less cookies over HTTPS on 2026-09-18.
+     *
+     * Returns the refused value ('https' or 'http') so a caller can say which
+     * decision it is about to make differently, or null when there is nothing
+     * to report — no header, or a peer that is trusted and was believed.
+     */
+    public function refusedForwardedProto(): ?string
+    {
+        $header = trim($this->getHeader('X-Forwarded-Proto') ?? '');
+        if ($header === '' || $this->isTrustedForwardedRequest()) {
+            return null;
+        }
+
+        $first = strtolower(trim(explode(',', $header)[0]));
+
+        return $first === 'http' || $first === 'https' ? $first : null;
+    }
+
     public function getOrigin(): string
     {
         $host = $this->getHost();
