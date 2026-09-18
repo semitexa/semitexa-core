@@ -10,11 +10,13 @@ use Semitexa\Core\Environment;
  * The Strict-Transport-Security header, off unless the deployment asks for it.
  *
  * OFF BY DEFAULT, and that is not timidity. HSTS is one of the few headers a
- * server cannot take back: a browser that has seen max-age=31536000 refuses
- * plaintext to that host for a year, from its own cache, whatever the server
- * says afterwards. A consumer whose certificate later lapses is locked out of
- * their own site and cannot fix it by changing anything they control. A
- * framework may not make that choice on a consumer's behalf.
+ * server cannot take back UNCONDITIONALLY: max-age=0 over working HTTPS does
+ * withdraw it, but that withdrawal only arrives over a connection the browser
+ * will still make. A browser that has seen max-age=31536000 refuses plaintext to
+ * that host for a year, from its own cache — so a consumer whose certificate
+ * later lapses has no HTTPS left to carry the rollback and no plaintext fallback
+ * to fall back to, and is locked out of their own site until the certificate is
+ * valid again. A framework may not make that choice on a consumer's behalf.
  *
  * NOT GATED ON THE REQUEST SCHEME, and that IS a deliberate lesson. The obvious
  * design is "send it only when the request is https", which reads as careful
