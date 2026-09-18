@@ -32,10 +32,15 @@ final class StrictTransportSecurityDoctorCheck implements DoctorCheckInterface
         $raw = trim((string) (Environment::getEnvValue('HSTS_MAX_AGE') ?? ''));
 
         if ($value === null) {
-            if ($raw !== '' && (!ctype_digit($raw) || (int) $raw <= 0)) {
+            // The same parser the header builder uses, rather than a second
+            // opinion about the same string. The second opinion was wrong for a
+            // number wider than the platform's integer: ctype_digit accepted it
+            // and the (int) cast saturated, so this branch was skipped and the
+            // check went on to report HSTS as simply "off".
+            if ($raw !== '' && StrictTransportSecurity::configuredMaxAge() === null) {
                 return DoctorResult::fail(
-                    sprintf('HSTS_MAX_AGE is set to "%s", which is not a positive number of seconds, '
-                        . 'so no Strict-Transport-Security header is sent at all.', $raw),
+                    sprintf('HSTS_MAX_AGE is set to "%s", which is not a positive number of seconds this '
+                        . 'platform can hold, so no Strict-Transport-Security header is sent at all.', $raw),
                     'Set it to a duration in seconds (HSTS_MAX_AGE=31536000 is one year), or remove it. '
                     . 'It is deliberately not guessed: a max-age nobody chose is the one outcome that '
                     . 'must not happen with a header browsers cache and honour for its full duration.',

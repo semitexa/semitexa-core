@@ -9,6 +9,8 @@ use PhpParser\Node\InterpolatedStringPart;
 use PhpParser\Node\Scalar\InterpolatedString;
 use PhpParser\Node\Scalar\String_;
 use PHPStan\Analyser\Scope;
+use PHPStan\Type\Constant\ConstantStringType;
+use PHPStan\Type\StringType;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
@@ -181,5 +183,79 @@ final class UnquotedSqlIdentifierRuleTest extends TestCase
             ->processNode(new String_('SELECT * FROM `%s`'), $this->createStub(Scope::class));
 
         self::assertStringContainsString('SqlIdentifier::quote()', $errors[0]->getMessage());
+    }
+
+    /**
+     * A statement wrapped across lines is still a statement. The head and body
+     * checks compared against literal spaces, so `SELECT\n* FROM `%s`` did not
+     * look like SQL at all and skipped the rule — formatting is not a reason to
+     * stop checking.
+     */
+    #[Test]
+    public function whitespace_between_the_keywords_does_not_hide_the_statement(): void
+    {
+        self::assertTrue($this->fire("SELECT\n* FROM `%s`"));
+        self::assertTrue($this->fire("SELECT\t* FROM `%s`"));
+        self::assertTrue($this->fire("SELECT *\nFROM `%s`"));
+        self::assertTrue($this->fire("SELECT   *   FROM   `%s`"));
+    }
+
+    /**
+     * `"SELECT {$pad}{$column}{$pad} FROM users"` with `$pad = ' '` has the
+     * shape of a fence and is ordinary SQL. When the analyser can resolve the
+     * repeated variable to a constant string, that settles it.
+     */
+    #[Test]
+    public function a_repeated_variable_the_analyser_knows_is_a_space_is_not_a_fence(): void
+    {
+        self::assertFalse($this->fireInterpolatedWithType(
+            ['SELECT ', new Variable('pad'), new Variable('column'), new Variable('pad'), ' FROM users'],
+            new ConstantStringType(' '),
+        ));
+    }
+
+    /**
+     * And a variable the analyser knows IS a quote still reports — the
+     * exclusion is about what it holds, not about being resolvable.
+     */
+    #[Test]
+    public function a_repeated_variable_the_analyser_knows_is_a_backtick_is_still_a_fence(): void
+    {
+        self::assertTrue($this->fireInterpolatedWithType(
+            ['ALTER TABLE ', new Variable('q'), new Variable('table'), new Variable('q'), ' DROP COLUMN x'],
+            new ConstantStringType('`'),
+        ));
+    }
+
+    /**
+     * THE CASE THE FENCE EXISTS FOR, and the reason only a KNOWN value
+     * excludes: SyncEngine's `$q` holds the dialect's quote character, chosen
+     * at runtime. A rule that went quiet whenever the type was unresolvable
+     * would be quiet exactly where the SQL is built dynamically.
+     */
+    #[Test]
+    public function an_unresolvable_repeated_variable_still_reports(): void
+    {
+        self::assertTrue($this->fireInterpolatedWithType(
+            ['ALTER TABLE ', new Variable('q'), new Variable('table'), new Variable('q'), ' DROP COLUMN x'],
+            new StringType(),
+        ));
+    }
+
+    /**
+     * @param list<string|Variable> $parts
+     */
+    private function fireInterpolatedWithType(array $parts, \PHPStan\Type\Type $variableType): bool
+    {
+        $nodes = array_map(
+            static fn (string|Variable $part) => is_string($part) ? new InterpolatedStringPart($part) : $part,
+            $parts,
+        );
+
+        $scope = $this->createStub(Scope::class);
+        $scope->method('getType')->willReturn($variableType);
+
+        return (new UnquotedSqlIdentifierRule())
+            ->processNode(new InterpolatedString($nodes), $scope) !== [];
     }
 }

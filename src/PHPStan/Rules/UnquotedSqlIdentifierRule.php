@@ -109,7 +109,7 @@ final class UnquotedSqlIdentifierRule implements Rule
         }
 
         $quotedInLiteral = preg_match(self::INTERPOLATION_IN_QUOTES, $value) === 1;
-        $quotedByVariable = $node instanceof InterpolatedString && self::wrapsInAVariableQuote($node);
+        $quotedByVariable = $node instanceof InterpolatedString && self::wrapsInAVariableQuote($node, $scope);
 
         if (!$quotedInLiteral && !$quotedByVariable) {
             return [];
@@ -119,8 +119,12 @@ final class UnquotedSqlIdentifierRule implements Rule
             RuleErrorBuilder::message(
                 'SQL identifier is wrapped in quotes in the format string instead of being escaped. '
                 . 'Backticking a name does not escape it — a backtick inside the name closes the quote '
-                . 'and the rest is parsed as SQL. Drop the quotes from the literal and pass the value '
-                . 'through Semitexa\\Orm\\Adapter\\SqlIdentifier::quote() (or quoteAll/quoteQualified).',
+                . 'and the rest is parsed as SQL. If the quoted thing is an IDENTIFIER (a table or column '
+                . 'name), drop the quotes from the literal and pass it through '
+                . 'Semitexa\\Orm\\Adapter\\SqlIdentifier::quote() (or quoteAll/quoteQualified). If it is '
+                . 'a VALUE — `WHERE name = \'%s\'` — neither quoting nor SqlIdentifier is the answer: bind '
+                . 'it as a parameter and leave a placeholder in the statement. This rule reads one string '
+                . 'literal and cannot tell the two positions apart, which is why it names both.',
             )
                 ->identifier('semitexa.unquotedSqlIdentifier')
                 ->build(),
@@ -138,7 +142,7 @@ final class UnquotedSqlIdentifierRule implements Rule
      * anything, and matching those would start flagging "{$a}{$b}{$a}" in
      * strings that are not quoting anything.
      */
-    private static function wrapsInAVariableQuote(InterpolatedString $node): bool
+    private static function wrapsInAVariableQuote(InterpolatedString $node, Scope $scope): bool
     {
         $parts = $node->parts;
 
@@ -153,12 +157,42 @@ final class UnquotedSqlIdentifierRule implements Rule
                 && is_string($open->name)
                 && $open->name === $close->name
                 && !$inner instanceof InterpolatedStringPart
+                && !self::isKnownNotToBeAQuote($open, $scope)
             ) {
                 return true;
             }
         }
 
         return false;
+    }
+
+    /**
+     * Does the analyser KNOW this variable holds something that is not a quote?
+     *
+     * `"SELECT {$pad}{$column}{$pad} FROM users"` with `$pad = ' '` has the
+     * shape of a fence and is ordinary SQL, and the rule reported it. When
+     * PHPStan can resolve the variable to a constant string, that settles it.
+     *
+     * ONLY A KNOWN VALUE EXCLUDES. An unresolvable variable still reports, and
+     * that is the whole point: `$q` in SyncEngine holds the dialect's quote
+     * character, chosen at runtime, and it is the case this fence was written
+     * for. A rule that went quiet whenever the type was unknown would be quiet
+     * exactly where the SQL is built dynamically.
+     */
+    private static function isKnownNotToBeAQuote(Node\Expr\Variable $variable, Scope $scope): bool
+    {
+        $constants = $scope->getType($variable)->getConstantStrings();
+        if ($constants === []) {
+            return false;
+        }
+
+        foreach ($constants as $constant) {
+            if (in_array($constant->getValue(), ['`', '"'], true)) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /**
@@ -179,7 +213,12 @@ final class UnquotedSqlIdentifierRule implements Rule
 
     private static function looksLikeSql(string $value): bool
     {
-        $upper = strtoupper(ltrim($value));
+        // Whitespace runs collapse first. The checks below compare against
+        // ' FROM ' and 'SELECT ' with literal spaces, so a statement wrapped
+        // across lines — `SELECT\n* FROM `%s`` — did not look like SQL at all
+        // and skipped the rule entirely. Formatting is not a reason to stop
+        // checking a statement.
+        $upper = (string) preg_replace('/\s+/', ' ', strtoupper(ltrim($value)));
 
         $opens = false;
         foreach (self::STATEMENT_HEADS as $verb) {

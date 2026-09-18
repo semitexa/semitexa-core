@@ -43,15 +43,49 @@ final class StrictTransportSecurity
      * pick a number nobody chose, and the one thing that must not happen is a
      * max-age the operator did not intend.
      */
-    public static function headerValue(): ?string
+    /**
+     * The configured max-age in seconds, or null when there is no usable one.
+     *
+     * The single parser, because the doctor check has to reach the same verdict
+     * as the header builder — it already re-derived "is this a positive number"
+     * with its own `ctype_digit`, and two parsers of one value is how a doctor
+     * comes to bless a header the server will not send.
+     *
+     * OUT OF RANGE IS NOT A DURATION. `ctype_digit` accepts a number wider than
+     * the platform's integer, and the `(int)` cast then SATURATES it: an
+     * operator who typed twenty digits got max-age=9223372036854775807 — about
+     * 292 billion years, cached and honoured by every browser that saw it — and
+     * a doctor check that called the value valid. Refused for the same reason
+     * garbage is refused: the one outcome that must not happen with this header
+     * is a duration nobody chose.
+     */
+    public static function configuredMaxAge(): ?int
     {
         $raw = trim((string) (Environment::getEnvValue('HSTS_MAX_AGE') ?? ''));
         if ($raw === '' || !ctype_digit($raw)) {
             return null;
         }
 
-        $maxAge = (int) $raw;
-        if ($maxAge <= 0) {
+        // Leading zeros are the operator's formatting, not a different number.
+        $digits = ltrim($raw, '0');
+        if ($digits === '') {
+            return null; // 0, 00, 000 — off, as documented
+        }
+
+        $maxAge = (int) $digits;
+        // The round trip is the range check: a value the platform cannot hold
+        // comes back as something other than what was written.
+        if ((string) $maxAge !== $digits || $maxAge <= 0) {
+            return null;
+        }
+
+        return $maxAge;
+    }
+
+    public static function headerValue(): ?string
+    {
+        $maxAge = self::configuredMaxAge();
+        if ($maxAge === null) {
             return null;
         }
 

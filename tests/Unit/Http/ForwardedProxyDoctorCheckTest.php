@@ -27,7 +27,13 @@ final class ForwardedProxyDoctorCheckTest extends TestCase
     {
         foreach (['TRUSTED_PROXIES', 'APP_URL', 'SESSION_COOKIE_SECURE'] as $name) {
             $this->saved[$name] = getenv($name);
-            putenv($name);
+            // An EMPTY process value, not an unset one. putenv($name) removes
+            // the process entry and Environment::getEnvValue() then falls
+            // through to its once-per-process cache of .env / .env.default — so
+            // a developer with the variable set in .env ran a different test
+            // from CI, silently. Empty is what "not configured" means to every
+            // reader here.
+            putenv($name . '=');
         }
     }
 
@@ -105,5 +111,74 @@ final class ForwardedProxyDoctorCheckTest extends TestCase
 
         self::assertSame(DoctorStatus::Pass, $result->status);
         self::assertStringContainsString('APP_URL is unset', $result->message);
+    }
+
+    /**
+     * THE HOLE THIS CHECK WAS LEAVING. It knew the enabling spellings of
+     * SESSION_COOKIE_SECURE and said nothing about the disabling ones, so an
+     * HTTPS deployment that had turned the flag OFF passed on the strength of a
+     * populated TRUSTED_PROXIES — while every cookie went out over HTTPS
+     * without Secure. Proxy trust cannot override an explicit setting.
+     */
+    #[Test]
+    public function an_https_deployment_that_turns_the_flag_off_fails_even_with_trusted_proxies(): void
+    {
+        putenv('APP_URL=https://semitexa.com');
+        putenv('TRUSTED_PROXIES=172.18.0.0/16');
+        putenv('SESSION_COOKIE_SECURE=never');
+
+        $result = (new ForwardedProxyDoctorCheck())->run();
+
+        self::assertSame(DoctorStatus::Fail, $result->status);
+        self::assertStringContainsString('never', $result->message);
+        self::assertStringContainsString('TRUSTED_PROXIES does not help', $result->message);
+        self::assertStringContainsString('SESSION_COOKIE_SECURE=always', (string) $result->hint);
+    }
+
+    /** Every disabling spelling, not just the word. */
+    #[Test]
+    public function the_other_disabling_spellings_fail_the_same_way(): void
+    {
+        putenv('APP_URL=https://semitexa.com');
+        putenv('TRUSTED_PROXIES=172.18.0.0/16');
+
+        foreach (['false', '0', 'off'] as $value) {
+            putenv('SESSION_COOKIE_SECURE=' . $value);
+
+            self::assertSame(
+                DoctorStatus::Fail,
+                (new ForwardedProxyDoctorCheck())->run()->status,
+                $value . ' turns the Secure flag off and must be reported',
+            );
+        }
+    }
+
+    /**
+     * A spelling nobody defined behaves as auto — which is not what the
+     * operator asked for, and is invisible from outside until a cookie goes out
+     * unprotected.
+     */
+    #[Test]
+    public function an_undefined_spelling_is_reported_rather_than_treated_as_auto(): void
+    {
+        putenv('APP_URL=https://semitexa.com');
+        putenv('TRUSTED_PROXIES=172.18.0.0/16');
+        putenv('SESSION_COOKIE_SECURE=alway');
+
+        $result = (new ForwardedProxyDoctorCheck())->run();
+
+        self::assertSame(DoctorStatus::Fail, $result->status);
+        self::assertStringContainsString('alway', $result->message);
+        self::assertStringContainsString('always', (string) $result->hint, 'the remedy lists what is accepted');
+    }
+
+    /** And a plain-HTTP deployment that disables the flag is doing what it says. */
+    #[Test]
+    public function a_plain_http_deployment_may_turn_the_flag_off(): void
+    {
+        putenv('APP_URL=http://localhost:9502');
+        putenv('SESSION_COOKIE_SECURE=never');
+
+        self::assertSame(DoctorStatus::Pass, (new ForwardedProxyDoctorCheck())->run()->status);
     }
 }

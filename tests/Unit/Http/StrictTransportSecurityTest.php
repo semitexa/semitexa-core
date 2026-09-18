@@ -27,7 +27,13 @@ final class StrictTransportSecurityTest extends TestCase
     {
         foreach (self::VARS as $name) {
             $this->saved[$name] = getenv($name);
-            putenv($name);
+            // An EMPTY process value, not an unset one. putenv($name) removes
+            // the process entry and Environment::getEnvValue() then falls
+            // through to its once-per-process cache of .env / .env.default — so
+            // a developer with the variable set in .env ran a different test
+            // from CI, silently. Empty is what "not configured" means to every
+            // reader here.
+            putenv($name . '=');
         }
     }
 
@@ -177,5 +183,67 @@ final class StrictTransportSecurityTest extends TestCase
 
         self::assertSame(DoctorStatus::Pass, $result->status);
         self::assertStringContainsString('max-age=31536000', $result->message);
+    }
+
+    /**
+     * A digit string wider than the platform's integer.
+     *
+     * `ctype_digit` accepts it and the `(int)` cast SATURATES, so an operator
+     * who typed twenty digits got max-age=9223372036854775807 — about 292
+     * billion years, cached and honoured by every browser that saw it — while
+     * the doctor check called the value valid. The one outcome this header must
+     * not produce is a duration nobody chose.
+     */
+    #[Test]
+    public function a_max_age_wider_than_the_platform_integer_turns_the_header_off(): void
+    {
+        putenv('HSTS_MAX_AGE=99999999999999999999999');
+
+        self::assertNull(StrictTransportSecurity::configuredMaxAge());
+        self::assertNull(StrictTransportSecurity::headerValue());
+    }
+
+    #[Test]
+    public function the_largest_holdable_max_age_is_still_accepted(): void
+    {
+        // The boundary itself is a real value and stays one — refusing it would
+        // be a second guess about what the operator meant.
+        putenv('HSTS_MAX_AGE=' . PHP_INT_MAX);
+
+        self::assertSame(PHP_INT_MAX, StrictTransportSecurity::configuredMaxAge());
+
+        putenv('HSTS_MAX_AGE=' . PHP_INT_MAX . '0');
+
+        self::assertNull(StrictTransportSecurity::configuredMaxAge(), 'one digit past it is not a duration');
+    }
+
+    #[Test]
+    public function leading_zeros_are_formatting_not_a_different_number(): void
+    {
+        putenv('HSTS_MAX_AGE=007');
+        self::assertSame(7, StrictTransportSecurity::configuredMaxAge());
+
+        putenv('HSTS_MAX_AGE=000');
+        self::assertNull(StrictTransportSecurity::configuredMaxAge(), 'zero is off, however it is spelled');
+    }
+
+    /**
+     * And the doctor says so, rather than reporting HSTS as merely "off".
+     * It used to re-derive "is this a positive number" with its own
+     * ctype_digit, which accepted the wide value and skipped the failing
+     * branch — a second opinion about the same string, reaching the opposite
+     * verdict from the code that builds the header.
+     */
+    #[Test]
+    public function the_doctor_fails_on_a_max_age_the_platform_cannot_hold(): void
+    {
+        putenv('HSTS_MAX_AGE=99999999999999999999999');
+        putenv('APP_URL=https://semitexa.com');
+
+        $result = (new StrictTransportSecurityDoctorCheck())->run();
+
+        self::assertSame(DoctorStatus::Fail, $result->status);
+        self::assertStringContainsString('99999999999999999999999', $result->message);
+        self::assertStringContainsString('no Strict-Transport-Security header is sent', $result->message);
     }
 }

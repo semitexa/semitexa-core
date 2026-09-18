@@ -235,6 +235,77 @@ final class BuiltSqlFragmentRuleTest extends TestCase
         self::assertSame([], (new BuiltSqlFragmentRule())->processNode($callable, $this->createStub(Scope::class)));
     }
 
+    /**
+     * The deduplication, exercised where it actually engages.
+     *
+     * PHPStan walks a nullsafe call in more than one scope, so the same call
+     * arrives twice; reports are keyed on file plus source offset. Every other
+     * fixture here is hand-built and carries no `startFilePos`, which is the
+     * branch that always reports — so without this case the `$reported` map is
+     * never written to in the whole suite, and a regression that keyed on the
+     * wrong attribute would pass it.
+     */
+    #[Test]
+    public function the_same_call_is_reported_once(): void
+    {
+        $rule = new BuiltSqlFragmentRule();
+        $scope = $this->scopeForFile('/app/src/Repo.php');
+        $call = $this->positionedCall(offset: 512);
+
+        self::assertNotSame([], $rule->processNode($call, $scope), 'the first visit reports');
+        self::assertSame([], $rule->processNode($call, $scope), 'the second visit of the same node is a duplicate');
+    }
+
+    /**
+     * And the key is the FILE as well as the offset: two different files
+     * routinely have a call at the same byte, and silencing the second would
+     * lose a real finding rather than a duplicate.
+     */
+    #[Test]
+    public function the_same_offset_in_another_file_is_still_reported(): void
+    {
+        $rule = new BuiltSqlFragmentRule();
+        $call = $this->positionedCall(offset: 512);
+
+        self::assertNotSame([], $rule->processNode($call, $this->scopeForFile('/app/src/One.php')));
+        self::assertNotSame([], $rule->processNode($call, $this->scopeForFile('/app/src/Two.php')));
+    }
+
+    /**
+     * A hand-built node has no position, and two of them must not be taken for
+     * one call — which is what a key of file-plus-nothing would do.
+     */
+    #[Test]
+    public function nodes_without_a_position_are_each_reported(): void
+    {
+        $rule = new BuiltSqlFragmentRule();
+        $scope = $this->scopeForFile('/app/src/Repo.php');
+
+        self::assertNotSame([], $rule->processNode($this->positionedCall(offset: null), $scope));
+        self::assertNotSame([], $rule->processNode($this->positionedCall(offset: null), $scope));
+    }
+
+    private function scopeForFile(string $file): Scope
+    {
+        $scope = $this->createStub(Scope::class);
+        $scope->method('getFile')->willReturn($file);
+
+        return $scope;
+    }
+
+    /** A reported-shaped call — a built fragment — at a known source offset. */
+    private function positionedCall(?int $offset): MethodCall
+    {
+        $call = new MethodCall(
+            new Variable('q'),
+            new Identifier('whereRaw'),
+            [$this->arg(new Concat(new String_('`name` = '), new Variable('input')))],
+            $offset === null ? [] : ['startFilePos' => $offset],
+        );
+
+        return $call;
+    }
+
     #[Test]
     public function the_identifier_is_contract_stable(): void
     {

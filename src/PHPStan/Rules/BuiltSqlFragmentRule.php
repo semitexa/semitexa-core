@@ -113,7 +113,11 @@ final class BuiltSqlFragmentRule implements Rule
             return [];
         }
 
-        $fragment = self::fragmentArgument($node->getArgs());
+        // array_values, because getArgs() is typed array<Arg> — not a list —
+        // and fragmentArgument() reads position 0. PHPStan reports argument.type
+        // here without it, and the position check would be reading a key that
+        // is not the one it thinks it is.
+        $fragment = self::fragmentArgument(array_values($node->getArgs()));
 
         // A call with no fragment at all is somebody else's error to report.
         if ($fragment === null) {
