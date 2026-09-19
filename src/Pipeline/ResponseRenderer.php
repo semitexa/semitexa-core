@@ -540,8 +540,11 @@ final class ResponseRenderer
             return false;
         }
 
+        // Strict identity alone: the declared list is typed as RenderProfile[],
+        // so the instanceof that used to guard this was always true, and a
+        // stray non-enum value is !== RenderProfile::Json regardless.
         foreach ($declared as $profile) {
-            if ($profile instanceof RenderProfile && $profile === RenderProfile::Json) {
+            if ($profile === RenderProfile::Json) {
                 return true;
             }
         }
