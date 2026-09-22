@@ -7,7 +7,6 @@ namespace Semitexa\Core\Tests\Unit\Resource;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Semitexa\Core\Discovery\ClassDiscovery;
-use Semitexa\Core\Resource\Attribute\ResourceObject;
 use Semitexa\Core\Resource\Metadata\CacheLoadResult;
 use Semitexa\Core\Resource\Metadata\ResourceMetadataCacheFile;
 use Semitexa\Core\Resource\Metadata\ResourceMetadataExtractor;

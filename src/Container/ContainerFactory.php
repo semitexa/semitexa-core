@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Container;
 
-use Psr\Container\ContainerInterface;
 use Semitexa\Core\Redis\RedisConnectionPool;
 use Semitexa\Core\Redis\RedisSharedPool;
 

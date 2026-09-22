@@ -17,7 +17,6 @@ use Semitexa\Core\Resource\Metadata\ResourceMetadataRegistry;
 use Semitexa\Core\Resource\RelationResolverInterface;
 use Semitexa\Core\Resource\RenderContext;
 use Semitexa\Core\Resource\RenderProfile;
-use Semitexa\Core\Resource\ResolvedResourceGraph;
 use Semitexa\Core\Resource\ResourceExpansionPipeline;
 use Semitexa\Core\Resource\ResourceIdentity;
 use Semitexa\Core\Resource\ResourceRef;

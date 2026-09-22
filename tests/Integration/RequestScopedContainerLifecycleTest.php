@@ -12,10 +12,8 @@ use Semitexa\Core\Auth\AuthContextInterface;
 use Semitexa\Core\Cookie\CookieJarInterface;
 use Semitexa\Core\Lifecycle\PerRequestStateRegistry;
 use Semitexa\Core\Lifecycle\TestStateResetRegistry;
-use Semitexa\Core\Locale\LocaleContextInterface;
 use Semitexa\Core\Request;
 use Semitexa\Core\Session\SessionInterface;
-use Semitexa\Core\Tenant\TenantContextInterface;
 use Semitexa\Modules\AuthDemo\Application\Service\AuthDemoStubAuthHandler;
 
 /**

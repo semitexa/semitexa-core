@@ -9,7 +9,6 @@ use Semitexa\Core\Attribute\InjectAsReadonly;
 use Semitexa\Core\Container\Exception\InjectionException;
 use ReflectionClass;
 use ReflectionNamedType;
-use ReflectionProperty;
 
 /**
  * Applies #[InjectAsReadonly] property injection to an already-constructed
