@@ -92,7 +92,7 @@ final class ResponseRenderer
                     $format = ResponseFormat::Json;
                 }
             } else {
-                return $resDto;
+                return DataProfileLabel::apply($resDto, $route);
             }
         }
         $rendererClass = method_exists($resDto, 'getRendererClass') ? $resDto->getRendererClass() : null;
@@ -147,6 +147,17 @@ final class ResponseRenderer
                     'available' => $e->produces,
                 ], HttpStatus::NotAcceptable->value);
             }
+        }
+
+        // A body the resource produced under a DATA profile is not a page, and
+        // the layout path would label it as one: renderLayout() sees content
+        // and stamps text/html over it. MEASURED 2026-09-22 across every
+        // parameterless GET route x four Accept headers: 21 JSON bodies on 7
+        // routes went out as text/html — the grid feeds and /playground/customers
+        // for any Accept but application/json, overwriting the application/json
+        // and application/ld+json their own response classes had set.
+        if ($format === null && $this->readContent($resDto) !== '' && DataProfileLabel::servedProfile($resDto, $route) !== null) {
+            return DataProfileLabel::apply($resDto, $route);
         }
 
         if ($format === null) {
