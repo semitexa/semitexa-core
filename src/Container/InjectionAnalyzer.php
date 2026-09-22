@@ -80,14 +80,6 @@ final class InjectionAnalyzer
             }
         }
 
-        // Slot handlers render per request, like payload handlers
-        if (class_exists(\Semitexa\Ssr\Attribute\AsSlotHandler::class)) {
-            foreach ($this->classDiscovery->findClassesWithAttribute(\Semitexa\Ssr\Attribute\AsSlotHandler::class) as $handlerClass) {
-                /** @var class-string $handlerClass */
-                $executionScopedClasses[$handlerClass] = true;
-            }
-        }
-
         return $executionScopedClasses;
     }
 

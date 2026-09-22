@@ -10,7 +10,7 @@ use Semitexa\Core\Pipeline\HandleRequest;
 
 /**
  * Registers all service classes in idToClass: payload handlers, #[AsService] classes,
- * ORM repositories, auth handlers, slot handlers, and pipeline listeners.
+ * ORM repositories, auth handlers, and pipeline listeners.
  *
  * Preconditions: context->classDiscovery, attributeDiscovery, pipelineListenerRegistry must be set.
  * Postconditions: context->idToClass populated with all service classes.
@@ -50,16 +50,6 @@ final class ServiceRegistrationPhase implements BuildPhaseInterface
         // Auth handlers (optional package)
         if (class_exists(\Semitexa\Auth\Attribute\AsAuthHandler::class)) {
             foreach ($context->classDiscovery->findClassesWithAttribute(\Semitexa\Auth\Attribute\AsAuthHandler::class) as $handlerClass) {
-                /** @var class-string $handlerClass */
-                $context->idToClass[$handlerClass] = $handlerClass;
-            }
-        }
-
-        // Slot handlers (optional package). SlotHandlerPipeline resolves them from the
-        // container first; before they were registered here, has() was always false, so a
-        // handler with an #[InjectAs*] property was refused and its region rendered empty.
-        if (class_exists(\Semitexa\Ssr\Attribute\AsSlotHandler::class)) {
-            foreach ($context->classDiscovery->findClassesWithAttribute(\Semitexa\Ssr\Attribute\AsSlotHandler::class) as $handlerClass) {
                 /** @var class-string $handlerClass */
                 $context->idToClass[$handlerClass] = $handlerClass;
             }
