@@ -5,6 +5,19 @@ Changes to `semitexa/core` that a consuming application can notice. Sections are
 next release tag. This file is machine-read by `update:changelog` and the OS
 "What's new" surface — keep entries short and operator-facing.
 
+## Unreleased
+
+### Changed
+- **A JSON body is no longer labelled `text/html`.** A route that declares a data
+  profile (`json`, `json-ld`, `graphql`) now sends that profile's type when the
+  response set none, and keeps the type its response class set instead of
+  replacing it. Before, a route with no render handle (`/platform/calendar/events`)
+  went out as `text/html`, and any `Accept` other than `application/json` on a
+  JSON route with a handle — `text/html`, `*/*`, `application/ld+json` — sent
+  its JSON as `text/html; charset=utf-8`. Bodies are unchanged. A client that
+  sniffed the body because the header was wrong keeps working; a client that
+  trusted the header now reads JSON as JSON.
+
 ## 2026.09.22.1020 — 2026-09-22
 
 ### Added
