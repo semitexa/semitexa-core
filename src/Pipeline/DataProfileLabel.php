@@ -52,35 +52,47 @@ final class DataProfileLabel
      */
     public static function servedProfile(object $resDto, DiscoveredRoute $route): ?RenderProfile
     {
-        $served = null;
-
-        if ($route->responsesByProfile !== null && $route->responsesByProfile !== []) {
-            // Exact class first: the instance may be a generated subclass
-            // carrying resource parts, and one profile's class may extend
-            // another's.
-            $key = array_search($resDto::class, $route->responsesByProfile, true);
-            if ($key === false) {
-                foreach ($route->responsesByProfile as $profileKey => $class) {
-                    if (is_string($class) && $resDto instanceof $class) {
-                        $key = $profileKey;
-                        break;
-                    }
-                }
-            }
-            $served = is_string($key) ? RenderProfile::tryFrom($key) : null;
-        }
+        $served = self::mappedProfile($resDto, $route);
 
         if ($served === null) {
             $declared = $route->renderProfile;
             if ($declared instanceof RenderProfile) {
                 $served = $declared;
             } elseif (is_array($declared) && count($declared) === 1) {
-                $only = reset($declared);
-                $served = $only instanceof RenderProfile ? $only : null;
+                // Typed RenderProfile[], as in ResponseRenderer::declaresJsonProfile(),
+                // and the count guarantees the one element exists.
+                $served = $declared[array_key_first($declared)];
             }
         }
 
         return $served === RenderProfile::Html ? null : $served;
+    }
+
+    /**
+     * Which `responsesByProfile` entry this instance is.
+     *
+     * The instance may be a generated subclass carrying resource parts, so an
+     * exact class match is not enough; and a route may map a parent class and
+     * its child to different profiles, in either order. So every mapped class
+     * the instance is an instance of is a candidate, and the most specific one
+     * wins — a child's profile over its parent's, whichever was declared first.
+     */
+    private static function mappedProfile(object $resDto, DiscoveredRoute $route): ?RenderProfile
+    {
+        $bestKey = null;
+        $bestClass = null;
+
+        foreach ($route->responsesByProfile ?? [] as $profileKey => $class) {
+            if (!$resDto instanceof $class) {
+                continue;
+            }
+            if ($bestClass === null || is_subclass_of($class, $bestClass)) {
+                $bestKey = $profileKey;
+                $bestClass = $class;
+            }
+        }
+
+        return is_string($bestKey) ? RenderProfile::tryFrom($bestKey) : null;
     }
 
     private static function hasBody(object $resDto): bool
@@ -94,7 +106,11 @@ final class DataProfileLabel
         return is_string($content) && $content !== '';
     }
 
-    private static function declaresContentType(object $resDto): bool
+    /**
+     * Whether the resource's own class or handler set a Content-Type. A
+     * ResourceResponse is born with none, so any value here is a declaration.
+     */
+    public static function declaresContentType(object $resDto): bool
     {
         if (!method_exists($resDto, 'getHeaders')) {
             return false;

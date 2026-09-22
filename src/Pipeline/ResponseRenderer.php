@@ -156,7 +156,16 @@ final class ResponseRenderer
         // routes went out as text/html — the grid feeds and /playground/customers
         // for any Accept but application/json, overwriting the application/json
         // and application/ld+json their own response classes had set.
-        if ($format === null && $this->readContent($resDto) !== '' && DataProfileLabel::servedProfile($resDto, $route) !== null) {
+        //
+        // The same holds when negotiation CHOSE the layout: a route may declare
+        // the Json profile and still produce text/html, and a browser's Accept
+        // then selects Layout for a body the class already labelled as JSON.
+        // Only a declared type is protected there — an unlabelled body under an
+        // explicit HTML choice may well be HTML, and stays on the layout path.
+        if (($format === null || $format === ResponseFormat::Layout)
+            && $this->readContent($resDto) !== ''
+            && DataProfileLabel::servedProfile($resDto, $route) !== null
+            && ($format === null || DataProfileLabel::declaresContentType($resDto))) {
             return DataProfileLabel::apply($resDto, $route);
         }
 

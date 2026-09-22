@@ -76,8 +76,11 @@ final class DataProfileBodyIsNotLabelledAsPageTest extends TestCase
         };
     }
 
-    /** @param array<string, class-string>|null $responsesByProfile */
-    private function route(mixed $renderProfile, ?array $responsesByProfile = null): DiscoveredRoute
+    /**
+     * @param array<string, class-string>|null $responsesByProfile
+     * @param list<string>|null $produces
+     */
+    private function route(mixed $renderProfile, ?array $responsesByProfile = null, ?array $produces = null): DiscoveredRoute
     {
         return new DiscoveredRoute(
             path: '/feed',
@@ -88,7 +91,7 @@ final class DataProfileBodyIsNotLabelledAsPageTest extends TestCase
             handlers: [],
             type: 'http_request',
             transport: null,
-            produces: null,
+            produces: $produces,
             consumes: null,
             module: 'stub',
             renderProfile: $renderProfile,
@@ -193,6 +196,56 @@ final class DataProfileBodyIsNotLabelledAsPageTest extends TestCase
         self::assertSame('text/csv; charset=utf-8', $this->headersOf($rendered)['Content-Type'] ?? null);
     }
 
+    /**
+     * A route may declare the Json profile and still produce text/html. A
+     * browser's Accept then NEGOTIATES Layout — a choice, not an absence — and
+     * the body the class already labelled as JSON must keep that label.
+     */
+    #[Test]
+    public function a_declared_type_survives_a_negotiated_layout(): void
+    {
+        $resource = $this->resource('playground.article.list', '{"data":[]}', ['Content-Type' => 'application/json']);
+        $route = $this->route(RenderProfile::Json, null, ['text/html', 'application/json']);
+
+        $rendered = (new ResponseRenderer())->render($resource, null, $this->get('text/html'), $route);
+
+        self::assertSame('application/json', $this->headersOf($rendered)['Content-Type'] ?? null);
+    }
+
+    /**
+     * Under that same explicit HTML choice an UNLABELLED body may well be the
+     * HTML the handler produced for it, so it is left to the layout path.
+     */
+    #[Test]
+    public function an_unlabelled_body_under_a_negotiated_layout_stays_html(): void
+    {
+        $resource = $this->resource('playground.article.list', '<main>list</main>');
+        $route = $this->route(RenderProfile::Json, null, ['text/html', 'application/json']);
+
+        $rendered = (new ResponseRenderer())->render($resource, null, $this->get('text/html'), $route);
+
+        self::assertSame('text/html; charset=utf-8', $this->headersOf($rendered)['Content-Type'] ?? null);
+    }
+
+    /**
+     * A route may map a parent class and its child to different profiles, and
+     * the instance may be a generated subclass of the child. The child's
+     * profile wins, even with the parent declared first.
+     */
+    #[Test]
+    public function the_most_specific_mapped_class_decides_the_profile(): void
+    {
+        $resource = new class ('playground.customer.list', '{"@graph":[]}', []) extends DataProfileChildResponseStub {};
+        $route = $this->route(
+            [RenderProfile::Json, RenderProfile::JsonLd],
+            ['json' => DataProfileParentResponseStub::class, 'json-ld' => DataProfileChildResponseStub::class],
+        );
+
+        $rendered = (new ResponseRenderer())->render($resource, null, $this->get('application/ld+json'), $route);
+
+        self::assertSame('application/ld+json', $this->headersOf($rendered)['Content-Type'] ?? null);
+    }
+
     /** A page is still a page: no profile, a rendered body, text/html. */
     #[Test]
     public function a_page_with_a_body_is_still_labelled_as_html(): void
@@ -225,4 +278,52 @@ final class DataProfileBodyIsNotLabelledAsPageTest extends TestCase
 
         self::assertArrayNotHasKey('Content-Type', $this->headersOf($rendered));
     }
+}
+
+/** A response class a route can map to a profile, the way a JSON resource is shaped. */
+class DataProfileParentResponseStub
+{
+    /** @param array<string, string> $headers */
+    public function __construct(
+        private ?string $handle,
+        private string $content,
+        private array $headers,
+    ) {
+    }
+
+    public function getRenderHandle(): ?string
+    {
+        return $this->handle;
+    }
+
+    /** @return array<string, mixed> */
+    public function getRenderContext(): array
+    {
+        return [];
+    }
+
+    public function getContent(): string
+    {
+        return $this->content;
+    }
+
+    public function setContent(string $content): void
+    {
+        $this->content = $content;
+    }
+
+    public function setHeader(string $name, string $value): void
+    {
+        $this->headers[$name] = $value;
+    }
+
+    /** @return array<string, string> */
+    public function getHeaders(): array
+    {
+        return $this->headers;
+    }
+}
+
+class DataProfileChildResponseStub extends DataProfileParentResponseStub
+{
 }
