@@ -7,7 +7,6 @@ namespace Semitexa\Core\Tests\Integration;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Semitexa\Auth\Context\AuthContextStore;
-use Semitexa\Authorization\Application\Service\PayloadAccessPolicyResolver;
 use Semitexa\Core\Application;
 use Semitexa\Core\Attribute\TransportType;
 use Semitexa\Core\Auth\PayloadAccessType;

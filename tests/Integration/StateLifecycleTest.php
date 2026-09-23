@@ -10,7 +10,6 @@ use Semitexa\Auth\Context\AuthContextStore;
 use Semitexa\Modules\AuthDemo\Domain\Model\AuthDemoUser;
 use Semitexa\Authorization\Application\Service\PayloadAccessPolicyResolver;
 use Semitexa\Core\Application;
-use Semitexa\Core\Auth\AuthResult;
 use Semitexa\Core\Container\ContainerFactory;
 use Semitexa\Core\Lifecycle\CurrentRequestStore;
 use Semitexa\Core\Lifecycle\PerRequestStateRegistry;

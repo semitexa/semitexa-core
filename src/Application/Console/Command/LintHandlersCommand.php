@@ -10,7 +10,6 @@ use Semitexa\Core\Attribute\AsPayloadHandler;
 use Semitexa\Core\Contract\ResourceInterface;
 use Semitexa\Core\Contract\TypedHandlerInterface;
 use Semitexa\Core\Discovery\AttributeDiscovery;
-use Semitexa\Core\Discovery\ClassDiscovery;
 use Semitexa\Core\HttpResponse;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Output\OutputInterface;

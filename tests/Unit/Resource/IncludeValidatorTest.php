@@ -6,7 +6,6 @@ namespace Semitexa\Core\Tests\Unit\Resource;
 
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
-use Semitexa\Core\Resource\Exception\NonExpandableIncludeException;
 use Semitexa\Core\Resource\Exception\UnknownIncludeException;
 use Semitexa\Core\Resource\Exception\UnsatisfiedResourceIncludeException;
 use Semitexa\Core\Resource\HandlerProvidedIncludeRegistry;
