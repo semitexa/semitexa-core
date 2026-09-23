@@ -11,7 +11,9 @@ next release tag. This file is machine-read by `update:changelog` and the OS
 - **A JSON body is no longer labelled `text/html`.** A route that declares a data
   profile (`json`, `json-ld`, `graphql`) now sends that profile's type when the
   response set none, and keeps the type its response class set instead of
-  replacing it. Before, a route with no render handle (`/platform/calendar/events`)
+  replacing it. One exception: when content negotiation explicitly picks the
+  HTML layout, a body with no `Content-Type` of its own stays on the layout path
+  — it may well be HTML. Before, a route with no render handle (`/platform/calendar/events`)
   went out as `text/html`, and any `Accept` other than `application/json` on a
   JSON route with a handle — `text/html`, `*/*`, `application/ld+json` — sent
   its JSON as `text/html; charset=utf-8`. Bodies are unchanged. A client that
