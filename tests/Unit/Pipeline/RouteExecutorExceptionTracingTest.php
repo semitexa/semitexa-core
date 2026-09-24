@@ -54,6 +54,37 @@ final class RouteExecutorExceptionTracingTest extends TestCase
     }
 
     /**
+     * The root span's end says what the request answered. Without it the
+     * observatory journal carried a bare duration for every untraced request,
+     * and its error rate read 0.0% while the server returned 500s.
+     */
+    #[Test]
+    public function the_request_span_ends_with_the_status_it_answered(): void
+    {
+        $tracer = new ExceptionMarkRecordingTracer();
+
+        $this->executeThrowing($tracer, new \RuntimeException('boom'), 500);
+
+        self::assertSame(['http_status' => 500], $tracer->ends['request'] ?? null);
+    }
+
+    #[Test]
+    public function an_exception_nothing_mapped_ends_the_span_naming_it(): void
+    {
+        $tracer = new ExceptionMarkRecordingTracer();
+        $container = new ExceptionTracingContainer([RequestTracerInterface::class => $tracer]);
+
+        try {
+            $this->executeRoute($container);
+            self::fail('with no mapper the exception must escape');
+        } catch (\Throwable) {
+        }
+
+        self::assertArrayHasKey('exception', $tracer->ends['request'] ?? []);
+        self::assertArrayNotHasKey('http_status', $tracer->ends['request']);
+    }
+
+    /**
      * Drive RouteExecutor far enough to reach the mapped-exception branch. The
      * route resolution is left to fail on purpose: whatever throws, the branch
      * under test is the one that maps it and marks the trace.
@@ -74,6 +105,11 @@ final class RouteExecutorExceptionTracingTest extends TestCase
             ExceptionResponseMapperInterface::class => $mapper,
         ]);
 
+        $this->executeRoute($container);
+    }
+
+    private function executeRoute(ExceptionTracingContainer $container): void
+    {
         $executor = new RouteExecutor(new RequestScopedContainer($container), $container);
 
         $route = new DiscoveredRoute(
@@ -112,7 +148,13 @@ final class ExceptionMarkRecordingTracer implements RequestTracerInterface
 
     public function begin(string $name, array $context = []): void {}
 
-    public function end(string $name, array $context = []): void {}
+    /** @var array<string, array<string, mixed>> */
+    public array $ends = [];
+
+    public function end(string $name, array $context = []): void
+    {
+        $this->ends[$name] = $context;
+    }
 
     public function mark(string $name, array $context = []): void
     {
