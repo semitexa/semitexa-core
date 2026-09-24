@@ -17,6 +17,12 @@ use Semitexa\Core\Discovery\BootDiagnostics;
  * layout:generate — the command SSR's own "layout not activated" page tells the
  * user to run — was absent from the console while nothing failed: its
  * constructor asked for a class the container does not register.
+ *
+ * A WHOLE-INSTALL gate, on purpose: discovery finds commands from every
+ * installed package, so this goes red for a command outside core that cannot
+ * be built in this install — in the release clone too, which installs
+ * packages dev does not. That is the case worth catching: a command that
+ * vanishes only where it ships.
  */
 final class ConsoleCommandRegistrationTest extends TestCase
 {
