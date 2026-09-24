@@ -255,9 +255,16 @@ class RouteExecutor
             // as the same event. Publishing the status rather than a list of
             // classes that mean refusal keeps readers of the trace out of the
             // business of knowing which package throws what.
-            $mapped = $exceptionMapper->map($e, $request, $metadata);
-            $tracer?->mark('request.exception.mapped', ['status' => $mapped->statusCode]);
-            return $sent = $this->decorateResponse($mapped, $request, $metadata);
+            try {
+                $mapped = $exceptionMapper->map($e, $request, $metadata);
+                $tracer?->mark('request.exception.mapped', ['status' => $mapped->statusCode]);
+                return $sent = $this->decorateResponse($mapped, $request, $metadata);
+            } catch (\Throwable $mappingFailure) {
+                // What escapes is the mapper's (or decorator's) own failure, not
+                // the exception it was handling — report the one that left.
+                $escaped = $mappingFailure;
+                throw $mappingFailure;
+            }
         } finally {
             // finally, not a line before each return: execute() leaves through
             // five different points including two rethrows, and a root span that

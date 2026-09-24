@@ -74,13 +74,17 @@ final class RouteExecutorExceptionTracingTest extends TestCase
         $tracer = new ExceptionMarkRecordingTracer();
         $container = new ExceptionTracingContainer([RequestTracerInterface::class => $tracer]);
 
+        // The assertion stays outside the try: a self::fail() inside it would be
+        // swallowed by the catch and the test would judge the wrong thing.
+        $escaped = null;
         try {
             $this->executeRoute($container);
-            self::fail('with no mapper the exception must escape');
-        } catch (\Throwable) {
+        } catch (\Throwable $e) {
+            $escaped = $e;
         }
 
-        self::assertArrayHasKey('exception', $tracer->ends['request'] ?? []);
+        self::assertNotNull($escaped, 'with no mapper the exception must escape');
+        self::assertSame($escaped::class, $tracer->ends['request']['exception'] ?? null);
         self::assertArrayNotHasKey('http_status', $tracer->ends['request']);
     }
 
@@ -103,13 +107,16 @@ final class RouteExecutorExceptionTracingTest extends TestCase
             ExceptionResponseMapperInterface::class => $mapper,
         ]);
 
+        $escaped = null;
         try {
             $this->executeRoute($container);
-            self::fail('the mapper\'s exception must escape');
-        } catch (\LogicException) {
+        } catch (\LogicException $e) {
+            $escaped = $e;
         }
 
-        self::assertArrayHasKey('exception', $tracer->ends['request'] ?? []);
+        self::assertNotNull($escaped, "the mapper's exception must escape");
+        // The mapper's own failure, not the exception it was mapping.
+        self::assertSame(\LogicException::class, $tracer->ends['request']['exception'] ?? null);
     }
 
     /**
