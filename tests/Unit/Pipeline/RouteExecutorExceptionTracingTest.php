@@ -54,6 +54,72 @@ final class RouteExecutorExceptionTracingTest extends TestCase
     }
 
     /**
+     * The root span's end says what the request answered. Without it the
+     * observatory journal carried a bare duration for every untraced request,
+     * and its error rate read 0.0% while the server returned 500s.
+     */
+    #[Test]
+    public function the_request_span_ends_with_the_status_it_answered(): void
+    {
+        $tracer = new ExceptionMarkRecordingTracer();
+
+        $this->executeThrowing($tracer, new \RuntimeException('boom'), 500);
+
+        self::assertSame(['http_status' => 500], $tracer->ends['request'] ?? null);
+    }
+
+    #[Test]
+    public function an_exception_nothing_mapped_ends_the_span_naming_it(): void
+    {
+        $tracer = new ExceptionMarkRecordingTracer();
+        $container = new ExceptionTracingContainer([RequestTracerInterface::class => $tracer]);
+
+        // The assertion stays outside the try: a self::fail() inside it would be
+        // swallowed by the catch and the test would judge the wrong thing.
+        $escaped = null;
+        try {
+            $this->executeRoute($container);
+        } catch (\Throwable $e) {
+            $escaped = $e;
+        }
+
+        self::assertNotNull($escaped, 'with no mapper the exception must escape');
+        self::assertSame($escaped::class, $tracer->ends['request']['exception'] ?? null);
+        self::assertArrayNotHasKey('http_status', $tracer->ends['request']);
+    }
+
+    /**
+     * A mapper that itself throws must not leave the request looking like a
+     * success: the span ends naming the exception that got it there.
+     */
+    #[Test]
+    public function a_mapper_that_crashes_still_ends_the_span_as_a_failure(): void
+    {
+        $tracer = new ExceptionMarkRecordingTracer();
+        $mapper = new class implements ExceptionResponseMapperInterface {
+            public function map(\Throwable $e, Request $request, ResolvedRouteMetadata $metadata): HttpResponse
+            {
+                throw new \LogicException('the mapper broke');
+            }
+        };
+        $container = new ExceptionTracingContainer([
+            RequestTracerInterface::class => $tracer,
+            ExceptionResponseMapperInterface::class => $mapper,
+        ]);
+
+        $escaped = null;
+        try {
+            $this->executeRoute($container);
+        } catch (\LogicException $e) {
+            $escaped = $e;
+        }
+
+        self::assertNotNull($escaped, "the mapper's exception must escape");
+        // The mapper's own failure, not the exception it was mapping.
+        self::assertSame(\LogicException::class, $tracer->ends['request']['exception'] ?? null);
+    }
+
+    /**
      * Drive RouteExecutor far enough to reach the mapped-exception branch. The
      * route resolution is left to fail on purpose: whatever throws, the branch
      * under test is the one that maps it and marks the trace.
@@ -74,6 +140,11 @@ final class RouteExecutorExceptionTracingTest extends TestCase
             ExceptionResponseMapperInterface::class => $mapper,
         ]);
 
+        $this->executeRoute($container);
+    }
+
+    private function executeRoute(ExceptionTracingContainer $container): void
+    {
         $executor = new RouteExecutor(new RequestScopedContainer($container), $container);
 
         $route = new DiscoveredRoute(
@@ -112,7 +183,13 @@ final class ExceptionMarkRecordingTracer implements RequestTracerInterface
 
     public function begin(string $name, array $context = []): void {}
 
-    public function end(string $name, array $context = []): void {}
+    /** @var array<string, array<string, mixed>> */
+    public array $ends = [];
+
+    public function end(string $name, array $context = []): void
+    {
+        $this->ends[$name] = $context;
+    }
 
     public function mark(string $name, array $context = []): void
     {

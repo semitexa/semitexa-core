@@ -112,6 +112,9 @@ class RouteExecutor
         // tracer: under Swoole the superglobals are not populated - request data
         // arrives on the request object - so a tracer reaching for $_GET would
         // work in unit tests and silently record nothing in a real worker.
+        // Which exit the request took, for the root span's end (RequestOutcome).
+        $sent = null;
+        $escaped = null;
         $tracer?->begin('request', [
             'method' => $request->getMethod(),
             'path'   => $route->path,
@@ -129,7 +132,7 @@ class RouteExecutor
                 $request
             );
             if ($consumesResult !== true) {
-                return $this->decorateResponse(HttpResponse::json([
+                return $sent = $this->decorateResponse(HttpResponse::json([
                     'error' => 'Unsupported Media Type',
                     'message' => "Content-Type '{$consumesResult}' is not supported.",
                     'supported' => $metadata->consumes,
@@ -227,18 +230,22 @@ class RouteExecutor
             $tracer?->end('response.render');
 
             // 6. Adapt to HttpResponse
-            return $this->decorateResponse($this->adaptResponse($resDto), $request, $metadata);
+            return $sent = $this->decorateResponse($this->adaptResponse($resDto), $request, $metadata);
 
         } catch (\Semitexa\Core\Exception\NotFoundException $e) {
             // Let NotFoundException bubble up so Application::handleRouteException()
             // can dispatch the custom error.404 route when registered.
             $tracer?->mark('request.exception', ['class' => $e::class]);
+            $escaped = $e;
             throw $e;
         } catch (DomainException|\Throwable $e) {
             // Named on the trace before anything is mapped: without this the trace
             // shows spans that stop and never says what stopped them, which is the
             // one question a failing request is opened to answer.
             $tracer?->mark('request.exception', ['class' => $e::class]);
+            // Set before mapping, not only on the rethrow: a mapper or decorator
+            // that throws here would otherwise end the span with no outcome at all.
+            $escaped = $e;
             if ($exceptionMapper === null || $metadata === null) {
                 throw $e;
             }
@@ -248,14 +255,21 @@ class RouteExecutor
             // as the same event. Publishing the status rather than a list of
             // classes that mean refusal keeps readers of the trace out of the
             // business of knowing which package throws what.
-            $mapped = $exceptionMapper->map($e, $request, $metadata);
-            $tracer?->mark('request.exception.mapped', ['status' => $mapped->statusCode]);
-            return $this->decorateResponse($mapped, $request, $metadata);
+            try {
+                $mapped = $exceptionMapper->map($e, $request, $metadata);
+                $tracer?->mark('request.exception.mapped', ['status' => $mapped->statusCode]);
+                return $sent = $this->decorateResponse($mapped, $request, $metadata);
+            } catch (\Throwable $mappingFailure) {
+                // What escapes is the mapper's (or decorator's) own failure, not
+                // the exception it was handling — report the one that left.
+                $escaped = $mappingFailure;
+                throw $mappingFailure;
+            }
         } finally {
             // finally, not a line before each return: execute() leaves through
             // five different points including two rethrows, and a root span that
             // closes on only some of them would silently mis-time the others.
-            $tracer?->end('request');
+            $tracer?->end('request', RequestOutcome::traceContext($sent, $escaped));
         }
     }
 
