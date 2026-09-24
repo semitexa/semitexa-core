@@ -85,6 +85,34 @@ final class RouteExecutorExceptionTracingTest extends TestCase
     }
 
     /**
+     * A mapper that itself throws must not leave the request looking like a
+     * success: the span ends naming the exception that got it there.
+     */
+    #[Test]
+    public function a_mapper_that_crashes_still_ends_the_span_as_a_failure(): void
+    {
+        $tracer = new ExceptionMarkRecordingTracer();
+        $mapper = new class implements ExceptionResponseMapperInterface {
+            public function map(\Throwable $e, Request $request, ResolvedRouteMetadata $metadata): HttpResponse
+            {
+                throw new \LogicException('the mapper broke');
+            }
+        };
+        $container = new ExceptionTracingContainer([
+            RequestTracerInterface::class => $tracer,
+            ExceptionResponseMapperInterface::class => $mapper,
+        ]);
+
+        try {
+            $this->executeRoute($container);
+            self::fail('the mapper\'s exception must escape');
+        } catch (\LogicException) {
+        }
+
+        self::assertArrayHasKey('exception', $tracer->ends['request'] ?? []);
+    }
+
+    /**
      * Drive RouteExecutor far enough to reach the mapped-exception branch. The
      * route resolution is left to fail on purpose: whatever throws, the branch
      * under test is the one that maps it and marks the trace.

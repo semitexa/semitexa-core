@@ -243,8 +243,10 @@ class RouteExecutor
             // shows spans that stop and never says what stopped them, which is the
             // one question a failing request is opened to answer.
             $tracer?->mark('request.exception', ['class' => $e::class]);
+            // Set before mapping, not only on the rethrow: a mapper or decorator
+            // that throws here would otherwise end the span with no outcome at all.
+            $escaped = $e;
             if ($exceptionMapper === null || $metadata === null) {
-                $escaped = $e;
                 throw $e;
             }
             // The status the exception BECAME, beside the class it came from.
