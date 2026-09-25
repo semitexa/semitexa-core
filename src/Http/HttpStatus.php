@@ -48,6 +48,7 @@ enum HttpStatus: int
             self::Created             => 'Created',
             self::Accepted            => 'Accepted',
             self::NoContent           => 'No Content',
+            self::MultipleChoices     => 'Multiple Choices',
             self::MovedPermanently    => 'Moved Permanently',
             self::Found               => 'Found',
             self::SeeOther            => 'See Other',

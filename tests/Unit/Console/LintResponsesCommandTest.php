@@ -193,4 +193,37 @@ PHP);
         self::assertStringContainsString('SneakyService.php', $tester->getDisplay());
         self::assertStringNotContainsString('LoginRedirectMapper.php', $tester->getDisplay());
     }
+
+    /**
+     * A file that matches the scan (`.php`, under a scanned dir) but cannot
+     * actually be read — a broken symlink here, just as plausibly a file
+     * deleted mid-scan or a permissions error on a real tree — used to reach
+     * `preg_match()`/`self::codeOnly()` with `file_get_contents()`'s `false`,
+     * an unguarded fatal instead of the lint simply skipping it.
+     */
+    #[Test]
+    public function an_unreadable_file_is_skipped_instead_of_crashing_the_lint(): void
+    {
+        symlink(
+            $this->fixtureRoot . '/src/modules/Demo/src/Application/Service/does-not-exist.php',
+            $this->fixtureRoot . '/src/modules/Demo/src/Application/Service/BrokenLink.php',
+        );
+        $this->write('SneakyService.php', <<<'PHP'
+<?php
+namespace Demo;
+use Semitexa\Core\HttpResponse;
+final class SneakyService
+{
+    public function out(): HttpResponse
+    {
+        return HttpResponse::json(['nope' => true]);
+    }
+}
+PHP);
+
+        $tester = $this->run_();
+
+        self::assertSame(1, $tester->getStatusCode(), $tester->getDisplay());
+        self::assertStringContainsString('SneakyService.php', $tester->getDisplay());
+    }
 }

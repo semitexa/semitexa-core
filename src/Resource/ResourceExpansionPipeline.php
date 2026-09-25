@@ -518,7 +518,7 @@ final class ResourceExpansionPipeline
             throw new InvalidResourceResolverException(
                 resolverClass: $resolverClass,
                 relationName:  $field->name,
-                actualClass:   $resolver::class,
+                actualClass:   is_object($resolver) ? $resolver::class : get_debug_type($resolver),
             );
         }
 
