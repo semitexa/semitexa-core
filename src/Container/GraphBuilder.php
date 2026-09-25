@@ -544,7 +544,7 @@ final class GraphBuilder
             // promises. One whose implementation exists but is #[ExecutionScoped]
             // is the trap below, and `optional` must not turn that into a boot
             // that succeeds and an injection that never happens.
-            $trap = $this->describeExecutionScopedTrap($typeName, $idToClass, $executionScopedClasses);
+            $trap = self::describeExecutionScopedTrap($typeName, $idToClass, $executionScopedClasses);
             if (!empty($info['optional']) && $trap === '') {
                 continue;
             }
@@ -576,7 +576,7 @@ final class GraphBuilder
      * @param IdToClassMap $idToClass
      * @param array<class-string, true> $executionScopedClasses
      */
-    private function describeExecutionScopedTrap(string $typeName, array $idToClass, array $executionScopedClasses): string
+    public static function describeExecutionScopedTrap(string $typeName, array $idToClass, array $executionScopedClasses): string
     {
         $implementer = null;
         $mapped = $idToClass[$typeName] ?? null;

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Semitexa\Core\Container\BuildPhase;
 
 use Semitexa\Core\Container\Exception\InjectionException;
+use Semitexa\Core\Container\GraphBuilder;
 use Semitexa\Core\Container\SemitexaContainer;
 
 /**
@@ -57,8 +58,12 @@ final class ValidationPhase implements BuildPhaseInterface
                     continue;
                 }
 
-                // Soft dependency (optional: true): skipped at injection, so not a boot error.
-                if (!empty($info['optional'])) {
+                // Soft dependency (optional: true): skipped at injection, so not a
+                // boot error — when nothing implements it. When an #[ExecutionScoped]
+                // class does, a binding exists that can never be injected here;
+                // GraphBuilder rejects that input, and so must validation.
+                $trap = GraphBuilder::describeExecutionScopedTrap($typeName, $context->idToClass, $context->executionScopedClasses);
+                if (!empty($info['optional']) && $trap === '') {
                     continue;
                 }
 
@@ -79,7 +84,8 @@ final class ValidationPhase implements BuildPhaseInterface
                     propertyType: $typeName,
                     injectionKind: $kind,
                     message: "Boot validation failed: {$class}::\${$propName} "
-                        . "(type: {$typeName}, kind: {$kind}) has no binding.",
+                        . "(type: {$typeName}, kind: {$kind}) has no binding."
+                        . $trap,
                 );
             }
         }

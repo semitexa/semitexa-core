@@ -74,6 +74,21 @@ final class OptionalInjectionAtBootTest extends TestCase
     }
 
     #[Test]
+    public function boot_validation_also_rejects_an_optional_dependency_only_an_execution_scoped_class_implements(): void
+    {
+        // The same input GraphBuilder rejects must not pass validation.
+        $context = $this->context(optional: true);
+        $context->executionScopedClasses[BootOptionalScopedImplementation::class] = true;
+
+        try {
+            (new ValidationPhase())->execute($context);
+            self::fail('validation passed an optional dependency whose only implementation is #[ExecutionScoped]');
+        } catch (InjectionException $e) {
+            self::assertStringContainsString(BootOptionalScopedImplementation::class . ' implements this type but is #[ExecutionScoped]', $e->getMessage());
+        }
+    }
+
+    #[Test]
     public function required_unbound_readonly_dependency_still_fails_the_graph_build(): void
     {
         $readonly = [];
