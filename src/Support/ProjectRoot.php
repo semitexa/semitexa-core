@@ -51,9 +51,25 @@ class ProjectRoot
             $dir = $parent;
         }
 
-        // 3. Fallback: 4 levels up from Support/
-        self::$root = dirname(__DIR__, 4);
+        // 3. Fallback: the nearest ancestor holding Composer's autoloader — the
+        //    project when installed under vendor/, the checkout itself when this
+        //    package is the root project. A fixed depth landed on <project>/vendor.
+        self::$root = self::nearestComposerRoot(__DIR__) ?? dirname(__DIR__, 2);
         return self::$root;
+    }
+
+    private static function nearestComposerRoot(string $dir): ?string
+    {
+        while (true) {
+            if (is_file($dir . '/vendor/autoload.php') && is_file($dir . '/composer.json')) {
+                return $dir;
+            }
+            $parent = dirname($dir);
+            if ($parent === $dir) {
+                return null;
+            }
+            $dir = $parent;
+        }
     }
 
     public static function reset(): void
