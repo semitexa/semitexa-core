@@ -25,8 +25,11 @@ final class ValidationPhase implements BuildPhaseInterface
 
                 // #[InjectAsMutable] is filled only on per-execution clones; a
                 // worker-scoped instance is never cloned, so the property would
-                // stay uninitialized forever.
-                if ($kind === 'mutable' && !isset($context->executionScopedClasses[$class])) {
+                // stay uninitialized forever. Except where that is the contract:
+                // an optional dependency with NO binding stays uninitialized on
+                // every class, and graph build and injection already skip it.
+                if ($kind === 'mutable' && !isset($context->executionScopedClasses[$class])
+                    && !(!empty($info['optional']) && !self::mutableIsBound($context, $typeName))) {
                     throw new InjectionException(
                         targetClass: $class,
                         propertyName: $propName,
@@ -80,6 +83,14 @@ final class ValidationPhase implements BuildPhaseInterface
                 );
             }
         }
+    }
+
+    /** Whether a mutable injection of this type has anything to be filled from. */
+    private static function mutableIsBound(BuildContext $context, string $typeName): bool
+    {
+        return isset($context->instanceStore->prototypes[$typeName])
+            || isset($context->instanceStore->prototypes[$context->idToClass[$typeName] ?? ''])
+            || in_array($typeName, SemitexaContainer::EXECUTION_CONTEXT_TYPES, true);
     }
 
     public function name(): string

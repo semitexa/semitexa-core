@@ -50,6 +50,34 @@ final class ValidationPhaseTest extends TestCase
         $this->addToAssertionCount(1);
     }
 
+    #[Test]
+    public function an_unbound_optional_mutable_on_a_worker_scoped_class_passes_boot(): void
+    {
+        // `optional: true` with no binding means "stays uninitialized" on any
+        // class; the worker-scope rule must not turn that promise into a boot error.
+        $context = new BuildContext(new InstanceStore(), new TypeMap(), new InjectionMap());
+        $context->injections = [
+            RequestReadingService::class => [
+                'maybe' => ['kind' => 'mutable', 'type' => 'App\\NoSuchService', 'optional' => true],
+            ],
+        ];
+
+        (new ValidationPhase())->execute($context);
+        $this->addToAssertionCount(1);
+    }
+
+    #[Test]
+    public function a_bound_optional_mutable_on_a_worker_scoped_class_still_fails_boot(): void
+    {
+        // Bound, it WOULD be filled on a clone — and a worker-scoped class is
+        // never cloned, so `optional` does not excuse it.
+        $this->expectException(InjectionException::class);
+        $context = $this->context(executionScoped: false);
+        $context->injections[RequestReadingService::class]['request']['optional'] = true;
+
+        (new ValidationPhase())->execute($context);
+    }
+
     private function context(bool $executionScoped): BuildContext
     {
         $context = new BuildContext(new InstanceStore(), new TypeMap(), new InjectionMap());
