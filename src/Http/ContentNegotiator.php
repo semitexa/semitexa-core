@@ -9,6 +9,14 @@ use Semitexa\Core\Request;
 
 final class ContentNegotiator
 {
+    /** The MIME a default format key stands for, so a refusal of it can be recognised. */
+    private const DEFAULT_MIMES = [
+        'json' => 'application/json',
+        'html' => 'text/html',
+        'xml' => 'application/xml',
+        'txt' => 'text/plain',
+    ];
+
     /**
      * Check if the request's Content-Type is accepted by this route.
      *
@@ -71,6 +79,35 @@ final class ContentNegotiator
 
         $entries = self::parseAcceptHeader($acceptHeader);
 
+        // q=0 is a refusal, not an absent entry: a wildcard alongside it must
+        // not hand back the very type the client ruled out.
+        $refused = [];
+        foreach ($entries as $i => [$mime, $q]) {
+            if ($q <= 0.0) {
+                $refused[$mime] = true;
+                unset($entries[$i]);
+            }
+        }
+        $accepted = [];
+        foreach ($entries as [$mime]) {
+            $accepted[$mime] = true;
+        }
+        $isRefused = static function (string $produce) use ($refused, $accepted): bool {
+            if (isset($refused[$produce])) {
+                return true;
+            }
+            // A refused range (`text/*;q=0`) covers the type unless the client
+            // named it exactly with a non-zero q, the more specific entry.
+            [$type] = explode('/', $produce, 2);
+
+            return isset($refused[$type . '/*']) && !isset($accepted[$produce]);
+        };
+
+        // The default is a type too, and a client can refuse it: `*/*` next to
+        // `application/json;q=0` accepts everything except the json default.
+        $defaultMime = self::DEFAULT_MIMES[$defaultFormat] ?? null;
+        $defaultRefused = $defaultMime !== null && $isRefused($defaultMime);
+
         if ($produces === null || $produces === []) {
             foreach ($entries as [$mime, $q]) {
                 $key = ContentType::toFormatKey($mime);
@@ -78,24 +115,41 @@ final class ContentNegotiator
                     return $key;
                 }
             }
+            if ($defaultRefused) {
+                throw new NegotiationFailedException([], $acceptHeader);
+            }
             return $defaultFormat;
         }
 
         foreach ($entries as [$mime, $q]) {
-            if ($mime === '*/*' && $produces !== []) {
-                return ContentType::toFormatKey($produces[0]) ?? $defaultFormat;
-            }
-            if (str_ends_with($mime, '/*')) {
-                [$type] = explode('/', $mime, 2);
+            if ($mime === '*/*') {
                 foreach ($produces as $produce) {
-                    if (str_starts_with($produce, $type . '/')) {
-                        return ContentType::toFormatKey($produce) ?? $defaultFormat;
+                    if (!$isRefused($produce)) {
+                        $key = ContentType::toFormatKey($produce) ?? ($defaultRefused ? null : $defaultFormat);
+                        if ($key !== null) {
+                            return $key;
+                        }
                     }
                 }
                 continue;
             }
-            if (in_array($mime, $produces, true)) {
-                return ContentType::toFormatKey($mime) ?? $defaultFormat;
+            if (str_ends_with($mime, '/*')) {
+                [$type] = explode('/', $mime, 2);
+                foreach ($produces as $produce) {
+                    if (str_starts_with($produce, $type . '/') && !$isRefused($produce)) {
+                        $key = ContentType::toFormatKey($produce) ?? ($defaultRefused ? null : $defaultFormat);
+                        if ($key !== null) {
+                            return $key;
+                        }
+                    }
+                }
+                continue;
+            }
+            if (in_array($mime, $produces, true) && !$isRefused($mime)) {
+                $key = ContentType::toFormatKey($mime) ?? ($defaultRefused ? null : $defaultFormat);
+                if ($key !== null) {
+                    return $key;
+                }
             }
         }
 
@@ -103,7 +157,7 @@ final class ContentNegotiator
     }
 
     /**
-     * Parse Accept header into sorted [(mime, q)] pairs.
+     * Parse Accept header into sorted [(mime, q)] pairs, refusals (q=0) included.
      *
      * @return list<array{0: string, 1: float}>
      */
@@ -123,10 +177,6 @@ final class ContentNegotiator
                 if (count($kv) === 2 && strtolower(trim($kv[0])) === 'q') {
                     $q = max(0.0, min(1.0, (float) trim($kv[1])));
                 }
-            }
-
-            if ($q <= 0.0) {
-                continue;
             }
 
             $entries[] = [$mime, $q];
