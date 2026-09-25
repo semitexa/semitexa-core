@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Session;
 
+use Semitexa\Core\Csrf\CsrfToken;
 use Semitexa\Core\Session\Attribute\SessionSegment;
 use Semitexa\Core\Support\PayloadSerializer;
 
@@ -70,6 +71,12 @@ final class Session implements SessionInterface
     public function regenerate(): void
     {
         $this->regenerate = true;
+        // The CSRF token must not survive a privilege change: under session fixation
+        // an attacker who read the token before login would otherwise still hold a
+        // valid one afterwards. Rotated here rather than in save() so anything
+        // rendered later in this request, and the XSRF-TOKEN cookie emitted in
+        // SessionPhase::finalize(), already carry the new value.
+        $this->setPayload(CsrfToken::generate());
     }
 
     public function flash(string $key, mixed $value): void
