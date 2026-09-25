@@ -494,7 +494,14 @@ final class ResourceExpansionPipeline
 
     private function makeResolver(ResourceFieldMetadata $field): RelationResolverInterface
     {
-        \assert($field->resolverClass !== null);
+        // Explicit throw, not assert(): assertions are compiled out in
+        // production and the null would surface as a TypeError instead.
+        if ($field->resolverClass === null) {
+            throw new \LogicException(sprintf(
+                'Cannot resolve relation "%s": it has no #[ResolveWith] resolver class.',
+                $field->name,
+            ));
+        }
         $resolverClass = $field->resolverClass;
 
         try {
