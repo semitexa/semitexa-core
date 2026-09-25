@@ -55,6 +55,22 @@ final class SemitexaContainer implements ContainerInterface, ExecutionContextAwa
     private InjectionMap $injectionMap;
 
     /**
+     * Per-class clone-time injection plan (the #[InjectAsMutable] and
+     * #[InjectAsFactory] entries of the injection map), built on first clone.
+     *
+     * @var array<string, array{mutable: array<string, array{type: string, optional: bool}>, factory: array<string, string>}>
+     */
+    private array $clonePlans = [];
+
+    /**
+     * Reflection handles used to assign clone-time properties, keyed by the
+     * clone's runtime class, then property name. Holds no instances.
+     *
+     * @var array<string, array<string, \ReflectionProperty>>
+     */
+    private array $propertyHandles = [];
+
+    /**
      * CoroutineLocal key for per-coroutine execution context values.
      *
      * Storage is coroutine-local (Swoole) or a CLI fallback static array — it is NEVER
@@ -479,23 +495,23 @@ final class SemitexaContainer implements ContainerInterface, ExecutionContextAwa
                 message: "Cyclic mutable injection detected for {$class}.",
             );
         }
+
+        $plan = $this->clonePlans[$class] ??= $this->buildClonePlan($class);
+        if ($plan['mutable'] === [] && $plan['factory'] === []) {
+            return;
+        }
+
         $visited[$class] = true;
 
         try {
-            $injections = $this->injectionMap->injections[$class] ?? [];
-            $ref = new ReflectionClass($instance);
-            $executionContextValues = $this->readExecutionContextValues();
+            $executionContextValues = $plan['mutable'] !== [] ? $this->readExecutionContextValues() : [];
 
-            foreach ($injections as $propName => $info) {
-                if ($info['kind'] !== 'mutable') {
-                    continue;
-                }
-
+            foreach ($plan['mutable'] as $propName => $info) {
                 $typeName = $info['type'];
 
                 // Try execution context first (Request, Session, etc.)
                 if (isset($executionContextValues[$typeName])) {
-                    $this->assignProperty($ref, $instance, $propName, $executionContextValues[$typeName]);
+                    $this->assignProperty($instance, $propName, $executionContextValues[$typeName]);
                     continue;
                 }
 
@@ -512,11 +528,11 @@ final class SemitexaContainer implements ContainerInterface, ExecutionContextAwa
                     // uninitialized and trigger "must not be accessed before initialization".
                     $this->injectMutableProperties($nestedClone, $nestedClass, $visited);
                     $this->initializeExecutionScoped($nestedClone, $nestedClass);
-                    $this->assignProperty($ref, $instance, $propName, $nestedClone);
+                    $this->assignProperty($instance, $propName, $nestedClone);
                     continue;
                 }
 
-                if (!empty($info['optional'])) {
+                if ($info['optional']) {
                     continue; // soft dependency — stays uninitialized, consumer isset-guards
                 }
 
@@ -531,13 +547,10 @@ final class SemitexaContainer implements ContainerInterface, ExecutionContextAwa
             }
 
             // Also inject factories into cloned instances
-            foreach ($injections as $propName => $info) {
-                if ($info['kind'] !== 'factory') {
-                    continue;
-                }
-                $factory = $this->instanceStore->factories[$info['type']] ?? null;
+            foreach ($plan['factory'] as $propName => $factoryType) {
+                $factory = $this->instanceStore->factories[$factoryType] ?? null;
                 if ($factory !== null) {
-                    $this->assignProperty($ref, $instance, $propName, $factory);
+                    $this->assignProperty($instance, $propName, $factory);
                 }
             }
         } finally {
@@ -546,12 +559,35 @@ final class SemitexaContainer implements ContainerInterface, ExecutionContextAwa
     }
 
     /**
-     * Write a value into a (possibly non-public) property via reflection.
+     * The injection map is written once by build() and never changes after,
+     * so the split below is a pure function of boot-time state.
+     *
+     * @return array{mutable: array<string, array{type: string, optional: bool}>, factory: array<string, string>}
      */
-    private function assignProperty(ReflectionClass $ref, object $instance, string $propName, mixed $value): void
+    private function buildClonePlan(string $class): array
     {
-        $prop = $ref->getProperty($propName);
-        $prop->setAccessible(true);
+        $plan = ['mutable' => [], 'factory' => []];
+        foreach ($this->injectionMap->injections[$class] ?? [] as $propName => $info) {
+            if ($info['kind'] === 'mutable') {
+                $plan['mutable'][$propName] = ['type' => $info['type'], 'optional' => !empty($info['optional'])];
+            } elseif ($info['kind'] === 'factory') {
+                $plan['factory'][$propName] = $info['type'];
+            }
+        }
+
+        return $plan;
+    }
+
+    /**
+     * Write a value into a (possibly non-public) property via reflection.
+     * The handle is looked up once per (runtime class, property): class
+     * declarations cannot change inside a worker.
+     */
+    private function assignProperty(object $instance, string $propName, mixed $value): void
+    {
+        $class = $instance::class;
+        $prop = $this->propertyHandles[$class][$propName]
+            ??= (new ReflectionClass($class))->getProperty($propName);
         $prop->setValue($instance, $value);
     }
 }

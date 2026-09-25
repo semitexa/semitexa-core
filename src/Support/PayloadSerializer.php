@@ -43,26 +43,59 @@ class PayloadSerializer
      */
     public static function hydrate(object $dto, array $payload): object
     {
-        $reflection = new ReflectionClass($dto);
+        $class = $dto::class;
 
         foreach ($payload as $key => $value) {
             if (!is_string($key) || $key === '') {
                 continue;
             }
-            $setterName = 'set' . ucfirst(Str::snakeToCamel($key));
-            if (!method_exists($dto, $setterName)) {
+            $setter = self::$setters[$class][$key] ?? null;
+            if ($setter === null) {
+                $setter = self::resolveSetter($dto, $key);
+                // Queue and event payload keys arrive from outside the worker:
+                // bound the per-class memo so unknown keys cannot grow it.
+                if (count(self::$setters[$class] ?? []) < self::MAX_MEMOIZED_KEYS_PER_CLASS) {
+                    self::$setters[$class][$key] = $setter;
+                }
+            }
+            if ($setter === false) {
                 continue;
             }
 
-            $method = $reflection->getMethod($setterName);
-            if ($method->getNumberOfRequiredParameters() !== 1) {
-                continue;
-            }
-
-            $method->invoke($dto, self::coerce($method->getParameters()[0], $value));
+            $setter[0]->invoke($dto, self::coerce($setter[1], $value));
         }
 
         return $dto;
+    }
+
+    /**
+     * Setter handle per (class, payload key), or false when the key has no
+     * one-argument setter. Keyed by immutable class declarations, so the
+     * method lookup runs once per worker instead of on every hydrate (the
+     * session hydrates its CSRF payload several times per request).
+     *
+     * @var array<class-string, array<string, array{0: \ReflectionMethod, 1: \ReflectionParameter}|false>>
+     */
+    private static array $setters = [];
+
+    private const MAX_MEMOIZED_KEYS_PER_CLASS = 256;
+
+    /**
+     * @return array{0: \ReflectionMethod, 1: \ReflectionParameter}|false
+     */
+    private static function resolveSetter(object $dto, string $key): array|false
+    {
+        $setterName = 'set' . ucfirst(Str::snakeToCamel($key));
+        if (!method_exists($dto, $setterName)) {
+            return false;
+        }
+
+        $method = new \ReflectionMethod($dto, $setterName);
+        if ($method->getNumberOfRequiredParameters() !== 1) {
+            return false;
+        }
+
+        return [$method, $method->getParameters()[0]];
     }
 
     /**

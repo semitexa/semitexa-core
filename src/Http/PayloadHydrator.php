@@ -80,19 +80,27 @@ class PayloadHydrator
     }
 
     /**
-     * Extract path parameters from URL; keys are route param names (e.g. 'id').
+     * Per payload class: the compiled path regex and param name => group index,
+     * or false when the class declares no parameterised route. A pure function
+     * of the class's route attribute, which cannot change inside a worker, so
+     * it is built once instead of re-reading the attribute on every request.
      *
-     * @return array<string, string>
+     * @var array<class-string, array{0: string, 1: array<string, int>}|false>
      */
-    private static function extractPathParams(object $dto, Request $httpRequest): array
+    private static array $pathParamPlans = [];
+
+    /**
+     * @param class-string $class
+     * @return array{0: string, 1: array<string, int>}|false
+     */
+    private static function buildPathParamPlan(string $class): array|false
     {
-        $reflection = new ReflectionClass($dto);
-        $requestAttrs = $reflection->getAttributes(
+        $requestAttrs = (new ReflectionClass($class))->getAttributes(
             \Semitexa\Core\Attribute\AbstractPayloadRoute::class,
             \ReflectionAttribute::IS_INSTANCEOF,
         );
         if (empty($requestAttrs)) {
-            return [];
+            return false;
         }
 
         try {
@@ -100,19 +108,19 @@ class PayloadHydrator
             $routePattern = $requestAttr->path ?? null;
             $requirements = $requestAttr->requirements ?? [];
         } catch (\Throwable) {
-            return [];
+            return false;
         }
 
         if (!is_string($routePattern) || $routePattern === '') {
-            return [];
+            return false;
         }
 
         if (strpos($routePattern, '{') === false) {
-            return [];
+            return false;
         }
 
         if (!preg_match_all('/\{([^}]+)\}/', $routePattern, $paramMatches)) {
-            return [];
+            return false;
         }
 
         $pathParams = [];
@@ -131,9 +139,25 @@ class PayloadHydrator
             $regexPattern
         );
         if (!is_string($regexPattern)) {
+            return false;
+        }
+
+        return ['#^' . $regexPattern . '$#', $pathParams];
+    }
+
+    /**
+     * Extract path parameters from URL; keys are route param names (e.g. 'id').
+     *
+     * @return array<string, string>
+     */
+    private static function extractPathParams(object $dto, Request $httpRequest): array
+    {
+        $class = $dto::class;
+        $plan = self::$pathParamPlans[$class] ??= self::buildPathParamPlan($class);
+        if ($plan === false) {
             return [];
         }
-        $regexPattern = '#^' . $regexPattern . '$#';
+        [$regexPattern, $pathParams] = $plan;
 
         if (!preg_match($regexPattern, $httpRequest->getPath(), $matches)) {
             return [];
