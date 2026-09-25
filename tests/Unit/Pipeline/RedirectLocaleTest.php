@@ -15,8 +15,21 @@ use Semitexa\Locale\Context\LocaleContextStore;
  */
 final class RedirectLocaleTest extends TestCase
 {
+    private string $previousLocale;
+    private string $previousFallbackLocale;
+    private bool $previousUrlPrefixEnabled;
+    private string $previousDefaultLocale;
+    /** @var string[] */
+    private array $previousSupportedLocales;
+
     protected function setUp(): void
     {
+        $this->previousLocale = LocaleContextStore::getLocale();
+        $this->previousFallbackLocale = LocaleContextStore::getFallbackLocale();
+        $this->previousUrlPrefixEnabled = LocaleContextStore::isUrlPrefixEnabled();
+        $this->previousDefaultLocale = LocaleContextStore::getDefaultLocale();
+        $this->previousSupportedLocales = LocaleContextStore::getSupportedLocales();
+
         LocaleContextStore::clearFallback();
         LocaleContextStore::setUrlPrefixEnabled(true);
         LocaleContextStore::setDefaultLocale('en');
@@ -25,7 +38,11 @@ final class RedirectLocaleTest extends TestCase
 
     protected function tearDown(): void
     {
-        LocaleContextStore::clearFallback();
+        LocaleContextStore::setLocale($this->previousLocale);
+        LocaleContextStore::setFallbackLocale($this->previousFallbackLocale);
+        LocaleContextStore::setUrlPrefixEnabled($this->previousUrlPrefixEnabled);
+        LocaleContextStore::setDefaultLocale($this->previousDefaultLocale);
+        LocaleContextStore::setSupportedLocales($this->previousSupportedLocales);
     }
 
     #[Test]
@@ -58,6 +75,16 @@ final class RedirectLocaleTest extends TestCase
         LocaleContextStore::setLocale('uk');
 
         self::assertSame('/uk/app', $this->rewrite('/uk/app'));
+    }
+
+    #[Test]
+    public function a_prefixed_target_with_a_colon_in_its_path_is_not_prefixed_twice(): void
+    {
+        // parse_url() reads `events/10:00` as host and port and returns false, which left no
+        // first segment to recognise the locale by.
+        LocaleContextStore::setLocale('uk');
+
+        self::assertSame('/uk/events/10:00', $this->rewrite('/uk/events/10:00'));
     }
 
     #[Test]

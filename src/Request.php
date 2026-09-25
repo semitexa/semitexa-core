@@ -68,7 +68,25 @@ readonly class Request
 
     public function getPath(): string
     {
-        return parse_url($this->uri, PHP_URL_PATH) ?: '/';
+        return self::pathOf($this->uri) ?? '/';
+    }
+
+    /**
+     * The path of a request-target, which is a path and not a URL.
+     *
+     * parse_url() reads a leading `//` as an authority and a colon as a port:
+     * `//evil.com/admin` came back as `/admin`, slipping past any prefix rule a
+     * proxy had applied to the raw target, and `/events/10:00` came back as
+     * false and routed to `/`. Only an absolute-form target (`http://host/x`)
+     * is a URL, so only that one is left to parse_url().
+     */
+    private static function pathOf(string $target): ?string
+    {
+        $path = str_starts_with($target, '/')
+            ? substr($target, 0, strcspn($target, '?#'))
+            : parse_url($target, PHP_URL_PATH);
+
+        return is_string($path) && $path !== '' ? $path : null;
     }
 
     /**
@@ -92,8 +110,8 @@ readonly class Request
         $servedUri = $this->server['request_uri'] ?? $this->server['REQUEST_URI'] ?? null;
 
         if (is_string($servedUri) && $servedUri !== '') {
-            $path = parse_url($servedUri, PHP_URL_PATH);
-            if (is_string($path) && $path !== '') {
+            $path = self::pathOf($servedUri);
+            if ($path !== null) {
                 return $path;
             }
         }
