@@ -91,24 +91,29 @@ final class EventDispatcher implements EventDispatcherInterface
         $tracer = $this->resolveTracer();
         $tracer?->mark('event.dispatch', ['event' => $eventClass, 'listeners' => count($listeners)]);
 
-        foreach ($listeners as $meta) {
-            $execution = EventExecution::fromAttributeValue((string) ($meta['execution'] ?? EventExecution::Sync->value));
-            match ($execution) {
-                EventExecution::Sync => $this->runListenerSync($meta, $event, $tracer),
-                EventExecution::Async => $this->runListenerDefer($meta, $event),
-                EventExecution::Queued => $this->enqueueListener($meta, $event, $tracer),
-            };
-        }
-
-        foreach ($this->postDispatchHooks as $hook) {
-            try {
-                $hook($event);
-            } catch (\Throwable $e) {
-                StaticLoggerBridge::error('core', 'Post-dispatch hook failed', [
-                    'event' => $eventClass,
-                    'exception' => $e::class,
-                    'message' => $e->getMessage(),
-                ]);
+        try {
+            foreach ($listeners as $meta) {
+                $execution = EventExecution::fromAttributeValue((string) ($meta['execution'] ?? EventExecution::Sync->value));
+                match ($execution) {
+                    EventExecution::Sync => $this->runListenerSync($meta, $event, $tracer),
+                    EventExecution::Async => $this->runListenerDefer($meta, $event),
+                    EventExecution::Queued => $this->enqueueListener($meta, $event, $tracer),
+                };
+            }
+        } finally {
+            // The event happened whether or not a listener failed: hooks (e.g.
+            // the ledger) must still see it. The listener's exception keeps
+            // propagating — sync listeners are part of the caller's transaction.
+            foreach ($this->postDispatchHooks as $hook) {
+                try {
+                    $hook($event);
+                } catch (\Throwable $e) {
+                    StaticLoggerBridge::error('core', 'Post-dispatch hook failed', [
+                        'event' => $eventClass,
+                        'exception' => $e::class,
+                        'message' => $e->getMessage(),
+                    ]);
+                }
             }
         }
     }

@@ -98,6 +98,25 @@ final class EventDispatcherTest extends TestCase
         self::assertSame([RecordingProbeListener::class], DispatcherProbeLog::$calls);
     }
 
+    #[Test]
+    public function a_throwing_sync_listener_still_propagates_but_post_dispatch_hooks_see_the_event(): void
+    {
+        $dispatcher = $this->dispatcherWith([[ThrowingProbeListener::class, EventExecution::Sync]]);
+        $hooked = [];
+        $dispatcher->addPostDispatchHook(static function (object $event) use (&$hooked): void {
+            $hooked[] = $event::class;
+        });
+
+        try {
+            $dispatcher->dispatch(new DispatcherProbeEvent());
+            self::fail('a sync listener failure belongs to the caller');
+        } catch (\RuntimeException $e) {
+            self::assertSame('listener failed', $e->getMessage());
+        }
+
+        self::assertSame([DispatcherProbeEvent::class], $hooked);
+    }
+
     /**
      * @param list<array{0: class-string, 1: EventExecution}> $listeners
      */
