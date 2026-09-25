@@ -160,6 +160,17 @@ final class PipelineExecutor
             return;
         }
 
+        // Not `instanceof PipelineListenerInterface`: listeners/handlers are
+        // dispatched duck-typed here (see ReRunUnitTest's fixtures), so the
+        // guard only needs to rule out the case neither contract covers —
+        // no handle() method at all — before the call below.
+        if (!method_exists($instance, 'handle')) {
+            throw new PipelineException(sprintf(
+                'Listener/handler %s implements neither TypedHandlerInterface nor a handle() method.',
+                $instance::class,
+            ));
+        }
+
         $instance->handle($context);
     }
 
