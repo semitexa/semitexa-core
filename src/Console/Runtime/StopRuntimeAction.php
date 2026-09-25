@@ -119,7 +119,10 @@ final class StopRuntimeAction
     private function getPidsOnPort(int $port): array
     {
         $pids = [];
-        $output = shell_exec("ss -ltnp 2>/dev/null | awk -v port=\":{$port}\" '\$4 ~ port {print \$6}' | sed -n 's/.*pid=\\([0-9]*\\).*/\\1/p' | sort -u");
+        // Anchored at the end of the local address (0.0.0.0:80, [::]:80): an
+        // unanchored ":80" also matched :8080 and :8000, and these PIDs get
+        // SIGKILLed without any identity check.
+        $output = shell_exec("ss -ltnp 2>/dev/null | awk -v port=\":{$port}\" '\$4 ~ (port \"\$\") {print \$6}' | sed -n 's/.*pid=\\([0-9]*\\).*/\\1/p' | sort -u");
         if ($output) {
             foreach (explode("\n", trim($output)) as $pid) {
                 if ($pid) {
