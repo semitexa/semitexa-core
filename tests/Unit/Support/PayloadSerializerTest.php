@@ -94,6 +94,22 @@ final class PayloadSerializerTest extends TestCase
     }
 
     #[Test]
+    public function every_year_normalize_can_write_comes_back(): void
+    {
+        // `Y` in createFromFormat() reads four digits at most, and the date
+        // constructor cannot read a five-digit year at all.
+        foreach ([[10000, 1, 2], [-44, 3, 15], [99, 1, 1]] as [$year, $month, $day]) {
+            $dto = self::filledFixture();
+            $dto->setDueAt((new DateTimeImmutable('@0'))->setDate($year, $month, $day)->setTime(3, 4, 5));
+
+            $data = json_decode((string) json_encode(PayloadSerializer::toArray($dto)), true);
+            $back = PayloadSerializer::hydrate(new SerializerTypedFixture(), $data);
+
+            self::assertSame($dto->getDueAt()->format('X-m-d\\TH:i:s.uP'), $back->getDueAt()->format('X-m-d\\TH:i:s.uP'), "year {$year}");
+        }
+    }
+
+    #[Test]
     public function a_string_outside_the_date_wire_format_is_not_turned_into_a_date(): void
     {
         // '' used to become "now" and 'tomorrow' a real date: the date

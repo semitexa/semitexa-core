@@ -153,7 +153,8 @@ class PayloadSerializer
         // Only the wire format normalize() writes. The date constructor reads
         // '' as now and 'tomorrow' or '+1 day' as real dates, so a stray string
         // silently became a timestamp nobody sent.
-        if (!self::isWireDate($value)) {
+        $parsed = self::parseWireDate($value);
+        if ($parsed === null) {
             if ($strict) {
                 throw new \InvalidArgumentException(sprintf(
                     'Cannot restore %s from %s: dates are serialized as DATE_ATOM, with microseconds when present.',
@@ -165,22 +166,30 @@ class PayloadSerializer
             return null;
         }
 
-        return new $concrete($value);
+        // Built from the parsed value, not the constructor: the constructor
+        // cannot read the five-digit year normalize() writes for year 10000.
+        return $concrete::createFromInterface($parsed);
     }
 
-    /** Exactly the two shapes normalize() writes: DATE_ATOM, with or without microseconds. */
-    private static function isWireDate(string $value): bool
+    /**
+     * Exactly the shapes normalize() writes — DATE_ATOM, with or without
+     * microseconds — for ANY year it can write. `X` is the expanded year:
+     * `Y` parses four digits at most, so year 10000 or a negative year
+     * came back rejected by the serializer that wrote it. `!` keeps fields
+     * the string does not carry (microseconds) at zero, not the current time.
+     */
+    private static function parseWireDate(string $value): ?\DateTimeImmutable
     {
-        foreach (['Y-m-d\\TH:i:sP', 'Y-m-d\\TH:i:s.uP'] as $format) {
+        foreach (['!X-m-d\\TH:i:sP', '!X-m-d\\TH:i:s.uP'] as $format) {
             $parsed = \DateTimeImmutable::createFromFormat($format, $value);
             $errors = \DateTimeImmutable::getLastErrors();
             $clean = $errors === false || ($errors['warning_count'] === 0 && $errors['error_count'] === 0);
             if ($parsed !== false && $clean) {
-                return true;
+                return $parsed;
             }
         }
 
-        return false;
+        return null;
     }
 
     private static function normalize(mixed $value): mixed
