@@ -1,0 +1,159 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Semitexa\Core\Tests\Unit\Event;
+
+use PHPUnit\Framework\Attributes\Test;
+use PHPUnit\Framework\TestCase;
+use Semitexa\Core\Event\EventDispatcher;
+use Semitexa\Core\Event\EventExecution;
+use Semitexa\Core\Event\EventListenerRegistry;
+use Semitexa\Core\Log\LoggerInterface;
+use Semitexa\Core\Log\StaticLoggerBridge;
+
+final class EventDispatcherTest extends TestCase
+{
+    /** @var list<string> */
+    private array $errors = [];
+
+    protected function setUp(): void
+    {
+        DispatcherProbeLog::$calls = [];
+        $this->errors = [];
+        $errors = &$this->errors;
+        StaticLoggerBridge::set(new class ($errors) implements LoggerInterface {
+            /** @param list<string> $errors */
+            public function __construct(private array &$errors) {}
+            public function error(string $message, array $context = []): void { $this->errors[] = $message; }
+            public function critical(string $message, array $context = []): void { $this->errors[] = $message; }
+            public function warning(string $message, array $context = []): void {}
+            public function info(string $message, array $context = []): void {}
+            public function notice(string $message, array $context = []): void {}
+            public function debug(string $message, array $context = []): void {}
+        });
+    }
+
+    protected function tearDown(): void
+    {
+        StaticLoggerBridge::reset();
+    }
+
+    #[Test]
+    public function an_async_listener_inside_a_swoole_coroutine_runs_after_dispatch_returns(): void
+    {
+        $dispatcher = $this->dispatcherWith([[RecordingProbeListener::class, EventExecution::Async]]);
+        $seenDuringDispatch = null;
+
+        \Swoole\Coroutine\run(function () use ($dispatcher, &$seenDuringDispatch): void {
+            $dispatcher->dispatch(new DispatcherProbeEvent());
+            $seenDuringDispatch = DispatcherProbeLog::$calls;
+        });
+
+        self::assertSame([], $seenDuringDispatch, 'async listener must not run inside the request');
+        self::assertSame([RecordingProbeListener::class], DispatcherProbeLog::$calls);
+    }
+
+    #[Test]
+    public function an_async_listener_is_resolved_while_the_request_context_is_still_live(): void
+    {
+        $dispatcher = $this->dispatcherWith([[ConstructedProbeListener::class, EventExecution::Async]]);
+        $seenDuringDispatch = null;
+
+        \Swoole\Coroutine\run(function () use ($dispatcher, &$seenDuringDispatch): void {
+            $dispatcher->dispatch(new DispatcherProbeEvent());
+            $seenDuringDispatch = DispatcherProbeLog::$calls;
+        });
+
+        self::assertSame(['constructed'], $seenDuringDispatch);
+        self::assertSame(['constructed', 'handled'], DispatcherProbeLog::$calls);
+    }
+
+    #[Test]
+    public function a_throwing_async_listener_does_not_propagate_and_is_logged(): void
+    {
+        $dispatcher = $this->dispatcherWith([[ThrowingProbeListener::class, EventExecution::Async]]);
+        $thrown = null;
+
+        \Swoole\Coroutine\run(function () use ($dispatcher, &$thrown): void {
+            try {
+                $dispatcher->dispatch(new DispatcherProbeEvent());
+            } catch (\Throwable $e) {
+                $thrown = $e;
+            }
+        });
+
+        self::assertNull($thrown);
+        self::assertSame([ThrowingProbeListener::class], DispatcherProbeLog::$calls);
+        self::assertNotSame([], $this->errors);
+    }
+
+    #[Test]
+    public function an_async_listener_outside_a_coroutine_runs_inline(): void
+    {
+        $dispatcher = $this->dispatcherWith([[RecordingProbeListener::class, EventExecution::Async]]);
+
+        $dispatcher->dispatch(new DispatcherProbeEvent());
+
+        self::assertSame([RecordingProbeListener::class], DispatcherProbeLog::$calls);
+    }
+
+    /**
+     * @param list<array{0: class-string, 1: EventExecution}> $listeners
+     */
+    private function dispatcherWith(array $listeners): EventDispatcher
+    {
+        $registryRef = new \ReflectionClass(EventListenerRegistry::class);
+        $registry = $registryRef->newInstanceWithoutConstructor();
+        $registryRef->getProperty('built')->setValue($registry, true);
+        $registryRef->getProperty('listenersByEvent')->setValue($registry, [
+            DispatcherProbeEvent::class => array_map(
+                static fn (array $l): array => ['class' => $l[0], 'execution' => $l[1]->value, 'event' => DispatcherProbeEvent::class],
+                $listeners,
+            ),
+        ]);
+
+        $dispatcher = new EventDispatcher();
+        (new \ReflectionProperty(EventDispatcher::class, 'eventListenerRegistry'))->setValue($dispatcher, $registry);
+
+        return $dispatcher;
+    }
+}
+
+final class DispatcherProbeEvent {}
+
+final class DispatcherProbeLog
+{
+    /** @var list<string> */
+    public static array $calls = [];
+}
+
+final class RecordingProbeListener
+{
+    public function handle(DispatcherProbeEvent $event): void
+    {
+        DispatcherProbeLog::$calls[] = self::class;
+    }
+}
+
+final class ThrowingProbeListener
+{
+    public function handle(DispatcherProbeEvent $event): void
+    {
+        DispatcherProbeLog::$calls[] = self::class;
+        throw new \RuntimeException('listener failed');
+    }
+}
+
+final class ConstructedProbeListener
+{
+    public function __construct()
+    {
+        DispatcherProbeLog::$calls[] = 'constructed';
+    }
+
+    public function handle(DispatcherProbeEvent $event): void
+    {
+        DispatcherProbeLog::$calls[] = 'handled';
+    }
+}
