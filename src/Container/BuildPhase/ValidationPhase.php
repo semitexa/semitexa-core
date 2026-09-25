@@ -38,6 +38,11 @@ final class ValidationPhase implements BuildPhaseInterface
                     continue;
                 }
 
+                // Soft dependency (optional: true): skipped at injection, so not a boot error.
+                if (!empty($info['optional'])) {
+                    continue;
+                }
+
                 if ($kind === 'mutable' && in_array($typeName, SemitexaContainer::EXECUTION_CONTEXT_TYPES, true)) {
                     continue;
                 }
