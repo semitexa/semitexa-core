@@ -39,12 +39,24 @@ class PayloadHydrator
         $reflection = new ReflectionClass($dto);
 
         foreach ($data as $key => $value) {
+            // A JSON list, `{"0":…}` or a form field named `0` arrives with an
+            // int key. Named as a string it can still reach a real setter —
+            // PHP allows `set0()`, and PayloadMetadataReflector publishes it as
+            // field `0` — while method_exists() below skips every key that does
+            // not. Passing the int on would TypeError and fail the whole request.
+            $key = (string) $key;
             $setterName = self::keyToSetterName($key);
             if (!method_exists($dto, $setterName)) {
                 continue;
             }
 
             $method = $reflection->getMethod($setterName);
+            // method_exists() sees private and static methods too, and invoke()
+            // would call them: a body key must only reach the public setters
+            // the payload publishes as its contract (PayloadMetadataReflector).
+            if (!$method->isPublic() || $method->isStatic()) {
+                continue;
+            }
             if ($method->getNumberOfRequiredParameters() !== 1) {
                 continue;
             }
@@ -225,6 +237,11 @@ class PayloadHydrator
         }
 
         if ($type instanceof ReflectionUnionType) {
+            // Same rule as a nullable named type below; otherwise null was cast
+            // to the first arm and int|float|null received 0.
+            if ($type->allowsNull() && ($value === null || $value === '')) {
+                return null;
+            }
             $firstNamed = null;
             foreach ($type->getTypes() as $t) {
                 if (!$t instanceof ReflectionNamedType || $t->getName() === 'null') {
@@ -296,12 +313,81 @@ class PayloadHydrator
     private static function isTypeCompatible(mixed $value, string $type): bool
     {
         return match ($type) {
-            'int', 'float' => (is_int($value) || is_float($value) || is_string($value)) && is_numeric($value),
+            'int'          => self::isExactInt($value),
+            'float'        => (is_int($value) || is_float($value) || is_string($value)) && is_numeric($value),
             'string'       => is_scalar($value),
             'bool'         => is_bool($value) || in_array($value, [0, 1, '0', '1', 'true', 'false', 'yes', 'no', 'on', 'off'], true),
             'array'        => is_array($value),
             default        => true, // Objects and unknown types: leave to PHP
         };
+    }
+
+    /**
+     * is_numeric() is not enough for int: the (int) cast that follows truncates
+     * "1.9" to 1 and clamps a 20-digit id to PHP_INT_MAX. Accept only a value
+     * whose number is whole and fits, so the cast cannot change it.
+     */
+    private static function isExactInt(mixed $value): bool
+    {
+        if (is_int($value)) {
+            return true;
+        }
+        if (is_string($value)) {
+            // Decided on the digits, never through a float: `+ 0` rounded
+            // "1.0000000000000001" to 1 and "9007199254740993e0" to …992 before
+            // the check could see them, so strict mode accepted a changed value.
+            return self::isExactIntString($value);
+        }
+        // 2^63 as a float: PHP_INT_MAX itself is not representable, so the
+        // upper bound must be exclusive.
+        return is_float($value)
+            && floor($value) === $value
+            && $value >= -9.2233720368547758E18
+            && $value < 9.2233720368547758E18;
+    }
+
+    /**
+     * A plain integer spelling must fit PHP's int. A decimal or exponent
+     * spelling must be whole AND at most 2^53: its (int) cast goes through a
+     * float, and only such values survive that exactly.
+     */
+    private static function isExactIntString(string $value): bool
+    {
+        $value = trim($value);
+        if (preg_match('/^([+-]?)0*(\d+)$/', $value, $m) === 1) {
+            return self::magnitudeAtMost($m[2], $m[1] === '-' ? '9223372036854775808' : '9223372036854775807');
+        }
+        if (preg_match('/^[+-]?(\d*)(?:\.(\d*))?(?:[eE]([+-]?\d+))?$/', $value, $m) !== 1 || ($m[1] === '' && ($m[2] ?? '') === '')) {
+            return false;
+        }
+
+        $fraction = $m[2] ?? '';
+        $digits = $m[1] . $fraction;
+        $shift = (int) ($m[3] ?? 0) - strlen($fraction);
+        if ($shift < 0) {
+            // Whole only when every digit shifted past the point is a zero.
+            if (trim(substr($digits, $shift), '0') !== '') {
+                return false;
+            }
+            $digits = (string) substr($digits, 0, $shift);
+        }
+        $digits = ltrim($digits, '0');
+        if ($digits === '') {
+            return true;
+        }
+        if ($shift > 0 && strlen($digits) + $shift > 16) {
+            return false;
+        }
+
+        return self::magnitudeAtMost($digits . str_repeat('0', max(0, $shift)), '9007199254740992');
+    }
+
+    /** Compares two unsigned decimal digit strings without converting either. */
+    private static function magnitudeAtMost(string $digits, string $limit): bool
+    {
+        $digits = ltrim($digits, '0');
+
+        return strlen($digits) < strlen($limit) || (strlen($digits) === strlen($limit) && strcmp($digits, $limit) <= 0);
     }
 
     private static function castToBool(mixed $value): bool
