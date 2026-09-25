@@ -37,7 +37,12 @@ class ContainerFactory
         // instant by the offset (runs fire early, events land at the wrong
         // hour). User-facing local time is handled explicitly elsewhere
         // (OsPreferences::timezone), never via the ambient default.
-        date_default_timezone_set('UTC');
+        // get() and createRequestScoped() reach this on every request; the set
+        // re-resolves the zone (~1.3 us), the read is ~40 ns, so only set it
+        // when something actually moved it off UTC.
+        if (date_default_timezone_get() !== 'UTC') {
+            date_default_timezone_set('UTC');
+        }
 
         if (self::$container === null) {
             $container = new SemitexaContainer();
