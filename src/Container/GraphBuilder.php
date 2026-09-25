@@ -135,6 +135,8 @@ final class GraphBuilder
      * @param ObjectMap $readonlyInstances
      * @param ObjectMap $executionScopedPrototypes
      * @param FactoryMap $factories (mutated in place)
+     * @param \Closure(class-string): object $resolveService The container's get(): resolves an
+     *        execution-scoped implementation per call (clone, mutable injection, initialize()).
      */
     public function buildFactories(
         array $contractDetails,
@@ -142,7 +144,19 @@ final class GraphBuilder
         array $readonlyInstances,
         array $executionScopedPrototypes,
         array &$factories,
+        \Closure $resolveService,
     ): void {
+        // Never hand out an execution-scoped prototype itself: it would be one
+        // object shared by every request, never injected nor initialized.
+        $perExecution = static function (object $impl) use ($executionScopedPrototypes, $resolveService): object {
+            $class = $impl::class;
+            if (!isset($executionScopedPrototypes[$class])) {
+                return $impl;
+            }
+
+            return static fn (): object => $resolveService($class);
+        };
+
         foreach ($contractDetails as $baseInterface => $data) {
             $implementations = $data['implementations'];
             if (count($implementations) < 2) {
@@ -170,6 +184,7 @@ final class GraphBuilder
             if ($defaultImpl === null) {
                 continue;
             }
+            $defaultImpl = $perExecution($defaultImpl);
             $byKey = [];
             $enumKeys = [];
             $enumClass = null;
@@ -192,7 +207,7 @@ final class GraphBuilder
                 $key = (string) $factoryKey->value;
                 $inst = $readonlyInstances[$implClass] ?? $executionScopedPrototypes[$implClass] ?? null;
                 if ($inst !== null) {
-                    $byKey[$key] = $inst;
+                    $byKey[$key] = $perExecution($inst);
                     $enumKeys[$key] = $factoryKey;
                 }
             }
