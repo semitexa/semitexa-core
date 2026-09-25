@@ -214,4 +214,35 @@ final class PayloadHydratorTest extends TestCase
         );
         self::assertSame(7, PayloadHydrator::hydrate($this->intDto(), $form)->n);
     }
+
+    #[Test]
+    public function a_nullable_union_setter_receives_null_for_null(): void
+    {
+        // ?int already mapped null (and '') to null; the union branch ignored
+        // allowsNull() and cast null to the first arm, handing over 0 or "".
+        $dto = new class {
+            public int|float|null $number = -1;
+            public int|string|null $label = 'unset';
+
+            public function setNumber(int|float|null $value): void
+            {
+                $this->number = $value;
+            }
+
+            public function setLabel(int|string|null $value): void
+            {
+                $this->label = $value;
+            }
+        };
+
+        foreach ([false, true] as $strict) {
+            $hydrated = PayloadHydrator::hydrate(clone $dto, $this->jsonRequest(['number' => null, 'label' => null], strict: $strict));
+            self::assertNull($hydrated->number);
+            self::assertNull($hydrated->label);
+
+            $hydrated = PayloadHydrator::hydrate(clone $dto, $this->jsonRequest(['number' => '', 'label' => ''], strict: $strict));
+            self::assertNull($hydrated->number, 'an empty value means null, as it does for ?int');
+            self::assertNull($hydrated->label);
+        }
+    }
 }

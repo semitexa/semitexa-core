@@ -237,6 +237,11 @@ class PayloadHydrator
         }
 
         if ($type instanceof ReflectionUnionType) {
+            // Same rule as a nullable named type below; otherwise null was cast
+            // to the first arm and int|float|null received 0.
+            if ($type->allowsNull() && ($value === null || $value === '')) {
+                return null;
+            }
             $firstNamed = null;
             foreach ($type->getTypes() as $t) {
                 if (!$t instanceof ReflectionNamedType || $t->getName() === 'null') {
