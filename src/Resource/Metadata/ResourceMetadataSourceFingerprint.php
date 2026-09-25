@@ -36,9 +36,13 @@ final class ResourceMetadataSourceFingerprint
 {
     /**
      * Algorithm version. Bump when changing the input shape so old caches
-     * (with a different fingerprint algorithm) don't false-match.
+     * (with a different fingerprint algorithm) don't false-match. Also bump
+     * when the extractor's OUTPUT changes for unchanged sources: the
+     * fingerprint covers the DTO files only, so a cache written by the old
+     * extractor would otherwise keep being served. 2: include names are
+     * lowercased at extraction.
      */
-    public const ALGORITHM_VERSION = 1;
+    public const ALGORITHM_VERSION = 2;
 
     #[InjectAsReadonly]
     protected ClassDiscovery $classDiscovery;

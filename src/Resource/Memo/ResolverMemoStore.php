@@ -93,7 +93,14 @@ final class ResolverMemoStore
         ResourceIdentity $parentIdentity,
         string $parentClass,
     ): string {
-        \assert($field->resolverClass !== null);
+        // Explicit throw, not assert(): assertions are compiled out in
+        // production and the null would surface as a TypeError instead.
+        if ($field->resolverClass === null) {
+            throw new \LogicException(sprintf(
+                'Cannot build a resolver memo key for relation "%s": it has no #[ResolveWith] resolver class.',
+                $field->name,
+            ));
+        }
         return self::formatKey(
             resolverClass:  $field->resolverClass,
             parentIdentity: $parentIdentity,
