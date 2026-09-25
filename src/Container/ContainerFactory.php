@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Container;
 
+use Semitexa\Core\Attribute\WorkerState;
 use Semitexa\Core\Redis\RedisConnectionPool;
 use Semitexa\Core\Redis\RedisSharedPool;
 
@@ -21,6 +22,7 @@ use Semitexa\Core\Redis\RedisSharedPool;
  */
 class ContainerFactory
 {
+    #[WorkerState('The worker container, built once per worker; requests get RequestScopedContainer.')]
     private static ?SemitexaContainer $container = null;
 
     /**

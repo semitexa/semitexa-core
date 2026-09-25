@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Locale;
 
+use Semitexa\Core\Attribute\WorkerState;
+
 /**
  * No-op locale context for use when semitexa-locale is not installed.
  *
@@ -14,6 +16,7 @@ namespace Semitexa\Core\Locale;
  */
 final class DefaultLocaleContext implements LocaleContextInterface
 {
+    #[WorkerState('Stateless fallback singleton; always answers the default locale.')]
     private static ?self $instance = null;
 
     private function __construct()

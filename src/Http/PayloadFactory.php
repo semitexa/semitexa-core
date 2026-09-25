@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Http;
 
+use Semitexa\Core\Attribute\WorkerState;
+
 /**
  * Creates DTO instances with dynamically composed traits from AsPayloadPart/AsResourcePart.
  *
@@ -13,6 +15,7 @@ namespace Semitexa\Core\Http;
 final class PayloadFactory
 {
     /** @var array<string, class-string> */
+    #[WorkerState('Generated wrapper class names keyed by base class and traits; derived from code only.')]
     private static array $classCache = [];
 
     /**

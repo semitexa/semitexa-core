@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Semitexa\Core\Support;
 
 use ReflectionClass;
+use Semitexa\Core\Attribute\WorkerState;
 
 /**
  * Serialize Payload DTOs to/from array using getter/setter convention.
@@ -76,6 +77,7 @@ class PayloadSerializer
      *
      * @var array<class-string, array<string, array{0: \ReflectionMethod, 1: \ReflectionParameter}|false>>
      */
+    #[WorkerState('Setter reflection keyed by class and key, capped per class; holds no values.')]
     private static array $setters = [];
 
     private const MAX_MEMOIZED_KEYS_PER_CLASS = 256;

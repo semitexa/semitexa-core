@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Log;
 
+use Semitexa\Core\Attribute\WorkerState;
+
 /**
  * Where a log line was written FROM, when something is able to say.
  *
@@ -39,6 +41,7 @@ namespace Semitexa\Core\Log;
 final class LogOrigin
 {
     /** @var (\Closure(): (array{process?: string, block?: string}|null))|null */
+    #[WorkerState('Resolver function installed at boot; it computes the per-request answer on each call.')]
     private static ?\Closure $resolver = null;
 
     /**
