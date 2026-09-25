@@ -67,6 +67,14 @@ final class BuildContext
     /** @var array<class-string, ContractDetail> */
     public array $contractDetails = [];
 
+    /**
+     * The container's get(), for services that must be resolved per execution
+     * after boot (e.g. execution-scoped contract factory implementations).
+     *
+     * @var (\Closure(class-string): object)|null
+     */
+    public ?\Closure $resolveService = null;
+
     public function __construct(
         InstanceStore $instanceStore,
         TypeMap $typeMap,

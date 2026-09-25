@@ -26,6 +26,7 @@ final class FactoryBuildPhase implements BuildPhaseInterface
             $context->instanceStore->readonly,
             $context->instanceStore->prototypes,
             $context->instanceStore->factories,
+            $context->resolveService ?? throw new \LogicException('FactoryBuildPhase needs BuildContext::$resolveService.'),
         );
 
         $graphBuilder->injectFactoriesIntoPrototypes(
