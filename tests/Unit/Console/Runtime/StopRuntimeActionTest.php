@@ -28,6 +28,7 @@ final class StopRuntimeActionTest extends TestCase
         LISTEN 0      511             [::]:80            [::]:*     users:(("php",pid=444,fd=5))
         LISTEN 0      511             [::]:8081          [::]:*     users:(("node",pid=555,fd=7))
         LISTEN 0      4096   127.0.0.53%lo:53         0.0.0.0:*     users:(("resolved",pid=666,fd=13))
+        LISTEN 0      511          0.0.0.0:9502       0.0.0.0:*     users:(("php",pid=777,fd=3),("php",pid=778,fd=3),("php",pid=779,fd=3))
         SS;
 
     private string $binDir;
@@ -60,6 +61,14 @@ final class StopRuntimeActionTest extends TestCase
         self::assertSame([111], $this->pidsOnPort(8080));
         self::assertSame([666], $this->pidsOnPort(53), 'an interface-scoped address still matches');
         self::assertSame([], $this->pidsOnPort(8));
+    }
+
+    #[Test]
+    public function every_process_sharing_one_listening_socket_is_selected(): void
+    {
+        // Swoole master/manager/workers share the socket: ss lists them all
+        // on ONE line, and keeping only the last pid left the rest running.
+        self::assertSame([777, 778, 779], $this->pidsOnPort(9502));
     }
 
     /** @return list<int> */

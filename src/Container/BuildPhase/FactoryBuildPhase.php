@@ -34,6 +34,14 @@ final class FactoryBuildPhase implements BuildPhaseInterface
             $context->injections,
             $context->instanceStore->factories,
         );
+
+        // Worker-scoped services are never cloned, so this is their only
+        // chance to receive an #[InjectAsFactory] property.
+        $graphBuilder->injectFactoriesIntoPrototypes(
+            $context->instanceStore->readonly,
+            $context->injections,
+            $context->instanceStore->factories,
+        );
     }
 
     public function name(): string

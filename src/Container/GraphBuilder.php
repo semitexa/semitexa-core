@@ -522,6 +522,12 @@ final class GraphBuilder
             $kind = $info['kind'];
             $typeName = $info['type'];
 
+            // Factories do not exist yet: FactoryBuildPhase builds and injects
+            // them after the graph; ValidationPhase reports a missing one.
+            if ($kind === 'factory') {
+                continue;
+            }
+
             $resolved = $this->resolveForBuildInjection($kind, $typeName, $readonlyInstances, $idToClass);
 
             if ($resolved !== null) {
