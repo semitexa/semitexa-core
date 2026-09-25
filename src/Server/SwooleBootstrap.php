@@ -80,6 +80,22 @@ class SwooleBootstrap
         return [$context[0], $context[1], $context[2]];
     }
 
+    /**
+     * Whether the calling coroutine is the one onRequest runs a request in —
+     * which exits once the response is out. A child coroutine of a request,
+     * and a standing one (a NATS consume loop, a timer), answer false.
+     */
+    public static function isRequestCoroutine(): bool
+    {
+        if (!extension_loaded('swoole') || Coroutine::getCid() <= 0) {
+            return false;
+        }
+
+        $context = Coroutine::getContext();
+
+        return $context instanceof \ArrayObject && isset($context[self::COROUTINE_CONTEXT_KEY]);
+    }
+
     public static function run(): void
     {
         self::verifyRequirements();

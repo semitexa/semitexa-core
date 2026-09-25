@@ -11,6 +11,7 @@ use Semitexa\Core\Container\ContainerFactory;
 use Semitexa\Core\Log\StaticLoggerBridge;
 use Semitexa\Core\Queue\QueueConfig;
 use Semitexa\Core\Queue\QueueTransportRegistry;
+use Semitexa\Core\Server\SwooleBootstrap;
 use Semitexa\Core\Support\PayloadSerializer;
 
 /**
@@ -178,18 +179,18 @@ final class EventDispatcher implements EventDispatcherInterface
         return $listener;
     }
 
-    /** Run listener after the current (request) coroutine finishes. Falls back to sync outside a coroutine. */
+    /** Run listener after the current request coroutine finishes. Falls back to sync anywhere else. */
     private function runListenerDefer(array $meta, object $event): void
     {
-        // Decided on "inside a Swoole coroutine", not on SAPI: a Swoole HTTP
-        // server always runs under the CLI SAPI. Outside a coroutine (queue
-        // worker, console command, PHPUnit) nothing drives a defer, so run
-        // inline and leave the reactor untouched.
-        $inCoroutine = extension_loaded('swoole')
-            && class_exists(\Swoole\Coroutine::class)
-            && \Swoole\Coroutine::getCid() > 0;
-
-        if (!$inCoroutine) {
+        // Decided on "inside a request coroutine", not on SAPI: a Swoole HTTP
+        // server always runs under the CLI SAPI. Nor merely on "inside a
+        // coroutine": Coroutine::defer fires when THAT coroutine exits, and a
+        // standing one (the ledger's NATS command loop, a consumer) never
+        // does — its listeners would never run and every dispatch would pin
+        // one more closure for the life of the worker. Outside a request
+        // coroutine (those loops, a child go(), queue worker, console,
+        // PHPUnit) run inline, as before, and leave the reactor untouched.
+        if (!SwooleBootstrap::isRequestCoroutine()) {
             $this->runListenerSync($meta, $event);
             return;
         }

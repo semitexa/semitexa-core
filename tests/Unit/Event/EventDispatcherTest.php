@@ -11,6 +11,7 @@ use Semitexa\Core\Event\EventExecution;
 use Semitexa\Core\Event\EventListenerRegistry;
 use Semitexa\Core\Log\LoggerInterface;
 use Semitexa\Core\Log\StaticLoggerBridge;
+use Semitexa\Core\Server\SwooleBootstrap;
 
 final class EventDispatcherTest extends TestCase
 {
@@ -46,6 +47,7 @@ final class EventDispatcherTest extends TestCase
         $seenDuringDispatch = null;
 
         \Swoole\Coroutine\run(function () use ($dispatcher, &$seenDuringDispatch): void {
+            self::markAsRequestCoroutine();
             $dispatcher->dispatch(new DispatcherProbeEvent());
             $seenDuringDispatch = DispatcherProbeLog::$calls;
         });
@@ -61,6 +63,7 @@ final class EventDispatcherTest extends TestCase
         $seenDuringDispatch = null;
 
         \Swoole\Coroutine\run(function () use ($dispatcher, &$seenDuringDispatch): void {
+            self::markAsRequestCoroutine();
             $dispatcher->dispatch(new DispatcherProbeEvent());
             $seenDuringDispatch = DispatcherProbeLog::$calls;
         });
@@ -76,6 +79,7 @@ final class EventDispatcherTest extends TestCase
         $thrown = null;
 
         \Swoole\Coroutine\run(function () use ($dispatcher, &$thrown): void {
+            self::markAsRequestCoroutine();
             try {
                 $dispatcher->dispatch(new DispatcherProbeEvent());
             } catch (\Throwable $e) {
@@ -86,6 +90,23 @@ final class EventDispatcherTest extends TestCase
         self::assertNull($thrown);
         self::assertSame([ThrowingProbeListener::class], DispatcherProbeLog::$calls);
         self::assertNotSame([], $this->errors);
+    }
+
+    #[Test]
+    public function an_async_listener_in_a_standing_coroutine_runs_inline(): void
+    {
+        // A consume loop (the ledger's NATS command processor) never exits, so
+        // a Coroutine::defer there would never fire and would pin the closure.
+        $dispatcher = $this->dispatcherWith([[RecordingProbeListener::class, EventExecution::Async]]);
+        $seenDuringDispatch = null;
+
+        \Swoole\Coroutine\run(function () use ($dispatcher, &$seenDuringDispatch): void {
+            $dispatcher->dispatch(new DispatcherProbeEvent());
+            $seenDuringDispatch = DispatcherProbeLog::$calls;
+        });
+
+        self::assertSame([RecordingProbeListener::class], $seenDuringDispatch);
+        self::assertSame([RecordingProbeListener::class], DispatcherProbeLog::$calls);
     }
 
     #[Test]
@@ -115,6 +136,13 @@ final class EventDispatcherTest extends TestCase
         }
 
         self::assertSame([DispatcherProbeEvent::class], $hooked);
+    }
+
+    /** What SwooleBootstrap's onRequest sets on the coroutine a request runs in. */
+    private static function markAsRequestCoroutine(): void
+    {
+        $key = (new \ReflectionClassConstant(SwooleBootstrap::class, 'COROUTINE_CONTEXT_KEY'))->getValue();
+        \Swoole\Coroutine::getContext()[$key] = true;
     }
 
     /**
