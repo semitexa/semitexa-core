@@ -20,6 +20,16 @@ final class HandlerRegistry
     private array $handlersByClass = [];
 
     /**
+     * findHandlers() results, key: request . "\0" . response. Lookup runs on every
+     * request and is a pure function of the pair once boot has registered
+     * everything; register() clears it. Concurrent coroutines can only ever
+     * write the same value for a key, so sharing it is safe.
+     *
+     * @var array<string, list<array{class: string, execution: string, transport: ?string, queue: ?string, priority: int, maxRetries?: int, retryDelay?: int}>>
+     */
+    private array $lookupMemo = [];
+
+    /**
      * Register a handler mapping. Called during boot only.
      *
      * @param array{class: string, payload?: string, resource?: string, execution: string, transport: ?string, queue: ?string, priority: int, maxRetries?: int, retryDelay?: int} $handlerMeta
@@ -29,6 +39,7 @@ final class HandlerRegistry
         $key = $payloadClass . "\0" . $resourceClass;
         $this->handlersByPayloadAndResource[$key][] = $handlerMeta;
         $this->handlersByClass[$handlerMeta['class']] = $handlerMeta;
+        $this->lookupMemo = [];
     }
 
     /**
@@ -41,6 +52,11 @@ final class HandlerRegistry
     {
         if ($responseClass === null) {
             return [];
+        }
+
+        $memoKey = $requestClass . "\0" . $responseClass;
+        if (isset($this->lookupMemo[$memoKey])) {
+            return $this->lookupMemo[$memoKey];
         }
 
         $found = [];
@@ -64,7 +80,7 @@ final class HandlerRegistry
             }
         }
 
-        return $found;
+        return $this->lookupMemo[$memoKey] = $found;
     }
 
     /**
