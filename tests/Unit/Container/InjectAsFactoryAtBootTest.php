@@ -6,15 +6,20 @@ namespace Semitexa\Core\Tests\Unit\Container;
 
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
+use Semitexa\Core\Attribute\InjectAsFactory;
 use Semitexa\Core\Attribute\SatisfiesServiceContract;
 use Semitexa\Core\Container\BuildPhase\BuildContext;
 use Semitexa\Core\Container\BuildPhase\FactoryBuildPhase;
 use Semitexa\Core\Container\BuildPhase\ValidationPhase;
+use Semitexa\Core\Container\ContractFactory;
 use Semitexa\Core\Container\Exception\ContainerBuildException;
+use Semitexa\Core\Container\Exception\InjectionException;
 use Semitexa\Core\Container\GraphBuilder;
+use Semitexa\Core\Container\InjectionAnalyzer;
 use Semitexa\Core\Container\Store\InjectionMap;
 use Semitexa\Core\Container\Store\InstanceStore;
 use Semitexa\Core\Container\Store\TypeMap;
+use Semitexa\Core\Contract\ContractFactoryInterface;
 use Semitexa\Core\Registry\RegistryContractResolverGenerator;
 use Semitexa\Core\Support\ProjectRoot;
 use Semitexa\Core\Tests\Support\StaticState;
@@ -52,12 +57,42 @@ final class BootFactorySmsChannel implements BootFactoryChannel
 
 final class BootFactoryConsumer
 {
+    #[InjectAsFactory]
     protected FactoryBootFactoryChannel $channels;
 
     public function channels(): FactoryBootFactoryChannel
     {
         return $this->channels;
     }
+}
+
+/** Typed as the generic factory (vendor docs di/factory.md): names its contract via `of`. */
+final class GenericBootFactoryConsumer
+{
+    #[InjectAsFactory(of: BootFactoryChannel::class)]
+    protected ContractFactory $channels;
+
+    public function channels(): ContractFactory
+    {
+        return $this->channels;
+    }
+}
+
+final class GenericInterfaceBootFactoryConsumer
+{
+    #[InjectAsFactory(of: BootFactoryChannel::class)]
+    protected ContractFactoryInterface $channels;
+
+    public function channels(): ContractFactoryInterface
+    {
+        return $this->channels;
+    }
+}
+
+final class GenericBootFactoryConsumerWithoutContract
+{
+    #[InjectAsFactory]
+    protected ContractFactory $channels;
 }
 
 /** A contract whose factory class was never generated. */
@@ -188,6 +223,78 @@ final class InjectAsFactoryAtBootTest extends TestCase
         self::assertInstanceOf(BootFactorySmsChannel::class, $sms);
         self::assertNotSame($context->instanceStore->prototypes[BootFactorySmsChannel::class], $sms);
         self::assertNotSame($sms, $factory->get(BootFactoryChannelKind::Sms));
+    }
+
+    #[Test]
+    public function generic_factory_typed_consumers_receive_the_generic_factory_next_to_a_typed_consumer(): void
+    {
+        $analyzer = (new \ReflectionClass(InjectionAnalyzer::class))->newInstanceWithoutConstructor();
+        $context = $this->context();
+        $context->injections = [
+            BootFactoryConsumer::class => $analyzer->buildInjectionsForClass(BootFactoryConsumer::class),
+            GenericBootFactoryConsumer::class => $analyzer->buildInjectionsForClass(GenericBootFactoryConsumer::class),
+            GenericInterfaceBootFactoryConsumer::class => $analyzer->buildInjectionsForClass(GenericInterfaceBootFactoryConsumer::class),
+        ];
+        $readonly = [
+            BootFactoryMailChannel::class => new BootFactoryMailChannel(),
+            BootFactorySmsChannel::class => new BootFactorySmsChannel(),
+        ];
+        // Worker-scoped: the ContractFactory-typed consumer and the typed one.
+        (new GraphBuilder())->buildReadonlyGraph(
+            [
+                GenericBootFactoryConsumer::class => GenericBootFactoryConsumer::class,
+                BootFactoryConsumer::class => BootFactoryConsumer::class,
+            ],
+            [GenericInterfaceBootFactoryConsumer::class => true],
+            $context->injections,
+            $readonly,
+            static fn (string $id): ?string => class_exists($id) ? $id : null,
+        );
+        foreach ($readonly as $id => $instance) {
+            $context->instanceStore->readonly[$id] = $instance;
+        }
+        // Execution-scoped: the ContractFactoryInterface-typed consumer.
+        $idToClass = [];
+        $prototypes = [];
+        (new GraphBuilder())->buildExecutionScopedPrototypes(
+            [GenericInterfaceBootFactoryConsumer::class => true],
+            $context->injections,
+            $context->instanceStore->readonly,
+            $idToClass,
+            $prototypes,
+            static fn (string $id): ?string => class_exists($id) ? $id : null,
+        );
+        $context->instanceStore->prototypes[GenericInterfaceBootFactoryConsumer::class] = $prototypes[GenericInterfaceBootFactoryConsumer::class];
+        $context->executionScopedClasses[GenericInterfaceBootFactoryConsumer::class] = true;
+
+        (new FactoryBuildPhase())->execute($context);
+        (new ValidationPhase())->execute($context);
+
+        $generic = $context->instanceStore->genericFactories[FactoryBootFactoryChannel::class];
+        $worker = $context->instanceStore->readonly[GenericBootFactoryConsumer::class];
+        self::assertInstanceOf(GenericBootFactoryConsumer::class, $worker);
+        self::assertSame($generic, $worker->channels());
+        self::assertSame($readonly[BootFactorySmsChannel::class], $worker->channels()->get(BootFactoryChannelKind::Sms));
+        $scoped = $context->instanceStore->prototypes[GenericInterfaceBootFactoryConsumer::class];
+        self::assertInstanceOf(GenericInterfaceBootFactoryConsumer::class, $scoped);
+        self::assertSame($generic, $scoped->channels());
+        self::assertSame($readonly[BootFactoryMailChannel::class], $scoped->channels()->getDefault());
+
+        // The typed consumer, and the container's own lookup by Factory* key, get the typed factory.
+        $typed = $context->instanceStore->readonly[BootFactoryConsumer::class];
+        self::assertInstanceOf(BootFactoryConsumer::class, $typed);
+        self::assertSame($context->instanceStore->factories[FactoryBootFactoryChannel::class], $typed->channels());
+        self::assertNotInstanceOf(ContractFactory::class, $typed->channels());
+    }
+
+    #[Test]
+    public function a_generic_factory_typed_property_without_a_contract_is_rejected(): void
+    {
+        $analyzer = (new \ReflectionClass(InjectionAnalyzer::class))->newInstanceWithoutConstructor();
+
+        $this->expectException(InjectionException::class);
+        $this->expectExceptionMessage('#[InjectAsFactory(of: YourContract::class)]');
+        $analyzer->buildInjectionsForClass(GenericBootFactoryConsumerWithoutContract::class);
     }
 
     #[Test]

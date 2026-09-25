@@ -27,12 +27,14 @@ final class FactoryBuildPhase implements BuildPhaseInterface
             $context->instanceStore->prototypes,
             $context->instanceStore->factories,
             $context->resolveService ?? throw new \LogicException('FactoryBuildPhase needs BuildContext::$resolveService.'),
+            $context->instanceStore->genericFactories,
         );
 
         $graphBuilder->injectFactoriesIntoPrototypes(
             $context->instanceStore->prototypes,
             $context->injections,
             $context->instanceStore->factories,
+            $context->instanceStore->genericFactories,
         );
 
         // Worker-scoped services are never cloned, so this is their only
@@ -41,6 +43,7 @@ final class FactoryBuildPhase implements BuildPhaseInterface
             $context->instanceStore->readonly,
             $context->injections,
             $context->instanceStore->factories,
+            $context->instanceStore->genericFactories,
         );
     }
 

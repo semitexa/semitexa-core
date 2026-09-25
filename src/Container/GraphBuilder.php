@@ -19,7 +19,7 @@ use ReflectionNamedType;
  * @internal Used only by ContainerBootstrapper during build.
  * @phpstan-type ContractImplementation array{module: string, class: class-string, factoryKey?: \BackedEnum|null}
  * @phpstan-type ContractDetail array{implementations: list<ContractImplementation>, active: class-string}
- * @phpstan-type InjectionsMap array<class-string, array<string, array{kind: string, type: class-string, optional?: bool}>>
+ * @phpstan-type InjectionsMap array<class-string, array<string, array{kind: string, type: class-string, optional?: bool, declared?: class-string}>>
  * @phpstan-type IdToClassMap array<string, class-string>
  * @phpstan-type ObjectMap array<string, object>
  * @phpstan-type FactoryMap array<string, object>
@@ -134,7 +134,8 @@ final class GraphBuilder
      * @param array<class-string, class-string> $interfaceToResolver
      * @param ObjectMap $readonlyInstances
      * @param ObjectMap $executionScopedPrototypes
-     * @param FactoryMap $factories (mutated in place)
+     * @param FactoryMap $factories (mutated in place) Factory* interface => the generated
+     *        typed factory, or the generic one when that class is absent
      * @param \Closure(class-string): object $resolveService The container's get(): resolves an
      *        execution-scoped implementation per call (clone, mutable injection, initialize()).
      */
@@ -145,6 +146,7 @@ final class GraphBuilder
         array $executionScopedPrototypes,
         array &$factories,
         \Closure $resolveService,
+        array &$genericFactories = [],
     ): void {
         // Never hand out an execution-scoped prototype itself: it would be one
         // object shared by every request, never injected nor initialized.
@@ -218,11 +220,9 @@ final class GraphBuilder
                     );
                 }
             }
-            $factories[$factoryInterface] = self::typedFactory(
-                $baseInterface,
-                $factoryInterface,
-                new ContractFactory($defaultImpl, $byKey, $enumKeys),
-            );
+            $generic = new ContractFactory($defaultImpl, $byKey, $enumKeys);
+            $genericFactories[$factoryInterface] = $generic;
+            $factories[$factoryInterface] = self::typedFactory($baseInterface, $factoryInterface, $generic);
         }
     }
 
@@ -260,11 +260,13 @@ final class GraphBuilder
      * @param array<class-string, object> $executionScopedPrototypes
      * @param InjectionsMap $injections
      * @param ObjectMap $factories
+     * @param array<string, ContractFactory> $genericFactories
      */
     public function injectFactoriesIntoPrototypes(
         array $executionScopedPrototypes,
         array $injections,
         array $factories,
+        array $genericFactories = [],
     ): void {
         foreach ($executionScopedPrototypes as $class => $instance) {
             $classInjections = $injections[$class] ?? [];
@@ -272,18 +274,41 @@ final class GraphBuilder
                 if ($info['kind'] !== 'factory') {
                     continue;
                 }
-                $factory = $factories[$info['type']] ?? null;
+                $factory = self::factoryFor($class, $propName, $info, $factories, $genericFactories);
                 if ($factory === null) {
                     continue;
-                }
-                if (!$factory instanceof $info['type']) {
-                    throw new ContainerBuildException(self::missingTypedFactoryMessage($class, $propName, $info['type']));
                 }
                 $prop = (new ReflectionClass($instance))->getProperty($propName);
                 $prop->setAccessible(true);
                 $prop->setValue($instance, $factory);
             }
         }
+    }
+
+    /**
+     * The factory an #[InjectAsFactory] property receives, chosen by its declared
+     * type: the generic ContractFactory when that type accepts it (ContractFactory,
+     * ContractFactoryInterface, or a Factory* interface it satisfies), otherwise
+     * the generated typed factory. Null when the contract has no factory.
+     *
+     * @param array{type: string, declared?: string} $info
+     * @param array<string, object> $factories
+     * @param array<string, ContractFactory> $genericFactories
+     */
+    public static function factoryFor(string $class, string $propName, array $info, array $factories, array $genericFactories): ?object
+    {
+        $key = $info['type'];
+        $declared = $info['declared'] ?? $key;
+        $generic = $genericFactories[$key] ?? null;
+        if ($generic instanceof $declared) {
+            return $generic;
+        }
+        $factory = $factories[$key] ?? null;
+        if ($factory === null || $factory instanceof $declared) {
+            return $factory;
+        }
+
+        throw new ContainerBuildException(self::missingTypedFactoryMessage($class, $propName, $key));
     }
 
     private static function missingTypedFactoryMessage(string $class, string $propName, string $factoryInterface): string

@@ -12,6 +12,6 @@ namespace Semitexa\Core\Container\Store;
  */
 final class InjectionMap
 {
-    /** @var array<class-string, array<string, array{kind: string, type: class-string, optional?: bool}>> */
+    /** @var array<class-string, array<string, array{kind: string, type: class-string, optional?: bool, declared?: class-string}>> */
     public array $injections = [];
 }
