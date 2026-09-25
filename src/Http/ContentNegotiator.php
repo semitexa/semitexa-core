@@ -9,6 +9,14 @@ use Semitexa\Core\Request;
 
 final class ContentNegotiator
 {
+    /** The MIME a default format key stands for, so a refusal of it can be recognised. */
+    private const DEFAULT_MIMES = [
+        'json' => 'application/json',
+        'html' => 'text/html',
+        'xml' => 'application/xml',
+        'txt' => 'text/plain',
+    ];
+
     /**
      * Check if the request's Content-Type is accepted by this route.
      *
@@ -95,12 +103,20 @@ final class ContentNegotiator
             return isset($refused[$type . '/*']) && !isset($accepted[$produce]);
         };
 
+        // The default is a type too, and a client can refuse it: `*/*` next to
+        // `application/json;q=0` accepts everything except the json default.
+        $defaultMime = self::DEFAULT_MIMES[$defaultFormat] ?? null;
+        $defaultRefused = $defaultMime !== null && $isRefused($defaultMime);
+
         if ($produces === null || $produces === []) {
             foreach ($entries as [$mime, $q]) {
                 $key = ContentType::toFormatKey($mime);
                 if ($key !== null) {
                     return $key;
                 }
+            }
+            if ($defaultRefused) {
+                throw new NegotiationFailedException([], $acceptHeader);
             }
             return $defaultFormat;
         }
@@ -109,7 +125,10 @@ final class ContentNegotiator
             if ($mime === '*/*') {
                 foreach ($produces as $produce) {
                     if (!$isRefused($produce)) {
-                        return ContentType::toFormatKey($produce) ?? $defaultFormat;
+                        $key = ContentType::toFormatKey($produce) ?? ($defaultRefused ? null : $defaultFormat);
+                        if ($key !== null) {
+                            return $key;
+                        }
                     }
                 }
                 continue;
@@ -118,13 +137,19 @@ final class ContentNegotiator
                 [$type] = explode('/', $mime, 2);
                 foreach ($produces as $produce) {
                     if (str_starts_with($produce, $type . '/') && !$isRefused($produce)) {
-                        return ContentType::toFormatKey($produce) ?? $defaultFormat;
+                        $key = ContentType::toFormatKey($produce) ?? ($defaultRefused ? null : $defaultFormat);
+                        if ($key !== null) {
+                            return $key;
+                        }
                     }
                 }
                 continue;
             }
             if (in_array($mime, $produces, true) && !$isRefused($mime)) {
-                return ContentType::toFormatKey($mime) ?? $defaultFormat;
+                $key = ContentType::toFormatKey($mime) ?? ($defaultRefused ? null : $defaultFormat);
+                if ($key !== null) {
+                    return $key;
+                }
             }
         }
 

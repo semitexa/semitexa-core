@@ -54,6 +54,31 @@ final class ContentNegotiatorTest extends TestCase
     /**
      * @param list<string> $produces
      */
+    #[Test]
+    public function an_unrestricted_route_does_not_fall_back_to_a_refused_default(): void
+    {
+        // No `produces` (ExceptionMapper's case): `*/*` used to hand back the
+        // json default the client had just refused.
+        $this->expectException(NegotiationFailedException::class);
+        ContentNegotiator::negotiateResponseFormat(null, $this->request('application/json;q=0, */*'), 'json');
+    }
+
+    #[Test]
+    public function an_unrestricted_route_still_serves_its_default_when_it_is_not_refused(): void
+    {
+        self::assertSame('json', ContentNegotiator::negotiateResponseFormat(null, $this->request('*/*'), 'json'));
+        self::assertSame('html', ContentNegotiator::negotiateResponseFormat(null, $this->request('application/json;q=0, text/html'), 'json'));
+    }
+
+    #[Test]
+    public function a_produce_without_a_format_key_does_not_borrow_a_refused_default(): void
+    {
+        // `?? $defaultFormat` labelled an unknown produce with the default —
+        // the refused one, here.
+        $this->expectException(NegotiationFailedException::class);
+        ContentNegotiator::negotiateResponseFormat(['text/csv'], $this->request('application/json;q=0, */*'), 'json');
+    }
+
     private function negotiate(string $accept, array $produces = self::PRODUCES): string
     {
         return ContentNegotiator::negotiateResponseFormat($produces, $this->request($accept));
