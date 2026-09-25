@@ -19,7 +19,7 @@ use Semitexa\Core\Resource\Exception\InvalidPaginationException;
  *   - perPage = 10
  *
  * Limits:
- *   - page    >= 1
+ *   - page    >= 1, and small enough that offset() fits in an int
  *   - perPage in [1, MAX_PER_PAGE]
  *
  * Invalid input throws {@see InvalidPaginationException} (HTTP 400).
@@ -40,6 +40,12 @@ final readonly class CollectionPageRequest
         // `fromQueryParams()`.
         self::guard('page',    (string) $page,    $page,    $maxPerPage);
         self::guard('perPage', (string) $perPage, $perPage, $maxPerPage);
+
+        // offset() must stay an int: past PHP_INT_MAX `($page - 1) * $perPage`
+        // becomes a float and the return type throws a TypeError (500).
+        if ($page - 1 > intdiv(PHP_INT_MAX, $perPage)) {
+            throw new InvalidPaginationException('page', (string) $page, 'is too large');
+        }
     }
 
     /**
@@ -107,6 +113,12 @@ final readonly class CollectionPageRequest
         }
         $value = (int) $raw;
         self::guard($name, $raw, $value, $maxPerPage);
+        // (int) saturates digit strings beyond the int range at
+        // PHP_INT_MAX instead of failing; numeric-string arithmetic
+        // yields a float for exactly those, so reject them here.
+        if (!is_int($raw + 0)) {
+            throw new InvalidPaginationException($name, $raw, 'is too large');
+        }
         return $value;
     }
 
