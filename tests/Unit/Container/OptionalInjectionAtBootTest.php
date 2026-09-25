@@ -19,6 +19,10 @@ interface BootOptionalMissingInterface
 {
 }
 
+final class BootOptionalScopedImplementation implements BootOptionalMissingInterface
+{
+}
+
 final class BootOptionalConsumer
 {
     protected BootOptionalMissingInterface $missing;
@@ -47,6 +51,26 @@ final class OptionalInjectionAtBootTest extends TestCase
         self::assertFalse(
             (new ReflectionProperty(BootOptionalConsumer::class, 'missing'))->isInitialized($readonly[BootOptionalConsumer::class]),
         );
+    }
+
+    #[Test]
+    public function optional_does_not_hide_an_execution_scoped_implementation(): void
+    {
+        // A binding EXISTS — it just cannot be a boot-time property. Skipping it
+        // booted fine and left the property empty in every request.
+        $readonly = [];
+        try {
+            (new GraphBuilder())->buildReadonlyGraph(
+                [BootOptionalConsumer::class => BootOptionalConsumer::class],
+                [BootOptionalScopedImplementation::class => true],
+                $this->injections(optional: true),
+                $readonly,
+                static fn (string $id): ?string => class_exists($id) ? $id : null,
+            );
+            self::fail('an optional dependency implemented only by an #[ExecutionScoped] class must fail boot');
+        } catch (InjectionException $e) {
+            self::assertStringContainsString(BootOptionalScopedImplementation::class . ' implements this type but is #[ExecutionScoped]', $e->getMessage());
+        }
     }
 
     #[Test]

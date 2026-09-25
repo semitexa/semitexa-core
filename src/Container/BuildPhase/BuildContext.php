@@ -61,7 +61,7 @@ final class BuildContext
     /** @var array<class-string, class-string> interface => resolver class */
     public array $interfaceToResolver = [];
 
-    /** @var array<class-string, array<string, array{kind: string, type: class-string}>> */
+    /** @var array<class-string, array<string, array{kind: string, type: class-string, optional?: bool}>> */
     public array $injections = [];
 
     /** @var array<class-string, ContractDetail> */

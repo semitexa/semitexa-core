@@ -19,7 +19,7 @@ use ReflectionNamedType;
  * @internal Used only by ContainerBootstrapper during build.
  * @phpstan-type ContractImplementation array{module: string, class: class-string, factoryKey?: \BackedEnum|null}
  * @phpstan-type ContractDetail array{implementations: list<ContractImplementation>, active: class-string}
- * @phpstan-type InjectionsMap array<class-string, array<string, array{kind: string, type: class-string}>>
+ * @phpstan-type InjectionsMap array<class-string, array<string, array{kind: string, type: class-string, optional?: bool}>>
  * @phpstan-type IdToClassMap array<string, class-string>
  * @phpstan-type ObjectMap array<string, object>
  * @phpstan-type FactoryMap array<string, ContractFactory>
@@ -539,8 +539,13 @@ final class GraphBuilder
                 continue;
             }
 
-            // Soft dependency (optional: true): leave the property uninitialized.
-            if (!empty($info['optional'])) {
+            // Why it resolved to nothing decides the case. An optional dependency
+            // with NO implementation stays uninitialized, as the attribute
+            // promises. One whose implementation exists but is #[ExecutionScoped]
+            // is the trap below, and `optional` must not turn that into a boot
+            // that succeeds and an injection that never happens.
+            $trap = $this->describeExecutionScopedTrap($typeName, $idToClass, $executionScopedClasses);
+            if (!empty($info['optional']) && $trap === '') {
                 continue;
             }
 
@@ -551,7 +556,7 @@ final class GraphBuilder
                 injectionKind: $kind,
                 message: "Cannot inject {$class}::\${$propName} (type: {$typeName}, "
                     . "kind: {$kind}). No binding found."
-                    . $this->describeExecutionScopedTrap($typeName, $idToClass, $executionScopedClasses),
+                    . $trap,
             );
         }
     }

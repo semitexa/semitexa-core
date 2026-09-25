@@ -46,6 +46,21 @@ final class ExceptionMapperTest extends TestCase
         self::assertStringContainsString('Internal Server Error', $response->getContent());
     }
 
+    #[Test]
+    public function a_route_without_produces_still_answers_an_explicit_text_request_in_text(): void
+    {
+        foreach ([
+            new Request('GET', '/broken', [], ['_format' => 'txt'], [], [], []),
+            new Request('GET', '/broken', ['Accept' => 'text/plain'], [], [], [], []),
+        ] as $request) {
+            $response = (new ExceptionMapper())->map(new \Semitexa\Core\Exception\NotFoundException('Page', 7), $request, $this->makeMetadata(null));
+
+            self::assertSame(404, $response->getStatusCode());
+            self::assertStringStartsWith('text/plain', $response->getHeaders()['Content-Type'] ?? '');
+            self::assertSame('Page #7 not found.', $response->getContent());
+        }
+    }
+
     /**
      * @param list<string>|null $produces
      */

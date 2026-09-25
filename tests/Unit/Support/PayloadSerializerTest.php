@@ -80,6 +80,35 @@ final class PayloadSerializerTest extends TestCase
         PayloadSerializer::hydrate(new SerializerTypedFixture(), ['priority' => 'bogus']);
     }
 
+    #[Test]
+    public function fractional_seconds_survive_a_round_trip(): void
+    {
+        $dto = self::filledFixture();
+        $dto->setDueAt(new DateTimeImmutable('2026-09-25T10:15:30.123456+02:00'));
+
+        $data = PayloadSerializer::toArray($dto);
+        self::assertSame('2026-09-25T10:15:30.123456+02:00', $data['dueAt']);
+
+        $back = PayloadSerializer::hydrate(new SerializerTypedFixture(), json_decode((string) json_encode($data), true));
+        self::assertSame('123456', $back->getDueAt()->format('u'));
+    }
+
+    #[Test]
+    public function a_union_typed_setter_gets_its_date_or_enum_back(): void
+    {
+        $dto = new SerializerUnionFixture();
+        $dto->setWhen(new DateTime('2026-09-25T10:15:30+00:00'));
+        $dto->setLevel(SerializerPriority::High);
+        $dto->setLabel('plain');
+
+        $back = PayloadSerializer::hydrate(new SerializerUnionFixture(), json_decode((string) json_encode(PayloadSerializer::toArray($dto)), true));
+
+        self::assertInstanceOf(\DateTimeInterface::class, $back->getWhen());
+        self::assertSame('2026-09-25T10:15:30+00:00', $back->getWhen()->format(DATE_ATOM));
+        self::assertSame(SerializerPriority::High, $back->getLevel());
+        self::assertSame('plain', $back->getLabel(), 'a scalar arm that takes the value keeps it as-is');
+    }
+
     private static function filledFixture(): SerializerTypedFixture
     {
         $dto = new SerializerTypedFixture();
@@ -129,4 +158,18 @@ final class SerializerTypedFixture
     public function isUrgent(): bool { return $this->urgent; }
     public function setUrgent(bool $urgent): void { $this->urgent = $urgent; }
     public function isDraft(): bool { return false; }
+}
+
+final class SerializerUnionFixture
+{
+    private DateTimeImmutable|DateTime|null $when = null;
+    private SerializerPriority|int|null $level = null;
+    private DateTimeImmutable|string $label = '';
+
+    public function getWhen(): DateTimeImmutable|DateTime|null { return $this->when; }
+    public function setWhen(DateTimeImmutable|DateTime $when): void { $this->when = $when; }
+    public function getLevel(): SerializerPriority|int|null { return $this->level; }
+    public function setLevel(SerializerPriority|int $level): void { $this->level = $level; }
+    public function getLabel(): DateTimeImmutable|string { return $this->label; }
+    public function setLabel(DateTimeImmutable|string $label): void { $this->label = $label; }
 }

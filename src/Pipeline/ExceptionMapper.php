@@ -28,7 +28,10 @@ use Semitexa\Core\HttpResponse;
 final class ExceptionMapper implements ExceptionResponseMapperInterface
 {
     /** The formats an error body can be rendered in here, preferred first. */
-    private const ERROR_FORMATS = ['application/json', 'text/html', 'application/xml'];
+    // text/plain last: mapDomainException() renders it, and an explicit
+    // `_format=txt` or `Accept: text/plain` must still get it; last, so a
+    // wildcard never picks it over json.
+    private const ERROR_FORMATS = ['application/json', 'text/html', 'application/xml', 'text/plain'];
 
     private ?ErrorRouteDispatcher $errorRouteDispatcher = null;
 
