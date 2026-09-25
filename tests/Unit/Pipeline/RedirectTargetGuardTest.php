@@ -52,6 +52,11 @@ final class RedirectTargetGuardTest extends TestCase
         yield 'leading space scheme relative' => [' //evil.com/'];
         yield 'scheme without authority slashes' => ['https:/evil.com/'];
         yield 'scheme with no slashes' => ['http:evil.com'];
+        // PHP reads site.test as the host of these; a browser reads `\` as `/`
+        // and goes to evil.example.
+        yield 'absolute backslash userinfo' => ['https://evil.example\\@site.test/path'];
+        yield 'scheme relative backslash userinfo' => ['//evil.example\\@site.test/path'];
+        yield 'absolute with tab in authority' => ["https://evil.example\t@site.test/path"];
         yield 'javascript scheme' => ['javascript:alert(1)'];
     }
 

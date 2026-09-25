@@ -51,6 +51,11 @@ final class LocalePhaseTest extends TestCase
         yield 'double slash after prefix' => ['/en//evil.example/x', '', '/evil.example/x'];
         yield 'backslash after prefix' => ['/en/\\evil.example', '', '/evil.example'];
         yield 'mixed slashes after prefix' => ['/en/\\/\\evil.example', 'a=1', '/evil.example?a=1'];
+        // Browsers drop tab/newline/CR from a Location: `/\t/evil.example`
+        // became `//evil.example`, another host.
+        yield 'tab between slashes after prefix' => ["/en/\t/evil.example", '', '/'];
+        yield 'newline between slashes after prefix' => ["/en/\n/evil.example", '', '/'];
+        yield 'backslash after a later slash' => ['/en/a\\b', '', '/a/b'];
     }
 
     #[Test]

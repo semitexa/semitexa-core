@@ -59,7 +59,11 @@ final class LocalePhase
             // Collapsed to ONE leading slash: `/en//evil.example` strips to
             // `//evil.example`, a protocol-relative Location on another host, and
             // browsers read `\` as `/`, so `/en/\evil.example` is the same thing.
-            $target = '/' . ltrim($resolution->strippedPath ?? '', '/\\');
+            // Browsers also DROP tab/newline/CR, so `/en/\t/evil.example` became
+            // `//evil.example` after the collapse: a path with ASCII controls is
+            // not redirected anywhere but `/`.
+            $stripped = str_replace('\\', '/', $resolution->strippedPath ?? '');
+            $target = preg_match('/[\x00-\x1F\x7F]/', $stripped) === 1 ? '/' : '/' . ltrim($stripped, '/');
             $qs = $request->getQueryString();
             if ($qs !== '') {
                 $target .= '?' . $qs;

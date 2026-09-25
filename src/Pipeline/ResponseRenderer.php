@@ -6,6 +6,7 @@ namespace Semitexa\Core\Pipeline;
 
 use Semitexa\Core\Request;
 use Semitexa\Core\HttpResponse;
+use Semitexa\Core\Http\RedirectTarget;
 use Semitexa\Core\Http\ContentType;
 use Semitexa\Core\Http\ContentNegotiator;
 use Semitexa\Core\Http\HttpStatus;
@@ -26,42 +27,8 @@ final class ResponseRenderer
         if (method_exists($resDto, 'getRedirectUrl') && $resDto->getRedirectUrl() !== null) {
             $redirectUrl = $resDto->getRedirectUrl();
             if (is_string($redirectUrl)) {
-                // Security: validate redirect URL to prevent open redirect attacks (VULN-006)
-                $parsed = parse_url($redirectUrl);
-                if ($parsed !== false && isset($parsed['host'])) {
-                    // Only allow http/https schemes for absolute URLs
-                    if (isset($parsed['scheme']) && !in_array($parsed['scheme'], ['http', 'https'], true)) {
-                        $redirectUrl = '/';
-                    } else {
-                        // Normalize: strip port from request host before comparison
-                        $requestHost = $request->getHost();
-                        $redirectHost = strtolower($parsed['host']);
-                        $requestHost = strtolower($requestHost);
-                        // Allow same-host, localhost, and known OAuth provider domains
-                        $allowedExternalHosts = [
-                            'accounts.google.com',
-                            'login.microsoftonline.com',
-                            'github.com',
-                            'login.live.com',
-                            'appleid.apple.com',
-                        ];
-                        if ($redirectHost !== $requestHost
-                            && $redirectHost !== 'localhost'
-                            && $redirectHost !== '127.0.0.1'
-                            && !self::isSiblingHost($redirectHost, $requestHost)
-                            && !in_array($redirectHost, $allowedExternalHosts, true)) {
-                            $redirectUrl = '/';
-                        }
-                    }
-                } elseif ($parsed !== false && !isset($parsed['host'])) {
-                    // Relative URL — allowed, but only when a browser reads it as one too
-                    if (!self::isSameOriginReference($redirectUrl, $parsed)) {
-                        $redirectUrl = '/';
-                    }
-                } else {
-                    // Unparseable or scheme without host (e.g. javascript:) — reject
-                    $redirectUrl = '/';
-                }
+                // Security: open redirects (VULN-006) — see RedirectTarget.
+                $redirectUrl = RedirectTarget::sanitize($redirectUrl, $request->getHost());
             } else {
                 $redirectUrl = '';
             }
@@ -636,62 +603,6 @@ final class ResponseRenderer
             // asking for a page document either.
             return false;
         }
-    }
-
-    /**
-     * Does a browser resolve this host-less target on the current origin?
-     *
-     * parse_url() finding no host is not the browser finding none. Browsers
-     * (WHATWG URL) read `\` as `/` in http(s) URLs and drop TAB/CR/LF anywhere,
-     * so `/\evil.com`, `\\evil.com` and `/<TAB>/evil.com` all become
-     * `//evil.com`; leading spaces are trimmed the same way. A scheme with no
-     * authority is no safer: `https:/evil.com` from an http page skips the
-     * missing slashes and lands on evil.com, and `javascript:` has no host at all.
-     *
-     * @param array<string, int|string> $parsed
-     */
-    private static function isSameOriginReference(string $url, array $parsed): bool
-    {
-        if (isset($parsed['scheme'])) {
-            return false;
-        }
-
-        if (preg_match('/[\x00-\x1F\x7F\\\\]/', $url) === 1) {
-            return false;
-        }
-
-        return !str_starts_with($url, ' ') && !str_starts_with($url, '//');
-    }
-
-    /**
-     * Is this redirect target another host of the SAME site?
-     *
-     * An application can be split across hosts on purpose — a public site on
-     * the apex and a cabinet on `account.`, say — and moving a visitor between
-     * them is ordinary navigation, not an open redirect. The guard above had no
-     * way to say that: its allow-list is a fixed set of OAuth providers, so an
-     * application redirecting to its own sibling host had the target silently
-     * replaced with '/', which looks like the redirect simply not working.
-     *
-     * The dot is the whole point. Matching on a bare suffix is the classic
-     * version of this bug: `evil-example.com` ends with `example.com`, and an
-     * attacker who can register that name gets exactly the open redirect this
-     * check exists to prevent. Only a real label boundary counts, in either
-     * direction — parent to child, child to parent.
-     */
-    private static function isSiblingHost(string $redirectHost, string $requestHost): bool
-    {
-        if ($redirectHost === '' || $requestHost === '') {
-            return false;
-        }
-
-        // A single label ("localhost", "app") has no site to be a sibling of.
-        if (!str_contains($redirectHost, '.') || !str_contains($requestHost, '.')) {
-            return false;
-        }
-
-        return str_ends_with($requestHost, '.' . $redirectHost)
-            || str_ends_with($redirectHost, '.' . $requestHost);
     }
 
 }
