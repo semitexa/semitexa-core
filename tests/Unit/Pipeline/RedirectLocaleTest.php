@@ -15,8 +15,21 @@ use Semitexa\Locale\Context\LocaleContextStore;
  */
 final class RedirectLocaleTest extends TestCase
 {
+    private string $previousLocale;
+    private string $previousFallbackLocale;
+    private bool $previousUrlPrefixEnabled;
+    private string $previousDefaultLocale;
+    /** @var string[] */
+    private array $previousSupportedLocales;
+
     protected function setUp(): void
     {
+        $this->previousLocale = LocaleContextStore::getLocale();
+        $this->previousFallbackLocale = LocaleContextStore::getFallbackLocale();
+        $this->previousUrlPrefixEnabled = LocaleContextStore::isUrlPrefixEnabled();
+        $this->previousDefaultLocale = LocaleContextStore::getDefaultLocale();
+        $this->previousSupportedLocales = LocaleContextStore::getSupportedLocales();
+
         LocaleContextStore::clearFallback();
         LocaleContextStore::setUrlPrefixEnabled(true);
         LocaleContextStore::setDefaultLocale('en');
@@ -25,7 +38,11 @@ final class RedirectLocaleTest extends TestCase
 
     protected function tearDown(): void
     {
-        LocaleContextStore::clearFallback();
+        LocaleContextStore::setLocale($this->previousLocale);
+        LocaleContextStore::setFallbackLocale($this->previousFallbackLocale);
+        LocaleContextStore::setUrlPrefixEnabled($this->previousUrlPrefixEnabled);
+        LocaleContextStore::setDefaultLocale($this->previousDefaultLocale);
+        LocaleContextStore::setSupportedLocales($this->previousSupportedLocales);
     }
 
     #[Test]
