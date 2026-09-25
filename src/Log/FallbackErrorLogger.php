@@ -36,7 +36,7 @@ final class FallbackErrorLogger
             } elseif (is_scalar($value)) {
                 $formatted = (string) $value;
             } else {
-                $encoded = json_encode($value, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+                $encoded = json_encode($value, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
                 $formatted = is_string($encoded) ? $encoded : '[unserializable]';
             }
 
