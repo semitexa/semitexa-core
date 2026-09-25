@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Tests\Unit\Pipeline;
 
+use Semitexa\Core\Tests\Support\StaticState;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
@@ -22,15 +23,21 @@ use Semitexa\Locale\Context\LocaleContextStore;
  */
 final class RedirectTargetGuardTest extends TestCase
 {
+    /** @var array{class: class-string, values: array<string, mixed>} */
+    private array $localeState;
+
     protected function setUp(): void
     {
+        // Snapshot BEFORE resetting: whatever an earlier test left in the
+        // store is put back in tearDown(), so this class leaves no trace.
+        $this->localeState = StaticState::snapshot(LocaleContextStore::class);
         LocaleContextStore::clearFallback();
         LocaleContextStore::setUrlPrefixEnabled(false);
     }
 
     protected function tearDown(): void
     {
-        LocaleContextStore::clearFallback();
+        StaticState::restore($this->localeState);
     }
 
     /** @return iterable<string, array{string}> */

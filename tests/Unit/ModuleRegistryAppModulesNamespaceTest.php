@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Tests\Unit;
 
+use Semitexa\Core\Tests\Support\StaticState;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Semitexa\Core\Container\ServiceContractRegistry;
@@ -22,6 +23,9 @@ final class ModuleRegistryAppModulesNamespaceTest extends TestCase
     private string $root;
 
     private string|false $previousCwd;
+
+    /** @var array{class: class-string, values: array<string, mixed>} */
+    private array $projectRootState;
 
     protected function setUp(): void
     {
@@ -45,6 +49,7 @@ final class ModuleRegistryAppModulesNamespaceTest extends TestCase
             require $this->root . '/src/modules/blog-posts/src/Greeter.php';
         }
 
+        $this->projectRootState = StaticState::snapshot(ProjectRoot::class);
         chdir($this->root);
         ProjectRoot::reset();
     }
@@ -54,7 +59,9 @@ final class ModuleRegistryAppModulesNamespaceTest extends TestCase
         if ($this->previousCwd !== false) {
             chdir($this->previousCwd);
         }
-        ProjectRoot::reset();
+        // The root cached before this test, not whatever a fresh resolution
+        // from the restored cwd happens to find.
+        StaticState::restore($this->projectRootState);
         exec('rm -rf ' . escapeshellarg($this->root));
     }
 

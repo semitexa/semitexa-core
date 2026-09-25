@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Tests\Unit\Resource;
 
+use Semitexa\Core\Tests\Support\StaticState;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Psr\Container\ContainerInterface;
@@ -32,9 +33,22 @@ use Semitexa\Core\Tests\Unit\Resource\Fixtures\UnionUserResource;
  */
 final class UnionNestedExpansionTest extends TestCase
 {
+    /** @var list<array{class: class-string, values: array<string, mixed>}> */
+    private array $staticState;
+
     protected function setUp(): void
     {
+        // Snapshot the static call logs BEFORE clearing them, so the next test
+        // finds them as it would have without this one.
+        $this->staticState = [
+            StaticState::snapshot(RecordingProfileResolver::class),
+        ];
         RecordingProfileResolver::reset();
+    }
+
+    protected function tearDown(): void
+    {
+        array_map([StaticState::class, 'restore'], $this->staticState);
     }
 
     private function registry(): ResourceMetadataRegistry
@@ -107,7 +121,8 @@ final class UnionNestedExpansionTest extends TestCase
             $this->profileResolverParentUrns(),
         );
         self::assertTrue($graph->has(ResourceIdentity::of('union_user', 'u1-author'), 'profile'));
-        self::assertFalse($graph->has(ResourceIdentity::of('union_user', 'b1-author'), 'profile'));
+        // b1's author is a BOT; asking about a union_user b1-author could never be true.
+        self::assertFalse($graph->has(ResourceIdentity::of('union_bot', 'b1-author'), 'profile'));
     }
 
     #[Test]

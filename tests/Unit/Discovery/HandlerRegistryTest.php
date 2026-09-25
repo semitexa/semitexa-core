@@ -157,10 +157,10 @@ final class HandlerRegistryTest extends TestCase
         self::assertGreaterThan(0, $attemptsAfterFirst);
         self::assertSame($attemptsAfterFirst, $autoloadAttempts, 'the second lookup must be answered from the memo');
 
-        self::assertSame(
-            $registry->findHandlers(LeafPayload::class, LeafResource::class),
-            $registry->findHandlers(LeafPayload::class, LeafResource::class),
-        );
+        // The exact handler first: two empty lookups would also be "the same".
+        $leaf = $registry->findHandlers(LeafPayload::class, LeafResource::class);
+        self::assertSame(['App\\Handler\\H1'], array_column($leaf, 'class'));
+        self::assertSame($leaf, $registry->findHandlers(LeafPayload::class, LeafResource::class));
     }
 
     #[Test]

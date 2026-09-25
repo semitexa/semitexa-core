@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Tests\Unit\Resource;
 
+use Semitexa\Core\Tests\Support\StaticState;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Psr\Container\ContainerInterface;
@@ -31,10 +32,24 @@ use Semitexa\Core\Tests\Unit\Resource\Fixtures\RecordingProfileResolver;
  */
 final class IncludeNameCaseTest extends TestCase
 {
+    /** @var list<array{class: class-string, values: array<string, mixed>}> */
+    private array $staticState;
+
     protected function setUp(): void
     {
+        // Snapshot the static call logs BEFORE clearing them, so the next test
+        // finds them as it would have without this one.
+        $this->staticState = [
+            StaticState::snapshot(RecordingProfileResolver::class),
+            StaticState::snapshot(RecordingPreferencesResolver::class),
+        ];
         RecordingProfileResolver::reset();
         RecordingPreferencesResolver::reset();
+    }
+
+    protected function tearDown(): void
+    {
+        array_map([StaticState::class, 'restore'], $this->staticState);
     }
 
     private function registry(): ResourceMetadataRegistry

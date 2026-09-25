@@ -259,7 +259,13 @@ final class FormatValidationTraitTest extends TestCase
         $h->slug($errors, 'slug', "my-slug\n");
         $h->hostname($errors, 'hostname', "example.com\n");
 
-        self::assertSame(['email', 'uuid', 'ulid', 'slug', 'hostname'], array_keys($errors));
+        self::assertSame([
+            'email' => ['This value should be a valid email address.'],
+            'uuid' => ['This value should be a valid UUID.'],
+            'ulid' => ['This value should be a valid ULID.'],
+            'slug' => ['This value should be a valid slug.'],
+            'hostname' => ['This value should be a valid hostname.'],
+        ], $errors);
     }
 
     private static function host(): object

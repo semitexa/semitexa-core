@@ -190,7 +190,10 @@ final class StringValidationTraitTest extends TestCase
         $h->alpha($errors, 'alpha', "Hello\n");
         $h->alphaNumeric($errors, 'alnum', "abc123\n");
 
-        self::assertSame(['alpha', 'alnum'], array_keys($errors));
+        self::assertSame([
+            'alpha' => ['This value should contain only letters.'],
+            'alnum' => ['This value should contain only letters and digits.'],
+        ], $errors);
     }
 
     private static function host(): object

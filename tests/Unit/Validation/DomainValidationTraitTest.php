@@ -207,10 +207,17 @@ final class DomainValidationTraitTest extends TestCase
         $h->hexColor($errors, 'opaque', "#ffffff\n", allowAlpha: false);
         $h->mime($errors, 'mime', "text/plain\n");
 
-        self::assertSame(
-            ['country', 'currency', 'locale', 'phone', 'color', 'opaque', 'mime'],
-            array_keys($errors),
-        );
+        // Fields AND messages: a validator that recorded a field with no
+        // message would pass a keys-only check and give the user nothing.
+        self::assertSame([
+            'country' => ['This value should be a 2-letter country code.'],
+            'currency' => ['This value should be a 3-letter currency code.'],
+            'locale' => ['This value should be a valid locale code.'],
+            'phone' => ['This value should be a valid E.164 phone number.'],
+            'color' => ['This value should be a valid hex color.'],
+            'opaque' => ['This value should be a valid hex color.'],
+            'mime' => ['This value should be a valid MIME type.'],
+        ], $errors);
     }
 
     private static function host(): object

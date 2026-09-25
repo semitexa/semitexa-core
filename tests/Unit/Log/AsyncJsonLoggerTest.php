@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Tests\Unit\Log;
 
+use Semitexa\Core\Tests\Support\StaticState;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Semitexa\Core\Environment;
@@ -16,9 +17,15 @@ final class AsyncJsonLoggerTest extends TestCase
     private ?string $previousLogLevel = null;
     private ?string $previousLogMaxBytes = null;
 
+    /** @var array{class: class-string, values: array<string, mixed>} */
+    private array $projectRootState;
+
     protected function setUp(): void
     {
         parent::setUp();
+        // The tests reset ProjectRoot to resolve a log path; put back the root
+        // an earlier test (or the suite) had cached.
+        $this->projectRootState = StaticState::snapshot(ProjectRoot::class);
 
         $this->previousLogFile = getenv('LOG_FILE') !== false ? (string) getenv('LOG_FILE') : null;
         $this->previousLogLevel = getenv('LOG_LEVEL') !== false ? (string) getenv('LOG_LEVEL') : null;
@@ -34,6 +41,7 @@ final class AsyncJsonLoggerTest extends TestCase
         // process. putenv() is process-wide; a test that unsets what it did not
         // set poisons whatever runs after it.
         $this->restoreEnv('LOG_MAX_BYTES', $this->previousLogMaxBytes);
+        StaticState::restore($this->projectRootState);
 
         parent::tearDown();
     }

@@ -34,7 +34,8 @@ final class FallbackErrorLoggerTest extends TestCase
 
         $line = (string) file_get_contents($this->logFile);
 
-        self::assertStringNotContainsString('[unserializable]', $line);
+        // Positive first: an empty line would satisfy the negative on its own.
         self::assertStringContainsString("payload={\"name\":\"caf\u{FFFD}\",\"id\":42}", $line);
+        self::assertStringNotContainsString('[unserializable]', $line);
     }
 }

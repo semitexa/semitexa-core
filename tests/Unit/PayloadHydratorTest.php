@@ -176,6 +176,14 @@ final class PayloadHydratorTest extends TestCase
         $dto = new class {
             public bool $isAdmin = false;
             public static bool $flag = false;
+            public string $name = '';
+
+            // Positive control: a public setter in the same body must run, or
+            // the two assertions below pass without the guard being exercised.
+            public function setName(string $value): void
+            {
+                $this->name = $value;
+            }
 
             private function setIsAdmin(bool $value): void
             {
@@ -188,8 +196,9 @@ final class PayloadHydratorTest extends TestCase
             }
         };
 
-        $hydrated = PayloadHydrator::hydrate($dto, $this->jsonRequest(['is_admin' => true, 'flag' => true], strict: false));
+        $hydrated = PayloadHydrator::hydrate($dto, $this->jsonRequest(['is_admin' => true, 'flag' => true, 'name' => 'ran'], strict: false));
 
+        self::assertSame('ran', $hydrated->name);
         self::assertFalse($hydrated->isAdmin);
         self::assertFalse($hydrated::$flag);
     }

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Tests\Unit\Queue;
 
+use Semitexa\Core\Tests\Support\StaticState;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use ReflectionMethod;
@@ -25,10 +26,25 @@ final class QueueWorkerDeadLetterTest extends TestCase
 {
     private const TRANSPORT = 'dlq-test-spy';
 
+    /** @var list<array{class: class-string, values: array<string, mixed>}> */
+    private array $staticState;
+
     protected function setUp(): void
     {
+        // The registry caches instances by name: register() alone would not
+        // replace one an earlier test created, and it would outlive this test.
+        $this->staticState = [
+            StaticState::snapshot(QueueTransportRegistry::class),
+            StaticState::snapshot(DeadLetterSpyTransport::class),
+        ];
+        QueueTransportRegistry::reset();
         DeadLetterSpyTransport::$published = [];
         QueueTransportRegistry::register(self::TRANSPORT, new DeadLetterSpyTransportFactory());
+    }
+
+    protected function tearDown(): void
+    {
+        array_map([StaticState::class, 'restore'], $this->staticState);
     }
 
     #[Test]
