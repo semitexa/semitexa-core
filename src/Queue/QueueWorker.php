@@ -319,8 +319,11 @@ class QueueWorker
     private function moveToDeadLetterQueue(QueuedHandlerMessage $message, string $error): void
     {
         try {
-            $transport = QueueTransportRegistry::create(QueueConfig::defaultTransport());
-            $dlqName = QueueConfig::defaultQueueName($message->requestClass) . '.failed';
+            // Next to the queue being consumed: the process defaults can name a
+            // different transport (in-memory when EVENTS_ASYNC is unset), where
+            // the dead letter would vanish with the process.
+            $transport = QueueTransportRegistry::create($this->currentTransport ?: QueueConfig::defaultTransport());
+            $dlqName = ($this->currentQueue ?: QueueConfig::defaultQueueName($message->requestClass)) . '.failed';
             $data = $message->jsonSerialize();
             $data['error'] = $error;
             $data['failed_at'] = date(DATE_ATOM);
