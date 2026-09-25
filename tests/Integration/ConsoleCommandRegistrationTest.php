@@ -29,22 +29,31 @@ final class ConsoleCommandRegistrationTest extends TestCase
     #[Test]
     public function every_discovered_command_registers(): void
     {
-        BootDiagnostics::begin();
+        // begin() replaces the process-wide collector; put the previous one
+        // back so a later test reads its own warnings, not these.
+        $collector = new \ReflectionProperty(BootDiagnostics::class, 'current');
+        $previous = $collector->getValue();
 
-        $application = new Application();
+        try {
+            BootDiagnostics::begin();
 
-        // Read current() only now: building the container inside the console
-        // may begin() a fresh collector, orphaning one taken before it.
-        $diagnostics = BootDiagnostics::current();
+            $application = new Application();
 
-        $skipped = array_map(
-            static fn ($w): string => $w->message,
-            array_values(array_filter(
-                $diagnostics->getWarnings(),
-                static fn ($w): bool => $w->component === 'Console',
-            )),
-        );
-        self::assertSame([], $skipped, 'Console boot skipped commands it discovered.');
-        self::assertTrue($application->has('layout:generate'));
+            // Read current() only now: building the container inside the console
+            // may begin() a fresh collector, orphaning one taken before it.
+            $diagnostics = BootDiagnostics::current();
+
+            $skipped = array_map(
+                static fn ($w): string => $w->message,
+                array_values(array_filter(
+                    $diagnostics->getWarnings(),
+                    static fn ($w): bool => $w->component === 'Console',
+                )),
+            );
+            self::assertSame([], $skipped, 'Console boot skipped commands it discovered.');
+            self::assertTrue($application->has('layout:generate'));
+        } finally {
+            $collector->setValue(null, $previous);
+        }
     }
 }
