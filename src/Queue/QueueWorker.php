@@ -383,7 +383,8 @@ class QueueWorker
     private function updateStats(string $type): void
     {
         $this->messageStatus = $type;
-        $stats = json_decode(file_get_contents($this->statsFile), true) ?: [
+        $raw = @file_get_contents($this->statsFile);
+        $stats = ($raw === false ? null : json_decode($raw, true)) ?: [
             'processed' => 0,
             'failed' => 0,
             'start_time' => time(),

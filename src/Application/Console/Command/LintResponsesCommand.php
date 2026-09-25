@@ -100,7 +100,10 @@ final class LintResponsesCommand extends BaseCommand
                 }
 
                 $filesChecked++;
-                $content = file_get_contents($path);
+                $content = @file_get_contents($path);
+                if ($content === false) {
+                    continue;
+                }
 
                 // An exception mapper is sanctioned wherever it lives — the
                 // interface CONTRACT returns HttpResponse, and a consumer
