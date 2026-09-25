@@ -20,6 +20,9 @@ final class InstanceStore
     /** @var array<class-string, object> class => prototype instance (cloned per execution) */
     public array $prototypes = [];
 
-    /** @var array<string, ContractFactory> factory interface => ContractFactory instance */
+    /** @var array<string, object> factory interface => generated typed factory (or the generic one when not generated) */
     public array $factories = [];
+
+    /** @var array<string, ContractFactory> factory interface => generic ContractFactory instance */
+    public array $genericFactories = [];
 }

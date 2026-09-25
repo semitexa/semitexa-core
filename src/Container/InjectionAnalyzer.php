@@ -15,6 +15,7 @@ use Semitexa\Core\Container\Exception\InjectionException;
 use Semitexa\Core\Discovery\AttributeDiscovery;
 use Semitexa\Core\Discovery\ClassDiscovery;
 use Semitexa\Core\Environment;
+use Semitexa\Core\Registry\RegistryContractResolverGenerator;
 use ReflectionClass;
 use ReflectionNamedType;
 
@@ -96,7 +97,7 @@ final class InjectionAnalyzer
      *
      * @param array<string, class-string> $idToClass
      * @param array<class-string, true> $executionScopedClasses
-     * @return array<class-string, array<string, array{kind: string, type: class-string, optional: bool}>>
+     * @return array<class-string, array<string, array{kind: string, type: class-string, optional: bool, declared?: class-string}>>
      */
     public function collectInjections(array $idToClass, array $executionScopedClasses): array
     {
@@ -122,11 +123,11 @@ final class InjectionAnalyzer
     /**
      * Build injection metadata for a single class with strict validation.
      *
-     * @return array<string, array{kind: string, type: class-string, optional: bool}>
+     * @return array<string, array{kind: string, type: class-string, optional: bool, declared?: class-string}>
      */
     /**
      * @param class-string $class
-     * @return array<string, array{kind: string, type: class-string, optional: bool}>
+     * @return array<string, array{kind: string, type: class-string, optional: bool, declared?: class-string}>
      */
     public function buildInjectionsForClass(string $class): array
     {
@@ -222,6 +223,10 @@ final class InjectionAnalyzer
             /** @var class-string $typeName */
             $typeName = $type->getName();
             $attrInstance = $injectAttrs[0]['attr']->newInstance();
+            if ($attrInstance instanceof InjectAsFactory) {
+                $out[$prop->getName()] = self::factoryInjection($class, $prop->getName(), $typeName, $attrInstance, $type->allowsNull());
+                continue;
+            }
             $out[$prop->getName()] = [
                 'kind' => $injectAttrs[0]['kind'],
                 'type' => $typeName,
@@ -232,6 +237,42 @@ final class InjectionAnalyzer
         }
 
         return $out;
+    }
+
+    /**
+     * 'type' is the factory's key in the instance store (the contract's Factory*
+     * interface); 'declared' is the property's own type, which decides whether
+     * the generic or the generated typed factory is injected.
+     *
+     * @return array{kind: string, type: class-string, optional: bool, declared: class-string}
+     */
+    private static function factoryInjection(string $class, string $propName, string $typeName, InjectAsFactory $attr, bool $optional): array
+    {
+        $key = $typeName;
+        if ($attr->of !== null) {
+            $key = RegistryContractResolverGenerator::getFactoryInterfaceForContract(ltrim($attr->of, '\\'));
+            if ($key === null) {
+                throw new InjectionException(
+                    targetClass: $class,
+                    propertyName: $propName,
+                    propertyType: $typeName,
+                    injectionKind: 'factory',
+                    message: "#[InjectAsFactory(of: {$attr->of})] on {$class}::\${$propName} names an unknown contract.",
+                );
+            }
+        } elseif (is_a(ContractFactory::class, $typeName, true)) {
+            throw new InjectionException(
+                targetClass: $class,
+                propertyName: $propName,
+                propertyType: $typeName,
+                injectionKind: 'factory',
+                message: "{$class}::\${$propName} is typed as the generic {$typeName}, which names no contract. "
+                    . 'Declare it: #[InjectAsFactory(of: YourContract::class)], or type the property as the contract\'s Factory* interface.',
+            );
+        }
+
+        /** @var class-string $key */
+        return ['kind' => 'factory', 'type' => $key, 'optional' => $optional, 'declared' => $typeName];
     }
 
     /**

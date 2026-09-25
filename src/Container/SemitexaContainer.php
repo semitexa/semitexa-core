@@ -58,7 +58,7 @@ final class SemitexaContainer implements ContainerInterface, ExecutionContextAwa
      * Per-class clone-time injection plan (the #[InjectAsMutable] and
      * #[InjectAsFactory] entries of the injection map), built on first clone.
      *
-     * @var array<string, array{mutable: array<string, array{type: string, optional: bool}>, factory: array<string, string>}>
+     * @var array<string, array{mutable: array<string, array{type: string, optional: bool}>, factory: array<string, array{type: string, declared?: string}>}>
      */
     private array $clonePlans = [];
 
@@ -547,8 +547,14 @@ final class SemitexaContainer implements ContainerInterface, ExecutionContextAwa
             }
 
             // Also inject factories into cloned instances
-            foreach ($plan['factory'] as $propName => $factoryType) {
-                $factory = $this->instanceStore->factories[$factoryType] ?? null;
+            foreach ($plan['factory'] as $propName => $factoryInfo) {
+                $factory = GraphBuilder::factoryFor(
+                    $class,
+                    $propName,
+                    $factoryInfo,
+                    $this->instanceStore->factories,
+                    $this->instanceStore->genericFactories,
+                );
                 if ($factory !== null) {
                     $this->assignProperty($instance, $propName, $factory);
                 }
@@ -562,7 +568,7 @@ final class SemitexaContainer implements ContainerInterface, ExecutionContextAwa
      * The injection map is written once by build() and never changes after,
      * so the split below is a pure function of boot-time state.
      *
-     * @return array{mutable: array<string, array{type: string, optional: bool}>, factory: array<string, string>}
+     * @return array{mutable: array<string, array{type: string, optional: bool}>, factory: array<string, array{type: string, declared?: string}>}
      */
     private function buildClonePlan(string $class): array
     {
@@ -571,7 +577,7 @@ final class SemitexaContainer implements ContainerInterface, ExecutionContextAwa
             if ($info['kind'] === 'mutable') {
                 $plan['mutable'][$propName] = ['type' => $info['type'], 'optional' => !empty($info['optional'])];
             } elseif ($info['kind'] === 'factory') {
-                $plan['factory'][$propName] = $info['type'];
+                $plan['factory'][$propName] = $info;
             }
         }
 

@@ -6,6 +6,7 @@ namespace Semitexa\Core\Registry;
 
 use ReflectionClass;
 use Semitexa\Core\Attribute\SatisfiesServiceContract;
+use Semitexa\Core\Contract\ContractFactoryInterface;
 use Semitexa\Core\Support\ProjectRoot;
 
 /**
@@ -111,6 +112,12 @@ class RegistryContractResolverGenerator
     }
 
     /**
+     * The generated class adapts the container's generic ContractFactory to the
+     * contract's Factory* interface (whose get() takes the concrete enum, which
+     * the generic factory cannot declare). The container builds the generic
+     * factory — including per-execution resolution of #[ExecutionScoped]
+     * implementations — and wraps it in this class for #[InjectAsFactory].
+     *
      * @param list<array{module: string, class: string}> $implementations
      */
     private static function writeFactoryClass(string $root, string $baseInterface, string $factoryInterface, array $implementations): ?string
@@ -121,11 +128,6 @@ class RegistryContractResolverGenerator
         } catch (\Throwable $e) {
             return null;
         }
-        $resolverShortName = preg_replace('/Interface$/', 'Resolver', $baseRef->getShortName());
-        if ($resolverShortName === $baseRef->getShortName()) {
-            $resolverShortName = $baseRef->getShortName() . 'Resolver';
-        }
-        $resolverClass = CanonicalRegistryPaths::REGISTRY_CONTRACTS_NAMESPACE . '\\' . $resolverShortName;
         $factoryShortName = preg_replace('/Interface$/', '', $baseRef->getShortName());
         if ($factoryShortName === $baseRef->getShortName()) {
             $factoryShortName = $baseRef->getShortName();
@@ -137,7 +139,7 @@ class RegistryContractResolverGenerator
         $imports = [];
         /** @var array<string, string> $usedShortNames */
         $usedShortNames = [];
-        $resolverTypeHint = self::addImport($resolverClass, $imports, $usedShortNames);
+        $innerTypeHint = self::addImport(ContractFactoryInterface::class, $imports, $usedShortNames);
         $factoryInterfaceTypeHint = self::addImport($factoryInterface, $imports, $usedShortNames);
         $baseInterfaceTypeHint = self::addImport($baseInterface, $imports, $usedShortNames);
         $enumTypeHint = self::resolveFactoryEnumTypeHint($factoryRef, $imports, $usedShortNames);
@@ -145,24 +147,16 @@ class RegistryContractResolverGenerator
             return null;
         }
 
-        $params = ["        private {$resolverTypeHint} \$resolver,"];
-        $paramNames = ['resolver'];
-        $byKeyEntries = [];
         $seenKeys = [];
         foreach ($implementations as $impl) {
             $implClass = $impl['class'];
-            // The map MUST be keyed by the enum-backed factoryKey value, because
-            // get()/keys() below look up by `$key->value`. Keying by module::Class
-            // (the old behaviour) made get() throw and keys() unusable for every
-            // factory contract.
             $lookupKey = self::resolveFactoryKeyValue($implClass, $baseInterface);
             if ($lookupKey === null) {
                 // Factory contracts require an enum-backed factoryKey on every
                 // implementation (enforced by GraphBuilder); skip defensively.
                 continue;
             }
-            // A reused factoryKey would silently overwrite the earlier entry in
-            // the generated $byKey map, permanently hiding one implementation.
+            // A reused factoryKey would silently hide one implementation.
             // Fail at generation time instead of surfacing as missing behavior.
             if (isset($seenKeys[$lookupKey])) {
                 throw new \RuntimeException(sprintf(
@@ -174,15 +168,7 @@ class RegistryContractResolverGenerator
                 ));
             }
             $seenKeys[$lookupKey] = $implClass;
-            $typeHint = self::addImport($implClass, $imports, $usedShortNames);
-            $paramName = self::uniqueParamName($implClass, $paramNames);
-            $paramNames[] = $paramName;
-            $params[] = "        private {$typeHint} \${$paramName},";
-            $byKeyEntries[] = '            ' . var_export($lookupKey, true) . ' => $this->' . $paramName . ',';
         }
-        $paramsStr = implode("\n", $params);
-        $paramsStr = rtrim($paramsStr, ',');
-        $byKeyStr = implode("\n", $byKeyEntries);
 
         $useBlock = self::formatUseBlock($imports);
 
@@ -198,41 +184,36 @@ namespace App\Registry\Contracts;
 /**
  * AUTO-GENERATED. Regenerate via: bin/semitexa registry:sync:contracts
  * Factory for {$baseInterface}. Implements {$factoryInterface}. Enum-keyed and closed-world.
+ * The container constructs it around its generic factory for #[InjectAsFactory].
  */
 final class {$factoryShortName} implements {$factoryInterfaceTypeHint}
 {
-    /** @var array<int|string, {$baseInterfaceTypeHint}> */
-    private array \$byKey;
-
     public function __construct(
-{$paramsStr}
+        private {$innerTypeHint} \$factory,
     ) {
-        \$this->byKey = [
-{$byKeyStr}
-        ];
     }
 
     public function getDefault(): {$baseInterfaceTypeHint}
     {
-        return \$this->resolver->getContract();
+        \$implementation = \$this->factory->getDefault();
+        \assert(\$implementation instanceof {$baseInterfaceTypeHint});
+
+        return \$implementation;
     }
 
     public function get({$enumTypeHint} \$key): {$baseInterfaceTypeHint}
     {
-        \$lookup = \$key->value;
-        if (isset(\$this->byKey[\$lookup])) {
-            return \$this->byKey[\$lookup];
-        }
-        throw new \InvalidArgumentException('Unknown implementation key: ' . \$key::class . '::' . \$key->name);
+        \$implementation = \$this->factory->get(\$key);
+        \assert(\$implementation instanceof {$baseInterfaceTypeHint});
+
+        return \$implementation;
     }
 
     /** @return list<{$enumTypeHint}> */
     public function keys(): array
     {
-        return array_map(
-            static fn(int|string \$key): {$enumTypeHint} => {$enumTypeHint}::from(\$key),
-            array_keys(\$this->byKey),
-        );
+        /** @var list<{$enumTypeHint}> */
+        return \$this->factory->keys();
     }
 }
 
