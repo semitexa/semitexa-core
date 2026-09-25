@@ -292,4 +292,40 @@ final class PayloadHydratorTest extends TestCase
 
         self::assertSame(1.9, $hydrated->v);
     }
+
+    #[Test]
+    public function an_integer_key_still_reaches_a_setter_named_after_it(): void
+    {
+        // PHP allows set0(), and PayloadMetadataReflector publishes it as field
+        // `0`; skipping int keys made that published field impossible to fill.
+        $dto = new class {
+            public ?string $zero = null;
+
+            public function set0(string $value): void
+            {
+                $this->zero = $value;
+            }
+        };
+
+        self::assertSame('first', PayloadHydrator::hydrate($dto, $this->jsonRequest(['first', 'second'], strict: false))->zero);
+    }
+
+    #[Test]
+    public function strict_int_does_not_accept_a_spelling_a_float_would_change(): void
+    {
+        // Each of these used to pass: `+ 0` turned them into 1, 0 and
+        // 9007199254740992 before the check looked, and the cast stored that.
+        foreach (['1.0000000000000001', '1e-400', '9007199254740993e0', '9223372036854775808'] as $value) {
+            try {
+                PayloadHydrator::hydrate($this->intDto(), $this->jsonRequest(['n' => $value], strict: true));
+                self::fail("strict int accepted {$value}");
+            } catch (TypeMismatchException) {
+                self::addToAssertionCount(1);
+            }
+        }
+
+        foreach (['1.0' => 1, '9007199254740992e0' => 9007199254740992, '9223372036854775807' => PHP_INT_MAX, '-9223372036854775808' => PHP_INT_MIN] as $value => $expected) {
+            self::assertSame($expected, PayloadHydrator::hydrate($this->intDto(), $this->jsonRequest(['n' => (string) $value], strict: true))->n);
+        }
+    }
 }
