@@ -188,7 +188,7 @@ final class ResourceMetadataExtractor
 
         if ($relationAttribute instanceof ResourceRefAttribute) {
             $this->assertType($class, $property, $typeInfo, ResourceRefRuntime::class, 'ResourceRef');
-            $defaultInclude = $relationAttribute->include ?? $this->defaultInclude($property);
+            $defaultInclude = $this->includeName($relationAttribute->include, $property);
 
             return new ResourceFieldMetadata(
                 name: $property,
@@ -207,7 +207,7 @@ final class ResourceMetadataExtractor
 
         if ($relationAttribute instanceof ResourceRefListAttribute) {
             $this->assertType($class, $property, $typeInfo, ResourceRefListRuntime::class, 'ResourceRefList');
-            $defaultInclude = $relationAttribute->include ?? $this->defaultInclude($property);
+            $defaultInclude = $this->includeName($relationAttribute->include, $property);
 
             return new ResourceFieldMetadata(
                 name: $property,
@@ -234,7 +234,7 @@ final class ResourceMetadataExtractor
             $expectedShortName = $relationAttribute->list ? 'ResourceRefList' : 'ResourceRef';
             $this->assertType($class, $property, $typeInfo, $expectedRuntime, "ResourceUnion(list: " . ($relationAttribute->list ? 'true' : 'false') . ") => $expectedShortName");
 
-            $defaultInclude = $relationAttribute->include ?? $this->defaultInclude($property);
+            $defaultInclude = $this->includeName($relationAttribute->include, $property);
 
             return new ResourceFieldMetadata(
                 name: $property,
@@ -345,6 +345,17 @@ final class ResourceMetadataExtractor
             'nullable' => $type->allowsNull(),
             'builtin'  => false,
         ];
+    }
+
+    /**
+     * Requested include tokens are lowercased on the way in
+     * (`IncludeSet`), so the declared name is lowercased here too —
+     * otherwise every consumer that compares it against tokens
+     * (pipeline, GraphQL bridge) would have to remember to.
+     */
+    private function includeName(?string $explicit, string $property): string
+    {
+        return $explicit !== null ? strtolower($explicit) : $this->defaultInclude($property);
     }
 
     private function defaultInclude(string $property): string
