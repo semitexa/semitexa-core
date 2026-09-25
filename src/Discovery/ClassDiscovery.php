@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Discovery;
 
+use Semitexa\Core\Attribute\WorkerState;
 use Semitexa\Core\Lifecycle\WorkerDrainSignal;
 use Semitexa\Core\Support\ProjectRoot;
 
@@ -40,9 +41,11 @@ class ClassDiscovery
      *
      * @var array<string, \Swoole\Coroutine\Channel>
      */
+    #[WorkerState('Single-flight gates for the process-wide discovery scan, keyed by project root.')]
     private static array $coroutineGates = [];
 
     /** @var array<string, int> Coroutine id owning each in-flight gate (reentrancy guard). */
+    #[WorkerState('Owner coroutine id per in-flight discovery gate; removed when the gate closes.')]
     private static array $coroutineGateOwners = [];
 
     /**
@@ -72,6 +75,7 @@ class ClassDiscovery
      *
      * @var array<string, array<class-string, string>>
      */
+    #[WorkerState('Classmap keyed by project root; the sources do not change under a worker.')]
     private static array $sharedClassMaps = [];
 
     /**
@@ -81,6 +85,7 @@ class ClassDiscovery
      *
      * @var array<string, array<string, list<class-string>>>
      */
+    #[WorkerState('Attribute lookups keyed by project root; derived from code only.')]
     private static array $sharedAttributeCaches = [];
 
     private array $allowedNamespacePrefixes = [

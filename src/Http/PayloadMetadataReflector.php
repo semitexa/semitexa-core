@@ -10,6 +10,7 @@ use ReflectionNamedType;
 use Semitexa\Core\Attribute\AbstractPayloadRoute;
 use Semitexa\Core\Attribute\SseGateModel;
 use Semitexa\Core\Attribute\TransportType;
+use Semitexa\Core\Attribute\WorkerState;
 
 /**
  * Core-side, production metadata builder for routable payloads (Multi-Modal
@@ -48,6 +49,7 @@ final class PayloadMetadataReflector
     private const LIVE_FILTER_PARAM_ATTRIBUTE = 'Semitexa\\Core\\Attribute\\LiveFilterParam';
 
     /** @var array<class-string, array<string, mixed>> */
+    #[WorkerState('Reflected payload metadata keyed by class name; derived from code only.')]
     private static array $cache = [];
 
     /**

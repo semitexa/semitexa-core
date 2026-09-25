@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Http;
 
+use Semitexa\Core\Attribute\WorkerState;
 use Semitexa\Core\Http\Exception\TypeMismatchException;
 use Semitexa\Core\Http\UploadedFile;
 use Semitexa\Core\Request;
@@ -87,6 +88,7 @@ class PayloadHydrator
      *
      * @var array<class-string, array{0: string, 1: array<string, int>}|false>
      */
+    #[WorkerState('Path-parameter plan keyed by payload class; derived from code only.')]
     private static array $pathParamPlans = [];
 
     /**

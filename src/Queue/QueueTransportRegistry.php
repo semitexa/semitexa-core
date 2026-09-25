@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Queue;
 
+use Semitexa\Core\Attribute\WorkerState;
 use Semitexa\Core\Environment;
 use Semitexa\Core\Exception\ConfigurationException;
 use Semitexa\Core\Log\StaticLoggerBridge;
@@ -23,11 +24,13 @@ class QueueTransportRegistry
     /**
      * @var array<string, QueueTransportFactoryInterface>
      */
+    #[WorkerState('Transport factories registered at boot.')]
     private static array $factories = [];
 
     /**
      * @var array<string, QueueTransportInterface>
      */
+    #[WorkerState('One transport per name per worker; transports must be coroutine-safe and hold no request data.')]
     private static array $instances = [];
 
     private static bool $initialized = false;

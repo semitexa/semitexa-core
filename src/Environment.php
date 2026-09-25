@@ -6,6 +6,7 @@ namespace Semitexa\Core;
 
 use Semitexa\Core\Server\SwooleLogRetention;
 
+use Semitexa\Core\Support\EnvFileCache;
 use Semitexa\Core\Support\ProjectRoot;
 
 /**
@@ -92,6 +93,7 @@ readonly class Environment
         );
     }
 
+    /** @return array<string, string> */
     private static function loadEnv(): array
     {
         $env = [];
@@ -110,6 +112,7 @@ readonly class Environment
         return $env;
     }
 
+    /** @return array<string, string> */
     private static function parseEnvFile(string $file): array
     {
         $env = [];
@@ -209,11 +212,7 @@ readonly class Environment
         }
 
         // 2. Cached .env file values (parsed once per worker)
-        /** @var array<string, string>|null $cache */
-        static $cache = null;
-        if ($cache === null) {
-            $cache = self::loadEnv();
-        }
+        $cache = EnvFileCache::values(static fn (): array => self::loadEnv());
         if (isset($cache[$key])) {
             return $cache[$key];
         }

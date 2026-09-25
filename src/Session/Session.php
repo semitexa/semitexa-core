@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Session;
 
+use Semitexa\Core\Attribute\WorkerState;
 use Semitexa\Core\Csrf\CsrfToken;
 use Semitexa\Core\Session\Attribute\SessionSegment;
 use Semitexa\Core\Support\PayloadSerializer;
@@ -26,6 +27,7 @@ final class Session implements SessionInterface
      *
      * @var array<class-string, string>
      */
+    #[WorkerState('#[SessionSegment] name keyed by payload class; derived from code only.')]
     private static array $segmentNames = [];
 
     public function __construct(

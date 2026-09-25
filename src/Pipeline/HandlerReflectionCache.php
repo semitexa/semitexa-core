@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Pipeline;
 
+use Semitexa\Core\Attribute\WorkerState;
 use Semitexa\Core\Contract\ResourceInterface;
 use Semitexa\Core\Contract\TypedHandlerInterface;
 use Semitexa\Core\Exception\ConfigurationException;
@@ -16,6 +17,7 @@ use Semitexa\Core\HttpResponse;
 final class HandlerReflectionCache
 {
     /** @var array<class-string<TypedHandlerInterface>, \ReflectionMethod> */
+    #[WorkerState('handle() reflection keyed by handler class, warmed at boot.')]
     private static array $methods = [];
 
     /**

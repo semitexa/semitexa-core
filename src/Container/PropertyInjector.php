@@ -6,6 +6,7 @@ namespace Semitexa\Core\Container;
 
 use Psr\Container\ContainerInterface;
 use Semitexa\Core\Attribute\InjectAsReadonly;
+use Semitexa\Core\Attribute\WorkerState;
 use Semitexa\Core\Container\Exception\InjectionException;
 use ReflectionClass;
 use ReflectionNamedType;
@@ -30,6 +31,7 @@ final class PropertyInjector
     /**
      * @var array<class-string, array<string, array{type: class-string, optional: bool}>>
      */
+    #[WorkerState('Injection metadata keyed by class name; derived from code only.')]
     private static array $metadataCache = [];
 
     /**

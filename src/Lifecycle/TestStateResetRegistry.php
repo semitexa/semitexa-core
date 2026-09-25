@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Lifecycle;
 
+use Semitexa\Core\Attribute\WorkerState;
+
 /**
  * Worker-scoped registry of test-only / dev-only / admin reset hooks.
  *
@@ -42,6 +44,7 @@ namespace Semitexa\Core\Lifecycle;
 final class TestStateResetRegistry
 {
     /** @var array<string, callable(): void> name → reset callback */
+    #[WorkerState('Test/dev reset callbacks registered once per worker; never holds request data.')]
     private static array $resetters = [];
 
     /**

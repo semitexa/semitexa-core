@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Http;
 
+use Semitexa\Core\Attribute\WorkerState;
 use Semitexa\Core\Support\CoroutineLocal;
 
 /**
@@ -48,6 +49,7 @@ final class CspNonce
      *
      * @var callable|null
      */
+    #[WorkerState('Worker-wide provider callable set at boot; the per-request nonce lives in CoroutineLocal.')]
     private static $provider = null;
 
     /**
