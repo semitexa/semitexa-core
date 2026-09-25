@@ -313,12 +313,37 @@ class PayloadHydrator
     private static function isTypeCompatible(mixed $value, string $type): bool
     {
         return match ($type) {
-            'int', 'float' => (is_int($value) || is_float($value) || is_string($value)) && is_numeric($value),
+            'int'          => self::isExactInt($value),
+            'float'        => (is_int($value) || is_float($value) || is_string($value)) && is_numeric($value),
             'string'       => is_scalar($value),
             'bool'         => is_bool($value) || in_array($value, [0, 1, '0', '1', 'true', 'false', 'yes', 'no', 'on', 'off'], true),
             'array'        => is_array($value),
             default        => true, // Objects and unknown types: leave to PHP
         };
+    }
+
+    /**
+     * is_numeric() is not enough for int: the (int) cast that follows truncates
+     * "1.9" to 1 and clamps a 20-digit id to PHP_INT_MAX. Accept only a value
+     * whose number is whole and fits, so the cast cannot change it.
+     */
+    private static function isExactInt(mixed $value): bool
+    {
+        if (is_int($value)) {
+            return true;
+        }
+        if (is_string($value) && is_numeric($value)) {
+            $value = $value + 0;
+            if (is_int($value)) {
+                return true;
+            }
+        }
+        // 2^63 as a float: PHP_INT_MAX itself is not representable, so the
+        // upper bound must be exclusive.
+        return is_float($value)
+            && floor($value) === $value
+            && $value >= -9.2233720368547758E18
+            && $value < 9.2233720368547758E18;
     }
 
     private static function castToBool(mixed $value): bool

@@ -245,4 +245,51 @@ final class PayloadHydratorTest extends TestCase
             self::assertNull($hydrated->label);
         }
     }
+
+    #[Test]
+    public function strict_request_rejects_a_number_an_int_cannot_hold_exactly(): void
+    {
+        // is_numeric() let these through and (int) then truncated or clamped
+        // them: "1.9" became 1, a 20-digit id PHP_INT_MAX, 1e30 garbage.
+        foreach (['1.9', '99999999999999999999', 1.5, 1e30, '1e30'] as $value) {
+            try {
+                PayloadHydrator::hydrate($this->intDto(), $this->jsonRequest(['n' => $value], strict: true));
+                self::fail('accepted ' . var_export($value, true));
+            } catch (TypeMismatchException) {
+                self::addToAssertionCount(1);
+            }
+        }
+    }
+
+    #[Test]
+    public function strict_request_accepts_every_exact_int_spelling(): void
+    {
+        foreach (['42' => 42, '-7' => -7, '007' => 7, ' 5' => 5, '1e3' => 1000] as $value => $expected) {
+            $hydrated = PayloadHydrator::hydrate($this->intDto(), $this->jsonRequest(['n' => (string) $value], strict: true));
+            self::assertSame($expected, $hydrated->n, (string) $value);
+        }
+
+        $hydrated = PayloadHydrator::hydrate($this->intDto(), $this->jsonRequest(['n' => 3.0], strict: true));
+        self::assertSame(3, $hydrated->n);
+
+        $hydrated = PayloadHydrator::hydrate($this->intDto(), $this->jsonRequest(['n' => PHP_INT_MAX], strict: true));
+        self::assertSame(PHP_INT_MAX, $hydrated->n);
+    }
+
+    #[Test]
+    public function strict_request_picks_the_float_arm_for_a_fraction(): void
+    {
+        $dto = new class {
+            public int|float|null $v = null;
+
+            public function setV(int|float $value): void
+            {
+                $this->v = $value;
+            }
+        };
+
+        $hydrated = PayloadHydrator::hydrate($dto, $this->jsonRequest(['v' => '1.9'], strict: true));
+
+        self::assertSame(1.9, $hydrated->v);
+    }
 }
