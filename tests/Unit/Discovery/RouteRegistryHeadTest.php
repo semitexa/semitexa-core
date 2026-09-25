@@ -49,4 +49,18 @@ final class RouteRegistryHeadTest extends TestCase
 
         self::assertSame(['GET'], $registry->find('/', 'HEAD')['methods'] ?? null);
     }
+
+    #[Test]
+    public function head_does_not_reach_an_sse_or_stream_route(): void
+    {
+        // Their handlers write the raw Swoole response past the emitter, so a
+        // HEAD would open a live stream and get a body.
+        $registry = new RouteRegistry();
+        $registry->register(['path' => '/feed', 'methods' => ['GET'], 'name' => 'feed', 'transport' => 'sse']);
+        $registry->register(['path' => '/dl/{id}', 'methods' => ['GET'], 'name' => 'dl', 'transport' => 'stream']);
+
+        self::assertNull($registry->find('/feed', 'HEAD'));
+        self::assertNull($registry->find('/dl/7', 'HEAD'));
+        self::assertSame('feed', $registry->find('/feed', 'GET')['name'] ?? null);
+    }
 }

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Discovery;
 
+use Semitexa\Core\Attribute\TransportType;
 use Semitexa\Core\Support\TenantModuleScopeResolver;
 
 /**
@@ -73,7 +74,15 @@ class RouteRegistry
         // answers GET must answer HEAD. Like OPTIONS it goes into the lookup
         // index only, so a HEAD resolves to the very route — handler, auth and
         // headers — a GET would; the HTTP server drops the body on the way out.
-        if (in_array('GET', $methods, true) && !in_array('HEAD', $indexMethods, true)) {
+        //
+        // Not for SSE/stream routes: their handlers take the raw Swoole
+        // response and write status, headers and chunks themselves, past the
+        // emitter that withholds the body — a HEAD would open a live stream
+        // and send a body a HEAD response must not have. They keep answering
+        // HEAD with 404/405, as before.
+        $transport = is_string($route['transport'] ?? null) ? $route['transport'] : '';
+        $streams = $transport === TransportType::Sse->value || $transport === TransportType::Stream->value;
+        if (!$streams && in_array('GET', $methods, true) && !in_array('HEAD', $indexMethods, true)) {
             $indexMethods[] = 'HEAD';
         }
 
