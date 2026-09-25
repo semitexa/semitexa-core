@@ -67,10 +67,27 @@ final class ResponseRenderer
             }
             $redirectUrl = self::inCurrentLocale($redirectUrl);
             $statusCode = method_exists($resDto, 'getStatusCode') ? $resDto->getStatusCode() : HttpStatus::Found->value;
-            return HttpResponse::redirect(
+            $redirect = HttpResponse::redirect(
                 $redirectUrl,
                 is_int($statusCode) ? $statusCode : HttpStatus::Found->value,
             );
+
+            // The handler's own headers go out with the redirect as they would on
+            // any other response (Cache-Control: no-store on a login,
+            // Clear-Site-Data on a logout). Location is left out whatever its case:
+            // the validated target above is the only one allowed to reach the client.
+            $headers = method_exists($resDto, 'getHeaders') ? $resDto->getHeaders() : [];
+            if (is_array($headers)) {
+                foreach (array_keys($headers) as $name) {
+                    if (!is_string($name) || strtolower($name) === 'location') {
+                        unset($headers[$name]);
+                    }
+                }
+                /** @var array<string, string|array<int|string, string>> $headers */
+                $redirect = $redirect->withHeaders($headers);
+            }
+
+            return $redirect;
         }
 
         $handle = method_exists($resDto, 'getRenderHandle') ? $resDto->getRenderHandle() : null;
