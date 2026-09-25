@@ -19,6 +19,15 @@ final class Session implements SessionInterface
     private array $flashNext = [];
     private bool $regenerate = false;
 
+    /**
+     * #[SessionSegment] name per payload class. A class's attributes cannot
+     * change inside a worker, so the reflection runs once per class rather
+     * than on every getPayload()/setPayload() (several per request).
+     *
+     * @var array<class-string, string>
+     */
+    private static array $segmentNames = [];
+
     public function __construct(
         private string $id,
         private SessionHandlerInterface $handler,
@@ -145,12 +154,16 @@ final class Session implements SessionInterface
 
     private function getSegmentName(string $payloadClass): string
     {
+        if (isset(self::$segmentNames[$payloadClass])) {
+            return self::$segmentNames[$payloadClass];
+        }
+
         $ref = new \ReflectionClass($payloadClass);
         $attrs = $ref->getAttributes(SessionSegment::class);
         if ($attrs === []) {
             throw new \InvalidArgumentException("Session payload class {$payloadClass} must have #[SessionSegment('name')] attribute.");
         }
-        return $attrs[0]->newInstance()->segment;
+        return self::$segmentNames[$payloadClass] = $attrs[0]->newInstance()->segment;
     }
 
     private function generateId(): string
