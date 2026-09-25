@@ -54,7 +54,10 @@ final class ResponseRenderer
                         }
                     }
                 } elseif ($parsed !== false && !isset($parsed['host'])) {
-                    // Relative URL or scheme-relative — allowed
+                    // Relative URL — allowed, but only when a browser reads it as one too
+                    if (!self::isSameOriginReference($redirectUrl, $parsed)) {
+                        $redirectUrl = '/';
+                    }
                 } else {
                     // Unparseable or scheme without host (e.g. javascript:) — reject
                     $redirectUrl = '/';
@@ -632,6 +635,31 @@ final class ResponseRenderer
      * check exists to prevent. Only a real label boundary counts, in either
      * direction — parent to child, child to parent.
      */
+    /**
+     * Does a browser resolve this host-less target on the current origin?
+     *
+     * parse_url() finding no host is not the browser finding none. Browsers
+     * (WHATWG URL) read `\` as `/` in http(s) URLs and drop TAB/CR/LF anywhere,
+     * so `/\evil.com`, `\\evil.com` and `/<TAB>/evil.com` all become
+     * `//evil.com`; leading spaces are trimmed the same way. A scheme with no
+     * authority is no safer: `https:/evil.com` from an http page skips the
+     * missing slashes and lands on evil.com, and `javascript:` has no host at all.
+     *
+     * @param array<string, int|string> $parsed
+     */
+    private static function isSameOriginReference(string $url, array $parsed): bool
+    {
+        if (isset($parsed['scheme'])) {
+            return false;
+        }
+
+        if (preg_match('/[\x00-\x1F\x7F\\\\]/', $url) === 1) {
+            return false;
+        }
+
+        return !str_starts_with($url, ' ') && !str_starts_with($url, '//');
+    }
+
     private static function isSiblingHost(string $redirectHost, string $requestHost): bool
     {
         if ($redirectHost === '' || $requestHost === '') {
