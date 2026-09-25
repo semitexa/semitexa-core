@@ -73,6 +73,12 @@ class Application extends SymfonyApplication
                 /** @var AsCommand $attr */
                 $attr = $attrs[0]->newInstance();
                 if (!is_subclass_of($className, Command::class)) {
+                    // Said, not silent: a class that declares a command and cannot
+                    // be one is a mistake nothing else would ever report.
+                    BootDiagnostics::current()->skip(
+                        'Console',
+                        "Skip {$className}: #[AsCommand] on a class that does not extend " . Command::class,
+                    );
                     continue;
                 }
                 $commandsWithMeta[] = ['class' => $className, 'attr' => $attr];
