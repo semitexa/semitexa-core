@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Tests\Unit\Validation;
 
+use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Semitexa\Core\Validation\Trait\DomainValidationTrait;
 
@@ -191,6 +192,25 @@ final class DomainValidationTraitTest extends TestCase
         $h->base64($errors, 'g', null);
         $h->mime($errors, 'h', null);
         self::assertSame([], $errors);
+    }
+
+    #[Test]
+    public function anchored_codes_reject_a_trailing_newline(): void
+    {
+        $h = self::host();
+        $errors = [];
+        $h->countryCode($errors, 'country', "US\n");
+        $h->currencyCode($errors, 'currency', "USD\n");
+        $h->localeCode($errors, 'locale', "en-US\n");
+        $h->phone($errors, 'phone', "+14155552671\n");
+        $h->hexColor($errors, 'color', "#fff\n");
+        $h->hexColor($errors, 'opaque', "#ffffff\n", allowAlpha: false);
+        $h->mime($errors, 'mime', "text/plain\n");
+
+        self::assertSame(
+            ['country', 'currency', 'locale', 'phone', 'color', 'opaque', 'mime'],
+            array_keys($errors),
+        );
     }
 
     private static function host(): object

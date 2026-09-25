@@ -37,11 +37,12 @@ use DateTimeZone;
  */
 trait DomainValidationTrait
 {
-    private const string COUNTRY_PATTERN  = '/^[A-Z]{2}$/';
-    private const string CURRENCY_PATTERN = '/^[A-Z]{3}$/';
-    private const string LOCALE_PATTERN   = '/^[a-z]{2,3}(?:-[A-Za-z0-9]{2,4})?$/';
-    private const string E164_PATTERN     = '/^\+[1-9]\d{1,14}$/';
-    private const string MIME_PATTERN     = '/^[A-Za-z0-9!#$&^_.+-]+\/[A-Za-z0-9!#$&^_.+-]+$/';
+    // `D` stops `$` from also matching before a trailing "\n".
+    private const string COUNTRY_PATTERN  = '/^[A-Z]{2}$/D';
+    private const string CURRENCY_PATTERN = '/^[A-Z]{3}$/D';
+    private const string LOCALE_PATTERN   = '/^[a-z]{2,3}(?:-[A-Za-z0-9]{2,4})?$/D';
+    private const string E164_PATTERN     = '/^\+[1-9]\d{1,14}$/D';
+    private const string MIME_PATTERN     = '/^[A-Za-z0-9!#$&^_.+-]+\/[A-Za-z0-9!#$&^_.+-]+$/D';
 
     /**
      * @param array<string, list<string>> $errors
@@ -126,8 +127,8 @@ trait DomainValidationTrait
             return;
         }
         $pattern = $allowAlpha
-            ? '/^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/'
-            : '/^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/';
+            ? '/^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/D'
+            : '/^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/D';
         if (preg_match($pattern, $value) !== 1) {
             $errors[$field] = $errors[$field] ?? [];
             $errors[$field][] = 'This value should be a valid hex color.';

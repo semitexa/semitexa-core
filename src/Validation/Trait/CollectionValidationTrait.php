@@ -143,10 +143,14 @@ trait CollectionValidationTrait
         if ($allowExtraFields) {
             return;
         }
-        foreach (array_keys($value) as $key) {
+        foreach (array_keys($value) as $position => $key) {
             if (! array_key_exists($key, $schema)) {
-                $errors[Path::join($field, (string) $key)] = $errors[Path::join($field, (string) $key)] ?? [];
-                $errors[Path::join($field, (string) $key)][] = 'This key is not allowed.';
+                // User-supplied key: a blank one falls back to its position
+                // instead of throwing from Path. The cast keeps integer keys
+                // rendered as `field.n`, as before.
+                $path = $this->composeItemPath($field, (string) $key, $position);
+                $errors[$path] = $errors[$path] ?? [];
+                $errors[$path][] = 'This key is not allowed.';
             }
         }
     }
@@ -201,10 +205,12 @@ trait CollectionValidationTrait
         if ($value === null) {
             return;
         }
-        foreach (array_keys($value) as $key) {
+        foreach (array_keys($value) as $position => $key) {
             if (! in_array((string) $key, $allowedKeys, true)) {
-                $errors[Path::join($field, (string) $key)] = $errors[Path::join($field, (string) $key)] ?? [];
-                $errors[Path::join($field, (string) $key)][] = 'This key is not allowed.';
+                // Same as validateCollection(): blank keys fall back to position.
+                $path = $this->composeItemPath($field, (string) $key, $position);
+                $errors[$path] = $errors[$path] ?? [];
+                $errors[$path][] = 'This key is not allowed.';
             }
         }
     }

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Semitexa\Core\Tests\Unit\Validation;
 
 use InvalidArgumentException;
+use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Semitexa\Core\Validation\Trait\StringValidationTrait;
 
@@ -179,6 +180,17 @@ final class StringValidationTraitTest extends TestCase
         $h->uppercase($errors, 'm', null);
 
         self::assertSame([], $errors);
+    }
+
+    #[Test]
+    public function alpha_and_alphanumeric_reject_a_trailing_newline(): void
+    {
+        $h = self::host();
+        $errors = [];
+        $h->alpha($errors, 'alpha', "Hello\n");
+        $h->alphaNumeric($errors, 'alnum', "abc123\n");
+
+        self::assertSame(['alpha', 'alnum'], array_keys($errors));
     }
 
     private static function host(): object
