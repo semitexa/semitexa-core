@@ -72,16 +72,28 @@ class PayloadSerializer
     private static function isBoolAccessor(\ReflectionMethod $method, object $dto): bool
     {
         $name = $method->getName();
-        if (!str_starts_with($name, 'is') || strlen($name) <= 2 || $method->getNumberOfRequiredParameters() !== 0) {
+        if (!str_starts_with($name, 'is') || strlen($name) <= 2 || $method->isStatic() || $method->getNumberOfRequiredParameters() !== 0) {
             return false;
         }
         $type = $method->getReturnType();
+        if (!$type instanceof \ReflectionNamedType || $type->getName() !== 'bool') {
+            return false;
+        }
+        // A getFoo() already supplies the key.
+        if (method_exists($dto, 'get' . substr($name, 2))) {
+            return false;
+        }
 
-        return $type instanceof \ReflectionNamedType
-            && $type->getName() === 'bool'
-            && method_exists($dto, 'set' . substr($name, 2))
-            // A getFoo() already supplies the key.
-            && !method_exists($dto, 'get' . substr($name, 2));
+        // Serialized only if hydrate() can put it back: a public, non-static
+        // setter taking one argument. A private or static setFoo() made the
+        // flag go out and never come back — the payload changed in transit.
+        $setter = 'set' . substr($name, 2);
+        if (!method_exists($dto, $setter)) {
+            return false;
+        }
+        $setterMethod = new \ReflectionMethod($dto, $setter);
+
+        return $setterMethod->isPublic() && !$setterMethod->isStatic() && $setterMethod->getNumberOfRequiredParameters() === 1;
     }
 
     /**

@@ -61,6 +61,21 @@ final class ExceptionMapperTest extends TestCase
         }
     }
 
+    #[Test]
+    public function an_unknown_exception_answers_in_the_negotiated_format_not_a_refused_json(): void
+    {
+        $refusesJson = new Request('GET', '/broken', ['Accept' => 'application/json;q=0, */*'], [], [], [], []);
+        $response = (new ExceptionMapper())->map(new \RuntimeException('Boom'), $refusesJson, $this->makeMetadata(null));
+
+        self::assertSame(500, $response->getStatusCode());
+        self::assertStringStartsWith('text/html', $response->getHeaders()['Content-Type'] ?? '');
+        self::assertStringNotContainsString('Boom', $response->getContent(), 'the internal message stays internal');
+
+        $text = new Request('GET', '/broken', ['Accept' => 'text/plain'], [], [], [], []);
+        $response = (new ExceptionMapper())->map(new \RuntimeException('Boom'), $text, $this->makeMetadata(null));
+        self::assertSame('An unexpected error occurred.', $response->getContent());
+    }
+
     /**
      * @param list<string>|null $produces
      */

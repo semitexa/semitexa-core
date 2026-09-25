@@ -136,10 +136,19 @@ final class ExceptionMapper implements ExceptionResponseMapperInterface
             }
         }
 
-        return HttpResponse::json([
-            'error' => 'Internal Server Error',
-            'message' => 'An unexpected error occurred.',
-        ], HttpStatus::InternalServerError->value);
+        // In the negotiated format, as a domain error is: always-JSON handed a
+        // client that sent `application/json;q=0, */*` the one type it refused.
+        $message = 'An unexpected error occurred.';
+        $body = ['error' => 'Internal Server Error', 'message' => $message];
+        $status = HttpStatus::InternalServerError;
+
+        return match ($format) {
+            'html' => $this->renderErrorHtml($status, $body),
+            'xml' => HttpResponse::text($this->arrayToXml($body, 'error'), $status->value)
+                ->withHeaders(['Content-Type' => 'application/xml; charset=utf-8']),
+            'txt' => HttpResponse::text($message, $status->value),
+            default => HttpResponse::json($body, $status->value),
+        };
     }
 
     private static function summarizeTrace(\Throwable $e): string

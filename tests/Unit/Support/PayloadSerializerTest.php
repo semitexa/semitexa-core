@@ -94,6 +94,18 @@ final class PayloadSerializerTest extends TestCase
     }
 
     #[Test]
+    public function an_is_flag_is_serialized_only_when_hydrate_can_put_it_back(): void
+    {
+        $data = PayloadSerializer::toArray(new SerializerFlagFixture());
+
+        self::assertArrayHasKey('open', $data, 'public setter taking one argument: round-trips');
+        self::assertArrayNotHasKey('hidden', $data, 'private setter: hydrate cannot restore it');
+        self::assertArrayNotHasKey('global', $data, 'static setter: not instance state');
+        self::assertArrayNotHasKey('pair', $data, 'setter needing two arguments: hydrate skips it');
+        self::assertArrayNotHasKey('shared', $data, 'a static is*() is not instance state either');
+    }
+
+    #[Test]
     public function every_year_normalize_can_write_comes_back(): void
     {
         // `Y` in createFromFormat() reads four digits at most, and the date
@@ -207,4 +219,18 @@ final class SerializerUnionFixture
     public function setLevel(SerializerPriority|int $level): void { $this->level = $level; }
     public function getLabel(): DateTimeImmutable|string { return $this->label; }
     public function setLabel(DateTimeImmutable|string $label): void { $this->label = $label; }
+}
+
+final class SerializerFlagFixture
+{
+    public function isOpen(): bool { return true; }
+    public function setOpen(bool $open): void {}
+    public function isHidden(): bool { return true; }
+    private function setHidden(bool $hidden): void {}
+    public function isGlobal(): bool { return true; }
+    public static function setGlobal(bool $global): void {}
+    public function isPair(): bool { return true; }
+    public function setPair(bool $pair, string $why): void {}
+    public static function isShared(): bool { return true; }
+    public function setShared(bool $shared): void {}
 }
