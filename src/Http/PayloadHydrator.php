@@ -45,6 +45,12 @@ class PayloadHydrator
             }
 
             $method = $reflection->getMethod($setterName);
+            // method_exists() sees private and static methods too, and invoke()
+            // would call them: a body key must only reach the public setters
+            // the payload publishes as its contract (PayloadMetadataReflector).
+            if (!$method->isPublic() || $method->isStatic()) {
+                continue;
+            }
             if ($method->getNumberOfRequiredParameters() !== 1) {
                 continue;
             }

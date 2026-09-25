@@ -167,4 +167,30 @@ final class PayloadHydratorTest extends TestCase
             cookies: [],
         );
     }
+
+    #[Test]
+    public function a_non_public_or_static_setter_is_not_reachable_from_the_body(): void
+    {
+        // The published contract (PayloadMetadataReflector) lists public setters
+        // only; a body key must not reach a private helper the DTO uses itself.
+        $dto = new class {
+            public bool $isAdmin = false;
+            public static bool $flag = false;
+
+            private function setIsAdmin(bool $value): void
+            {
+                $this->isAdmin = $value;
+            }
+
+            public static function setFlag(bool $value): void
+            {
+                self::$flag = $value;
+            }
+        };
+
+        $hydrated = PayloadHydrator::hydrate($dto, $this->jsonRequest(['is_admin' => true, 'flag' => true], strict: false));
+
+        self::assertFalse($hydrated->isAdmin);
+        self::assertFalse($hydrated::$flag);
+    }
 }
