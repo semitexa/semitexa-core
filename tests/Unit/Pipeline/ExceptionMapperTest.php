@@ -46,6 +46,36 @@ final class ExceptionMapperTest extends TestCase
         self::assertStringContainsString('Internal Server Error', $response->getContent());
     }
 
+    #[Test]
+    public function a_route_without_produces_still_answers_an_explicit_text_request_in_text(): void
+    {
+        foreach ([
+            new Request('GET', '/broken', [], ['_format' => 'txt'], [], [], []),
+            new Request('GET', '/broken', ['Accept' => 'text/plain'], [], [], [], []),
+        ] as $request) {
+            $response = (new ExceptionMapper())->map(new \Semitexa\Core\Exception\NotFoundException('Page', 7), $request, $this->makeMetadata(null));
+
+            self::assertSame(404, $response->getStatusCode());
+            self::assertStringStartsWith('text/plain', $response->getHeaders()['Content-Type'] ?? '');
+            self::assertSame('Page #7 not found.', $response->getContent());
+        }
+    }
+
+    #[Test]
+    public function an_unknown_exception_answers_in_the_negotiated_format_not_a_refused_json(): void
+    {
+        $refusesJson = new Request('GET', '/broken', ['Accept' => 'application/json;q=0, */*'], [], [], [], []);
+        $response = (new ExceptionMapper())->map(new \RuntimeException('Boom'), $refusesJson, $this->makeMetadata(null));
+
+        self::assertSame(500, $response->getStatusCode());
+        self::assertStringStartsWith('text/html', $response->getHeaders()['Content-Type'] ?? '');
+        self::assertStringNotContainsString('Boom', $response->getContent(), 'the internal message stays internal');
+
+        $text = new Request('GET', '/broken', ['Accept' => 'text/plain'], [], [], [], []);
+        $response = (new ExceptionMapper())->map(new \RuntimeException('Boom'), $text, $this->makeMetadata(null));
+        self::assertSame('An unexpected error occurred.', $response->getContent());
+    }
+
     /**
      * @param list<string>|null $produces
      */

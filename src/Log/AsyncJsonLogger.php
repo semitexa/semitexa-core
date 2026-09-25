@@ -272,7 +272,9 @@ final class AsyncJsonLogger implements LoggerInterface
     private function encodeEntry(array $entry): string
     {
         try {
-            return json_encode($entry, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+            // Substitute invalid UTF-8 with U+FFFD: one stray byte from user
+            // input must not cost the whole entry.
+            return json_encode($entry, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE | JSON_THROW_ON_ERROR);
         } catch (\JsonException $exception) {
             $fallbackEntry = [
                 'timestamp' => date('c'),
@@ -285,7 +287,7 @@ final class AsyncJsonLogger implements LoggerInterface
                 ],
             ];
 
-            return json_encode($fallbackEntry, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)
+            return json_encode($fallbackEntry, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE)
                 ?: '{"timestamp":null,"level":"error","message":"Log entry could not be JSON encoded","context":{"encoding_error":"fallback encoding failed"}}';
         }
     }

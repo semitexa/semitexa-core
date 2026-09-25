@@ -127,6 +127,56 @@ final class HandlerRegistryTest extends TestCase
         self::assertSame([BasePayload::class, OtherPayload::class], $payloads);
     }
 
+    #[Test]
+    public function a_repeated_lookup_returns_the_same_handlers_without_walking_the_registry_again(): void
+    {
+        // Lookup runs on every request, so it must not redo the subclass walk
+        // for a pair it has already answered. An unloadable response class
+        // makes each walk observable: is_subclass_of() asks the autoloader.
+        $registry = self::registryWith(BasePayload::class, BaseResource::class);
+        $registry->register(OtherPayload::class, OtherResource::class, self::meta('App\\Handler\\H2'));
+        $missing = __NAMESPACE__ . '\\NeverDeclaredResource';
+        $autoloadAttempts = 0;
+        $counter = static function (string $class) use ($missing, &$autoloadAttempts): void {
+            if ($class === $missing) {
+                $autoloadAttempts++;
+            }
+        };
+        spl_autoload_register($counter);
+
+        try {
+            $first = $registry->findHandlers(BasePayload::class, $missing);
+            $attemptsAfterFirst = $autoloadAttempts;
+            $second = $registry->findHandlers(BasePayload::class, $missing);
+        } finally {
+            spl_autoload_unregister($counter);
+        }
+
+        self::assertSame([], $first);
+        self::assertSame($first, $second);
+        self::assertGreaterThan(0, $attemptsAfterFirst);
+        self::assertSame($attemptsAfterFirst, $autoloadAttempts, 'the second lookup must be answered from the memo');
+
+        // The exact handler first: two empty lookups would also be "the same".
+        $leaf = $registry->findHandlers(LeafPayload::class, LeafResource::class);
+        self::assertSame(['App\\Handler\\H1'], array_column($leaf, 'class'));
+        self::assertSame($leaf, $registry->findHandlers(LeafPayload::class, LeafResource::class));
+    }
+
+    #[Test]
+    public function registering_a_handler_after_a_lookup_is_seen_by_the_next_lookup(): void
+    {
+        $registry = self::registryWith(BasePayload::class, BaseResource::class);
+        self::assertSame(['App\\Handler\\H1'], array_column($registry->findHandlers(LeafPayload::class, LeafResource::class), 'class'));
+
+        $registry->register(LeafPayload::class, LeafResource::class, self::meta('App\\Handler\\H2'));
+
+        self::assertSame(
+            ['App\\Handler\\H1', 'App\\Handler\\H2'],
+            array_column($registry->findHandlers(LeafPayload::class, LeafResource::class), 'class'),
+        );
+    }
+
     private static function registryWith(string $payload, string $resource): HandlerRegistry
     {
         $registry = new HandlerRegistry();

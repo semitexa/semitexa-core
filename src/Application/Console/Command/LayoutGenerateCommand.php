@@ -6,7 +6,9 @@ namespace Semitexa\Core\Application\Console\Command;
 
 use Semitexa\Core\Console\BaseCommand;
 use Semitexa\Core\Attribute\AsCommand;
+use Semitexa\Core\Attribute\InjectAsReadonly;
 use Semitexa\Core\CodeGen\LayoutGenerator;
+use Semitexa\Core\ModuleRegistry;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Input\InputInterface;
@@ -17,11 +19,14 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 #[AsCommand(name: 'layout:generate', description: 'Copy module layouts into src/')]
 class LayoutGenerateCommand extends BaseCommand
 {
-    public function __construct(
-        private readonly LayoutGenerator $layoutGenerator,
-    ) {
-        parent::__construct();
-    }
+    /**
+     * LayoutGenerator is a plain class, not a container service, so a
+     * constructor asking for it could never be resolved and console boot
+     * skipped this command without a word. Take the registry it needs and
+     * build it here instead.
+     */
+    #[InjectAsReadonly]
+    protected ModuleRegistry $moduleRegistry;
 
     protected function configure(): void
     {
@@ -39,9 +44,9 @@ class LayoutGenerateCommand extends BaseCommand
 
         try {
             if ($all || !is_string($layout) || $layout === '') {
-                $this->layoutGenerator->generateAll($io);
+                $this->layoutGenerator()->generateAll($io);
             } else {
-                $this->layoutGenerator->generate($layout, $io);
+                $this->layoutGenerator()->generate($layout, $io);
             }
         } catch (\Throwable $e) {
             $io->error($e->getMessage());
@@ -52,5 +57,10 @@ class LayoutGenerateCommand extends BaseCommand
         }
 
         return Command::SUCCESS;
+    }
+
+    private function layoutGenerator(): LayoutGenerator
+    {
+        return new LayoutGenerator($this->moduleRegistry);
     }
 }

@@ -27,6 +27,12 @@ use Semitexa\Core\HttpResponse;
 #[SatisfiesServiceContract(of: ExceptionResponseMapperInterface::class)]
 final class ExceptionMapper implements ExceptionResponseMapperInterface
 {
+    /** The formats an error body can be rendered in here, preferred first. */
+    // text/plain last: mapDomainException() renders it, and an explicit
+    // `_format=txt` or `Accept: text/plain` must still get it; last, so a
+    // wildcard never picks it over json.
+    private const ERROR_FORMATS = ['application/json', 'text/html', 'application/xml', 'text/plain'];
+
     private ?ErrorRouteDispatcher $errorRouteDispatcher = null;
 
     public function withErrorRouteDispatcher(ErrorRouteDispatcher $errorRouteDispatcher): static
@@ -130,10 +136,19 @@ final class ExceptionMapper implements ExceptionResponseMapperInterface
             }
         }
 
-        return HttpResponse::json([
-            'error' => 'Internal Server Error',
-            'message' => 'An unexpected error occurred.',
-        ], HttpStatus::InternalServerError->value);
+        // In the negotiated format, as a domain error is: always-JSON handed a
+        // client that sent `application/json;q=0, */*` the one type it refused.
+        $message = 'An unexpected error occurred.';
+        $body = ['error' => 'Internal Server Error', 'message' => $message];
+        $status = HttpStatus::InternalServerError;
+
+        return match ($format) {
+            'html' => $this->renderErrorHtml($status, $body),
+            'xml' => HttpResponse::text($this->arrayToXml($body, 'error'), $status->value)
+                ->withHeaders(['Content-Type' => 'application/xml; charset=utf-8']),
+            'txt' => HttpResponse::text($message, $status->value),
+            default => HttpResponse::json($body, $status->value),
+        };
     }
 
     private static function summarizeTrace(\Throwable $e): string
@@ -150,8 +165,18 @@ final class ExceptionMapper implements ExceptionResponseMapperInterface
     private function negotiateErrorFormat(Request $request, ?array $produces): string
     {
         try {
-            return ContentNegotiator::negotiateResponseFormat($produces, $request, 'json');
+            // A route without `produces` still has a set of formats — the ones
+            // this mapper renders — so a refusal among them is honoured instead
+            // of falling back to the json default the client ruled out.
+            return ContentNegotiator::negotiateResponseFormat(
+                $produces !== null && $produces !== [] ? $produces : self::ERROR_FORMATS,
+                $request,
+                'json',
+            );
         } catch (\Throwable) {
+            // Everything this route or mapper can say was refused. An error
+            // must still go out in something, and RFC 9110 lets it disregard
+            // Accept rather than answer with nothing.
             return 'json';
         }
     }

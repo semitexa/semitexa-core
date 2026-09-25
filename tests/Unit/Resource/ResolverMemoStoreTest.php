@@ -179,7 +179,8 @@ final class ResolverMemoStoreTest extends TestCase
     public function field_without_resolver_class_is_a_logic_error_for_key_from_field(): void
     {
         // The pipeline never asks for a key on a field without
-        // resolverClass, but we pin the assertion here for safety.
+        // resolverClass, but the guard must hold with assertions
+        // compiled out (production zend.assertions=-1) too.
         $field = new ResourceFieldMetadata(
             name:          'profile',
             kind:          ResourceFieldKind::RefOne,
@@ -190,7 +191,7 @@ final class ResolverMemoStoreTest extends TestCase
             resolverClass: null,
         );
 
-        $this->expectException(\AssertionError::class);
+        $this->expectException(\LogicException::class);
         ResolverMemoStore::keyFromField($field, ResourceIdentity::of('x', '1'), 'P');
     }
 

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Semitexa\Core;
 
+use Semitexa\Core\Http\RequestTarget;
 use Semitexa\Core\Http\UploadedFile;
 
 /**
@@ -68,7 +69,7 @@ readonly class Request
 
     public function getPath(): string
     {
-        return parse_url($this->uri, PHP_URL_PATH) ?: '/';
+        return RequestTarget::path($this->uri) ?? '/';
     }
 
     /**
@@ -91,14 +92,9 @@ readonly class Request
     {
         $servedUri = $this->server['request_uri'] ?? $this->server['REQUEST_URI'] ?? null;
 
-        if (is_string($servedUri) && $servedUri !== '') {
-            $path = parse_url($servedUri, PHP_URL_PATH);
-            if (is_string($path) && $path !== '') {
-                return $path;
-            }
-        }
-
-        return $this->getPath();
+        // RequestTarget::path() is null for an empty or pathless target, which
+        // falls back to the routed path exactly as the old guards did.
+        return (is_string($servedUri) ? RequestTarget::path($servedUri) : null) ?? $this->getPath();
     }
 
     /**

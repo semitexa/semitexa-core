@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Tests\Unit\Log;
 
+use Semitexa\Core\Tests\Support\StaticState;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Semitexa\Core\Environment;
@@ -16,9 +17,15 @@ final class AsyncJsonLoggerTest extends TestCase
     private ?string $previousLogLevel = null;
     private ?string $previousLogMaxBytes = null;
 
+    /** @var array{class: class-string, values: array<string, mixed>} */
+    private array $projectRootState;
+
     protected function setUp(): void
     {
         parent::setUp();
+        // The tests reset ProjectRoot to resolve a log path; put back the root
+        // an earlier test (or the suite) had cached.
+        $this->projectRootState = StaticState::snapshot(ProjectRoot::class);
 
         $this->previousLogFile = getenv('LOG_FILE') !== false ? (string) getenv('LOG_FILE') : null;
         $this->previousLogLevel = getenv('LOG_LEVEL') !== false ? (string) getenv('LOG_LEVEL') : null;
@@ -34,6 +41,7 @@ final class AsyncJsonLoggerTest extends TestCase
         // process. putenv() is process-wide; a test that unsets what it did not
         // set poisons whatever runs after it.
         $this->restoreEnv('LOG_MAX_BYTES', $this->previousLogMaxBytes);
+        StaticState::restore($this->projectRootState);
 
         parent::tearDown();
     }
@@ -74,6 +82,45 @@ final class AsyncJsonLoggerTest extends TestCase
         self::assertNotEmpty($entry['context']['encoding_error']);
 
         @unlink($absolutePath);
+    }
+
+    /**
+     * One invalid UTF-8 byte (a Latin-1 name, a raw path) used to discard the
+     * whole entry; in the message it emptied even the fallback line.
+     */
+    #[Test]
+    public function invalid_utf8_in_message_or_context_is_substituted_not_dropped(): void
+    {
+        ProjectRoot::reset();
+        $relativePath = 'var/tmp/async-json-logger-utf8-' . bin2hex(random_bytes(6)) . '.log';
+        $absolutePath = ProjectRoot::get() . '/' . $relativePath;
+
+        putenv('LOG_FILE=' . $relativePath);
+        putenv('LOG_LEVEL=debug');
+
+        try {
+            $logger = new AsyncJsonLogger();
+            $this->injectEnvironment($logger);
+
+            $logger->error('Login failed', ['user_id' => 42, 'username' => "caf\xE9"]);
+            $logger->error("Bad path /tmp/\xFF", ['user_id' => 7]);
+            $logger->flush();
+
+            $lines = file($absolutePath, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+            self::assertIsArray($lines);
+            self::assertCount(2, $lines);
+
+            $first = json_decode($lines[0], true, 512, JSON_THROW_ON_ERROR);
+            self::assertSame('Login failed', $first['message']);
+            self::assertSame(42, $first['context']['user_id']);
+            self::assertSame("caf\u{FFFD}", $first['context']['username']);
+
+            $second = json_decode($lines[1], true, 512, JSON_THROW_ON_ERROR);
+            self::assertSame("Bad path /tmp/\u{FFFD}", $second['message']);
+            self::assertSame(7, $second['context']['user_id']);
+        } finally {
+            @unlink($absolutePath);
+        }
     }
 
     /**

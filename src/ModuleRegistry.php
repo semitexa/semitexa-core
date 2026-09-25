@@ -123,6 +123,13 @@ class ModuleRegistry
             if ($ns !== '' && str_starts_with($className, $ns . '\\')) {
                 return $module['name'];
             }
+            // A local module is also autoloaded as App\Modules\<Studly>
+            // (LocalModuleAutoloadRegistrar), so its classes belong to it too.
+            if ($module['type'] === 'local'
+                && str_starts_with($className, 'App\\Modules\\' . Str::toStudly($module['name']) . '\\')
+            ) {
+                return $module['name'];
+            }
         }
         return null;
     }

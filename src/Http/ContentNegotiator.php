@@ -9,6 +9,14 @@ use Semitexa\Core\Request;
 
 final class ContentNegotiator
 {
+    /** The MIME a default format key stands for, so a refusal of it can be recognised. */
+    private const DEFAULT_MIMES = [
+        'json' => 'application/json',
+        'html' => 'text/html',
+        'xml' => 'application/xml',
+        'txt' => 'text/plain',
+    ];
+
     /**
      * Check if the request's Content-Type is accepted by this route.
      *
@@ -69,41 +77,91 @@ final class ContentNegotiator
             return $defaultFormat;
         }
 
+        // Sorted by q, highest first; equal q keep the order the client wrote.
         $entries = self::parseAcceptHeader($acceptHeader);
 
-        if ($produces === null || $produces === []) {
-            foreach ($entries as [$mime, $q]) {
-                $key = ContentType::toFormatKey($mime);
-                if ($key !== null) {
-                    return $key;
+        // RFC 9110 §12.5.1: a representation's quality is the q of the MOST
+        // SPECIFIC range that matches it — its exact type, then `type/*`, then
+        // `*/*` — and q=0 there is a refusal. Reading the entries in q order
+        // instead let a high `*/*` pick a type the client had ranked lower by
+        // name (`text/html;q=0.1, */*` served html), and a `*/*;q=0` refused
+        // nothing at all.
+        $quality = static function (string $mime) use ($entries): ?array {
+            [$type] = explode('/', $mime, 2);
+            $best = null;
+            foreach ($entries as $at => [$range, $q]) {
+                $specificity = match (true) {
+                    $range === $mime => 3,
+                    $range === $type . '/*' => 2,
+                    $range === '*/*' => 1,
+                    default => 0,
+                };
+                if ($specificity > 0 && ($best === null || $specificity > $best['specificity'])) {
+                    $best = ['specificity' => $specificity, 'q' => $q, 'at' => $at];
                 }
             }
+
+            return $best;
+        };
+
+        // The default is a type too, and a client can refuse it.
+        $defaultMime = self::DEFAULT_MIMES[$defaultFormat] ?? null;
+        $defaultMatch = $defaultMime !== null ? $quality($defaultMime) : null;
+        $defaultRefused = $defaultMatch !== null && $defaultMatch['q'] <= 0.0;
+
+        $unrestricted = $produces === null || $produces === [];
+        $candidates = $unrestricted ? self::unrestrictedCandidates($defaultMime, $entries) : $produces;
+
+        $winner = null;
+        foreach ($candidates as $order => $mime) {
+            $match = $quality($mime);
+            if ($match === null || $match['q'] <= 0.0) {
+                continue;
+            }
+            $key = ContentType::toFormatKey($mime) ?? ($defaultRefused ? null : $defaultFormat);
+            if ($key === null) {
+                continue;
+            }
+            // Highest quality; then the entry the client listed first; then the
+            // route's own order.
+            $rank = [$match['q'], -$match['at'], -$order];
+            if ($winner === null || $rank > $winner['rank']) {
+                $winner = ['rank' => $rank, 'key' => $key];
+            }
+        }
+
+        if ($winner !== null) {
+            return $winner['key'];
+        }
+        if ($unrestricted && $defaultMime === null) {
+            // A default this negotiator cannot name as a type cannot be refused.
             return $defaultFormat;
         }
 
-        foreach ($entries as [$mime, $q]) {
-            if ($mime === '*/*' && $produces !== []) {
-                return ContentType::toFormatKey($produces[0]) ?? $defaultFormat;
-            }
-            if (str_ends_with($mime, '/*')) {
-                [$type] = explode('/', $mime, 2);
-                foreach ($produces as $produce) {
-                    if (str_starts_with($produce, $type . '/')) {
-                        return ContentType::toFormatKey($produce) ?? $defaultFormat;
-                    }
-                }
-                continue;
-            }
-            if (in_array($mime, $produces, true)) {
-                return ContentType::toFormatKey($mime) ?? $defaultFormat;
-            }
-        }
-
-        throw new NegotiationFailedException($produces, $acceptHeader);
+        throw new NegotiationFailedException($produces ?? [], $acceptHeader);
     }
 
     /**
-     * Parse Accept header into sorted [(mime, q)] pairs.
+     * What a route without `produces` can answer in: its default first, then
+     * every known format the client named. The default leads so it wins a tie.
+     *
+     * @param  list<array{0: string, 1: float}> $entries
+     * @return list<string>
+     */
+    private static function unrestrictedCandidates(?string $defaultMime, array $entries): array
+    {
+        $candidates = $defaultMime !== null ? [$defaultMime] : [];
+        foreach ($entries as [$range]) {
+            if (!str_contains($range, '*') && ContentType::toFormatKey($range) !== null && !in_array($range, $candidates, true)) {
+                $candidates[] = $range;
+            }
+        }
+
+        return $candidates;
+    }
+
+    /**
+     * Parse Accept header into sorted [(mime, q)] pairs, refusals (q=0) included.
      *
      * @return list<array{0: string, 1: float}>
      */
@@ -123,10 +181,6 @@ final class ContentNegotiator
                 if (count($kv) === 2 && strtolower(trim($kv[0])) === 'q') {
                     $q = max(0.0, min(1.0, (float) trim($kv[1])));
                 }
-            }
-
-            if ($q <= 0.0) {
-                continue;
             }
 
             $entries[] = [$mime, $q];

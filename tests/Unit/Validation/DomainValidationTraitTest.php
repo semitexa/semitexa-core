@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Tests\Unit\Validation;
 
+use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Semitexa\Core\Validation\Trait\DomainValidationTrait;
 
@@ -191,6 +192,32 @@ final class DomainValidationTraitTest extends TestCase
         $h->base64($errors, 'g', null);
         $h->mime($errors, 'h', null);
         self::assertSame([], $errors);
+    }
+
+    #[Test]
+    public function anchored_codes_reject_a_trailing_newline(): void
+    {
+        $h = self::host();
+        $errors = [];
+        $h->countryCode($errors, 'country', "US\n");
+        $h->currencyCode($errors, 'currency', "USD\n");
+        $h->localeCode($errors, 'locale', "en-US\n");
+        $h->phone($errors, 'phone', "+14155552671\n");
+        $h->hexColor($errors, 'color', "#fff\n");
+        $h->hexColor($errors, 'opaque', "#ffffff\n", allowAlpha: false);
+        $h->mime($errors, 'mime', "text/plain\n");
+
+        // Fields AND messages: a validator that recorded a field with no
+        // message would pass a keys-only check and give the user nothing.
+        self::assertSame([
+            'country' => ['This value should be a 2-letter country code.'],
+            'currency' => ['This value should be a 3-letter currency code.'],
+            'locale' => ['This value should be a valid locale code.'],
+            'phone' => ['This value should be a valid E.164 phone number.'],
+            'color' => ['This value should be a valid hex color.'],
+            'opaque' => ['This value should be a valid hex color.'],
+            'mime' => ['This value should be a valid MIME type.'],
+        ], $errors);
     }
 
     private static function host(): object

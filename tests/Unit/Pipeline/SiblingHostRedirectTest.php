@@ -6,7 +6,7 @@ namespace Semitexa\Core\Tests\Unit\Pipeline;
 
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
-use Semitexa\Core\Pipeline\ResponseRenderer;
+use Semitexa\Core\Http\RedirectTarget;
 
 /**
  * An application split across hosts — a public site on the apex, a cabinet on
@@ -67,7 +67,7 @@ final class SiblingHostRedirectTest extends TestCase
 
     private function isSibling(string $redirectHost, string $requestHost): bool
     {
-        $method = new \ReflectionMethod(ResponseRenderer::class, 'isSiblingHost');
+        $method = new \ReflectionMethod(RedirectTarget::class, 'isSiblingHost');
         $method->setAccessible(true);
 
         return (bool) $method->invoke(null, $redirectHost, $requestHost);

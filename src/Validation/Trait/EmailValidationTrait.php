@@ -24,6 +24,6 @@ trait EmailValidationTrait
 
     private function isEmailLike(string $value): bool
     {
-        return (bool) preg_match('/^[^@\s]+@[^@\s]+\.[^@\s]+$/', $value);
+        return (bool) preg_match('/^[^@\s]+@[^@\s]+\.[^@\s]+$/D', $value);
     }
 }

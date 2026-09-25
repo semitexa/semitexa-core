@@ -37,10 +37,11 @@ namespace Semitexa\Core\Validation\Trait;
  */
 trait FormatValidationTrait
 {
-    private const string UUID_PATTERN  = '/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i';
-    private const string ULID_PATTERN  = '/^[0-7][0-9A-HJKMNP-TV-Z]{25}$/i';
-    private const string SLUG_PATTERN  = '/^[a-z0-9]+(?:-[a-z0-9]+)*$/';
-    private const string EMAIL_LENIENT = '/^[^@\s]+@[^@\s]+\.[^@\s]+$/';
+    // `D` stops `$` from also matching before a trailing "\n".
+    private const string UUID_PATTERN  = '/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iD';
+    private const string ULID_PATTERN  = '/^[0-7][0-9A-HJKMNP-TV-Z]{25}$/iD';
+    private const string SLUG_PATTERN  = '/^[a-z0-9]+(?:-[a-z0-9]+)*$/D';
+    private const string EMAIL_LENIENT = '/^[^@\s]+@[^@\s]+\.[^@\s]+$/D';
 
     /**
      * @param array<string, list<string>> $errors
@@ -191,7 +192,7 @@ trait FormatValidationTrait
             if ($length === 0 || $length > 63) {
                 return false;
             }
-            if (preg_match('/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/', $label) !== 1) {
+            if (preg_match('/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/D', $label) !== 1) {
                 return false;
             }
         }

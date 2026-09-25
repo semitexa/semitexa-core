@@ -79,6 +79,40 @@ final class RequestWithPathTest extends TestCase
     }
 
     #[Test]
+    public function a_request_target_is_read_as_a_path_not_as_a_url(): void
+    {
+        // parse_url() takes a leading `//` for an authority and gives up on a
+        // colon it reads as a port: `//evil.com/admin` came out as `/admin`,
+        // and `/events/10:00` as `false`, which routed to `/`.
+        $cases = [
+            '//evil.com/admin' => '//evil.com/admin',
+            '///admin/users' => '///admin/users',
+            '/events/10:00' => '/events/10:00',
+            '/x:1/y' => '/x:1/y',
+            '/foo:99999?a=1' => '/foo:99999',
+            '/gallery#top' => '/gallery',
+        ];
+
+        foreach ($cases as $uri => $expected) {
+            $request = $this->get($uri);
+            self::assertSame($expected, $request->getPath(), $uri);
+            self::assertSame($expected, $request->getServedPath(), $uri);
+        }
+    }
+
+    #[Test]
+    public function an_absolute_form_target_still_yields_its_path(): void
+    {
+        self::assertSame('/x', $this->get('http://example.com/x?a=1')->getPath());
+    }
+
+    #[Test]
+    public function an_empty_path_before_the_query_is_the_root(): void
+    {
+        self::assertSame('/', $this->get('?a=1')->getPath());
+    }
+
+    #[Test]
     public function a_prefixed_path_hydrates_no_route_parameter(): void
     {
         // The defect this exists to prevent: the pattern never carries /uk, so

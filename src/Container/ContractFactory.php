@@ -10,6 +10,10 @@ use Semitexa\Core\Contract\ContractFactoryInterface;
  * Generic factory for a contract: getDefault(), get(enum $key), keys().
  * Used instead of generated per-contract factory classes. The container binds
  * each Factory* interface to an instance of this class configured for that contract.
+ *
+ * An entry is either a shared (worker-scoped) implementation or a \Closure that
+ * resolves an execution-scoped one per call; a contract implementation can
+ * never itself be a \Closure, so the two cannot be confused.
  */
 final class ContractFactory implements ContractFactoryInterface
 {
@@ -23,8 +27,8 @@ final class ContractFactory implements ContractFactoryInterface
     private array $enumKeys;
 
     /**
-     * @param object $default Active implementation (by module order or resolver).
-     * @param array<string, object> $byKey Backed enum value => implementation.
+     * @param object $default Active implementation (by module order or resolver), or a \Closure resolving it.
+     * @param array<string, object> $byKey Backed enum value => implementation, or a \Closure resolving it.
      * @param array<string, \BackedEnum> $enumKeys Backed enum value => enum case.
      */
     public function __construct(object $default, array $byKey, array $enumKeys)
@@ -36,14 +40,14 @@ final class ContractFactory implements ContractFactoryInterface
 
     public function getDefault(): object
     {
-        return $this->default;
+        return self::resolve($this->default);
     }
 
     public function get(\BackedEnum $key): object
     {
         $lookup = (string) $key->value;
         if (isset($this->byKey[$lookup])) {
-            return $this->byKey[$lookup];
+            return self::resolve($this->byKey[$lookup]);
         }
 
         $available = implode(', ', array_map(
@@ -58,5 +62,16 @@ final class ContractFactory implements ContractFactoryInterface
     public function keys(): array
     {
         return array_values($this->enumKeys);
+    }
+
+    private static function resolve(object $entry): object
+    {
+        if (!$entry instanceof \Closure) {
+            return $entry;
+        }
+        $resolved = $entry();
+        \assert(is_object($resolved));
+
+        return $resolved;
     }
 }

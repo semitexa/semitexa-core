@@ -322,8 +322,13 @@ final class ResourceExpansionPipeline
                 continue;
             }
 
-            $childMetadata = $this->resolveTargetMetadata($parentField);
-            if ($childMetadata === null) {
+            // A union child may be any of the declared targets, so it is
+            // walked with its own class's metadata (looked up per child
+            // below) rather than the first target's.
+            $fixedMetadata = $parentField->target === null
+                ? null
+                : $this->registry->get($parentField->target);
+            if ($parentField->target !== null && $fixedMetadata === null) {
                 // No metadata for the target — the nested pass cannot expand
                 // a child whose class isn't registered. The validator
                 // is supposed to catch this earlier; if not, fail
@@ -337,6 +342,7 @@ final class ResourceExpansionPipeline
             // never collide.
             /** @var array<string, array{
              *   field: ResourceFieldMetadata,
+             *   childClass: class-string,
              *   identities: list<ResourceIdentity>,
              *   seenUrns: array<string, true>,
              * }> $nestedBuckets
@@ -349,6 +355,10 @@ final class ResourceExpansionPipeline
                     $parentField,
                 );
                 foreach ($childDtos as $childDto) {
+                    $childMetadata = $fixedMetadata ?? $this->registry->get($childDto::class);
+                    if ($childMetadata === null) {
+                        continue;
+                    }
                     $childIdentity = $this->extractIdentity(
                         $childDto,
                         (string) $childMetadata->idField,
@@ -367,6 +377,7 @@ final class ResourceExpansionPipeline
                         if (!isset($nestedBuckets[$nKey])) {
                             $nestedBuckets[$nKey] = [
                                 'field'      => $nestedField,
+                                'childClass' => $childMetadata->class,
                                 'identities' => [],
                                 'seenUrns'   => [],
                             ];
@@ -383,6 +394,7 @@ final class ResourceExpansionPipeline
             foreach ($nestedBuckets as $nestedBucket) {
                 $nestedField  = $nestedBucket['field'];
                 $nestedIdents = $nestedBucket['identities'];
+                $childClass   = $nestedBucket['childClass'];
                 if ($nestedIdents === []) {
                     continue;
                 }
@@ -397,7 +409,7 @@ final class ResourceExpansionPipeline
                     $memoKey = ResolverMemoStore::keyFromField(
                         $nestedField,
                         $childIdentity,
-                        $childMetadata->class,
+                        $childClass,
                     );
                     if (!$memo->has($memoKey)) {
                         $unresolved[] = $childIdentity;
@@ -413,7 +425,7 @@ final class ResourceExpansionPipeline
                         $memoKey = ResolverMemoStore::keyFromField(
                             $nestedField,
                             $childIdentity,
-                            $childMetadata->class,
+                            $childClass,
                         );
                         $memo->set($memoKey, $value);
                     }
@@ -423,7 +435,7 @@ final class ResourceExpansionPipeline
                     $memoKey = ResolverMemoStore::keyFromField(
                         $nestedField,
                         $childIdentity,
-                        $childMetadata->class,
+                        $childClass,
                     );
                     $value   = $memo->get($memoKey);
                     $key     = ResolvedResourceGraph::formatKey($childIdentity->urn(), $nestedField->name);
@@ -482,7 +494,14 @@ final class ResourceExpansionPipeline
 
     private function makeResolver(ResourceFieldMetadata $field): RelationResolverInterface
     {
-        \assert($field->resolverClass !== null);
+        // Explicit throw, not assert(): assertions are compiled out in
+        // production and the null would surface as a TypeError instead.
+        if ($field->resolverClass === null) {
+            throw new \LogicException(sprintf(
+                'Cannot resolve relation "%s": it has no #[ResolveWith] resolver class.',
+                $field->name,
+            ));
+        }
         $resolverClass = $field->resolverClass;
 
         try {
@@ -643,25 +662,6 @@ final class ResourceExpansionPipeline
                 );
             }
         }
-    }
-
-    /**
-     * Resolve the metadata for the target type of a relation field.
-     * Mirrors `IncludeValidator::resolveTargetMetadata()`; for
-     * unions the first registered target is used so the pipeline
-     * stays deterministic. `null` means "no target metadata to walk
-     * into" — the caller treats that as "no nested expansion
-     * possible for this branch".
-     */
-    private function resolveTargetMetadata(ResourceFieldMetadata $field): ?ResourceObjectMetadata
-    {
-        if ($field->target !== null) {
-            return $this->registry->get($field->target);
-        }
-        if ($field->unionTargets !== null && $field->unionTargets !== []) {
-            return $this->registry->get($field->unionTargets[0]);
-        }
-        return null;
     }
 
     /**

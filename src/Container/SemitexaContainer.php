@@ -425,6 +425,7 @@ final class SemitexaContainer implements ContainerInterface, ExecutionContextAwa
     public function build(): void
     {
         $context = new BuildContext($this->instanceStore, $this->typeMap, $this->injectionMap);
+        $context->resolveService = $this->get(...);
         $bootstrapper = new ContainerBootstrapper();
         $bootstrapper->build($context);
 

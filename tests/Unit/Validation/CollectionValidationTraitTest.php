@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Semitexa\Core\Tests\Unit\Validation;
 
 use InvalidArgumentException;
+use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Semitexa\Core\Validation\Trait\CollectionValidationTrait;
 
@@ -232,6 +233,48 @@ final class CollectionValidationTraitTest extends TestCase
         $errors = [];
         $this->expectException(InvalidArgumentException::class);
         self::host()->atLeastOneKey($errors, 'p', ['a' => 1], []);
+    }
+
+    #[Test]
+    public function collection_reports_a_blank_extra_key_by_position_instead_of_throwing(): void
+    {
+        // A JSON body like {"meta": {"": 1}} is user input, not a schema
+        // error, so it must land in the envelope rather than throw.
+        $errors = [];
+        self::host()->collection(
+            $errors,
+            'meta',
+            ['sku' => 'S-1', '' => 1, ' ' => 2],
+            ['sku' => ['required' => true, 'validator' => self::noopValidator()]],
+        );
+        self::assertSame(
+            ['meta[1]' => ['This key is not allowed.'], 'meta[2]' => ['This key is not allowed.']],
+            $errors,
+        );
+    }
+
+    #[Test]
+    public function no_extra_keys_reports_a_blank_key_by_position_instead_of_throwing(): void
+    {
+        $errors = [];
+        self::host()->noExtraKeys($errors, 'p', ['a' => 1, '' => 2], ['a']);
+        self::assertSame(['p[1]' => ['This key is not allowed.']], $errors);
+    }
+
+    #[Test]
+    public function optional_keys_reports_a_blank_key_by_position_instead_of_throwing(): void
+    {
+        $errors = [];
+        self::host()->optionalKeys($errors, 'p', ['' => 1], ['a']);
+        self::assertSame(['p[0]' => ['This key is not allowed.']], $errors);
+    }
+
+    #[Test]
+    public function integer_extra_keys_keep_their_dotted_path(): void
+    {
+        $errors = [];
+        self::host()->noExtraKeys($errors, 'p', ['a' => 1, 5 => 2], ['a']);
+        self::assertSame(['p.5' => ['This key is not allowed.']], $errors);
     }
 
     private static function nonBlankItemValidator(): callable

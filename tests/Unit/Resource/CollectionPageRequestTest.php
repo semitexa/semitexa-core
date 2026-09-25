@@ -134,6 +134,49 @@ final class CollectionPageRequestTest extends TestCase
     }
 
     #[Test]
+    public function rejects_page_whose_offset_overflows_int_with_400(): void
+    {
+        // (page - 1) * perPage past PHP_INT_MAX becomes a float, which the
+        // int return type of offset() turns into a TypeError (500).
+        $this->expectException(InvalidPaginationException::class);
+        $this->expectExceptionMessageMatches('/page.*is too large/');
+        CollectionPageRequest::fromQueryParams('200000000000000000', '50')->offset();
+    }
+
+    #[Test]
+    public function rejects_page_digits_that_saturate_the_int_cast_with_400(): void
+    {
+        // With perPage=1 the saturated PHP_INT_MAX would still yield an
+        // int offset, so the oversized string itself must be rejected.
+        try {
+            CollectionPageRequest::fromQueryParams('99999999999999999999', '1');
+            self::fail('Expected InvalidPaginationException.');
+        } catch (InvalidPaginationException $e) {
+            self::assertSame('page', $e->parameter);
+            self::assertSame('99999999999999999999', $e->rawValue);
+            self::assertSame('is too large', $e->reason);
+        }
+    }
+
+    #[Test]
+    public function constructor_rejects_page_whose_offset_overflows_int(): void
+    {
+        $this->expectException(InvalidPaginationException::class);
+        new CollectionPageRequest(PHP_INT_MAX, 2);
+    }
+
+    #[Test]
+    public function largest_page_whose_offset_fits_in_int_is_accepted(): void
+    {
+        $page = intdiv(PHP_INT_MAX, 50) + 1;
+        $req  = CollectionPageRequest::fromQueryParams((string) $page, '50');
+
+        self::assertSame(intdiv(PHP_INT_MAX, 50) * 50, $req->offset());
+        self::assertSame([], $req->slice(['a', 'b']));
+        self::assertSame(PHP_INT_MAX - 1, (new CollectionPageRequest(PHP_INT_MAX, 1))->offset());
+    }
+
+    #[Test]
     public function exception_carries_status_400(): void
     {
         try {

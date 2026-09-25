@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Tests\Unit\Validation;
 
+use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Semitexa\Core\Validation\Trait\FormatValidationTrait;
 
@@ -243,6 +244,28 @@ final class FormatValidationTraitTest extends TestCase
         $h->slug($errors, 'i', null);
 
         self::assertSame([], $errors);
+    }
+
+    #[Test]
+    public function anchored_formats_reject_a_trailing_newline(): void
+    {
+        // `$` without the D modifier also matches before a final "\n", which
+        // would let a newline-suffixed value through every anchored pattern.
+        $h = self::host();
+        $errors = [];
+        $h->email($errors, 'email', "a@b.co\n");
+        $h->uuid($errors, 'uuid', "123e4567-e89b-12d3-a456-426614174000\n");
+        $h->ulid($errors, 'ulid', "01ARZ3NDEKTSV4RRFFQ69G5FAV\n");
+        $h->slug($errors, 'slug', "my-slug\n");
+        $h->hostname($errors, 'hostname', "example.com\n");
+
+        self::assertSame([
+            'email' => ['This value should be a valid email address.'],
+            'uuid' => ['This value should be a valid UUID.'],
+            'ulid' => ['This value should be a valid ULID.'],
+            'slug' => ['This value should be a valid slug.'],
+            'hostname' => ['This value should be a valid hostname.'],
+        ], $errors);
     }
 
     private static function host(): object

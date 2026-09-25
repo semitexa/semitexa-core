@@ -16,7 +16,8 @@ trait LengthValidationTrait
      */
     protected function validateLength(string $fieldName, string|array $value, ?int $min, ?int $max, array &$errors): void
     {
-        $len = is_string($value) ? strlen($value) : count($value);
+        // Characters, not bytes — matches StringValidationTrait::validateLength().
+        $len = is_string($value) ? mb_strlen($value, 'UTF-8') : count($value);
         if ($min !== null && $len < $min) {
             $errors[$fieldName] = $errors[$fieldName] ?? [];
             $errors[$fieldName][] = "Length must be at least {$min}.";
