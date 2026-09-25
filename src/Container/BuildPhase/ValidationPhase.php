@@ -23,6 +23,22 @@ final class ValidationPhase implements BuildPhaseInterface
                 $kind = $info['kind'];
                 $typeName = $info['type'];
 
+                // #[InjectAsMutable] is filled only on per-execution clones; a
+                // worker-scoped instance is never cloned, so the property would
+                // stay uninitialized forever.
+                if ($kind === 'mutable' && !isset($context->executionScopedClasses[$class])) {
+                    throw new InjectionException(
+                        targetClass: $class,
+                        propertyName: $propName,
+                        propertyType: $typeName,
+                        injectionKind: $kind,
+                        message: "Boot validation failed: {$class}::\${$propName} "
+                            . "(type: {$typeName}) is #[InjectAsMutable], but {$class} is worker-scoped, "
+                            . 'so it would never be injected. Mark the class #[ExecutionScoped], '
+                            . 'or inject a worker-scoped seam with #[InjectAsReadonly] and read per-execution state at call time.',
+                    );
+                }
+
                 $resolved = match ($kind) {
                     'factory' => $context->instanceStore->factories[$typeName] ?? null,
                     'readonly' => $context->instanceStore->readonly[$typeName]
@@ -35,6 +51,11 @@ final class ValidationPhase implements BuildPhaseInterface
                 };
 
                 if ($resolved !== null) {
+                    continue;
+                }
+
+                // Soft dependency (optional: true): skipped at injection, so not a boot error.
+                if (!empty($info['optional'])) {
                     continue;
                 }
 

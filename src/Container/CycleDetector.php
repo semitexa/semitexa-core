@@ -44,7 +44,8 @@ final class CycleDetector
                     continue; // Factories don't participate in cycle detection
                 }
                 $target = $resolveToClass($info['type']);
-                if ($target !== null && $target !== $class) {
+                // Self-edges are kept: injecting your own type is a cycle (A -> A).
+                if ($target !== null) {
                     $adjacency[$class][] = $target;
                 }
             }

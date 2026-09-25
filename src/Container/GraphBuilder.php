@@ -482,7 +482,7 @@ final class GraphBuilder
 
     /**
      * Inject #[InjectAs*] properties with strict failure.
-     * Every annotated property must resolve. No silent skip.
+     * Every annotated property must resolve, unless it is declared optional.
      *
      * @param class-string $class
      * @param InjectionsMap $injections
@@ -521,6 +521,11 @@ final class GraphBuilder
 
             // For mutable properties in execution-scoped classes, skip during boot
             if ($kind === 'mutable' && isset($executionScopedClasses[$class])) {
+                continue;
+            }
+
+            // Soft dependency (optional: true): leave the property uninitialized.
+            if (!empty($info['optional'])) {
                 continue;
             }
 
