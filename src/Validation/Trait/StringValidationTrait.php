@@ -135,7 +135,7 @@ trait StringValidationTrait
         if ($value === null) {
             return;
         }
-        if (preg_match('/^[A-Za-z]+$/', $value) !== 1) {
+        if (preg_match('/^[A-Za-z]+$/D', $value) !== 1) {
             $errors[$field] = $errors[$field] ?? [];
             $errors[$field][] = 'This value should contain only letters.';
         }
@@ -151,7 +151,7 @@ trait StringValidationTrait
         if ($value === null) {
             return;
         }
-        if (preg_match('/^[A-Za-z0-9]+$/', $value) !== 1) {
+        if (preg_match('/^[A-Za-z0-9]+$/D', $value) !== 1) {
             $errors[$field] = $errors[$field] ?? [];
             $errors[$field][] = 'This value should contain only letters and digits.';
         }
