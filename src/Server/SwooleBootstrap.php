@@ -36,6 +36,9 @@ class SwooleBootstrap
 {
     private const COROUTINE_CONTEXT_KEY = '__semitexa_swoole_ctx';
 
+    /** How long a request that reached a still-booting worker waits before a 503. */
+    private const WORKER_BOOT_WAIT_SECONDS = 30.0;
+
     /** Swoole Table: integer column size in bytes (32-bit). */
     private const TABLE_COLUMN_INT_SIZE = 4;
 
@@ -138,29 +141,39 @@ class SwooleBootstrap
         );
         $lifecycleInvoker->invokePhase(ServerLifecyclePhase::PreStart, $bootstrapContext, false);
 
-        $server->on(SwooleEvent::WorkerStart->value, function (Server $server, int $workerId) use ($bootstrapState, $lifecycleInvoker, $crashLoopBreaker) {
-            self::syncInheritedComposerAutoloader();
-            Environment::syncEnvFromFiles();
-            $workerEnv = Environment::create();
-            $context = new ServerLifecycleContext(
-                server: $server,
-                workerId: $workerId,
-                environment: $workerEnv,
-                bootstrapState: $bootstrapState,
-                container: ContainerFactory::get(),
-                recentWorkerCrashes: $crashLoopBreaker->crashCount($workerId, time()),
-            );
-            $lifecycleInvoker->invokePhase(ServerLifecyclePhase::WorkerStartBeforeContainer, $context, false);
-            ContainerFactory::create();
-            // Switch to container-managed registry (uses container's ClassDiscovery,
-            // avoiding duplicate attribute scanning).
-            $containerRegistry = ContainerFactory::get()->get(ServerLifecycleRegistry::class);
-            if ($containerRegistry instanceof ServerLifecycleRegistry) {
-                $lifecycleInvoker->setRegistry($containerRegistry);
+        $bootGate = new WorkerBootGate();
+
+        $server->on(SwooleEvent::WorkerStart->value, function (Server $server, int $workerId) use ($bootstrapState, $lifecycleInvoker, $crashLoopBreaker, $bootGate) {
+            // This callback yields (hooked file I/O, DB warm-up) and Swoole
+            // dispatches requests to this worker while it does; they wait at
+            // the gate until every lifecycle phase below has run.
+            $bootGate->close();
+            try {
+                self::syncInheritedComposerAutoloader();
+                Environment::syncEnvFromFiles();
+                $workerEnv = Environment::create();
+                $context = new ServerLifecycleContext(
+                    server: $server,
+                    workerId: $workerId,
+                    environment: $workerEnv,
+                    bootstrapState: $bootstrapState,
+                    container: ContainerFactory::get(),
+                    recentWorkerCrashes: $crashLoopBreaker->crashCount($workerId, time()),
+                );
+                $lifecycleInvoker->invokePhase(ServerLifecyclePhase::WorkerStartBeforeContainer, $context, false);
+                ContainerFactory::create();
+                // Switch to container-managed registry (uses container's ClassDiscovery,
+                // avoiding duplicate attribute scanning).
+                $containerRegistry = ContainerFactory::get()->get(ServerLifecycleRegistry::class);
+                if ($containerRegistry instanceof ServerLifecycleRegistry) {
+                    $lifecycleInvoker->setRegistry($containerRegistry);
+                }
+                $lifecycleInvoker->invokePhase(ServerLifecyclePhase::WorkerStartAfterContainer, $context, true);
+                $lifecycleInvoker->invokePhase(ServerLifecyclePhase::WorkerStartAfterServerBindings, $context, true);
+                $lifecycleInvoker->invokePhase(ServerLifecyclePhase::WorkerStartFinalize, $context, true);
+            } finally {
+                $bootGate->open();
             }
-            $lifecycleInvoker->invokePhase(ServerLifecyclePhase::WorkerStartAfterContainer, $context, true);
-            $lifecycleInvoker->invokePhase(ServerLifecyclePhase::WorkerStartAfterServerBindings, $context, true);
-            $lifecycleInvoker->invokePhase(ServerLifecyclePhase::WorkerStartFinalize, $context, true);
         });
 
         $server->on(SwooleEvent::WorkerExit->value, function (Server $server, int $workerId) use ($bootstrapState, $lifecycleInvoker, $drainReporter) {
@@ -349,7 +362,16 @@ class SwooleBootstrap
 
         $emitter = new SwooleResponseEmitter();
 
-        $server->on(SwooleEvent::Request->value, function (SwooleRequest $request, SwooleResponse $response) use ($emitter, $corsHandler, $healthHandler, $metricsHandler, $staticAssetHandler, $server, $hstsHeader) {
+        $server->on(SwooleEvent::Request->value, function (SwooleRequest $request, SwooleResponse $response) use ($emitter, $corsHandler, $healthHandler, $metricsHandler, $staticAssetHandler, $server, $hstsHeader, $bootGate) {
+            if (!$bootGate->wait(self::WORKER_BOOT_WAIT_SECONDS)) {
+                $response->status(HttpStatus::ServiceUnavailable->value);
+                $response->header('Retry-After', '1');
+                $response->header('Content-Type', 'text/plain');
+                $response->end('Service Unavailable');
+
+                return;
+            }
+
             $sent = false;
             $ensureResponseSent = function () use ($response, &$sent): void {
                 if ($sent) {
