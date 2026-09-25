@@ -77,6 +77,45 @@ final class AsyncJsonLoggerTest extends TestCase
     }
 
     /**
+     * One invalid UTF-8 byte (a Latin-1 name, a raw path) used to discard the
+     * whole entry; in the message it emptied even the fallback line.
+     */
+    #[Test]
+    public function invalid_utf8_in_message_or_context_is_substituted_not_dropped(): void
+    {
+        ProjectRoot::reset();
+        $relativePath = 'var/tmp/async-json-logger-utf8-' . bin2hex(random_bytes(6)) . '.log';
+        $absolutePath = ProjectRoot::get() . '/' . $relativePath;
+
+        putenv('LOG_FILE=' . $relativePath);
+        putenv('LOG_LEVEL=debug');
+
+        try {
+            $logger = new AsyncJsonLogger();
+            $this->injectEnvironment($logger);
+
+            $logger->error('Login failed', ['user_id' => 42, 'username' => "caf\xE9"]);
+            $logger->error("Bad path /tmp/\xFF", ['user_id' => 7]);
+            $logger->flush();
+
+            $lines = file($absolutePath, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+            self::assertIsArray($lines);
+            self::assertCount(2, $lines);
+
+            $first = json_decode($lines[0], true, 512, JSON_THROW_ON_ERROR);
+            self::assertSame('Login failed', $first['message']);
+            self::assertSame(42, $first['context']['user_id']);
+            self::assertSame("caf\u{FFFD}", $first['context']['username']);
+
+            $second = json_decode($lines[1], true, 512, JSON_THROW_ON_ERROR);
+            self::assertSame("Bad path /tmp/\u{FFFD}", $second['message']);
+            self::assertSame(7, $second['context']['user_id']);
+        } finally {
+            @unlink($absolutePath);
+        }
+    }
+
+    /**
      * REGRESSION. A worker that finds an ALREADY oversized log must rotate it, not
      * wait to write a megabyte of its own first.
      *
