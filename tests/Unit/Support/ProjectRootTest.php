@@ -59,7 +59,14 @@ final class ProjectRootTest extends TestCase
         $source = (new \ReflectionClass(ProjectRoot::class))->getFileName();
         self::assertIsString($source);
         @mkdir(dirname($file), 0o777, true);
-        copy($source, $file);
+        // The copy must not find a real project before the fallback under test
+        // runs: step 1 also tries a fixed /var/www/html, and inside the app and
+        // test containers that IS a project, so the resolution never reached
+        // the fallback there and these assertions failed on every CI box.
+        $code = (string) file_get_contents($source);
+        $isolated = str_replace("'/var/www/html'", var_export($this->base . '/no-such-host-root', true), $code, $replaced);
+        self::assertSame(1, $replaced, 'ProjectRoot.php no longer names /var/www/html; update this isolation');
+        file_put_contents($file, $isolated);
 
         $code = sprintf('require %s; echo \\Semitexa\\Core\\Support\\ProjectRoot::get();', var_export($file, true));
         $process = proc_open(
