@@ -1,0 +1,14 @@
+# Opt-in: every static that can hold objects or arrays must say how long it
+# lives in a Swoole worker (#[WorkerState(reason: ...)], PerRequestStateRegistry,
+# or CoroutineLocal). See StaticStateLifetimeRule.
+#
+# Kept out of phpstan-rules.neon until the framework's own packages carry the
+# declarations (94 findings across 15 packages on 2026-09-25; core is clean):
+# the shared list is also what workspace gates run over package sources.
+# Add it to a project with:
+#
+#   includes:
+#       - %currentWorkingDirectory%/vendor/semitexa/core/config/phpstan-state-lifetime.neon
+
+rules:
+    - Semitexa\Core\PHPStan\Rules\StaticStateLifetimeRule
