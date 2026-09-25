@@ -61,6 +61,16 @@ final class RedirectLocaleTest extends TestCase
     }
 
     #[Test]
+    public function a_prefixed_target_with_a_colon_in_its_path_is_not_prefixed_twice(): void
+    {
+        // parse_url() reads `events/10:00` as host and port and returns false, which left no
+        // first segment to recognise the locale by.
+        LocaleContextStore::setLocale('uk');
+
+        self::assertSame('/uk/events/10:00', $this->rewrite('/uk/events/10:00'));
+    }
+
+    #[Test]
     public function another_hosts_url_is_left_alone(): void
     {
         LocaleContextStore::setLocale('uk');

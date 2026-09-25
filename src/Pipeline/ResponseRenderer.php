@@ -446,7 +446,9 @@ final class ResponseRenderer
             return $url;
         }
 
-        $firstSegment = explode('/', ltrim(parse_url($url, PHP_URL_PATH) ?: '/', '/'), 2)[0];
+        // Cut at `?`/`#` rather than parse_url(), which gives up on a colon in
+        // the path (`/uk/events/10:00`) and so lost the locale segment.
+        $firstSegment = explode('/', ltrim(substr($url, 0, strcspn($url, '?#')), '/'), 2)[0];
         $supported = LocaleContextStore::getSupportedLocales();
 
         if ($supported !== [] && in_array($firstSegment, $supported, true)) {
