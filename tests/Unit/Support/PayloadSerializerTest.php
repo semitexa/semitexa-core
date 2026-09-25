@@ -94,6 +94,25 @@ final class PayloadSerializerTest extends TestCase
     }
 
     #[Test]
+    public function a_string_outside_the_date_wire_format_is_not_turned_into_a_date(): void
+    {
+        // '' used to become "now" and 'tomorrow' a real date: the date
+        // constructor accepts both. Only what normalize() writes is a date.
+        foreach (['', 'tomorrow', '+1 day', '2026-09-25'] as $value) {
+            try {
+                PayloadSerializer::hydrate(new SerializerTypedFixture(), ['dueAt' => $value]);
+                self::fail('restored a date from ' . var_export($value, true));
+            } catch (\InvalidArgumentException $e) {
+                self::assertStringContainsString('DATE_ATOM', $e->getMessage());
+            }
+        }
+
+        // A union with a string arm keeps a non-date string as a string.
+        $dto = PayloadSerializer::hydrate(new SerializerUnionFixture(), ['label' => 'tomorrow']);
+        self::assertSame('tomorrow', $dto->getLabel());
+    }
+
+    #[Test]
     public function a_union_typed_setter_gets_its_date_or_enum_back(): void
     {
         $dto = new SerializerUnionFixture();

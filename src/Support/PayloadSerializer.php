@@ -150,14 +150,37 @@ class PayloadSerializer
             return null;
         }
         $concrete = $class === \DateTimeInterface::class ? \DateTimeImmutable::class : $class;
-        if ($strict) {
-            return new $concrete($value);
-        }
-        try {
-            return new $concrete($value);
-        } catch (\Exception) {
+        // Only the wire format normalize() writes. The date constructor reads
+        // '' as now and 'tomorrow' or '+1 day' as real dates, so a stray string
+        // silently became a timestamp nobody sent.
+        if (!self::isWireDate($value)) {
+            if ($strict) {
+                throw new \InvalidArgumentException(sprintf(
+                    'Cannot restore %s from %s: dates are serialized as DATE_ATOM, with microseconds when present.',
+                    $class,
+                    var_export($value, true),
+                ));
+            }
+
             return null;
         }
+
+        return new $concrete($value);
+    }
+
+    /** Exactly the two shapes normalize() writes: DATE_ATOM, with or without microseconds. */
+    private static function isWireDate(string $value): bool
+    {
+        foreach (['Y-m-d\\TH:i:sP', 'Y-m-d\\TH:i:s.uP'] as $format) {
+            $parsed = \DateTimeImmutable::createFromFormat($format, $value);
+            $errors = \DateTimeImmutable::getLastErrors();
+            $clean = $errors === false || ($errors['warning_count'] === 0 && $errors['error_count'] === 0);
+            if ($parsed !== false && $clean) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static function normalize(mixed $value): mixed
