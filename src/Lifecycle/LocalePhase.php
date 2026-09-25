@@ -56,7 +56,10 @@ final class LocalePhase
             && $config->urlRedirectDefault
             && in_array($request->getMethod(), ['GET', 'HEAD'], true)
         ) {
-            $target = $resolution->strippedPath ?: '/';
+            // Collapsed to ONE leading slash: `/en//evil.example` strips to
+            // `//evil.example`, a protocol-relative Location on another host, and
+            // browsers read `\` as `/`, so `/en/\evil.example` is the same thing.
+            $target = '/' . ltrim($resolution->strippedPath ?? '', '/\\');
             $qs = $request->getQueryString();
             if ($qs !== '') {
                 $target .= '?' . $qs;
