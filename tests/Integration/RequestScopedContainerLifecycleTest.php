@@ -14,7 +14,12 @@ use Semitexa\Core\Lifecycle\PerRequestStateRegistry;
 use Semitexa\Core\Lifecycle\TestStateResetRegistry;
 use Semitexa\Core\Request;
 use Semitexa\Core\Session\SessionInterface;
-use Semitexa\Modules\AuthDemo\Application\Service\AuthDemoStubAuthHandler;
+use Semitexa\Core\Tests\Fixtures\AuthDemo\AuthDemoStubAuthHandler;
+use Semitexa\Core\Tests\Fixtures\AuthDemo\Payload\ProtectedPermissionPingPayload;
+use Semitexa\Core\Tests\Fixtures\AuthDemo\Payload\ProtectedPingPayload;
+use Semitexa\Core\Tests\Fixtures\AuthDemo\Payload\PublicPingPayload;
+use Semitexa\Core\Tests\Fixtures\AuthDemo\Payload\ServicePingPayload;
+use Semitexa\Core\Tests\Support\FixtureModules;
 
 /**
  * Lifecycle test for the request-scoped container.
@@ -32,10 +37,24 @@ use Semitexa\Modules\AuthDemo\Application\Service\AuthDemoStubAuthHandler;
  * RequestScopedContainer instance — so any leak is observable. These tests
  * pin the contract that Application::handleRequest's finally block wipes
  * the per-request cache before returning.
+ *
+ * The routes and the stub auth handler are core's own fixtures
+ * (tests/Fixtures/AuthDemo), so every response path here is really reached
+ * in any app, not only in the monorepo.
  */
 final class RequestScopedContainerLifecycleTest extends TestCase
 {
     private Application $app;
+
+    public static function setUpBeforeClass(): void
+    {
+        FixtureModules::install();
+    }
+
+    public static function tearDownAfterClass(): void
+    {
+        FixtureModules::uninstall();
+    }
 
     protected function setUp(): void
     {
@@ -60,8 +79,9 @@ final class RequestScopedContainerLifecycleTest extends TestCase
     #[Test]
     public function request_scoped_container_resets_after_2xx_request(): void
     {
-        $this->app->handleRequest($this->makeRequest('/playground'));
+        $response = $this->app->handleRequest($this->makeRequest(PublicPingPayload::PATH));
 
+        self::assertSame(200, $response->getStatusCode(), 'precondition: public route returns 200');
         $this->assertRequestScopedCacheEmpty();
     }
 
@@ -87,7 +107,7 @@ final class RequestScopedContainerLifecycleTest extends TestCase
     public function request_scoped_container_resets_after_401_authentication_failure(): void
     {
         // Protected route with NO auth → 401 from PreHydrationAuthGate.
-        $response = $this->app->handleRequest($this->makeRequest('/auth-demo/runtime/protected'));
+        $response = $this->app->handleRequest($this->makeRequest(ProtectedPingPayload::PATH));
 
         self::assertSame(401, $response->getStatusCode(), 'precondition: protected route returns 401 for guest');
         $this->assertRequestScopedCacheEmpty();
@@ -98,7 +118,7 @@ final class RequestScopedContainerLifecycleTest extends TestCase
     {
         // Authenticated user with no permission → 403 from AuthorizationListener.
         $response = $this->app->handleRequest($this->makeRequest(
-            '/auth-demo/runtime/protected-with-permission',
+            ProtectedPermissionPingPayload::PATH,
             [AuthDemoStubAuthHandler::HEADER => AuthDemoStubAuthHandler::USER_PREFIX . 'no-perms-user'],
         ));
 
@@ -114,8 +134,8 @@ final class RequestScopedContainerLifecycleTest extends TestCase
     public function two_sequential_requests_do_not_share_request_scoped_request_instance(): void
     {
         // Request A — runs the SessionPhase which sets Request:: into the cache.
-        $a = $this->makeRequest('/playground');
-        $this->app->handleRequest($a);
+        $a = $this->makeRequest(PublicPingPayload::PATH);
+        self::assertSame(200, $this->app->handleRequest($a)->getStatusCode(), 'precondition: request A ran');
 
         // After Application::handleRequest's reset, the cache is empty —
         // so peeking before the next request shows nothing.
@@ -125,8 +145,8 @@ final class RequestScopedContainerLifecycleTest extends TestCase
         );
 
         // Request B — get a different Request instance into the cache.
-        $b = $this->makeRequest('/playground');
-        $this->app->handleRequest($b);
+        $b = $this->makeRequest(PublicPingPayload::PATH);
+        self::assertSame(200, $this->app->handleRequest($b)->getStatusCode(), 'precondition: request B ran');
 
         // Container is empty again — proving the framework owns the lifecycle.
         self::assertFalse($this->app->requestScopedContainer->has(Request::class));
@@ -135,11 +155,12 @@ final class RequestScopedContainerLifecycleTest extends TestCase
     #[Test]
     public function authenticated_user_does_not_leak_into_a_later_anonymous_request(): void
     {
-        // Authenticated request as user A.
-        $this->app->handleRequest($this->makeRequest(
-            '/playground',
+        // Authenticated request as user A, on a route that only lets a user in.
+        $first = $this->app->handleRequest($this->makeRequest(
+            ProtectedPingPayload::PATH,
             [AuthDemoStubAuthHandler::HEADER => AuthDemoStubAuthHandler::USER_PREFIX . 'leak-test-user-A'],
         ));
+        self::assertSame(200, $first->getStatusCode(), 'precondition: user A was authenticated');
 
         // After reset, the per-request CACHE entries (Request, Session,
         // CookieJar) are gone. AuthContextInterface falls through to the
@@ -151,7 +172,7 @@ final class RequestScopedContainerLifecycleTest extends TestCase
 
         // Anonymous request — nobody set anything into the container; the
         // gate would reject the request, but the container starts clean.
-        $response = $this->app->handleRequest($this->makeRequest('/auth-demo/runtime/protected'));
+        $response = $this->app->handleRequest($this->makeRequest(ProtectedPingPayload::PATH));
 
         self::assertSame(401, $response->getStatusCode(), 'second request must be rejected as guest, not authenticated as user A');
     }
@@ -161,16 +182,16 @@ final class RequestScopedContainerLifecycleTest extends TestCase
     {
         // First: dispatch a service-token request to a service route.
         $first = $this->app->handleRequest($this->makeRequest(
-            '/playground',
+            ServicePingPayload::PATH,
             [AuthDemoStubAuthHandler::HEADER => AuthDemoStubAuthHandler::SERVICE_PREFIX . 'leak-test-service-A'],
         ));
-        self::assertNotSame(500, $first->getStatusCode(), 'precondition: first dispatch is controlled');
+        self::assertSame(200, $first->getStatusCode(), 'precondition: the service principal was authenticated');
 
         // Then: a protected route with NO auth header. If the service
         // principal had leaked, PreHydrationAuthGate would reject as
         // "service authentication when user is required" or worse,
         // accept it incorrectly. The clean state means a plain 401 guest.
-        $response = $this->app->handleRequest($this->makeRequest('/auth-demo/runtime/protected'));
+        $response = $this->app->handleRequest($this->makeRequest(ProtectedPingPayload::PATH));
 
         self::assertSame(401, $response->getStatusCode(), 'protected route must reject the second request as guest');
         $this->assertRequestScopedCacheEmpty();
@@ -185,10 +206,11 @@ final class RequestScopedContainerLifecycleTest extends TestCase
     {
         // Set state in both — request-scoped container via the request lifecycle,
         // PerRequestStateRegistry via a plain auth handler.
-        $this->app->handleRequest($this->makeRequest(
-            '/playground',
+        $response = $this->app->handleRequest($this->makeRequest(
+            ProtectedPingPayload::PATH,
             [AuthDemoStubAuthHandler::HEADER => AuthDemoStubAuthHandler::USER_PREFIX . 'coexist-test-user'],
         ));
+        self::assertSame(200, $response->getStatusCode(), 'precondition: the user was authenticated');
 
         // PerRequestStateRegistry cleanup and request-scoped container reset
         // are independent — both must run after a single dispatch.

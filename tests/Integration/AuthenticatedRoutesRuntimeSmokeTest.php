@@ -16,15 +16,22 @@ use Semitexa\Core\Request;
 use Semitexa\Core\Support\TenantModuleScopeResolver;
 use Semitexa\Core\Tenant\TenantContextStoreInterface;
 use Semitexa\Tenancy\Context\TenantContext;
-use Semitexa\Modules\AuthDemo\Application\Payload\Request\ProtectedPermissionPingPayload;
-use Semitexa\Modules\AuthDemo\Application\Service\AuthDemoCapabilityStore;
-use Semitexa\Modules\AuthDemo\Application\Service\AuthDemoPermissionStore;
-use Semitexa\Modules\AuthDemo\Application\Service\AuthDemoStubAuthHandler;
-use Semitexa\Modules\AuthDemo\Domain\Model\RuntimeCapability;
-use Semitexa\Modules\WebhookDemo\Application\Payload\Request\SignedCapabilityWebhookPayload;
-use Semitexa\Modules\WebhookDemo\Application\Service\WebhookDemoEventStore;
-use Semitexa\Modules\WebhookDemo\Application\Service\WebhookDemoServiceCapabilityStore;
-use Semitexa\Modules\WebhookDemo\Domain\Model\WebhookDemoServiceCapability;
+use Semitexa\Core\Tests\Fixtures\AuthDemo\AuthDemoCapabilityStore;
+use Semitexa\Core\Tests\Fixtures\AuthDemo\AuthDemoPermissionStore;
+use Semitexa\Core\Tests\Fixtures\AuthDemo\AuthDemoStubAuthHandler;
+use Semitexa\Core\Tests\Fixtures\AuthDemo\Payload\ProtectedCapabilityPingPayload;
+use Semitexa\Core\Tests\Fixtures\AuthDemo\Payload\ProtectedPermissionPingPayload;
+use Semitexa\Core\Tests\Fixtures\AuthDemo\Payload\ProtectedPingPayload;
+use Semitexa\Core\Tests\Fixtures\AuthDemo\Payload\PublicPingPayload;
+use Semitexa\Core\Tests\Fixtures\AuthDemo\Payload\ServicePingPayload;
+use Semitexa\Core\Tests\Fixtures\AuthDemo\RuntimeCapability;
+use Semitexa\Core\Tests\Fixtures\WebhookDemo\Payload\SignedCapabilityWebhookPayload;
+use Semitexa\Core\Tests\Fixtures\WebhookDemo\Payload\SignedWebhookPayload;
+use Semitexa\Core\Tests\Fixtures\WebhookDemo\WebhookDemoEventStore;
+use Semitexa\Core\Tests\Fixtures\WebhookDemo\WebhookDemoServiceCapability;
+use Semitexa\Core\Tests\Fixtures\WebhookDemo\WebhookDemoServiceCapabilityStore;
+use Semitexa\Core\Tests\Support\FixtureModules;
+use Semitexa\Webhooks\Auth\Attribute\AsWebhookReceiver;
 use Semitexa\Webhooks\Auth\Contract\WebhookReplayStoreInterface;
 
 /**
@@ -45,6 +52,10 @@ use Semitexa\Webhooks\Auth\Contract\WebhookReplayStoreInterface;
  *   404                     — fail unless RouteRegistry::find still matches the path
  *   500                     — fail unless the path is in NEEDS_FIXTURES
  * Boundary tests are dedicated; not part of the per-route loop.
+ *
+ * The routes the dedicated tests drive, the stub auth handler and the grant
+ * stores are core's own fixtures (tests/Fixtures), so the auth boundaries are
+ * exercised in any app, not only in the monorepo's demo modules.
  */
 final class AuthenticatedRoutesRuntimeSmokeTest extends TestCase
 {
@@ -129,18 +140,16 @@ final class AuthenticatedRoutesRuntimeSmokeTest extends TestCase
     ];
 
     /**
-     * Map of webhook receiver paths to a dedicated event id used by the
-     * test's HMAC-signing helper. The receiver's secretRef is read from
-     * env:WEBHOOK_DEMO_SECRET (set in setUp). For the signed-capability
-     * route, the test also grants the required service capability before
-     * dispatch so it can return 200.
+     * Webhook receiver paths — every route whose payload carries
+     * #[AsWebhookReceiver] — mapped to the env var its `env:` secretRef names.
+     * setUp points each at SECRET, so the HMAC-signing helper can sign for
+     * any receiver the app has, fixture or not. For the fixture's
+     * signed-capability receiver the test also grants the required service
+     * capability before dispatch so it can return 200.
      *
      * @var array<string,string>
      */
-    private const WEBHOOK_ROUTES = [
-        '/webhook-demo/signed'             => 'evt-auth-smoke-signed',
-        '/webhook-demo/signed-capability'  => 'evt-auth-smoke-signed-capability',
-    ];
+    private array $webhookRoutes = [];
 
     /**
      * Map of protected-route paths whose #[RequiresPermission] slug we know
@@ -153,7 +162,7 @@ final class AuthenticatedRoutesRuntimeSmokeTest extends TestCase
      * @var array<string,string>
      */
     private const KNOWN_PERMISSIONS = [
-        '/auth-demo/runtime/protected-with-permission'    => ProtectedPermissionPingPayload::PERMISSION_SLUG,
+        ProtectedPermissionPingPayload::PATH              => ProtectedPermissionPingPayload::PERMISSION_SLUG,
         '/playground/rbac/action/admin-tools'             => 'admin.tools',
         '/playground/rbac/action/users-manage'            => 'users.manage',
         '/playground/rbac/action/roles-manage'            => 'roles.manage',
@@ -170,11 +179,18 @@ final class AuthenticatedRoutesRuntimeSmokeTest extends TestCase
 
     private WebhookReplayStoreInterface $webhookReplayStore;
 
+    public static function setUpBeforeClass(): void
+    {
+        FixtureModules::install();
+    }
+
+    public static function tearDownAfterClass(): void
+    {
+        FixtureModules::uninstall();
+    }
+
     protected function setUp(): void
     {
-        $_ENV['WEBHOOK_DEMO_SECRET'] = self::SECRET;
-        putenv('WEBHOOK_DEMO_SECRET=' . self::SECRET);
-
         $this->app = new Application();
         $container = ContainerFactory::get();
         /** @var AttributeDiscovery $discovery */
@@ -183,6 +199,26 @@ final class AuthenticatedRoutesRuntimeSmokeTest extends TestCase
         $this->routes = $discovery->getRoutes();
         $this->webhookReplayStore = $container->get(WebhookReplayStoreInterface::class);
 
+        $this->webhookRoutes = [];
+        foreach ($this->routes as $route) {
+            $class = (string) ($route['class'] ?? '');
+            if ($class === '' || !class_exists($class)) {
+                continue;
+            }
+            $receiver = (new \ReflectionClass($class))->getAttributes(AsWebhookReceiver::class)[0] ?? null;
+            if ($receiver === null) {
+                continue;
+            }
+            $secretRef = $receiver->newInstance()->secretRef;
+            $env = str_starts_with($secretRef, 'env:') ? substr($secretRef, 4) : '';
+            $this->webhookRoutes[(string) $route['path']] = $env;
+            if ($env !== '') {
+                $_ENV[$env] = self::SECRET;
+                putenv($env . '=' . self::SECRET);
+            }
+        }
+        self::assertArrayHasKey(SignedWebhookPayload::PATH, $this->webhookRoutes, 'precondition: the fixture receivers are routed');
+
         $this->resetAllStores();
         $this->seedKnownGrants();
     }
@@ -190,8 +226,10 @@ final class AuthenticatedRoutesRuntimeSmokeTest extends TestCase
     protected function tearDown(): void
     {
         $this->resetAllStores();
-        unset($_ENV['WEBHOOK_DEMO_SECRET']);
-        putenv('WEBHOOK_DEMO_SECRET');
+        foreach (array_unique(array_filter($this->webhookRoutes)) as $env) {
+            unset($_ENV[$env]);
+            putenv($env);
+        }
     }
 
     private function resetAllStores(): void
@@ -314,7 +352,7 @@ final class AuthenticatedRoutesRuntimeSmokeTest extends TestCase
 
     private function isWebhookRoute(string $path): bool
     {
-        return isset(self::WEBHOOK_ROUTES[$path]);
+        return isset($this->webhookRoutes[$path]);
     }
 
     /**
@@ -510,7 +548,7 @@ final class AuthenticatedRoutesRuntimeSmokeTest extends TestCase
             // Webhook routes get a real HMAC-signed request; non-webhook
             // service routes get the AuthDemoStubAuthHandler service token.
             if ($this->isWebhookRoute($path)) {
-                $request = $this->signedWebhookRequest($path, self::WEBHOOK_ROUTES[$path] . '-' . uniqid());
+                $request = $this->signedWebhookRequest($path, 'evt-auth-smoke-' . uniqid());
                 $authStrategy = 'webhook-hmac';
             } else {
                 $request = $this->buildRequest($method, $smokePath, $this->serviceToken());
@@ -651,7 +689,7 @@ final class AuthenticatedRoutesRuntimeSmokeTest extends TestCase
         // verification. A generic AuthDemoStubAuthHandler service token
         // must NOT bypass WebhookAuthHandler.
         $failures = [];
-        foreach (array_keys(self::WEBHOOK_ROUTES) as $path) {
+        foreach (array_keys($this->webhookRoutes) as $path) {
             $method = 'POST';
             $out = $this->dispatch($this->buildRequest($method, $path, $this->serviceToken()));
             if ($out['status'] !== 401) {
@@ -671,10 +709,10 @@ final class AuthenticatedRoutesRuntimeSmokeTest extends TestCase
     #[Test]
     public function user_auth_does_not_leak_into_a_later_anonymous_protected_request(): void
     {
-        $first = $this->dispatch($this->buildRequest('GET', '/auth-demo/runtime/protected', $this->userToken()));
+        $first = $this->dispatch($this->buildRequest('GET', ProtectedPingPayload::PATH, $this->userToken()));
         self::assertSame(200, $first['status']);
 
-        $second = $this->dispatch($this->buildRequest('GET', '/auth-demo/runtime/protected', []));
+        $second = $this->dispatch($this->buildRequest('GET', ProtectedPingPayload::PATH, []));
         self::assertSame(401, $second['status'], 'user identity leaked into later anonymous request');
         self::assertNull(AuthContextStore::getUser());
     }
@@ -682,12 +720,12 @@ final class AuthenticatedRoutesRuntimeSmokeTest extends TestCase
     #[Test]
     public function service_auth_does_not_leak_into_a_later_protected_user_request(): void
     {
-        // Service authenticates against /auth-demo/runtime/service.
-        $first = $this->dispatch($this->buildRequest('GET', '/auth-demo/runtime/service', $this->serviceToken()));
+        // Service authenticates against the fixture service route.
+        $first = $this->dispatch($this->buildRequest('GET', ServicePingPayload::PATH, $this->serviceToken()));
         self::assertSame(200, $first['status']);
 
         // Anonymous protected request must 401.
-        $second = $this->dispatch($this->buildRequest('GET', '/auth-demo/runtime/protected', []));
+        $second = $this->dispatch($this->buildRequest('GET', ProtectedPingPayload::PATH, []));
         self::assertSame(401, $second['status']);
     }
 
@@ -695,18 +733,18 @@ final class AuthenticatedRoutesRuntimeSmokeTest extends TestCase
     public function webhook_signed_request_does_not_leak_service_principal_into_later_routes(): void
     {
         // Send a real signed request to the signed-webhook receiver.
-        $request = $this->signedWebhookRequest('/webhook-demo/signed', 'evt-leak-' . uniqid());
+        $request = $this->signedWebhookRequest(SignedWebhookPayload::PATH, 'evt-leak-' . uniqid());
         $first = $this->dispatch($request);
         self::assertSame(200, $first['status']);
 
         // Anonymous protected user route must still 401.
-        $second = $this->dispatch($this->buildRequest('GET', '/auth-demo/runtime/protected', []));
+        $second = $this->dispatch($this->buildRequest('GET', ProtectedPingPayload::PATH, []));
         self::assertSame(401, $second['status']);
 
         // Public route must work without auth, returning 200 (or its
         // controlled response). It MUST NOT carry a leftover service
         // principal forward.
-        $third = $this->dispatch($this->buildRequest('GET', '/auth-demo/runtime/public', []));
+        $third = $this->dispatch($this->buildRequest('GET', PublicPingPayload::PATH, []));
         self::assertSame(200, $third['status']);
         self::assertNull($third['body']['principal'] ?? null);
     }
@@ -721,7 +759,7 @@ final class AuthenticatedRoutesRuntimeSmokeTest extends TestCase
         // smoke-user already has the permission via seedKnownGrants().
         $out = $this->dispatch($this->buildRequest(
             'GET',
-            '/auth-demo/runtime/protected-with-permission',
+            ProtectedPermissionPingPayload::PATH,
             $this->userToken(),
         ));
         self::assertSame(200, $out['status']);
@@ -733,7 +771,7 @@ final class AuthenticatedRoutesRuntimeSmokeTest extends TestCase
         // smoke-user already has the capability via seedKnownGrants().
         $out = $this->dispatch($this->buildRequest(
             'GET',
-            '/auth-demo/runtime/protected-with-capability',
+            ProtectedCapabilityPingPayload::PATH,
             $this->userToken(),
         ));
         self::assertSame(200, $out['status']);
@@ -748,7 +786,7 @@ final class AuthenticatedRoutesRuntimeSmokeTest extends TestCase
 
         $out = $this->dispatch($this->buildRequest(
             'GET',
-            '/auth-demo/runtime/protected-with-permission',
+            ProtectedPermissionPingPayload::PATH,
             $this->userToken(),
         ));
         self::assertSame(403, $out['status'], 'missing grant must produce 403 not 500');

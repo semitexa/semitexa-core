@@ -7,7 +7,6 @@ namespace Semitexa\Core\Tests\Integration;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Semitexa\Auth\Context\AuthContextStore;
-use Semitexa\Modules\AuthDemo\Domain\Model\AuthDemoUser;
 use Semitexa\Authorization\Application\Service\PayloadAccessPolicyResolver;
 use Semitexa\Core\Application;
 use Semitexa\Core\Container\ContainerFactory;
@@ -16,10 +15,13 @@ use Semitexa\Core\Lifecycle\PerRequestStateRegistry;
 use Semitexa\Core\Lifecycle\TestStateResetRegistry;
 use Semitexa\Core\Pipeline\HandlerReflectionCache;
 use Semitexa\Core\Request;
-use Semitexa\Modules\AuthDemo\Application\Service\AuthDemoCapabilityStore;
-use Semitexa\Modules\AuthDemo\Application\Service\AuthDemoPermissionStore;
-use Semitexa\Modules\WebhookDemo\Application\Service\WebhookDemoEventStore;
-use Semitexa\Modules\WebhookDemo\Application\Service\WebhookDemoServiceCapabilityStore;
+use Semitexa\Core\Tests\Fixtures\AuthDemo\AuthDemoCapabilityStore;
+use Semitexa\Core\Tests\Fixtures\AuthDemo\AuthDemoPermissionStore;
+use Semitexa\Core\Tests\Fixtures\AuthDemo\AuthDemoUser;
+use Semitexa\Core\Tests\Fixtures\AuthDemo\Payload\ProtectedPingPayload;
+use Semitexa\Core\Tests\Fixtures\WebhookDemo\WebhookDemoEvent;
+use Semitexa\Core\Tests\Fixtures\WebhookDemo\WebhookDemoEventStore;
+use Semitexa\Core\Tests\Fixtures\WebhookDemo\WebhookDemoServiceCapabilityStore;
 use Semitexa\Rbac\Application\Service\RbacDecisionCache;
 use Semitexa\Webhooks\Auth\Contract\WebhookReplayStoreInterface;
 
@@ -32,6 +34,10 @@ use Semitexa\Webhooks\Auth\Contract\WebhookReplayStoreInterface;
  * test-only state (resettable on demand by tests, never by the framework).
  *
  * Companion document: packages/semitexa-docs/docs/en/runtime/state-lifecycle.md
+ *
+ * The demo stores are core's own fixtures (tests/Fixtures), shaped like the
+ * monorepo's AuthDemo/WebhookDemo stores: test-only state that registers with
+ * TestStateResetRegistry and never with PerRequestStateRegistry.
  *
  * The tests run in CLI mode — no Swoole coroutine — which is exactly when
  * the static-fallback paths would leak if the framework's per-request reset
@@ -65,7 +71,7 @@ final class StateLifecycleTest extends TestCase
         WebhookDemoServiceCapabilityStore::setForService('lifecycle-warm', []);
         WebhookDemoEventStore::clear();
         // Seed the event store so its registration callback is wired.
-        WebhookDemoEventStore::record(new \Semitexa\Modules\WebhookDemo\Domain\Model\WebhookDemoEvent('warm', 'warm.v1', []));
+        WebhookDemoEventStore::record(new WebhookDemoEvent('warm', 'warm.v1', []));
         $this->replay->markSeen('lifecycle-warm');
 
         // Now wipe everything to start from a deterministic empty state.
@@ -161,10 +167,10 @@ final class StateLifecycleTest extends TestCase
         $names = PerRequestStateRegistry::registeredNames();
 
         self::assertNotContains('in_memory_webhook_replay_store', $names);
-        self::assertNotContains('webhook_demo_event_store', $names);
-        self::assertNotContains('auth_demo_permission_store', $names);
-        self::assertNotContains('auth_demo_capability_store', $names);
-        self::assertNotContains('webhook_demo_service_capability_store', $names);
+        self::assertNotContains(WebhookDemoEventStore::REGISTRY_NAME, $names);
+        self::assertNotContains(AuthDemoPermissionStore::REGISTRY_NAME, $names);
+        self::assertNotContains(AuthDemoCapabilityStore::REGISTRY_NAME, $names);
+        self::assertNotContains(WebhookDemoServiceCapabilityStore::REGISTRY_NAME, $names);
     }
 
     #[Test]
@@ -222,7 +228,7 @@ final class StateLifecycleTest extends TestCase
     #[Test]
     public function webhook_demo_event_store_does_not_reset_after_application_handle_request(): void
     {
-        WebhookDemoEventStore::record(new \Semitexa\Modules\WebhookDemo\Domain\Model\WebhookDemoEvent('lifecycle-event', 'lifecycle.event.v1', []));
+        WebhookDemoEventStore::record(new WebhookDemoEvent('lifecycle-event', 'lifecycle.event.v1', []));
         $this->app->handleRequest($this->makeRequest('/__semitexa/error/404'));
 
         self::assertSame(1, WebhookDemoEventStore::count(), 'side-effect store must survive a request');
@@ -239,11 +245,11 @@ final class StateLifecycleTest extends TestCase
         // the same payload must be a hot lookup, not a re-discovery — and
         // certainly not affected by a request lifecycle in between.
         $resolver = new PayloadAccessPolicyResolver();
-        $first = $resolver->accessType(new \Semitexa\Modules\AuthDemo\Application\Payload\Request\ProtectedPingPayload());
+        $first = $resolver->accessType(new ProtectedPingPayload());
 
         $this->app->handleRequest($this->makeRequest('/__semitexa/error/404'));
 
-        $second = $resolver->accessType(new \Semitexa\Modules\AuthDemo\Application\Payload\Request\ProtectedPingPayload());
+        $second = $resolver->accessType(new ProtectedPingPayload());
         self::assertSame($first, $second, 'PayloadAccessPolicyResolver cache must not be cleared per request');
     }
 
@@ -272,10 +278,10 @@ final class StateLifecycleTest extends TestCase
     {
         $names = TestStateResetRegistry::registeredNames();
 
-        self::assertContains('auth_demo_permission_store', $names);
-        self::assertContains('auth_demo_capability_store', $names);
-        self::assertContains('webhook_demo_event_store', $names);
-        self::assertContains('webhook_demo_service_capability_store', $names);
+        self::assertContains(AuthDemoPermissionStore::REGISTRY_NAME, $names);
+        self::assertContains(AuthDemoCapabilityStore::REGISTRY_NAME, $names);
+        self::assertContains(WebhookDemoEventStore::REGISTRY_NAME, $names);
+        self::assertContains(WebhookDemoServiceCapabilityStore::REGISTRY_NAME, $names);
         self::assertContains('in_memory_webhook_replay_store', $names);
     }
 
@@ -285,7 +291,7 @@ final class StateLifecycleTest extends TestCase
         AuthDemoPermissionStore::setForUser('user-A', ['perm.x']);
         AuthDemoCapabilityStore::setForUser('user-A', []);
         WebhookDemoServiceCapabilityStore::setForService('service-A', []);
-        WebhookDemoEventStore::record(new \Semitexa\Modules\WebhookDemo\Domain\Model\WebhookDemoEvent('e', 'e.v1', []));
+        WebhookDemoEventStore::record(new WebhookDemoEvent('e', 'e.v1', []));
         $this->replay->markSeen('replay-A');
 
         TestStateResetRegistry::resetAllForTesting();
@@ -302,7 +308,7 @@ final class StateLifecycleTest extends TestCase
         // request lifecycle. If it did, replay protection and any
         // in-memory side-effect store would be wiped between requests.
         $this->replay->markSeen('test-registry-not-called-key');
-        WebhookDemoEventStore::record(new \Semitexa\Modules\WebhookDemo\Domain\Model\WebhookDemoEvent('untouched', 'untouched.v1', []));
+        WebhookDemoEventStore::record(new WebhookDemoEvent('untouched', 'untouched.v1', []));
 
         $this->app->handleRequest($this->makeRequest('/__semitexa/error/404'));
 
