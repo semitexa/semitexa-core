@@ -55,6 +55,11 @@ rules:
     - Semitexa\Core\PHPStan\Rules\DiscoveryCallSiteRule
     - Semitexa\Core\PHPStan\Rules\WorkerServiceConnectionHandleRule
 
+    # --- Lifetimes in a long-lived worker: every static says how long it lives.
+    # Reaches a consumer's own src/ only where it keeps static caches; measured
+    # 2026-09-25 on semitexa-ultimate's src: 0 findings.
+    - Semitexa\Core\PHPStan\Rules\StaticStateLifetimeRule
+
     # --- Persistence: mappers and the models they map.
     - Semitexa\Core\PHPStan\Rules\NoOpMapperRule
     - Semitexa\Core\PHPStan\Rules\MapperTypeConversionRule
