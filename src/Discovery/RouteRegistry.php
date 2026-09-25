@@ -69,6 +69,14 @@ class RouteRegistry
             $indexMethods = [...$methods, 'OPTIONS'];
         }
 
+        // HEAD is GET without the body (RFC 9110 §9.3.2), and a server that
+        // answers GET must answer HEAD. Like OPTIONS it goes into the lookup
+        // index only, so a HEAD resolves to the very route — handler, auth and
+        // headers — a GET would; the HTTP server drops the body on the way out.
+        if (in_array('GET', $methods, true) && !in_array('HEAD', $indexMethods, true)) {
+            $indexMethods[] = 'HEAD';
+        }
+
         if (str_contains($path, '{')) {
             /** @var array<string, mixed> $requirements */
             $requirements = is_array($route['requirements'] ?? null) ? $route['requirements'] : [];
