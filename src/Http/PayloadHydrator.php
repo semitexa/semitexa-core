@@ -39,6 +39,12 @@ class PayloadHydrator
         $reflection = new ReflectionClass($dto);
 
         foreach ($data as $key => $value) {
+            // A JSON list, `{"0":…}` or a form field named `0` arrives with an
+            // int key; no setter can be named after it, and passing it on
+            // would TypeError and fail the whole request.
+            if (!is_string($key)) {
+                continue;
+            }
             $setterName = self::keyToSetterName($key);
             if (!method_exists($dto, $setterName)) {
                 continue;

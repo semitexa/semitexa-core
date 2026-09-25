@@ -193,4 +193,25 @@ final class PayloadHydratorTest extends TestCase
         self::assertFalse($hydrated->isAdmin);
         self::assertFalse($hydrated::$flag);
     }
+
+    #[Test]
+    public function integer_keys_in_the_body_are_ignored_rather_than_failing_the_request(): void
+    {
+        // A JSON list, `{"0":1}` or a form field named `0` all decode to int
+        // keys; under strict_types they used to TypeError in keyToSetterName()
+        // and the whole request was rejected.
+        $hydrated = PayloadHydrator::hydrate($this->intDto(), $this->jsonRequest([1, 2, 3], strict: false));
+        self::assertSame(-1, $hydrated->n);
+
+        $form = new Request(
+            method: 'POST',
+            uri: '/demo',
+            headers: [],
+            query: [],
+            post: [0 => 'x', 'n' => '7'],
+            server: [],
+            cookies: [],
+        );
+        self::assertSame(7, PayloadHydrator::hydrate($this->intDto(), $form)->n);
+    }
 }
