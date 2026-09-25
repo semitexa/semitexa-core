@@ -54,7 +54,10 @@ final class ResponseRenderer
                         }
                     }
                 } elseif ($parsed !== false && !isset($parsed['host'])) {
-                    // Relative URL or scheme-relative — allowed
+                    // Relative URL — allowed, but only when a browser reads it as one too
+                    if (!self::isSameOriginReference($redirectUrl, $parsed)) {
+                        $redirectUrl = '/';
+                    }
                 } else {
                     // Unparseable or scheme without host (e.g. javascript:) — reject
                     $redirectUrl = '/';
@@ -64,10 +67,27 @@ final class ResponseRenderer
             }
             $redirectUrl = self::inCurrentLocale($redirectUrl);
             $statusCode = method_exists($resDto, 'getStatusCode') ? $resDto->getStatusCode() : HttpStatus::Found->value;
-            return HttpResponse::redirect(
+            $redirect = HttpResponse::redirect(
                 $redirectUrl,
                 is_int($statusCode) ? $statusCode : HttpStatus::Found->value,
             );
+
+            // The handler's own headers go out with the redirect as they would on
+            // any other response (Cache-Control: no-store on a login,
+            // Clear-Site-Data on a logout). Location is left out whatever its case:
+            // the validated target above is the only one allowed to reach the client.
+            $headers = method_exists($resDto, 'getHeaders') ? $resDto->getHeaders() : [];
+            if (is_array($headers)) {
+                foreach (array_keys($headers) as $name) {
+                    if (!is_string($name) || strtolower($name) === 'location') {
+                        unset($headers[$name]);
+                    }
+                }
+                /** @var array<string, string|array<int|string, string>> $headers */
+                $redirect = $redirect->withHeaders($headers);
+            }
+
+            return $redirect;
         }
 
         $handle = method_exists($resDto, 'getRenderHandle') ? $resDto->getRenderHandle() : null;
@@ -616,6 +636,31 @@ final class ResponseRenderer
             // asking for a page document either.
             return false;
         }
+    }
+
+    /**
+     * Does a browser resolve this host-less target on the current origin?
+     *
+     * parse_url() finding no host is not the browser finding none. Browsers
+     * (WHATWG URL) read `\` as `/` in http(s) URLs and drop TAB/CR/LF anywhere,
+     * so `/\evil.com`, `\\evil.com` and `/<TAB>/evil.com` all become
+     * `//evil.com`; leading spaces are trimmed the same way. A scheme with no
+     * authority is no safer: `https:/evil.com` from an http page skips the
+     * missing slashes and lands on evil.com, and `javascript:` has no host at all.
+     *
+     * @param array<string, int|string> $parsed
+     */
+    private static function isSameOriginReference(string $url, array $parsed): bool
+    {
+        if (isset($parsed['scheme'])) {
+            return false;
+        }
+
+        if (preg_match('/[\x00-\x1F\x7F\\\\]/', $url) === 1) {
+            return false;
+        }
+
+        return !str_starts_with($url, ' ') && !str_starts_with($url, '//');
     }
 
     /**
