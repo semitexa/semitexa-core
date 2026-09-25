@@ -397,7 +397,7 @@ class SwooleBootstrap
                 $semitexaRequest = Request::create($request);
                 $semitexaResponse = $app->handleRequest($semitexaRequest);
 
-                $emitter->emit($semitexaResponse, $response);
+                $emitter->emit($semitexaResponse, $response, !$semitexaRequest->isMethod('HEAD'));
                 $sent = true;
             } catch (\Throwable $e) {
                 try {
@@ -499,6 +499,12 @@ class SwooleBootstrap
             $headers,
             static fn (string $header, mixed $value): mixed => call_user_func([$response, 'header'], $header, $value),
         );
+
+        if ($request?->isMethod('HEAD') === true) {
+            $response->end();
+
+            return;
+        }
 
         $response->end($errorResponse->getContent());
     }
