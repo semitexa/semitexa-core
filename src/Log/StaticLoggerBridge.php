@@ -4,10 +4,12 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Log;
 
+use Semitexa\Core\Attribute\WorkerState;
 use Semitexa\Core\Container\ContainerFactory;
 
 final class StaticLoggerBridge
 {
+    #[WorkerState('The worker logger service, set at boot.')]
     private static ?LoggerInterface $logger = null;
 
     public static function set(LoggerInterface $logger): void

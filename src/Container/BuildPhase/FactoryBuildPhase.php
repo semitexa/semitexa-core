@@ -27,12 +27,30 @@ final class FactoryBuildPhase implements BuildPhaseInterface
             $context->instanceStore->prototypes,
             $context->instanceStore->factories,
             $context->resolveService ?? throw new \LogicException('FactoryBuildPhase needs BuildContext::$resolveService.'),
+            $context->instanceStore->genericFactories,
         );
 
         $graphBuilder->injectFactoriesIntoPrototypes(
             $context->instanceStore->prototypes,
             $context->injections,
             $context->instanceStore->factories,
+            $context->instanceStore->genericFactories,
+        );
+
+        // Worker-scoped services are never cloned, so this is their only
+        // chance to receive an #[InjectAsFactory] property.
+        $graphBuilder->injectFactoriesIntoPrototypes(
+            $context->instanceStore->readonly,
+            $context->injections,
+            $context->instanceStore->factories,
+            $context->instanceStore->genericFactories,
+        );
+
+        // Their initialize() was held back until now, so it never reads an
+        // #[InjectAsFactory] property before it is assigned.
+        $graphBuilder->initializeAfterFactoryInjection(
+            $context->instanceStore->readonly,
+            $context->injections,
         );
     }
 

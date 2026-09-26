@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Tests\Unit;
 
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Semitexa\Core\Http\Exception\TypeMismatchException;
@@ -12,14 +13,49 @@ use Semitexa\Core\Request;
 
 final class PayloadHydratorTest extends TestCase
 {
+    /**
+     * A number the cast would change is a malformed request in every mode:
+     * "hello" used to become 0 and a 20-digit id PHP_INT_MAX.
+     */
     #[Test]
-    public function non_strict_request_silently_casts_incompatible_value(): void
+    #[DataProvider('numbersTheCastWouldChange')]
+    public function non_strict_request_rejects_a_number_the_cast_would_change(mixed $value): void
     {
-        $dto = $this->intDto();
+        $this->expectException(TypeMismatchException::class);
 
-        $hydrated = PayloadHydrator::hydrate($dto, $this->jsonRequest(['n' => 'hello'], strict: false));
+        PayloadHydrator::hydrate($this->intDto(), $this->jsonRequest(['n' => $value], strict: false));
+    }
 
-        self::assertSame(0, $hydrated->n, 'Default (non-strict) hydration coerces "hello" to 0.');
+    /** @return iterable<string, array{mixed}> */
+    public static function numbersTheCastWouldChange(): iterable
+    {
+        yield 'word' => ['hello'];
+        yield 'overflow' => ['99999999999999999999'];
+        yield 'fraction' => ['1.5'];
+        yield 'array' => [[1]];
+    }
+
+    #[Test]
+    public function non_strict_request_still_casts_a_numeric_string(): void
+    {
+        $hydrated = PayloadHydrator::hydrate($this->intDto(), $this->jsonRequest(['n' => '42'], strict: false));
+
+        self::assertSame(42, $hydrated->n);
+    }
+
+    #[Test]
+    public function non_strict_union_skips_a_numeric_arm_the_value_does_not_fit(): void
+    {
+        $dto = new class {
+            public int|string $v = -1;
+
+            public function setV(int|string $value): void
+            {
+                $this->v = $value;
+            }
+        };
+
+        self::assertSame('hello', PayloadHydrator::hydrate($dto, $this->jsonRequest(['v' => 'hello'], strict: false))->v);
     }
 
     #[Test]
@@ -317,6 +353,32 @@ final class PayloadHydratorTest extends TestCase
         };
 
         self::assertSame('first', PayloadHydrator::hydrate($dto, $this->jsonRequest(['first', 'second'], strict: false))->zero);
+    }
+
+    #[Test]
+    public function a_float_that_overflows_to_infinity_is_rejected_in_both_modes(): void
+    {
+        $dto = new class {
+            public float $f = -1.0;
+
+            public function setF(float $value): void
+            {
+                $this->f = $value;
+            }
+        };
+
+        foreach ([false, true] as $strict) {
+            foreach (['1e309', '-1e309'] as $value) {
+                try {
+                    PayloadHydrator::hydrate(clone $dto, $this->jsonRequest(['f' => $value], strict: $strict));
+                    self::fail("float accepted {$value} (strict: " . var_export($strict, true) . ')');
+                } catch (TypeMismatchException) {
+                    self::addToAssertionCount(1);
+                }
+            }
+
+            self::assertSame(1.5e308, PayloadHydrator::hydrate(clone $dto, $this->jsonRequest(['f' => '1.5e308'], strict: $strict))->f);
+        }
     }
 
     #[Test]

@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Server\Lifecycle;
 
+use Semitexa\Core\Attribute\WorkerState;
+
 /**
  * Per-worker registry of background {@see \Swoole\Timer} ids, so they can be
  * cleared as one group when the worker stops ({@see ClearWorkerTimersListener}).
@@ -22,6 +24,7 @@ namespace Semitexa\Core\Server\Lifecycle;
 final class WorkerTimerRegistry
 {
     /** @var list<int> */
+    #[WorkerState('Timer ids armed by this worker; a worker timer has exactly worker lifetime.')]
     private static array $timerIds = [];
 
     public static function register(int $timerId): void

@@ -12,6 +12,7 @@ use Semitexa\Core\Discovery\HandlerRegistry;
 use Semitexa\Core\Discovery\RouteRegistry;
 use Semitexa\Core\Environment;
 use Semitexa\Core\Error\ErrorRouteDispatcher;
+use Semitexa\Core\Http\HttpStatus;
 use Semitexa\Core\Http\RouteType;
 use Semitexa\Core\Pipeline\RouteExecutor;
 use Semitexa\Core\Request;
@@ -82,6 +83,11 @@ final class RoutePhase
             }
         }
 
+        $allowed = $this->routeRegistry->allowedMethods($routingPath);
+        if ($allowed !== []) {
+            return $this->getMethodNotAllowedResponse($request, $allowed);
+        }
+
         return $this->getNotFoundResponse($request);
     }
 
@@ -149,6 +155,20 @@ final class RoutePhase
         }
 
         return \Semitexa\Core\Http\ErrorRenderer::render($e, $request, $this->environment->appDebug);
+    }
+
+    /**
+     * The path exists but not for this method: 405 with the Allow header
+     * (RFC 9110 §15.5.6), rather than a 404 that says the resource is not there.
+     *
+     * @param list<string> $allowed
+     */
+    private function getMethodNotAllowedResponse(Request $request, array $allowed): HttpResponse
+    {
+        $response = $this->errorRouteDispatcher->dispatchStatus(HttpStatus::MethodNotAllowed->value, $request)
+            ?? HttpResponse::text('Method Not Allowed', HttpStatus::MethodNotAllowed->value);
+
+        return $response->withHeaders(['Allow' => implode(', ', $allowed)]);
     }
 
     private function getNotFoundResponse(Request $request): HttpResponse

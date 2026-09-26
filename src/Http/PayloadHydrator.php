@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Http;
 
+use Semitexa\Core\Attribute\WorkerState;
 use Semitexa\Core\Http\Exception\TypeMismatchException;
 use Semitexa\Core\Http\UploadedFile;
 use Semitexa\Core\Request;
@@ -80,19 +81,28 @@ class PayloadHydrator
     }
 
     /**
-     * Extract path parameters from URL; keys are route param names (e.g. 'id').
+     * Per payload class: the compiled path regex and param name => group index,
+     * or false when the class declares no parameterised route. A pure function
+     * of the class's route attribute, which cannot change inside a worker, so
+     * it is built once instead of re-reading the attribute on every request.
      *
-     * @return array<string, string>
+     * @var array<class-string, array{0: string, 1: array<string, int>}|false>
      */
-    private static function extractPathParams(object $dto, Request $httpRequest): array
+    #[WorkerState('Path-parameter plan keyed by payload class; derived from code only.')]
+    private static array $pathParamPlans = [];
+
+    /**
+     * @param class-string $class
+     * @return array{0: string, 1: array<string, int>}|false
+     */
+    private static function buildPathParamPlan(string $class): array|false
     {
-        $reflection = new ReflectionClass($dto);
-        $requestAttrs = $reflection->getAttributes(
+        $requestAttrs = (new ReflectionClass($class))->getAttributes(
             \Semitexa\Core\Attribute\AbstractPayloadRoute::class,
             \ReflectionAttribute::IS_INSTANCEOF,
         );
         if (empty($requestAttrs)) {
-            return [];
+            return false;
         }
 
         try {
@@ -100,19 +110,19 @@ class PayloadHydrator
             $routePattern = $requestAttr->path ?? null;
             $requirements = $requestAttr->requirements ?? [];
         } catch (\Throwable) {
-            return [];
+            return false;
         }
 
         if (!is_string($routePattern) || $routePattern === '') {
-            return [];
+            return false;
         }
 
         if (strpos($routePattern, '{') === false) {
-            return [];
+            return false;
         }
 
         if (!preg_match_all('/\{([^}]+)\}/', $routePattern, $paramMatches)) {
-            return [];
+            return false;
         }
 
         $pathParams = [];
@@ -131,9 +141,25 @@ class PayloadHydrator
             $regexPattern
         );
         if (!is_string($regexPattern)) {
+            return false;
+        }
+
+        return ['#^' . $regexPattern . '$#', $pathParams];
+    }
+
+    /**
+     * Extract path parameters from URL; keys are route param names (e.g. 'id').
+     *
+     * @return array<string, string>
+     */
+    private static function extractPathParams(object $dto, Request $httpRequest): array
+    {
+        $class = $dto::class;
+        $plan = self::$pathParamPlans[$class] ??= self::buildPathParamPlan($class);
+        if ($plan === false) {
             return [];
         }
-        $regexPattern = '#^' . $regexPattern . '$#';
+        [$regexPattern, $pathParams] = $plan;
 
         if (!preg_match($regexPattern, $httpRequest->getPath(), $matches)) {
             return [];
@@ -254,13 +280,17 @@ class PayloadHydrator
                 if ($strict && self::isTypeCompatible($value, $t->getName())) {
                     return self::castToType($value, $t->getName(), $fieldName, $strict);
                 }
+                // Non-strict casts to the first arm, but never through a numeric
+                // arm the value does not fit: int|string must keep "hello".
+                if (!$strict && (!self::isNumericType($t->getName()) || self::isTypeCompatible($value, $t->getName()))) {
+                    return self::castToType($value, $t->getName(), $fieldName, $strict);
+                }
             }
             if ($firstNamed === null) {
                 return $value;
             }
-            // Non-strict keeps its historical behavior (cast to the first arm).
-            // Strict with no compatible arm falls through to castToType, which
-            // throws TypeMismatchException for a genuinely incompatible value.
+            // No arm took the value. castToType throws TypeMismatchException
+            // for it: in strict mode for any type, otherwise for a number.
             return self::castToType($value, $firstNamed, $fieldName, $strict);
         }
 
@@ -292,7 +322,10 @@ class PayloadHydrator
         }
 
         // Strict mode: reject values that cannot be meaningfully coerced to the target type.
-        if ($strict && !self::isTypeCompatible($value, $type)) {
+        // Numbers are checked in every mode: the cast would turn "abc" into 0 and
+        // clamp a 20-digit id to PHP_INT_MAX, handing the handler a value the
+        // client never sent. That is a malformed request, not a lenient one.
+        if (($strict || self::isNumericType($type)) && !self::isTypeCompatible($value, $type)) {
             throw new TypeMismatchException($fieldName, $type, $value);
         }
 
@@ -306,15 +339,24 @@ class PayloadHydrator
         };
     }
 
+    private static function isNumericType(string $type): bool
+    {
+        return $type === 'int' || $type === 'float';
+    }
+
     /**
      * Determines whether $value can be meaningfully coerced to $type without semantic loss.
-     * Used only in strict mode to guard against obviously wrong input types.
+     * Every mode checks int and float; strict mode checks every type.
      */
     private static function isTypeCompatible(mixed $value, string $type): bool
     {
         return match ($type) {
             'int'          => self::isExactInt($value),
-            'float'        => (is_int($value) || is_float($value) || is_string($value)) && is_numeric($value),
+            // is_numeric() accepts "1e309", whose cast is INF: a value the client
+            // never sent. Only a finite result is the number that was asked for.
+            'float'        => (is_int($value) || is_float($value) || is_string($value))
+                && is_numeric($value)
+                && is_finite((float) $value),
             'string'       => is_scalar($value),
             'bool'         => is_bool($value) || in_array($value, [0, 1, '0', '1', 'true', 'false', 'yes', 'no', 'on', 'off'], true),
             'array'        => is_array($value),

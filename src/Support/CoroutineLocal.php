@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Support;
 
+use Semitexa\Core\Attribute\WorkerState;
+
 /**
  * Per-coroutine key/value storage with CLI fallback.
  *
@@ -16,6 +18,7 @@ namespace Semitexa\Core\Support;
 final class CoroutineLocal
 {
     /** @var array<string, mixed> */
+    #[WorkerState('Fallback store used only outside a coroutine (CLI, tests); coroutines use their own context.')]
     private static array $cliStore = [];
 
     public static function get(string $key, mixed $default = null): mixed

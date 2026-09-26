@@ -160,6 +160,19 @@ final class PipelineExecutor
             return;
         }
 
+        // Not `instanceof PipelineListenerInterface`: listeners/handlers are
+        // dispatched duck-typed here (see ReRunUnitTest's fixtures), so the
+        // guard only needs to rule out the case neither contract covers —
+        // no public handle() method at all — before the call below. A
+        // private or protected handle() would otherwise surface as a bare
+        // Error that does not name the handler.
+        if (!method_exists($instance, 'handle') || !(new \ReflectionMethod($instance, 'handle'))->isPublic()) {
+            throw new PipelineException(sprintf(
+                'Listener/handler %s implements neither TypedHandlerInterface nor a public handle() method.',
+                $instance::class,
+            ));
+        }
+
         $instance->handle($context);
     }
 

@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Discovery;
 
+use Semitexa\Core\Attribute\WorkerState;
+
 final class BootDiagnostics
 {
     /** Do not emit any boot diagnostic output (strict-mode exceptions still throw). */
@@ -15,6 +17,7 @@ final class BootDiagnostics
     /** Legacy behavior — emit every warning on its own line. Controlled by -v / --verbose / BOOT_VERBOSE=1. */
     public const VERBOSITY_VERBOSE = 2;
 
+    #[WorkerState('Boot-time diagnostics collector, restarted by each container build.')]
     private static ?self $current = null;
 
     /** @var list<BootWarning> */

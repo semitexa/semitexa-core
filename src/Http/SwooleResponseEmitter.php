@@ -12,7 +12,13 @@ use Swoole\Http\Response as SwooleResponse;
  */
 final class SwooleResponseEmitter implements ResponseEmitterInterface
 {
-    public function emit(HttpResponse $response, mixed $transport): void
+    /**
+     * @param bool $withBody false for a HEAD request. Swoole writes whatever
+     *   end() is given even when the request was HEAD, so the body has to be
+     *   withheld here; a bare end() also leaves Content-Length out, which is
+     *   what RFC 9110 §8.6 asks for when the GET length is not being sent.
+     */
+    public function emit(HttpResponse $response, mixed $transport, bool $withBody = true): void
     {
         if (!$transport instanceof SwooleResponse) {
             throw new \InvalidArgumentException(
@@ -44,6 +50,12 @@ final class SwooleResponseEmitter implements ResponseEmitterInterface
             } else {
                 $transport->header($name, (string) $value);
             }
+        }
+
+        if (!$withBody) {
+            $transport->end();
+
+            return;
         }
 
         $transport->end($response->getContent());

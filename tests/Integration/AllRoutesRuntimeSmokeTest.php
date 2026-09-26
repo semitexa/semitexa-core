@@ -15,6 +15,7 @@ use Semitexa\Core\Container\ContainerFactory;
 use Semitexa\Core\Discovery\AttributeDiscovery;
 use Semitexa\Core\Discovery\ClassDiscovery;
 use Semitexa\Core\Request;
+use Semitexa\Core\Support\ProjectRoot;
 use Semitexa\Core\Support\TenantModuleScopeResolver;
 use Semitexa\Core\Tenant\TenantContextStoreInterface;
 use Semitexa\Tenancy\Context\TenantContext;
@@ -143,6 +144,15 @@ final class AllRoutesRuntimeSmokeTest extends TestCase
         // smoke loop would silently shrink too. The hard floor is conservative
         // (50) so legitimate route deletions don't false-positive on every
         // change; a regression that drops 30+ routes will trip this.
+        //
+        // The floor is a count of the monorepo app, whose demo and playground
+        // modules supply most of those routes. Any other app (an installed
+        // skeleton ships ~30) has no known inventory to hold it to, and the
+        // silent-drop case is still covered there by
+        // every_route_class_is_reflectable_and_lists_the_attribute.
+        if (!is_dir(ProjectRoot::get() . '/packages')) {
+            self::markTestSkipped('The minimum route count is the monorepo inventory; this app is not the monorepo (no packages/ directory).');
+        }
         self::assertGreaterThanOrEqual(
             50,
             count($this->routes),

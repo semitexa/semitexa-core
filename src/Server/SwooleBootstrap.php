@@ -36,6 +36,9 @@ class SwooleBootstrap
 {
     private const COROUTINE_CONTEXT_KEY = '__semitexa_swoole_ctx';
 
+    /** How long a request that reached a still-booting worker waits before a 503. */
+    private const WORKER_BOOT_WAIT_SECONDS = 30.0;
+
     /** Swoole Table: integer column size in bytes (32-bit). */
     private const TABLE_COLUMN_INT_SIZE = 4;
 
@@ -75,6 +78,22 @@ class SwooleBootstrap
         }
 
         return [$context[0], $context[1], $context[2]];
+    }
+
+    /**
+     * Whether the calling coroutine is the one onRequest runs a request in —
+     * which exits once the response is out. A child coroutine of a request,
+     * and a standing one (a NATS consume loop, a timer), answer false.
+     */
+    public static function isRequestCoroutine(): bool
+    {
+        if (!extension_loaded('swoole') || Coroutine::getCid() <= 0) {
+            return false;
+        }
+
+        $context = Coroutine::getContext();
+
+        return $context instanceof \ArrayObject && isset($context[self::COROUTINE_CONTEXT_KEY]);
     }
 
     public static function run(): void
@@ -138,29 +157,39 @@ class SwooleBootstrap
         );
         $lifecycleInvoker->invokePhase(ServerLifecyclePhase::PreStart, $bootstrapContext, false);
 
-        $server->on(SwooleEvent::WorkerStart->value, function (Server $server, int $workerId) use ($bootstrapState, $lifecycleInvoker, $crashLoopBreaker) {
-            self::syncInheritedComposerAutoloader();
-            Environment::syncEnvFromFiles();
-            $workerEnv = Environment::create();
-            $context = new ServerLifecycleContext(
-                server: $server,
-                workerId: $workerId,
-                environment: $workerEnv,
-                bootstrapState: $bootstrapState,
-                container: ContainerFactory::get(),
-                recentWorkerCrashes: $crashLoopBreaker->crashCount($workerId, time()),
-            );
-            $lifecycleInvoker->invokePhase(ServerLifecyclePhase::WorkerStartBeforeContainer, $context, false);
-            ContainerFactory::create();
-            // Switch to container-managed registry (uses container's ClassDiscovery,
-            // avoiding duplicate attribute scanning).
-            $containerRegistry = ContainerFactory::get()->get(ServerLifecycleRegistry::class);
-            if ($containerRegistry instanceof ServerLifecycleRegistry) {
-                $lifecycleInvoker->setRegistry($containerRegistry);
+        $bootGate = new WorkerBootGate();
+
+        $server->on(SwooleEvent::WorkerStart->value, function (Server $server, int $workerId) use ($bootstrapState, $lifecycleInvoker, $crashLoopBreaker, $bootGate) {
+            // This callback yields (hooked file I/O, DB warm-up) and Swoole
+            // dispatches requests to this worker while it does; they wait at
+            // the gate until every lifecycle phase below has run.
+            $bootGate->close();
+            try {
+                self::syncInheritedComposerAutoloader();
+                Environment::syncEnvFromFiles();
+                $workerEnv = Environment::create();
+                $context = new ServerLifecycleContext(
+                    server: $server,
+                    workerId: $workerId,
+                    environment: $workerEnv,
+                    bootstrapState: $bootstrapState,
+                    container: ContainerFactory::get(),
+                    recentWorkerCrashes: $crashLoopBreaker->crashCount($workerId, time()),
+                );
+                $lifecycleInvoker->invokePhase(ServerLifecyclePhase::WorkerStartBeforeContainer, $context, false);
+                ContainerFactory::create();
+                // Switch to container-managed registry (uses container's ClassDiscovery,
+                // avoiding duplicate attribute scanning).
+                $containerRegistry = ContainerFactory::get()->get(ServerLifecycleRegistry::class);
+                if ($containerRegistry instanceof ServerLifecycleRegistry) {
+                    $lifecycleInvoker->setRegistry($containerRegistry);
+                }
+                $lifecycleInvoker->invokePhase(ServerLifecyclePhase::WorkerStartAfterContainer, $context, true);
+                $lifecycleInvoker->invokePhase(ServerLifecyclePhase::WorkerStartAfterServerBindings, $context, true);
+                $lifecycleInvoker->invokePhase(ServerLifecyclePhase::WorkerStartFinalize, $context, true);
+            } finally {
+                $bootGate->open();
             }
-            $lifecycleInvoker->invokePhase(ServerLifecyclePhase::WorkerStartAfterContainer, $context, true);
-            $lifecycleInvoker->invokePhase(ServerLifecyclePhase::WorkerStartAfterServerBindings, $context, true);
-            $lifecycleInvoker->invokePhase(ServerLifecyclePhase::WorkerStartFinalize, $context, true);
         });
 
         $server->on(SwooleEvent::WorkerExit->value, function (Server $server, int $workerId) use ($bootstrapState, $lifecycleInvoker, $drainReporter) {
@@ -349,28 +378,37 @@ class SwooleBootstrap
 
         $emitter = new SwooleResponseEmitter();
 
-        $server->on(SwooleEvent::Request->value, function (SwooleRequest $request, SwooleResponse $response) use ($emitter, $corsHandler, $healthHandler, $metricsHandler, $staticAssetHandler, $server, $hstsHeader) {
+        $server->on(SwooleEvent::Request->value, function (SwooleRequest $request, SwooleResponse $response) use ($emitter, $corsHandler, $healthHandler, $metricsHandler, $staticAssetHandler, $server, $hstsHeader, $bootGate) {
+            // Before every early return below, because HSTS has to be on the
+            // boot-timeout 503, the static asset and the health check too — a browser that learns the
+            // policy from one response applies it to the host, and a path that
+            // omits it is a path that leaves the first plaintext request open.
+            if ($hstsHeader !== null) {
+                $response->header(StrictTransportSecurity::HEADER, $hstsHeader);
+            }
+
+            if (!$bootGate->wait(self::WORKER_BOOT_WAIT_SECONDS)) {
+                $response->status(HttpStatus::ServiceUnavailable->value);
+                $response->header('Retry-After', '1');
+                $response->header('Content-Type', 'text/plain');
+                RawResponse::end($request, $response, 'Service Unavailable');
+
+                return;
+            }
+
             $sent = false;
-            $ensureResponseSent = function () use ($response, &$sent): void {
+            $ensureResponseSent = function () use ($request, $response, &$sent): void {
                 if ($sent) {
                     return;
                 }
                 try {
                     @$response->status(HttpStatus::InternalServerError->value);
                     @$response->header('Content-Type', 'text/plain');
-                    @$response->end('Internal Server Error');
+                    @RawResponse::end($request, $response, 'Internal Server Error');
                     $sent = true;
                 } catch (\Throwable) {
                 }
             };
-
-            // Before every early return below, because HSTS has to be on the
-            // static asset and the health check too — a browser that learns the
-            // policy from one response applies it to the host, and a path that
-            // omits it is a path that leaves the first plaintext request open.
-            if ($hstsHeader !== null) {
-                $response->header(StrictTransportSecurity::HEADER, $hstsHeader);
-            }
 
             if ($healthHandler->handle($request, $response)) {
                 return;
@@ -397,7 +435,7 @@ class SwooleBootstrap
                 $semitexaRequest = Request::create($request);
                 $semitexaResponse = $app->handleRequest($semitexaRequest);
 
-                $emitter->emit($semitexaResponse, $response);
+                $emitter->emit($semitexaResponse, $response, !$semitexaRequest->isMethod('HEAD'));
                 $sent = true;
             } catch (\Throwable $e) {
                 try {
@@ -499,6 +537,12 @@ class SwooleBootstrap
             $headers,
             static fn (string $header, mixed $value): mixed => call_user_func([$response, 'header'], $header, $value),
         );
+
+        if ($request?->isMethod('HEAD') === true) {
+            $response->end();
+
+            return;
+        }
 
         $response->end($errorResponse->getContent());
     }

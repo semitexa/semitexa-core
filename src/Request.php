@@ -263,6 +263,9 @@ readonly class Request
     /**
      * Whether the peer that handed us this request may speak for the client.
      *
+     * Public so any header that only a trusted front proxy may set (a tenant
+     * id, say) is gated by the same rule as X-Forwarded-Proto.
+     *
      * Loopback is always trusted — a proxy on the same host. Anything else is
      * trusted only when the operator lists it in TRUSTED_PROXIES (comma-
      * separated IPs and/or CIDR blocks, e.g. `172.18.0.0/16, 10.0.0.5`): in
@@ -274,7 +277,7 @@ readonly class Request
      * loopback-only: trusting private ranges implicitly would let any
      * container on the bridge spoof the scheme.
      */
-    private function isTrustedForwardedRequest(): bool
+    public function isTrustedForwardedRequest(): bool
     {
         $remoteAddr = strtolower(trim($this->getServer('remote_addr')));
 

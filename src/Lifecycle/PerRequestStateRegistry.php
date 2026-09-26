@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Lifecycle;
 
+use Semitexa\Core\Attribute\WorkerState;
+
 /**
  * Worker-scoped registry of per-request runtime state resetters.
  *
@@ -35,6 +37,7 @@ namespace Semitexa\Core\Lifecycle;
 final class PerRequestStateRegistry
 {
     /** @var array<string, callable(): void> name → reset callback */
+    #[WorkerState('Reset callbacks registered once per worker; the state they clear is per request.')]
     private static array $resetters = [];
 
     /**

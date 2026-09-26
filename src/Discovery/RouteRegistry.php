@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Discovery;
 
+use Semitexa\Core\Attribute\TransportType;
 use Semitexa\Core\Support\TenantModuleScopeResolver;
 
 /**
@@ -25,6 +26,13 @@ class RouteRegistry
 
     /** @var list<array{route: array<string, mixed>, regex: string, methods: list<string>}> Pre-compiled pattern routes */
     private array $patternIndex = [];
+
+    /**
+     * Exact routes by path with the methods they answer, for allowedMethods().
+     *
+     * @var array<string, list<array{route: array<string, mixed>, methods: list<string>}>>
+     */
+    private array $exactByPath = [];
 
     /** @var array<string, list<array<string, mixed>>> Named route index: "name" => [route, ...] */
     private array $namedIndex = [];
@@ -69,6 +77,22 @@ class RouteRegistry
             $indexMethods = [...$methods, 'OPTIONS'];
         }
 
+        // HEAD is GET without the body (RFC 9110 §9.3.2), and a server that
+        // answers GET must answer HEAD. Like OPTIONS it goes into the lookup
+        // index only, so a HEAD resolves to the very route — handler, auth and
+        // headers — a GET would; the HTTP server drops the body on the way out.
+        //
+        // Not for SSE/stream routes: their handlers take the raw Swoole
+        // response and write status, headers and chunks themselves, past the
+        // emitter that withholds the body — a HEAD would open a live stream
+        // and send a body a HEAD response must not have. They keep answering
+        // HEAD with 404/405, as before.
+        $transport = is_string($route['transport'] ?? null) ? $route['transport'] : '';
+        $streams = $transport === TransportType::Sse->value || $transport === TransportType::Stream->value;
+        if (!$streams && in_array('GET', $methods, true) && !in_array('HEAD', $indexMethods, true)) {
+            $indexMethods[] = 'HEAD';
+        }
+
         if (str_contains($path, '{')) {
             /** @var array<string, mixed> $requirements */
             $requirements = is_array($route['requirements'] ?? null) ? $route['requirements'] : [];
@@ -79,6 +103,7 @@ class RouteRegistry
                 'methods' => $indexMethods,
             ];
         } else {
+            $this->exactByPath[$path === '' ? '/' : $path][] = ['route' => $route, 'methods' => $indexMethods];
             foreach ($indexMethods as $method) {
                 $key = $method . ':' . ($path === '' ? '/' : $path);
                 $this->exactIndex[$key][] = $route;
@@ -121,9 +146,81 @@ class RouteRegistry
             return null;
         }
 
+        // A route that declares HEAD itself wins over a GET route that only
+        // answers HEAD through the synthesized index entry, whichever was
+        // registered first. Partitioned per tier, so an exact match still
+        // precedes a pattern match.
+        if ($method === 'HEAD') {
+            $exactCount = isset($this->exactIndex[$key]) ? count($this->exactIndex[$key]) : 0;
+            $matches = [
+                ...self::declaringFirst(array_slice($matches, 0, $exactCount), 'HEAD'),
+                ...self::declaringFirst(array_slice($matches, $exactCount), 'HEAD'),
+            ];
+        }
+
         $selected = TenantModuleScopeResolver::selectRoutesForTenant($matches, $this->currentTenantContext());
         $selectedRoute = $selected[0] ?? null;
         return is_array($selectedRoute) ? $selectedRoute : null;
+    }
+
+    /**
+     * The methods some route answers on this path — non-empty when find()
+     * missed only because of the method, which is a 405 with this list as
+     * Allow, not a 404 (RFC 9110 §15.5.6). Honours tenant module scope the
+     * way find() does, so a route hidden from this tenant stays a 404.
+     *
+     * @return list<string>
+     */
+    public function allowedMethods(string $path): array
+    {
+        if ($path === '') {
+            $path = '/';
+        }
+
+        $candidates = $this->exactByPath[$path] ?? [];
+        foreach ($this->patternIndex as $compiled) {
+            if (preg_match($compiled['regex'], $path)) {
+                $candidates[] = ['route' => $compiled['route'], 'methods' => $compiled['methods']];
+            }
+        }
+
+        $context = $this->currentTenantContext();
+        $methods = [];
+        foreach ($candidates as $candidate) {
+            if (TenantModuleScopeResolver::selectRoutesForTenant([$candidate['route']], $context) === []) {
+                continue;
+            }
+            foreach ($candidate['methods'] as $method) {
+                $methods[$method] = true;
+            }
+        }
+
+        $methods = array_keys($methods);
+        sort($methods);
+
+        return $methods;
+    }
+
+    /**
+     * Stable partition: routes that declare $method first, the rest after.
+     *
+     * @param list<array<string, mixed>> $routes
+     * @return list<array<string, mixed>>
+     */
+    private static function declaringFirst(array $routes, string $method): array
+    {
+        $declaring = [];
+        $others = [];
+        foreach ($routes as $route) {
+            $methods = is_array($route['methods'] ?? null) ? $route['methods'] : [$route['method'] ?? 'GET'];
+            if (in_array($method, $methods, true)) {
+                $declaring[] = $route;
+            } else {
+                $others[] = $route;
+            }
+        }
+
+        return [...$declaring, ...$others];
     }
 
     /**
@@ -252,6 +349,7 @@ class RouteRegistry
         $this->exactIndex = [];
         $this->patternIndex = [];
         $this->namedIndex = [];
+        $this->exactByPath = [];
     }
 
     public function setTenantContextProvider(\Closure $provider): void

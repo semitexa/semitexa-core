@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Config;
 
+use Semitexa\Core\Attribute\WorkerState;
 use Semitexa\Core\Support\ProjectRoot;
 
 /**
@@ -26,6 +27,7 @@ use Semitexa\Core\Support\ProjectRoot;
 final class RegistryConfig
 {
     /** @var array<string, mixed>|null */
+    #[WorkerState('composer.json extra, read by registry:sync CLI commands; never request data.')]
     private static ?array $extra = null;
 
     /**

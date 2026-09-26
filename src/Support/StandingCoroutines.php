@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Support;
 
+use Semitexa\Core\Attribute\WorkerState;
 use Semitexa\Core\Support\Row;
 /**
  * Coroutines that are SUPPOSED to sit parked for the life of the worker, and
@@ -45,6 +46,7 @@ final class StandingCoroutines
     private const MAX_LABEL = 60;
 
     /** @var array<int, array{label: string, reason: string, since: float}> */
+    #[WorkerState('Worker-wide register of long-running coroutines, read by another coroutine; pruned as they end.')]
     private static array $standing = [];
 
     /**

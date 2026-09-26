@@ -4,12 +4,14 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Auth;
 
+use Semitexa\Core\Attribute\WorkerState;
 use Semitexa\Core\Support\CoroutineLocal;
 
 final class GuestAuthContext implements AuthContextInterface
 {
     private const LAST_RESULT_KEY = 'semitexa.core.auth.guest.last_result';
 
+    #[WorkerState('Stateless singleton; per-request results live in CoroutineLocal.')]
     private static ?self $instance = null;
 
     private function __construct()

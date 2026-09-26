@@ -8,8 +8,9 @@ use Semitexa\Core\Contract\ContractFactoryInterface;
 
 /**
  * Generic factory for a contract: getDefault(), get(enum $key), keys().
- * Used instead of generated per-contract factory classes. The container binds
- * each Factory* interface to an instance of this class configured for that contract.
+ * The container builds one per factory contract; the generated per-contract
+ * class (App\Registry\Contracts\*Factory) wraps it to implement the contract's
+ * Factory* interface, whose get() takes the concrete enum.
  *
  * An entry is either a shared (worker-scoped) implementation or a \Closure that
  * resolves an execution-scoped one per call; a contract implementation can

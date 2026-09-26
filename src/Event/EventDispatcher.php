@@ -11,6 +11,7 @@ use Semitexa\Core\Container\ContainerFactory;
 use Semitexa\Core\Log\StaticLoggerBridge;
 use Semitexa\Core\Queue\QueueConfig;
 use Semitexa\Core\Queue\QueueTransportRegistry;
+use Semitexa\Core\Server\SwooleBootstrap;
 use Semitexa\Core\Support\PayloadSerializer;
 
 /**
@@ -33,6 +34,9 @@ final class EventDispatcher implements EventDispatcherInterface
      * @var list<callable(object): void>
      */
     private array $postDispatchHooks = [];
+
+    /** Coroutine-context key of the FIFO queue drained by the one deferred callback. */
+    private const DEFERRED_LISTENERS_KEY = 'semitexa.event.deferredListeners';
     /**
      * Create an event instance. Use this instead of "new Event()" so the framework
      * can apply initialization, validation, or optimizations now or later.
@@ -91,24 +95,29 @@ final class EventDispatcher implements EventDispatcherInterface
         $tracer = $this->resolveTracer();
         $tracer?->mark('event.dispatch', ['event' => $eventClass, 'listeners' => count($listeners)]);
 
-        foreach ($listeners as $meta) {
-            $execution = EventExecution::fromAttributeValue((string) ($meta['execution'] ?? EventExecution::Sync->value));
-            match ($execution) {
-                EventExecution::Sync => $this->runListenerSync($meta, $event, $tracer),
-                EventExecution::Async => $this->runListenerDefer($meta, $event),
-                EventExecution::Queued => $this->enqueueListener($meta, $event, $tracer),
-            };
-        }
-
-        foreach ($this->postDispatchHooks as $hook) {
-            try {
-                $hook($event);
-            } catch (\Throwable $e) {
-                StaticLoggerBridge::error('core', 'Post-dispatch hook failed', [
-                    'event' => $eventClass,
-                    'exception' => $e::class,
-                    'message' => $e->getMessage(),
-                ]);
+        try {
+            foreach ($listeners as $meta) {
+                $execution = EventExecution::fromAttributeValue((string) ($meta['execution'] ?? EventExecution::Sync->value));
+                match ($execution) {
+                    EventExecution::Sync => $this->runListenerSync($meta, $event, $tracer),
+                    EventExecution::Async => $this->runListenerDefer($meta, $event),
+                    EventExecution::Queued => $this->enqueueListener($meta, $event, $tracer),
+                };
+            }
+        } finally {
+            // The event happened whether or not a listener failed: hooks (e.g.
+            // the ledger) must still see it. The listener's exception keeps
+            // propagating — sync listeners are part of the caller's transaction.
+            foreach ($this->postDispatchHooks as $hook) {
+                try {
+                    $hook($event);
+                } catch (\Throwable $e) {
+                    StaticLoggerBridge::error('core', 'Post-dispatch hook failed', [
+                        'event' => $eventClass,
+                        'exception' => $e::class,
+                        'message' => $e->getMessage(),
+                    ]);
+                }
             }
         }
     }
@@ -140,6 +149,20 @@ final class EventDispatcher implements EventDispatcherInterface
 
     private function runListenerSync(array $meta, object $event, ?\Semitexa\Core\Pipeline\RequestTracerInterface $tracer = null): void
     {
+        $listener = $this->resolveListener($meta);
+
+        // A span, not a mark: which listener a request's milliseconds went to
+        // is exactly the question a slow-event hunt opens the trace to answer.
+        $tracer?->begin('event.listener', ['listener' => $meta['class'], 'method' => 'handle', 'event' => get_class($event)]);
+        try {
+            $listener->handle($event);
+        } finally {
+            $tracer?->end('event.listener');
+        }
+    }
+
+    private function resolveListener(array $meta): object
+    {
         /** @var \Semitexa\Core\Container\SemitexaContainer $container */
         $container = ContainerFactory::get();
 
@@ -156,38 +179,71 @@ final class EventDispatcher implements EventDispatcherInterface
             ));
         }
 
-        // A span, not a mark: which listener a request's milliseconds went to
-        // is exactly the question a slow-event hunt opens the trace to answer.
-        // Deferred runs re-resolve nothing: no tracer is handed in, and by then
-        // the buffer is closed anyway, so bracketing would record into nothing.
-        $tracer?->begin('event.listener', ['listener' => $meta['class'], 'method' => 'handle', 'event' => get_class($event)]);
-        try {
-            $listener->handle($event);
-        } finally {
-            $tracer?->end('event.listener');
-        }
+        return $listener;
     }
 
-    /** Run listener after response is sent (Swoole defer). Falls back to sync if Swoole not available. */
+    /** Run listener after the current request coroutine finishes. Falls back to sync anywhere else. */
     private function runListenerDefer(array $meta, object $event): void
     {
-        // In CLI (queue worker, console command, PHPUnit) there is no Swoole
-        // event loop driving deferred callbacks — and queueing callbacks via
-        // Swoole\Event::defer leaves the reactor "dirty", which triggers the
-        // `swoole_event_rshutdown(): Event::wait() in shutdown function is
-        // deprecated` notice at PHP shutdown. Run sync in CLI to keep the
-        // reactor untouched.
-        $useDefer = PHP_SAPI !== 'cli'
-            && extension_loaded('swoole')
-            && class_exists(\Swoole\Event::class)
-            && method_exists(\Swoole\Event::class, 'defer');
-
-        if ($useDefer) {
-            \Swoole\Event::defer(function () use ($meta, $event): void {
-                $this->runListenerSync($meta, $event);
-            });
-        } else {
+        // Decided on "inside a request coroutine", not on SAPI: a Swoole HTTP
+        // server always runs under the CLI SAPI. Nor merely on "inside a
+        // coroutine": Coroutine::defer fires when THAT coroutine exits, and a
+        // standing one (the ledger's NATS command loop, a consumer) never
+        // does — its listeners would never run and every dispatch would pin
+        // one more closure for the life of the worker. Outside a request
+        // coroutine (those loops, a child go(), queue worker, console,
+        // PHPUnit) run inline, as before, and leave the reactor untouched.
+        if (!SwooleBootstrap::isRequestCoroutine()) {
             $this->runListenerSync($meta, $event);
+            return;
+        }
+
+        // Resolved NOW, while the ExecutionContext is live: Coroutine::defer
+        // fires at coroutine exit, after the response is emitted AND after
+        // Application has reset request-scoped state, so an #[ExecutionScoped]
+        // listener's #[InjectAsMutable] deps must be bound before that.
+        $listener = $this->resolveListener($meta);
+        $listenerClass = (string) $meta['class'];
+
+        // Coroutine::defer runs its callbacks LIFO, which would hand an
+        // order-dependent listener an update before its creation event. So
+        // listeners queue in scheduling order on the coroutine's context and
+        // ONE deferred callback drains that queue FIFO — including listeners
+        // scheduled while it drains.
+        $context = \Swoole\Coroutine::getContext();
+        if (!$context instanceof \ArrayObject) {
+            $this->runListenerSync($meta, $event);
+            return;
+        }
+        $queue = $context[self::DEFERRED_LISTENERS_KEY] ?? null;
+        if ($queue instanceof \ArrayObject) {
+            $queue[] = [$listener, $event, $listenerClass];
+            return;
+        }
+        $queue = new \ArrayObject([[$listener, $event, $listenerClass]]);
+        $context[self::DEFERRED_LISTENERS_KEY] = $queue;
+
+        \Swoole\Coroutine::defer(static function () use ($queue): void {
+            for ($i = 0; $i < count($queue); $i++) {
+                [$listener, $event, $listenerClass] = $queue[$i];
+                self::runDeferredListener($listener, $event, $listenerClass);
+            }
+        });
+    }
+
+    private static function runDeferredListener(object $listener, object $event, string $listenerClass): void
+    {
+        // Nothing above a deferred callback can catch: an escaping
+        // throwable would be fatal to the worker, not a 500.
+        try {
+            $listener->handle($event);
+        } catch (\Throwable $e) {
+            StaticLoggerBridge::error('core', 'Async event listener failed', [
+                'event' => $event::class,
+                'listener' => $listenerClass,
+                'exception' => $e::class,
+                'message' => $e->getMessage(),
+            ]);
         }
     }
 

@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Lifecycle;
 
+use Semitexa\Core\Attribute\WorkerState;
+
 /**
  * "This process is re-running something for inspection — nothing may leave it."
  *
@@ -46,6 +48,7 @@ final class SandboxGuard
     private static string $reason = '';
 
     /** @var list<array{port: string, detail: array<string, mixed>, at: string}> */
+    #[WorkerState('Process-global replay sandbox ledger; a replay owns its process.')]
     private static array $withheld = [];
 
     /**
