@@ -47,7 +47,7 @@ class HealthCheckHandler
 
         $response->status(HttpStatus::Ok->value);
         $response->header('Content-Type', 'application/json');
-        $response->end(json_encode($payload, JSON_THROW_ON_ERROR));
+        RawResponse::end($request, $response, json_encode($payload, JSON_THROW_ON_ERROR));
         return true;
     }
 }

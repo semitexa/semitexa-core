@@ -39,7 +39,7 @@ final class MetricsHandler
         if (!$this->isAuthorized($request)) {
             $response->status(HttpStatus::Forbidden->value);
             $response->header('Content-Type', 'application/json');
-            $response->end('{}');
+            RawResponse::end($request, $response, '{}');
 
             return true;
         }
@@ -60,10 +60,10 @@ final class MetricsHandler
         try {
             $payload = json_encode($stats, JSON_THROW_ON_ERROR | JSON_PRETTY_PRINT);
             $response->status(HttpStatus::Ok->value);
-            $response->end($payload);
+            RawResponse::end($request, $response, $payload);
         } catch (JsonException) {
             $response->status(HttpStatus::InternalServerError->value);
-            $response->end('{}');
+            RawResponse::end($request, $response, '{}');
         }
 
         return true;

@@ -383,20 +383,20 @@ class SwooleBootstrap
                 $response->status(HttpStatus::ServiceUnavailable->value);
                 $response->header('Retry-After', '1');
                 $response->header('Content-Type', 'text/plain');
-                $response->end('Service Unavailable');
+                RawResponse::end($request, $response, 'Service Unavailable');
 
                 return;
             }
 
             $sent = false;
-            $ensureResponseSent = function () use ($response, &$sent): void {
+            $ensureResponseSent = function () use ($request, $response, &$sent): void {
                 if ($sent) {
                     return;
                 }
                 try {
                     @$response->status(HttpStatus::InternalServerError->value);
                     @$response->header('Content-Type', 'text/plain');
-                    @$response->end('Internal Server Error');
+                    @RawResponse::end($request, $response, 'Internal Server Error');
                     $sent = true;
                 } catch (\Throwable) {
                 }
