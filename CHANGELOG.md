@@ -5,6 +5,36 @@ Changes to `semitexa/core` that a consuming application can notice. Sections are
 next release tag. This file is machine-read by `update:changelog` and the OS
 "What's new" surface — keep entries short and operator-facing.
 
+## Unreleased
+
+### Added
+- **405 Method Not Allowed.** A path that exists for other methods now answers
+  405 with an `Allow` header instead of 404 (`POST /` on a GET-only page).
+- **HEAD on every GET route**, without a body — including `/health`, `/metrics`,
+  the boot-gate 503 and the fallback 500. SSE and stream routes are excluded.
+- `Request::isTrustedForwardedRequest()` is public, so packages can gate a
+  proxy-set header on the same loopback / `TRUSTED_PROXIES` rule as
+  `X-Forwarded-Proto`.
+- `#[InjectAsFactory]` accepts the generated `Factory*` type or `of: Contract::class`.
+- `#[WorkerState]` and an opt-in PHPStan rule (`config/phpstan-state-lifetime.neon`)
+  requiring every static to declare that it outlives a request.
+
+### Changed
+- **Numeric payload fields reject values the cast would change.** `"abc"`,
+  `"1.5"` or a 20-digit id for an `int` field is now a 422 field error, instead
+  of reaching the handler as `0`, `1` or `PHP_INT_MAX`.
+- **`.env` follows dotenv rules.** An inline comment after an unquoted value is
+  no longer part of it (`CORS_ALLOW_ORIGIN=https://x # note`), `export KEY=v`
+  works, indented `#` lines are comments, and single quotes are literal. Check
+  values that relied on a trailing ` # …` being kept.
+- Requests that reach a worker still booting wait up to 30 s, then get 503.
+
+### Fixed
+- Async event listeners are deferred only inside a request coroutine, and
+  post-dispatch hooks run even when a listener throws.
+- `server:stop` signals every process on the port.
+- Less reflection per request (payload/session attributes, container clones).
+
 ## 2026.09.23.1717 — 2026-09-23
 
 ### Changed
