@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Tests\Unit;
 
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Semitexa\Core\Http\Exception\TypeMismatchException;
@@ -12,14 +13,49 @@ use Semitexa\Core\Request;
 
 final class PayloadHydratorTest extends TestCase
 {
+    /**
+     * A number the cast would change is a malformed request in every mode:
+     * "hello" used to become 0 and a 20-digit id PHP_INT_MAX.
+     */
     #[Test]
-    public function non_strict_request_silently_casts_incompatible_value(): void
+    #[DataProvider('numbersTheCastWouldChange')]
+    public function non_strict_request_rejects_a_number_the_cast_would_change(mixed $value): void
     {
-        $dto = $this->intDto();
+        $this->expectException(TypeMismatchException::class);
 
-        $hydrated = PayloadHydrator::hydrate($dto, $this->jsonRequest(['n' => 'hello'], strict: false));
+        PayloadHydrator::hydrate($this->intDto(), $this->jsonRequest(['n' => $value], strict: false));
+    }
 
-        self::assertSame(0, $hydrated->n, 'Default (non-strict) hydration coerces "hello" to 0.');
+    /** @return iterable<string, array{mixed}> */
+    public static function numbersTheCastWouldChange(): iterable
+    {
+        yield 'word' => ['hello'];
+        yield 'overflow' => ['99999999999999999999'];
+        yield 'fraction' => ['1.5'];
+        yield 'array' => [[1]];
+    }
+
+    #[Test]
+    public function non_strict_request_still_casts_a_numeric_string(): void
+    {
+        $hydrated = PayloadHydrator::hydrate($this->intDto(), $this->jsonRequest(['n' => '42'], strict: false));
+
+        self::assertSame(42, $hydrated->n);
+    }
+
+    #[Test]
+    public function non_strict_union_skips_a_numeric_arm_the_value_does_not_fit(): void
+    {
+        $dto = new class {
+            public int|string $v = -1;
+
+            public function setV(int|string $value): void
+            {
+                $this->v = $value;
+            }
+        };
+
+        self::assertSame('hello', PayloadHydrator::hydrate($dto, $this->jsonRequest(['v' => 'hello'], strict: false))->v);
     }
 
     #[Test]

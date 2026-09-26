@@ -280,13 +280,17 @@ class PayloadHydrator
                 if ($strict && self::isTypeCompatible($value, $t->getName())) {
                     return self::castToType($value, $t->getName(), $fieldName, $strict);
                 }
+                // Non-strict casts to the first arm, but never through a numeric
+                // arm the value does not fit: int|string must keep "hello".
+                if (!$strict && (!self::isNumericType($t->getName()) || self::isTypeCompatible($value, $t->getName()))) {
+                    return self::castToType($value, $t->getName(), $fieldName, $strict);
+                }
             }
             if ($firstNamed === null) {
                 return $value;
             }
-            // Non-strict keeps its historical behavior (cast to the first arm).
-            // Strict with no compatible arm falls through to castToType, which
-            // throws TypeMismatchException for a genuinely incompatible value.
+            // No arm took the value. castToType throws TypeMismatchException
+            // for it: in strict mode for any type, otherwise for a number.
             return self::castToType($value, $firstNamed, $fieldName, $strict);
         }
 
@@ -318,7 +322,10 @@ class PayloadHydrator
         }
 
         // Strict mode: reject values that cannot be meaningfully coerced to the target type.
-        if ($strict && !self::isTypeCompatible($value, $type)) {
+        // Numbers are checked in every mode: the cast would turn "abc" into 0 and
+        // clamp a 20-digit id to PHP_INT_MAX, handing the handler a value the
+        // client never sent. That is a malformed request, not a lenient one.
+        if (($strict || self::isNumericType($type)) && !self::isTypeCompatible($value, $type)) {
             throw new TypeMismatchException($fieldName, $type, $value);
         }
 
@@ -332,9 +339,14 @@ class PayloadHydrator
         };
     }
 
+    private static function isNumericType(string $type): bool
+    {
+        return $type === 'int' || $type === 'float';
+    }
+
     /**
      * Determines whether $value can be meaningfully coerced to $type without semantic loss.
-     * Used only in strict mode to guard against obviously wrong input types.
+     * Every mode checks int and float; strict mode checks every type.
      */
     private static function isTypeCompatible(mixed $value, string $type): bool
     {
