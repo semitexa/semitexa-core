@@ -123,25 +123,51 @@ readonly class Environment
         }
 
         foreach ($lines as $line) {
-            if (strpos($line, '#') === 0) {
-                continue; // Skip comments
+            $line = trim($line);
+            if ($line === '' || $line[0] === '#' || !str_contains($line, '=')) {
+                continue; // Blank, comment (indented ones too), or not an assignment
             }
 
-            if (strpos($line, '=') !== false) {
-                [$key, $value] = explode('=', $line, 2);
-                $key = trim($key);
-                $value = trim($value);
-
-                // Remove quotes if present
-                if (($value[0] ?? '') === '"' && ($value[-1] ?? '') === '"') {
-                    $value = substr($value, 1, -1);
-                }
-
-                $env[$key] = $value;
+            [$key, $raw] = explode('=', $line, 2);
+            // `export KEY=value` keeps a file usable with `source` as well.
+            $key = trim((string) preg_replace('/^export\s+/', '', trim($key)));
+            if ($key === '') {
+                continue;
             }
+
+            $env[$key] = self::parseEnvValue($raw);
         }
 
         return $env;
+    }
+
+    /**
+     * dotenv conventions: a quoted value runs to its closing quote (so `#`
+     * inside it is data, and anything after it is ignored); an unquoted value
+     * ends at a `#` preceded by whitespace, so `URL=https://x # note` is the
+     * URL alone while `COLOR=#fff` keeps its hash. Double quotes allow \" and
+     * \\ escapes; single quotes are literal.
+     */
+    private static function parseEnvValue(string $raw): string
+    {
+        $value = ltrim($raw);
+        $quote = $value[0] ?? '';
+
+        if ($quote === '"' || $quote === "'") {
+            $end = 1;
+            $length = strlen($value);
+            while ($end < $length && $value[$end] !== $quote) {
+                $end += ($quote === '"' && $value[$end] === '\\') ? 2 : 1;
+            }
+            if ($end < $length) {
+                $inner = substr($value, 1, $end - 1);
+
+                return $quote === '"' ? strtr($inner, ['\\"' => '"', '\\\\' => '\\']) : $inner;
+            }
+            // No closing quote: fall through and treat it as unquoted text.
+        }
+
+        return trim((string) preg_replace('/\s#.*$/', '', $raw));
     }
 
     private static function parsePositiveInt(mixed $value, string $name): int
