@@ -356,6 +356,32 @@ final class PayloadHydratorTest extends TestCase
     }
 
     #[Test]
+    public function a_float_that_overflows_to_infinity_is_rejected_in_both_modes(): void
+    {
+        $dto = new class {
+            public float $f = -1.0;
+
+            public function setF(float $value): void
+            {
+                $this->f = $value;
+            }
+        };
+
+        foreach ([false, true] as $strict) {
+            foreach (['1e309', '-1e309'] as $value) {
+                try {
+                    PayloadHydrator::hydrate(clone $dto, $this->jsonRequest(['f' => $value], strict: $strict));
+                    self::fail("float accepted {$value} (strict: " . var_export($strict, true) . ')');
+                } catch (TypeMismatchException) {
+                    self::addToAssertionCount(1);
+                }
+            }
+
+            self::assertSame(1.5e308, PayloadHydrator::hydrate(clone $dto, $this->jsonRequest(['f' => '1.5e308'], strict: $strict))->f);
+        }
+    }
+
+    #[Test]
     public function strict_int_does_not_accept_a_spelling_a_float_would_change(): void
     {
         // Each of these used to pass: `+ 0` turned them into 1, 0 and

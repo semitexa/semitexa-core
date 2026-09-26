@@ -352,7 +352,11 @@ class PayloadHydrator
     {
         return match ($type) {
             'int'          => self::isExactInt($value),
-            'float'        => (is_int($value) || is_float($value) || is_string($value)) && is_numeric($value),
+            // is_numeric() accepts "1e309", whose cast is INF: a value the client
+            // never sent. Only a finite result is the number that was asked for.
+            'float'        => (is_int($value) || is_float($value) || is_string($value))
+                && is_numeric($value)
+                && is_finite((float) $value),
             'string'       => is_scalar($value),
             'bool'         => is_bool($value) || in_array($value, [0, 1, '0', '1', 'true', 'false', 'yes', 'no', 'on', 'off'], true),
             'array'        => is_array($value),

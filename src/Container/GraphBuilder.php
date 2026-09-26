@@ -26,6 +26,9 @@ use ReflectionNamedType;
  */
 final class GraphBuilder
 {
+    /** @var array<int, bool> spl_object_id => initialize() deferred to FactoryBuildPhase */
+    private array $deferredInitialization = [];
+
     /**
      * Build readonly (worker-scoped) instances in dependency order.
      *
@@ -439,8 +442,10 @@ final class GraphBuilder
         // Deferred too for a service with an #[InjectAsFactory] property:
         // factories are injected later, by FactoryBuildPhase, which then calls
         // {@see initializeAfterFactoryInjection()} — so initialize() still
-        // runs after every property is populated.
-        if (!$deferInitialization && !self::hasFactoryInjection($injections[$class] ?? [])) {
+        // runs after every property is populated. The deferral is transitive
+        // (see {@see defersInitialization()}): a consumer of such a service
+        // waits with it, so dependencies still initialize before consumers.
+        if (!$deferInitialization && !$this->defersInitialization($instance, $injections)) {
             $this->initializeAfterInjection($instance, $class);
         }
 
@@ -464,8 +469,8 @@ final class GraphBuilder
     /**
      * Run initialize() on the worker-scoped services whose initialization
      * {@see createInstance()} deferred because they declare an
-     * #[InjectAsFactory] property. Called by FactoryBuildPhase once those
-     * factories are injected. Each object is initialized once, in build
+     * #[InjectAsFactory] property, or depend on a service that does. Called
+     * by FactoryBuildPhase once those factories are injected. Each object is initialized once, in build
      * (dependency) order, however many ids alias it.
      *
      * @param ObjectMap $readonlyInstances
@@ -480,11 +485,54 @@ final class GraphBuilder
                 continue;
             }
             $seen[$id] = true;
-            $class = $instance::class;
-            if (self::hasFactoryInjection($injections[$class] ?? [])) {
-                $this->initializeAfterInjection($instance, $class);
+            if ($this->defersInitialization($instance, $injections)) {
+                $this->initializeAfterInjection($instance, $instance::class);
             }
         }
+    }
+
+    /**
+     * Whether initialize() on this worker-scoped instance waits for
+     * FactoryBuildPhase: it has an #[InjectAsFactory] property itself, or it
+     * injects (#[InjectAsReadonly]) a service that waits. Without the second
+     * half a consumer's initialize() would run during graph construction and
+     * see its dependency not yet initialized.
+     *
+     * Decided on the injected objects, so the answer is the same in every
+     * build phase; memoized per object for the lifetime of this builder.
+     *
+     * @param InjectionsMap $injections
+     */
+    private function defersInitialization(object $instance, array $injections): bool
+    {
+        $objectId = spl_object_id($instance);
+        if (isset($this->deferredInitialization[$objectId])) {
+            return $this->deferredInitialization[$objectId];
+        }
+        // Cycle guard: an edge back to an object still being decided adds nothing.
+        $this->deferredInitialization[$objectId] = false;
+
+        $classInjections = $injections[$instance::class] ?? [];
+        $deferred = self::hasFactoryInjection($classInjections);
+        if (!$deferred) {
+            $ref = new ReflectionClass($instance);
+            foreach ($classInjections as $propName => $info) {
+                if ($info['kind'] !== 'readonly' || !$ref->hasProperty($propName)) {
+                    continue;
+                }
+                $prop = $ref->getProperty($propName);
+                if (!$prop->isInitialized($instance)) {
+                    continue;
+                }
+                $dependency = $prop->getValue($instance);
+                if (is_object($dependency) && $this->defersInitialization($dependency, $injections)) {
+                    $deferred = true;
+                    break;
+                }
+            }
+        }
+
+        return $this->deferredInitialization[$objectId] = $deferred;
     }
 
     /**
@@ -563,7 +611,7 @@ final class GraphBuilder
             $idToClass,
             array_fill_keys(array_keys($executionScopedPrototypes), true),
         );
-        if (!self::hasFactoryInjection($injections[$class] ?? [])) {
+        if (!$this->defersInitialization($instance, $injections)) {
             $this->initializeAfterInjection($instance, $class);
         }
 

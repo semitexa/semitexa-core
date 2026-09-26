@@ -51,6 +51,19 @@ final class InitFixtureWithFactory implements InitializesAfterInjectionInterface
     }
 }
 
+final class InitFixtureConsumerOfFactoryService implements InitializesAfterInjectionInterface
+{
+    public InitFixtureWithFactory $dependency;
+
+    public ?bool $dependencyWasReady = null;
+
+    public function initialize(): void
+    {
+        // Reads state its dependency establishes in its own initialize().
+        $this->dependencyWasReady = $this->dependency->initializations > 0;
+    }
+}
+
 final class InitFixturePlain
 {
     public bool $touched = false;
@@ -119,6 +132,41 @@ final class InitializesAfterInjectionTest extends TestCase
         );
 
         self::assertSame(1, $instance->initializations);
+    }
+
+    #[Test]
+    public function a_consumer_of_a_deferred_service_initializes_after_it(): void
+    {
+        // The dependency's initialize() waits for FactoryBuildPhase; a consumer
+        // initialized during graph construction would read it half-built.
+        $injections = [
+            InitFixtureWithFactory::class => [
+                'channels' => ['kind' => 'factory', 'type' => \stdClass::class],
+            ],
+            InitFixtureConsumerOfFactoryService::class => [
+                'dependency' => ['kind' => 'readonly', 'type' => InitFixtureWithFactory::class],
+            ],
+        ];
+        $builder = (new \ReflectionClass(GraphBuilder::class))->newInstanceWithoutConstructor();
+        $create = new \ReflectionMethod(GraphBuilder::class, 'createInstance');
+
+        $dependency = $create->invoke($builder, InitFixtureWithFactory::class, $injections, [], [], []);
+        $readonly = [InitFixtureWithFactory::class => $dependency];
+        $consumer = $create->invoke($builder, InitFixtureConsumerOfFactoryService::class, $injections, $readonly, [], []);
+        self::assertInstanceOf(InitFixtureWithFactory::class, $dependency);
+        self::assertInstanceOf(InitFixtureConsumerOfFactoryService::class, $consumer);
+        self::assertSame($dependency, $consumer->dependency);
+        self::assertNull($consumer->dependencyWasReady, 'the consumer must wait with its dependency');
+
+        $dependency->channels = new \stdClass(); // what FactoryBuildPhase does
+        $readonly[InitFixtureConsumerOfFactoryService::class] = $consumer;
+
+        // A fresh builder, as FactoryBuildPhase uses: same answer, dependency first.
+        $factoryPhase = (new \ReflectionClass(GraphBuilder::class))->newInstanceWithoutConstructor();
+        $factoryPhase->initializeAfterFactoryInjection($readonly, $injections);
+
+        self::assertSame(1, $dependency->initializations);
+        self::assertTrue($consumer->dependencyWasReady);
     }
 
     /**
