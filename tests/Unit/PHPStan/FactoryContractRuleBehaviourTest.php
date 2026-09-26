@@ -37,8 +37,12 @@ final class FactoryContractRuleBehaviourTest extends RuleTestCase
 
     public function testThePlainEnumKeyedInterfaceIsAcceptedAndBrokenOnesAreNot(): void
     {
+        $errors = $this->gatherAnalyserErrors([self::FIXTURE]);
+        // Indexing by line would let a duplicate diagnostic overwrite its twin.
+        self::assertCount(2, $errors);
+
         $reported = [];
-        foreach ($this->gatherAnalyserErrors([self::FIXTURE]) as $error) {
+        foreach ($errors as $error) {
             self::assertSame('semitexa.factoryContract', $error->getIdentifier());
             $reported[$error->getLine()] = $error->getMessage();
         }
