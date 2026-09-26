@@ -55,8 +55,16 @@ class PayloadSerializer
                 $setter = self::resolveSetter($dto, $key);
                 // Queue and event payload keys arrive from outside the worker:
                 // bound the per-class memo so unknown keys cannot grow it.
+                // A valid setter may evict a cached miss, so a burst of unknown
+                // keys cannot lock real setters out of the memo.
                 if (count(self::$setters[$class] ?? []) < self::MAX_MEMOIZED_KEYS_PER_CLASS) {
                     self::$setters[$class][$key] = $setter;
+                } elseif ($setter !== false) {
+                    $miss = array_search(false, self::$setters[$class], true);
+                    if ($miss !== false) {
+                        unset(self::$setters[$class][$miss]);
+                        self::$setters[$class][$key] = $setter;
+                    }
                 }
             }
             if ($setter === false) {

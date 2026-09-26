@@ -45,6 +45,13 @@ final class FactoryBuildPhase implements BuildPhaseInterface
             $context->instanceStore->factories,
             $context->instanceStore->genericFactories,
         );
+
+        // Their initialize() was held back until now, so it never reads an
+        // #[InjectAsFactory] property before it is assigned.
+        $graphBuilder->initializeAfterFactoryInjection(
+            $context->instanceStore->readonly,
+            $context->injections,
+        );
     }
 
     public function name(): string

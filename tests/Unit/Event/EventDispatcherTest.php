@@ -18,8 +18,16 @@ final class EventDispatcherTest extends TestCase
     /** @var list<string> */
     private array $errors = [];
 
+    /** @var list<string> */
+    private array $callsSnapshot = [];
+
+    private ?LoggerInterface $loggerSnapshot = null;
+
     protected function setUp(): void
     {
+        $this->callsSnapshot = DispatcherProbeLog::$calls;
+        $logger = (new \ReflectionProperty(StaticLoggerBridge::class, 'logger'))->getValue();
+        $this->loggerSnapshot = $logger instanceof LoggerInterface ? $logger : null;
         DispatcherProbeLog::$calls = [];
         $this->errors = [];
         $errors = &$this->errors;
@@ -37,7 +45,32 @@ final class EventDispatcherTest extends TestCase
 
     protected function tearDown(): void
     {
-        StaticLoggerBridge::reset();
+        DispatcherProbeLog::$calls = $this->callsSnapshot;
+        (new \ReflectionProperty(StaticLoggerBridge::class, 'logger'))->setValue(null, $this->loggerSnapshot);
+    }
+
+    #[Test]
+    public function async_listeners_run_in_the_order_they_were_scheduled(): void
+    {
+        // Coroutine::defer itself is LIFO; an order-dependent listener must not
+        // see the second dispatch's event before the first's.
+        $dispatcher = $this->dispatcherWith([
+            [RecordingProbeListener::class, EventExecution::Async],
+            [SecondRecordingProbeListener::class, EventExecution::Async],
+        ]);
+
+        \Swoole\Coroutine\run(function () use ($dispatcher): void {
+            self::markAsRequestCoroutine();
+            $dispatcher->dispatch(new DispatcherProbeEvent());
+            $dispatcher->dispatch(new DispatcherProbeEvent());
+        });
+
+        self::assertSame([
+            RecordingProbeListener::class,
+            SecondRecordingProbeListener::class,
+            RecordingProbeListener::class,
+            SecondRecordingProbeListener::class,
+        ], DispatcherProbeLog::$calls);
     }
 
     #[Test]
@@ -176,6 +209,14 @@ final class DispatcherProbeLog
 }
 
 final class RecordingProbeListener
+{
+    public function handle(DispatcherProbeEvent $event): void
+    {
+        DispatcherProbeLog::$calls[] = self::class;
+    }
+}
+
+final class SecondRecordingProbeListener
 {
     public function handle(DispatcherProbeEvent $event): void
     {

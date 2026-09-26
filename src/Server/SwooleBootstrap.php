@@ -379,6 +379,14 @@ class SwooleBootstrap
         $emitter = new SwooleResponseEmitter();
 
         $server->on(SwooleEvent::Request->value, function (SwooleRequest $request, SwooleResponse $response) use ($emitter, $corsHandler, $healthHandler, $metricsHandler, $staticAssetHandler, $server, $hstsHeader, $bootGate) {
+            // Before every early return below, because HSTS has to be on the
+            // boot-timeout 503, the static asset and the health check too — a browser that learns the
+            // policy from one response applies it to the host, and a path that
+            // omits it is a path that leaves the first plaintext request open.
+            if ($hstsHeader !== null) {
+                $response->header(StrictTransportSecurity::HEADER, $hstsHeader);
+            }
+
             if (!$bootGate->wait(self::WORKER_BOOT_WAIT_SECONDS)) {
                 $response->status(HttpStatus::ServiceUnavailable->value);
                 $response->header('Retry-After', '1');
@@ -401,14 +409,6 @@ class SwooleBootstrap
                 } catch (\Throwable) {
                 }
             };
-
-            // Before every early return below, because HSTS has to be on the
-            // static asset and the health check too — a browser that learns the
-            // policy from one response applies it to the host, and a path that
-            // omits it is a path that leaves the first plaintext request open.
-            if ($hstsHeader !== null) {
-                $response->header(StrictTransportSecurity::HEADER, $hstsHeader);
-            }
 
             if ($healthHandler->handle($request, $response)) {
                 return;

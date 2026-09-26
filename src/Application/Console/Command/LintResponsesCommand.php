@@ -99,11 +99,15 @@ final class LintResponsesCommand extends BaseCommand
                     continue;
                 }
 
-                $filesChecked++;
                 $content = @file_get_contents($path);
                 if ($content === false) {
+                    // A file the lint cannot open is not a file it can clear:
+                    // fail rather than count it as checked.
+                    $relativePath = str_replace($root . '/', '', $path);
+                    $errors[] = "{$relativePath}: Could not be read, so it could not be checked.";
                     continue;
                 }
+                $filesChecked++;
 
                 // An exception mapper is sanctioned wherever it lives — the
                 // interface CONTRACT returns HttpResponse, and a consumer

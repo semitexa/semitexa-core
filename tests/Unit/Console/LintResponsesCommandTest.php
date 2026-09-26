@@ -197,33 +197,22 @@ PHP);
     /**
      * A file that matches the scan (`.php`, under a scanned dir) but cannot
      * actually be read — a broken symlink here, just as plausibly a file
-     * deleted mid-scan or a permissions error on a real tree — used to reach
-     * `preg_match()`/`self::codeOnly()` with `file_get_contents()`'s `false`,
-     * an unguarded fatal instead of the lint simply skipping it.
+     * deleted mid-scan or a permissions error on a real tree — must fail the
+     * lint: a file it cannot open is not a file it can clear. With no other
+     * violation in the tree, skipping it would report a false green.
      */
     #[Test]
-    public function an_unreadable_file_is_skipped_instead_of_crashing_the_lint(): void
+    public function an_unreadable_file_fails_the_lint_instead_of_being_skipped(): void
     {
         symlink(
             $this->fixtureRoot . '/src/modules/Demo/src/Application/Service/does-not-exist.php',
             $this->fixtureRoot . '/src/modules/Demo/src/Application/Service/BrokenLink.php',
         );
-        $this->write('SneakyService.php', <<<'PHP'
-<?php
-namespace Demo;
-use Semitexa\Core\HttpResponse;
-final class SneakyService
-{
-    public function out(): HttpResponse
-    {
-        return HttpResponse::json(['nope' => true]);
-    }
-}
-PHP);
 
         $tester = $this->run_();
 
         self::assertSame(1, $tester->getStatusCode(), $tester->getDisplay());
-        self::assertStringContainsString('SneakyService.php', $tester->getDisplay());
+        self::assertStringContainsString('BrokenLink.php', $tester->getDisplay());
+        self::assertStringContainsString('Could not be', $tester->getDisplay());
     }
 }

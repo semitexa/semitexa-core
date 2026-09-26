@@ -34,6 +34,9 @@ final class EventDispatcher implements EventDispatcherInterface
      * @var list<callable(object): void>
      */
     private array $postDispatchHooks = [];
+
+    /** Coroutine-context key of the FIFO queue drained by the one deferred callback. */
+    private const DEFERRED_LISTENERS_KEY = 'semitexa.event.deferredListeners';
     /**
      * Create an event instance. Use this instead of "new Event()" so the framework
      * can apply initialization, validation, or optimizations now or later.
@@ -202,20 +205,46 @@ final class EventDispatcher implements EventDispatcherInterface
         $listener = $this->resolveListener($meta);
         $listenerClass = (string) $meta['class'];
 
-        \Swoole\Coroutine::defer(static function () use ($listener, $event, $listenerClass): void {
-            // Nothing above a deferred callback can catch: an escaping
-            // throwable would be fatal to the worker, not a 500.
-            try {
-                $listener->handle($event);
-            } catch (\Throwable $e) {
-                StaticLoggerBridge::error('core', 'Async event listener failed', [
-                    'event' => $event::class,
-                    'listener' => $listenerClass,
-                    'exception' => $e::class,
-                    'message' => $e->getMessage(),
-                ]);
+        // Coroutine::defer runs its callbacks LIFO, which would hand an
+        // order-dependent listener an update before its creation event. So
+        // listeners queue in scheduling order on the coroutine's context and
+        // ONE deferred callback drains that queue FIFO — including listeners
+        // scheduled while it drains.
+        $context = \Swoole\Coroutine::getContext();
+        if (!$context instanceof \ArrayObject) {
+            $this->runListenerSync($meta, $event);
+            return;
+        }
+        $queue = $context[self::DEFERRED_LISTENERS_KEY] ?? null;
+        if ($queue instanceof \ArrayObject) {
+            $queue[] = [$listener, $event, $listenerClass];
+            return;
+        }
+        $queue = new \ArrayObject([[$listener, $event, $listenerClass]]);
+        $context[self::DEFERRED_LISTENERS_KEY] = $queue;
+
+        \Swoole\Coroutine::defer(static function () use ($queue): void {
+            for ($i = 0; $i < count($queue); $i++) {
+                [$listener, $event, $listenerClass] = $queue[$i];
+                self::runDeferredListener($listener, $event, $listenerClass);
             }
         });
+    }
+
+    private static function runDeferredListener(object $listener, object $event, string $listenerClass): void
+    {
+        // Nothing above a deferred callback can catch: an escaping
+        // throwable would be fatal to the worker, not a 500.
+        try {
+            $listener->handle($event);
+        } catch (\Throwable $e) {
+            StaticLoggerBridge::error('core', 'Async event listener failed', [
+                'event' => $event::class,
+                'listener' => $listenerClass,
+                'exception' => $e::class,
+                'message' => $e->getMessage(),
+            ]);
+        }
     }
 
     private function enqueueListener(array $meta, object $event, ?\Semitexa\Core\Pipeline\RequestTracerInterface $tracer = null): void

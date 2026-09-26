@@ -37,6 +37,20 @@ final class InitFixtureFailing implements InitializesAfterInjectionInterface
     }
 }
 
+final class InitFixtureWithFactory implements InitializesAfterInjectionInterface
+{
+    public int $initializations = 0;
+
+    public \stdClass $channels;
+
+    public function initialize(): void
+    {
+        // Reading it is the point: this throws if it runs before injection.
+        $this->channels->ready = true;
+        $this->initializations++;
+    }
+}
+
 final class InitFixturePlain
 {
     public bool $touched = false;
@@ -80,6 +94,31 @@ final class InitializesAfterInjectionTest extends TestCase
         $this->expectExceptionMessageMatches('/InitFixtureFailing::initialize\(\) failed after injection: deliberate/');
 
         $this->build(InitFixtureFailing::class);
+    }
+
+    #[Test]
+    public function a_worker_scoped_service_with_a_factory_property_initializes_only_after_factory_injection(): void
+    {
+        // Factories are injected by FactoryBuildPhase, after the graph is
+        // built: initializing at construction would read an unassigned
+        // #[InjectAsFactory] property.
+        $injections = [InitFixtureWithFactory::class => [
+            'channels' => ['kind' => 'factory', 'type' => \stdClass::class],
+        ]];
+        $builder = (new \ReflectionClass(GraphBuilder::class))->newInstanceWithoutConstructor();
+        $instance = (new \ReflectionMethod(GraphBuilder::class, 'createInstance'))
+            ->invoke($builder, InitFixtureWithFactory::class, $injections, [], [], []);
+        self::assertInstanceOf(InitFixtureWithFactory::class, $instance);
+        self::assertSame(0, $instance->initializations, 'initialize() must wait for factory injection');
+        $instance->channels = new \stdClass(); // what FactoryBuildPhase does
+
+        // Aliased under a second id, as readonly instances are: still once.
+        $builder->initializeAfterFactoryInjection(
+            [InitFixtureWithFactory::class => $instance, 'Some\\AliasId' => $instance, 'plain' => new InitFixtureInitialized()],
+            $injections,
+        );
+
+        self::assertSame(1, $instance->initializations);
     }
 
     /**

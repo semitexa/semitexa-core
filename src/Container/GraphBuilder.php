@@ -436,11 +436,55 @@ final class GraphBuilder
         // uninitialized typed properties at boot and never run at all for the
         // clone anyone actually receives. The container calls
         // {@see initializeInstance()} there instead.
-        if (!$deferInitialization) {
+        // Deferred too for a service with an #[InjectAsFactory] property:
+        // factories are injected later, by FactoryBuildPhase, which then calls
+        // {@see initializeAfterFactoryInjection()} — so initialize() still
+        // runs after every property is populated.
+        if (!$deferInitialization && !self::hasFactoryInjection($injections[$class] ?? [])) {
             $this->initializeAfterInjection($instance, $class);
         }
 
         return $instance;
+    }
+
+    /**
+     * @param array<string, array{kind: string}> $classInjections
+     */
+    private static function hasFactoryInjection(array $classInjections): bool
+    {
+        foreach ($classInjections as $info) {
+            if ($info['kind'] === 'factory') {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Run initialize() on the worker-scoped services whose initialization
+     * {@see createInstance()} deferred because they declare an
+     * #[InjectAsFactory] property. Called by FactoryBuildPhase once those
+     * factories are injected. Each object is initialized once, in build
+     * (dependency) order, however many ids alias it.
+     *
+     * @param ObjectMap $readonlyInstances
+     * @param InjectionsMap $injections
+     */
+    public function initializeAfterFactoryInjection(array $readonlyInstances, array $injections): void
+    {
+        $seen = [];
+        foreach ($readonlyInstances as $instance) {
+            $id = spl_object_id($instance);
+            if (isset($seen[$id])) {
+                continue;
+            }
+            $seen[$id] = true;
+            $class = $instance::class;
+            if (self::hasFactoryInjection($injections[$class] ?? [])) {
+                $this->initializeAfterInjection($instance, $class);
+            }
+        }
     }
 
     /**
@@ -519,7 +563,9 @@ final class GraphBuilder
             $idToClass,
             array_fill_keys(array_keys($executionScopedPrototypes), true),
         );
-        $this->initializeAfterInjection($instance, $class);
+        if (!self::hasFactoryInjection($injections[$class] ?? [])) {
+            $this->initializeAfterInjection($instance, $class);
+        }
 
         return $instance;
     }

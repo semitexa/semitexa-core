@@ -138,9 +138,43 @@ class RouteRegistry
             return null;
         }
 
+        // A route that declares HEAD itself wins over a GET route that only
+        // answers HEAD through the synthesized index entry, whichever was
+        // registered first. Partitioned per tier, so an exact match still
+        // precedes a pattern match.
+        if ($method === 'HEAD') {
+            $exactCount = isset($this->exactIndex[$key]) ? count($this->exactIndex[$key]) : 0;
+            $matches = [
+                ...self::declaringFirst(array_slice($matches, 0, $exactCount), 'HEAD'),
+                ...self::declaringFirst(array_slice($matches, $exactCount), 'HEAD'),
+            ];
+        }
+
         $selected = TenantModuleScopeResolver::selectRoutesForTenant($matches, $this->currentTenantContext());
         $selectedRoute = $selected[0] ?? null;
         return is_array($selectedRoute) ? $selectedRoute : null;
+    }
+
+    /**
+     * Stable partition: routes that declare $method first, the rest after.
+     *
+     * @param list<array<string, mixed>> $routes
+     * @return list<array<string, mixed>>
+     */
+    private static function declaringFirst(array $routes, string $method): array
+    {
+        $declaring = [];
+        $others = [];
+        foreach ($routes as $route) {
+            $methods = is_array($route['methods'] ?? null) ? $route['methods'] : [$route['method'] ?? 'GET'];
+            if (in_array($method, $methods, true)) {
+                $declaring[] = $route;
+            } else {
+                $others[] = $route;
+            }
+        }
+
+        return [...$declaring, ...$others];
     }
 
     /**

@@ -24,14 +24,19 @@ use Semitexa\Core\Support\CoroutineLocal;
  */
 final class SemitexaContainerClonePlanCacheTest extends TestCase
 {
+    /** @var array<mixed> The CLI store as it was before the test. */
+    private array $cliStoreSnapshot = [];
+
     protected function setUp(): void
     {
+        $store = (new ReflectionProperty(CoroutineLocal::class, 'cliStore'))->getValue();
+        $this->cliStoreSnapshot = is_array($store) ? $store : [];
         CoroutineLocal::resetCliStore();
     }
 
     protected function tearDown(): void
     {
-        CoroutineLocal::resetCliStore();
+        (new ReflectionProperty(CoroutineLocal::class, 'cliStore'))->setValue(null, $this->cliStoreSnapshot);
     }
 
     #[Test]

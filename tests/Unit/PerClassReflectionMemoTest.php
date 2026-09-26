@@ -23,6 +23,35 @@ use Semitexa\Core\Support\PayloadSerializer;
  */
 final class PerClassReflectionMemoTest extends TestCase
 {
+    /** The process-global memos these tests fill: [class, static property]. */
+    private const MEMOS = [
+        [PayloadHydrator::class, 'pathParamPlans'],
+        [Session::class, 'segmentNames'],
+        [PayloadSerializer::class, 'setters'],
+    ];
+
+    /** @var list<mixed> */
+    private array $memoSnapshot = [];
+
+    protected function setUp(): void
+    {
+        // Snapshot, then start every test from empty memos so no test depends
+        // on what an earlier one happened to prime.
+        $this->memoSnapshot = [];
+        foreach (self::MEMOS as [$class, $property]) {
+            $ref = new \ReflectionProperty($class, $property);
+            $this->memoSnapshot[] = $ref->getValue();
+            $ref->setValue(null, []);
+        }
+    }
+
+    protected function tearDown(): void
+    {
+        foreach (self::MEMOS as $i => [$class, $property]) {
+            (new \ReflectionProperty($class, $property))->setValue(null, $this->memoSnapshot[$i]);
+        }
+    }
+
     #[Test]
     public function path_param_plan_is_reused_but_each_request_gets_its_own_values(): void
     {
@@ -97,7 +126,13 @@ final class PerClassReflectionMemoTest extends TestCase
 
         self::assertSame('kept', $dto->getValue(), 'a key past the memo bound still hydrates');
         $setters = (new \ReflectionProperty(PayloadSerializer::class, 'setters'))->getValue();
-        self::assertLessThanOrEqual(256, count($setters[MemoSegmentB::class] ?? []));
+        self::assertIsArray($setters[MemoSegmentB::class] ?? null);
+        self::assertLessThanOrEqual(256, count($setters[MemoSegmentB::class]));
+        // The real setter displaced a cached miss instead of being locked out.
+        self::assertIsArray(
+            $setters[MemoSegmentB::class]['value'] ?? null,
+            'the valid setter must be memoized even after unknown keys filled the memo',
+        );
     }
 
     private function get(string $uri): Request

@@ -384,6 +384,15 @@ class QueueWorker
     {
         $this->messageStatus = $type;
         $raw = @file_get_contents($this->statsFile);
+        // Fresh counters only when there is no file yet. An existing file that
+        // cannot be read keeps its accumulated counts: report, do not overwrite.
+        if ($raw === false && file_exists($this->statsFile)) {
+            FallbackErrorLogger::log('Queue statistics file exists but could not be read; not updating it', [
+                'file' => $this->statsFile,
+                'type' => $type,
+            ]);
+            return;
+        }
         $stats = ($raw === false ? null : json_decode($raw, true)) ?: [
             'processed' => 0,
             'failed' => 0,

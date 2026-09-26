@@ -63,4 +63,19 @@ final class RouteRegistryHeadTest extends TestCase
         self::assertNull($registry->find('/dl/7', 'HEAD'));
         self::assertSame('feed', $registry->find('/feed', 'GET')['name'] ?? null);
     }
+
+    #[Test]
+    public function an_explicit_head_route_wins_over_a_get_route_registered_before_it(): void
+    {
+        $registry = new RouteRegistry();
+        $registry->register(['path' => '/', 'methods' => ['GET'], 'name' => 'home']);
+        $registry->register(['path' => '/', 'methods' => ['HEAD'], 'name' => 'home-head']);
+        $registry->register(['path' => '/items/{id}', 'methods' => ['GET'], 'name' => 'item']);
+        $registry->register(['path' => '/items/{id}', 'methods' => ['HEAD'], 'name' => 'item-head']);
+
+        self::assertSame('home-head', $registry->find('/', 'HEAD')['name'] ?? null);
+        self::assertSame('item-head', $registry->find('/items/7', 'HEAD')['name'] ?? null);
+        self::assertSame('home', $registry->find('/', 'GET')['name'] ?? null);
+        self::assertSame('item', $registry->find('/items/7', 'GET')['name'] ?? null);
+    }
 }

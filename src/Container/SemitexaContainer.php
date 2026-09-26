@@ -555,9 +555,18 @@ final class SemitexaContainer implements ContainerInterface, ExecutionContextAwa
                     $this->instanceStore->factories,
                     $this->instanceStore->genericFactories,
                 );
-                if ($factory !== null) {
-                    $this->assignProperty($instance, $propName, $factory);
+                if ($factory === null) {
+                    continue;
                 }
+                // A readonly factory property was already initialized on the
+                // prototype by FactoryBuildPhase and inherited by the clone;
+                // reassigning it here would throw "Cannot modify readonly
+                // property". The inherited value is the same factory.
+                $prop = $this->propertyHandle($instance::class, $propName);
+                if ($prop->isReadOnly() && $prop->isInitialized($instance)) {
+                    continue;
+                }
+                $prop->setValue($instance, $factory);
             }
         } finally {
             unset($visited[$class]);
@@ -591,9 +600,15 @@ final class SemitexaContainer implements ContainerInterface, ExecutionContextAwa
      */
     private function assignProperty(object $instance, string $propName, mixed $value): void
     {
-        $class = $instance::class;
-        $prop = $this->propertyHandles[$class][$propName]
+        $this->propertyHandle($instance::class, $propName)->setValue($instance, $value);
+    }
+
+    /**
+     * @param class-string $class
+     */
+    private function propertyHandle(string $class, string $propName): \ReflectionProperty
+    {
+        return $this->propertyHandles[$class][$propName]
             ??= (new ReflectionClass($class))->getProperty($propName);
-        $prop->setValue($instance, $value);
     }
 }
