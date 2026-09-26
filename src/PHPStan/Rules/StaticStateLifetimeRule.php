@@ -82,11 +82,6 @@ use Semitexa\Core\Lifecycle\PerRequestStateRegistry;
  */
 final class StaticStateLifetimeRule implements Rule
 {
-    private const WORKER_STATE_ATTRIBUTES = [
-        WorkerState::class,
-        'WorkerState',
-    ];
-
     public function __construct(
         private readonly ReflectionProvider $reflectionProvider,
     ) {
@@ -215,11 +210,16 @@ final class StaticStateLifetimeRule implements Rule
             && in_array(strtolower($expr->name->toString()), ['true', 'false'], true);
     }
 
+    /**
+     * PHPStan resolves names before rules run, so an imported or aliased
+     * attribute already reads as its FQCN here. Only the real Semitexa
+     * attribute counts; a short-name match would accept any `WorkerState`.
+     */
     private function hasWorkerStateAttribute(Property $property): bool
     {
         foreach ($property->attrGroups as $group) {
             foreach ($group->attrs as $attr) {
-                if (in_array($attr->name->toString(), self::WORKER_STATE_ATTRIBUTES, true)) {
+                if (ltrim($attr->name->toString(), '\\') === WorkerState::class) {
                     return true;
                 }
             }
@@ -228,7 +228,11 @@ final class StaticStateLifetimeRule implements Rule
         return false;
     }
 
-    /** The class opts into request scope by registering a reset with PerRequestStateRegistry. */
+    /**
+     * The class opts into request scope by registering a reset with
+     * PerRequestStateRegistry. Imported and aliased calls are already resolved
+     * to the FQCN by PHPStan's name resolver (pinned by the rule's fixtures).
+     */
     private function registersPerRequestReset(ClassLike $node): bool
     {
         $call = (new NodeFinder())->findFirst(

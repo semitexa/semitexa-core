@@ -84,3 +84,36 @@ trait StaticStateInTrait
     /** @var list<object> */
     private static array $seen = [];
 }
+
+// Aliases are imported here, not at the top, so the lines asserted above do not move.
+use Semitexa\Core\Attribute\WorkerState as AliasedWorkerState;
+use Semitexa\Core\Lifecycle\PerRequestStateRegistry as AliasedRegistry;
+
+/** ALLOWED — an aliased #[WorkerState] still resolves to the Semitexa attribute. */
+final class AliasedWorkerStateAttribute
+{
+    #[AliasedWorkerState('Metadata keyed by class name; derived from code only.')]
+    private static array $metadata = [];
+}
+
+/** ALLOWED — an aliased PerRequestStateRegistry::register() still declares request scope. */
+final class AliasedRegistryStaticState
+{
+    /** @var array<string, bool> */
+    private static array $grants = [];
+
+    public static function remember(string $key): void
+    {
+        AliasedRegistry::register('fixture.aliased', static function (): void {
+            self::$grants = [];
+        });
+        self::$grants[$key] = true;
+    }
+}
+
+/** FLAGGED — an unrelated attribute that happens to be called WorkerState declares nothing. */
+final class ForeignWorkerStateAttribute
+{
+    #[\Some\Other\WorkerState('not the Semitexa attribute')]
+    private static array $impostor = [];
+}

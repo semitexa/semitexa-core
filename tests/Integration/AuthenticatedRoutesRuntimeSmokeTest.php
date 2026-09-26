@@ -152,6 +152,14 @@ final class AuthenticatedRoutesRuntimeSmokeTest extends TestCase
     private array $webhookRoutes = [];
 
     /**
+     * Values of the webhook secret env vars before setUp overwrote them, so
+     * tearDown restores a pre-existing .env/CI value instead of deleting it.
+     *
+     * @var array<string, array{env: mixed, putenv: string|false}>
+     */
+    private array $envSnapshot = [];
+
+    /**
      * Map of protected-route paths whose #[RequiresPermission] slug we know
      * from the corresponding payload's attribute. The test seeds these into
      * AuthDemoPermissionStore for the smoke user before the per-route loop.
@@ -213,6 +221,7 @@ final class AuthenticatedRoutesRuntimeSmokeTest extends TestCase
             $env = str_starts_with($secretRef, 'env:') ? substr($secretRef, 4) : '';
             $this->webhookRoutes[(string) $route['path']] = $env;
             if ($env !== '') {
+                $this->envSnapshot[$env] ??= ['env' => $_ENV[$env] ?? null, 'putenv' => getenv($env)];
                 $_ENV[$env] = self::SECRET;
                 putenv($env . '=' . self::SECRET);
             }
@@ -226,10 +235,20 @@ final class AuthenticatedRoutesRuntimeSmokeTest extends TestCase
     protected function tearDown(): void
     {
         $this->resetAllStores();
-        foreach (array_unique(array_filter($this->webhookRoutes)) as $env) {
-            unset($_ENV[$env]);
-            putenv($env);
+        // Restore what was there before (a .env or CI value), not just unset it.
+        foreach ($this->envSnapshot as $env => $previous) {
+            if ($previous['env'] === null) {
+                unset($_ENV[$env]);
+            } else {
+                $_ENV[$env] = $previous['env'];
+            }
+            if ($previous['putenv'] === false) {
+                putenv($env);
+            } else {
+                putenv($env . '=' . $previous['putenv']);
+            }
         }
+        $this->envSnapshot = [];
     }
 
     private function resetAllStores(): void

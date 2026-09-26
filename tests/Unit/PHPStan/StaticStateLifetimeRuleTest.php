@@ -59,8 +59,10 @@ final class StaticStateLifetimeRuleTest extends RuleTestCase
     public function testItFlagsExactlyTheUndeclaredStaticsThatCanHoldObjectsOrArrays(): void
     {
         // Array, nullable object, untyped (mixed), a `static $x = null` local,
-        // and a trait's static. Nothing from the exempt or declared classes.
-        self::assertSame([20, 22, 24, 28, 85], array_keys($this->reported()));
+        // a trait's static, and a static carrying a foreign attribute that is
+        // merely named WorkerState. Nothing from the exempt or declared classes,
+        // including the aliased attribute and the aliased registry call.
+        self::assertSame([20, 22, 24, 28, 85, 118], array_keys($this->reported()));
     }
 
     public function testTheMessageSaysWhatToDoAndWhy(): void
