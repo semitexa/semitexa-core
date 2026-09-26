@@ -27,6 +27,13 @@ class RouteRegistry
     /** @var list<array{route: array<string, mixed>, regex: string, methods: list<string>}> Pre-compiled pattern routes */
     private array $patternIndex = [];
 
+    /**
+     * Exact routes by path with the methods they answer, for allowedMethods().
+     *
+     * @var array<string, list<array{route: array<string, mixed>, methods: list<string>}>>
+     */
+    private array $exactByPath = [];
+
     /** @var array<string, list<array<string, mixed>>> Named route index: "name" => [route, ...] */
     private array $namedIndex = [];
 
@@ -96,6 +103,7 @@ class RouteRegistry
                 'methods' => $indexMethods,
             ];
         } else {
+            $this->exactByPath[$path === '' ? '/' : $path][] = ['route' => $route, 'methods' => $indexMethods];
             foreach ($indexMethods as $method) {
                 $key = $method . ':' . ($path === '' ? '/' : $path);
                 $this->exactIndex[$key][] = $route;
@@ -153,6 +161,44 @@ class RouteRegistry
         $selected = TenantModuleScopeResolver::selectRoutesForTenant($matches, $this->currentTenantContext());
         $selectedRoute = $selected[0] ?? null;
         return is_array($selectedRoute) ? $selectedRoute : null;
+    }
+
+    /**
+     * The methods some route answers on this path — non-empty when find()
+     * missed only because of the method, which is a 405 with this list as
+     * Allow, not a 404 (RFC 9110 §15.5.6). Honours tenant module scope the
+     * way find() does, so a route hidden from this tenant stays a 404.
+     *
+     * @return list<string>
+     */
+    public function allowedMethods(string $path): array
+    {
+        if ($path === '') {
+            $path = '/';
+        }
+
+        $candidates = $this->exactByPath[$path] ?? [];
+        foreach ($this->patternIndex as $compiled) {
+            if (preg_match($compiled['regex'], $path)) {
+                $candidates[] = ['route' => $compiled['route'], 'methods' => $compiled['methods']];
+            }
+        }
+
+        $context = $this->currentTenantContext();
+        $methods = [];
+        foreach ($candidates as $candidate) {
+            if (TenantModuleScopeResolver::selectRoutesForTenant([$candidate['route']], $context) === []) {
+                continue;
+            }
+            foreach ($candidate['methods'] as $method) {
+                $methods[$method] = true;
+            }
+        }
+
+        $methods = array_keys($methods);
+        sort($methods);
+
+        return $methods;
     }
 
     /**
@@ -303,6 +349,7 @@ class RouteRegistry
         $this->exactIndex = [];
         $this->patternIndex = [];
         $this->namedIndex = [];
+        $this->exactByPath = [];
     }
 
     public function setTenantContextProvider(\Closure $provider): void
