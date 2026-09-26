@@ -14,8 +14,16 @@ use PHPStan\Rules\RuleErrorBuilder;
 /**
  * semitexa.factoryContract
  *
- * Flags factory interfaces (name starts with "Factory") that do not extend
- * ContractFactoryInterface or whose get() signature is not enum-keyed.
+ * Flags factory interfaces (name starts with "Factory") that extend
+ * ContractFactoryInterface or whose get() signature is not keyed by one
+ * concrete backed enum.
+ *
+ * A Factory* interface must NOT extend ContractFactoryInterface: that base
+ * declares get(\BackedEnum), and narrowing the parameter to a concrete enum
+ * in a child interface is a fatal error when PHP loads it. The generator
+ * reads the concrete enum from the Factory* interface's own get(), and the
+ * generated App\Registry\Contracts\*Factory implements only the Factory*
+ * interface, delegating to the generic ContractFactory.
  *
  * @implements Rule<Interface_>
  */
@@ -40,34 +48,25 @@ final class FactoryContractRule implements Rule
         }
 
         $interfaceName = $this->resolveInterfaceName($node, $scope);
-        $extendsFactory = $this->extendsContractFactoryInterface($node, $interfaceName);
 
-        if (!$extendsFactory) {
+        if ($this->extendsContractFactoryInterface($node, $interfaceName)) {
             return [
                 RuleErrorBuilder::message(
                     sprintf(
-                        'Factory interface %s must extend ContractFactoryInterface.',
+                        'Factory interface %s must not extend ContractFactoryInterface: its get(\\BackedEnum) cannot be narrowed to a concrete enum, and PHP refuses to load an interface that does. Declare getDefault(), get(<YourEnum> $key) and keys() on a plain interface.',
                         $name,
                     )
                 )->identifier('semitexa.factoryContract')->build(),
             ];
         }
 
-        $hasGetMethod = false;
         foreach ($node->getMethods() as $method) {
-            if ($method->name->name !== 'get') {
-                continue;
+            if ($method->name->name === 'get') {
+                return $this->validateAstGetMethod($name, $method);
             }
-            $hasGetMethod = true;
-
-            return $this->validateAstGetMethod($name, $method);
         }
 
-        if ($hasGetMethod) {
-            return [];
-        }
-
-        return $this->validateInheritedGetMethod($name, $interfaceName);
+        return [$this->buildGetMethodError(sprintf('Factory interface %s must declare get() with exactly one concrete backed enum parameter.', $name))];
     }
 
     private function resolveTypeName(Node\Name $type): string
@@ -125,43 +124,6 @@ final class FactoryContractRule implements Rule
 
         if (!$this->isBackedEnumTypeName($typeName)) {
             return [$this->buildGetMethodError(sprintf('Factory interface %s::get() parameter must resolve to a backed enum, got %s.', $interfaceName, $typeName))];
-        }
-
-        return [];
-    }
-
-    /**
-     * @return list<\PHPStan\Rules\IdentifierRuleError>
-     */
-    private function validateInheritedGetMethod(string $shortName, string $interfaceName): array
-    {
-        if (!$this->reflectionProvider->hasClass($interfaceName)) {
-            return [$this->buildGetMethodError(sprintf('Factory interface %s::get() must declare or inherit exactly one backed enum parameter.', $shortName))];
-        }
-
-        try {
-            $interfaceRef = $this->reflectionProvider->getClass($interfaceName)->getNativeReflection();
-            $params = $interfaceRef->getMethod('get')->getParameters();
-        } catch (\ReflectionException $e) {
-            return [$this->buildGetMethodError(sprintf('Factory interface %s::get() must declare or inherit exactly one backed enum parameter.', $shortName))];
-        }
-
-        if (count($params) !== 1) {
-            return [$this->buildGetMethodError(sprintf('Factory interface %s::get() must accept exactly one backed enum parameter.', $shortName))];
-        }
-
-        $type = $params[0]->getType();
-        if (!$type instanceof \ReflectionNamedType || $type->isBuiltin()) {
-            return [$this->buildGetMethodError(sprintf('Factory interface %s::get() parameter must be a concrete backed enum type.', $shortName))];
-        }
-
-        $typeName = ltrim($type->getName(), '\\');
-        if ($typeName === \BackedEnum::class) {
-            return [$this->buildGetMethodError(sprintf('Factory interface %s::get() must not inherit generic %s; override it with a concrete backed enum.', $shortName, \BackedEnum::class))];
-        }
-
-        if (!$this->isBackedEnumTypeName($typeName)) {
-            return [$this->buildGetMethodError(sprintf('Factory interface %s::get() parameter must resolve to a backed enum, got %s.', $shortName, $typeName))];
         }
 
         return [];

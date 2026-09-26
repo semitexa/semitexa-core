@@ -5,15 +5,17 @@ declare(strict_types=1);
 namespace Semitexa\Core\Contract;
 
 /**
- * Base interface for "Factory of implementations" contracts.
+ * The generic, untyped factory API — what ContractFactory implements and what an
+ * #[InjectAsFactory(of: SomeContract::class)] property typed as ContractFactory or
+ * ContractFactoryInterface receives.
  *
- * When an interface name starts with "Factory" (e.g. FactoryItemListProviderInterface),
- * the framework binds it to a generated implementation that lets the developer choose
- * from all registered implementations of the base contract (e.g. ItemListProviderInterface).
- *
- * Define your factory interface in the same namespace as the base contract:
+ * For a typed factory, declare an interface whose name starts with "Factory" (e.g.
+ * FactoryItemListProviderInterface) in the same namespace as the base contract; the
+ * framework binds it to a generated App\Registry\Contracts\*Factory. That interface must
+ * NOT extend this one: get() here takes \BackedEnum, and a child interface narrowing it to
+ * a concrete enum is a fatal error when PHP loads it (semitexa.factoryContract flags it).
  * <code>
- * interface FactoryItemListProviderInterface extends ContractFactoryInterface
+ * interface FactoryItemListProviderInterface
  * {
  *     public function getDefault(): ItemListProviderInterface;
  *     public function get(ItemListProviderKind $key): ItemListProviderInterface;
