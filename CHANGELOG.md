@@ -5,7 +5,7 @@ Changes to `semitexa/core` that a consuming application can notice. Sections are
 next release tag. This file is machine-read by `update:changelog` and the OS
 "What's new" surface — keep entries short and operator-facing.
 
-## Unreleased
+## 2026.09.27.0404 — 2026-09-27
 
 ### Added
 - **405 Method Not Allowed.** A path that exists for other methods now answers
