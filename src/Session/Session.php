@@ -154,6 +154,7 @@ final class Session implements SessionInterface
         return $this->id;
     }
 
+    /** @param class-string $payloadClass */
     private function getSegmentName(string $payloadClass): string
     {
         if (isset(self::$segmentNames[$payloadClass])) {

@@ -271,7 +271,10 @@ final class InjectionAnalyzer
             );
         }
 
+        // Both are class-like: $typeName passed the non-builtin named-type
+        // check in analyze(), and $key is either it or a Factory* interface.
         /** @var class-string $key */
+        /** @var class-string $typeName */
         return ['kind' => 'factory', 'type' => $key, 'optional' => $optional, 'declared' => $typeName];
     }
 

@@ -9,6 +9,7 @@ use PHPUnit\Framework\TestCase;
 use Semitexa\Core\Event\EventDispatcher;
 use Semitexa\Core\Event\EventExecution;
 use Semitexa\Core\Event\EventListenerRegistry;
+use Semitexa\Core\Exception\ConfigurationException;
 use Semitexa\Core\Log\LoggerInterface;
 use Semitexa\Core\Log\StaticLoggerBridge;
 use Semitexa\Core\Server\SwooleBootstrap;
@@ -171,6 +172,18 @@ final class EventDispatcherTest extends TestCase
         self::assertSame([DispatcherProbeEvent::class], $hooked);
     }
 
+    #[Test]
+    public function a_listener_whose_handle_is_not_public_is_refused_as_a_configuration_error(): void
+    {
+        // method_exists() alone let a private handle() through, and the call
+        // then died with a bare "Call to private method" Error.
+        $dispatcher = $this->dispatcherWith([[PrivateHandleProbeListener::class, EventExecution::Sync]]);
+
+        $this->expectException(ConfigurationException::class);
+        $this->expectExceptionMessage('must have a public handle() method');
+        $dispatcher->dispatch(new DispatcherProbeEvent());
+    }
+
     /** What SwooleBootstrap's onRequest sets on the coroutine a request runs in. */
     private static function markAsRequestCoroutine(): void
     {
@@ -243,5 +256,26 @@ final class ConstructedProbeListener
     public function handle(DispatcherProbeEvent $event): void
     {
         DispatcherProbeLog::$calls[] = 'handled';
+    }
+}
+
+final class PrivateHandleProbeListener
+{
+    private function handle(DispatcherProbeEvent $event): void
+    {
+        DispatcherProbeLog::$calls[] = self::class;
+    }
+
+    /**
+     * A public __call() makes [$this, 'handle'] callable although handle()
+     * is private — the dispatcher must still refuse the listener.
+     *
+     * @param array<mixed> $arguments
+     */
+    public function __call(string $name, array $arguments): mixed
+    {
+        DispatcherProbeLog::$calls[] = self::class . '::__call';
+
+        return null;
     }
 }

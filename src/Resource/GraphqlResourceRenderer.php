@@ -242,7 +242,7 @@ final class GraphqlResourceRenderer
         ) {
             $resolvedDto = $context->resolved->lookup($parentIdentity, $field->name);
             if ($resolvedDto instanceof ResourceObjectInterface) {
-                return $this->renderObject($resolvedDto, $context, $includes->nested($field->include));
+                return $this->renderObject($resolvedDto, $context, $this->nestedIncludes($includes, $field));
             }
             // Resolver said "absent" — render link-only.
             $node = [
@@ -264,7 +264,7 @@ final class GraphqlResourceRenderer
             // Embedded: render as a flat object using the embedded data's
             // own metadata. The href on the parent ref is GraphQL-irrelevant
             // when data is present.
-            return $this->renderObject($value->data, $context, $includes->nested($field->include));
+            return $this->renderObject($value->data, $context, $this->nestedIncludes($includes, $field));
         }
 
         // Reference-only: lightweight {id, type, href?} object.
@@ -303,7 +303,7 @@ final class GraphqlResourceRenderer
         ) {
             $resolvedList = $context->resolved->lookup($parentIdentity, $field->name);
             if (is_array($resolvedList)) {
-                $nested = $includes->nested($field->include);
+                $nested = $this->nestedIncludes($includes, $field);
                 $out    = [];
                 foreach ($resolvedList as $item) {
                     if ($item instanceof ResourceObjectInterface) {
@@ -320,7 +320,7 @@ final class GraphqlResourceRenderer
         }
 
         if ($value->data !== null) {
-            $nested = $includes->nested($field->include);
+            $nested = $this->nestedIncludes($includes, $field);
             $out = [];
             foreach ($value->data as $item) {
                 if ($item instanceof ResourceObjectInterface) {
@@ -396,6 +396,18 @@ final class GraphqlResourceRenderer
             // bare-`null` semantics for an optional relation.
             return null;
         }
-        return $this->renderObject($resolvedDto, $context, $includes->nested($field->include));
+        return $this->renderObject($resolvedDto, $context, $this->nestedIncludes($includes, $field));
+    }
+
+    /**
+     * The include set a relation's rendered object sees, keyed by the same
+     * token GraphqlSelectionToIncludeSet writes: the include name, else the
+     * property name. A relation's metadata normally carries an include name
+     * (the extractor derives one), but metadata built or restored without
+     * one used to hand null to nested() and die with a TypeError.
+     */
+    private function nestedIncludes(IncludeSet $includes, ResourceFieldMetadata $field): IncludeSet
+    {
+        return $includes->nested($field->include ?? $field->name);
     }
 }

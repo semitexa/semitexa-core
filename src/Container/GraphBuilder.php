@@ -137,10 +137,10 @@ final class GraphBuilder
      * @param array<class-string, class-string> $interfaceToResolver
      * @param ObjectMap $readonlyInstances
      * @param ObjectMap $executionScopedPrototypes
-     * @param FactoryMap $factories (mutated in place) Factory* interface => the generated
-     *        typed factory, or the generic one when that class is absent
+     * @param FactoryMap $factories (mutated) Factory* interface => generated typed factory, else the generic one
      * @param \Closure(class-string): object $resolveService The container's get(): resolves an
      *        execution-scoped implementation per call (clone, mutable injection, initialize()).
+     * @param array<string, ContractFactory> $genericFactories (mutated) Factory* interface => the generic factory
      */
     public function buildFactories(
         array $contractDetails,
@@ -260,7 +260,7 @@ final class GraphBuilder
     /**
      * Inject factory instances into execution-scoped prototypes that have InjectAsFactory.
      *
-     * @param array<class-string, object> $executionScopedPrototypes
+     * @param ObjectMap $executionScopedPrototypes also the readonly instances, keyed by id
      * @param InjectionsMap $injections
      * @param ObjectMap $factories
      * @param array<string, ContractFactory> $genericFactories

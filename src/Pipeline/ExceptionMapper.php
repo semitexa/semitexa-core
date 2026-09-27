@@ -162,6 +162,7 @@ final class ExceptionMapper implements ExceptionResponseMapperInterface
         return implode(' | ', $frames);
     }
 
+    /** @param list<string>|null $produces the route's ResolvedRouteMetadata::$produces */
     private function negotiateErrorFormat(Request $request, ?array $produces): string
     {
         try {

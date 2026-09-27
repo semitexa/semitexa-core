@@ -205,7 +205,7 @@ final class JsonResourceRenderer
         ) {
             $resolvedDto = $context->resolved->lookup($parentIdentity, $field->name);
             if ($resolvedDto instanceof ResourceObjectInterface) {
-                $envelope['data'] = $this->renderObject($resolvedDto, $context, $includes->nested($field->include));
+                $envelope['data'] = $this->renderObject($resolvedDto, $context, $this->relationIncludes($includes, $field));
             }
             return $envelope;
         }
@@ -215,7 +215,7 @@ final class JsonResourceRenderer
         }
 
         if ($value->data !== null) {
-            $envelope['data'] = $this->renderObject($value->data, $context, $includes->nested($field->include));
+            $envelope['data'] = $this->renderObject($value->data, $context, $this->relationIncludes($includes, $field));
         }
 
         return $envelope;
@@ -252,7 +252,7 @@ final class JsonResourceRenderer
                 if ($value->href !== null && $value->href !== '') {
                     $envelope['href'] = $value->href;
                 }
-                $nested = $includes->nested($field->include);
+                $nested = $this->relationIncludes($includes, $field);
                 $items  = [];
                 foreach ($resolvedList as $item) {
                     if ($item instanceof ResourceObjectInterface) {
@@ -284,7 +284,7 @@ final class JsonResourceRenderer
         }
 
         if ($value->data !== null) {
-            $nested = $includes->nested($field->include);
+            $nested = $this->relationIncludes($includes, $field);
             $items  = [];
             foreach ($value->data as $item) {
                 if ($item instanceof ResourceObjectInterface) {
@@ -359,7 +359,7 @@ final class JsonResourceRenderer
         $envelope['data'] = $this->renderObject(
             $resolvedDto,
             $context,
-            $includes->nested($field->include),
+            $this->relationIncludes($includes, $field),
         );
         return $envelope;
     }

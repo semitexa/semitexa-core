@@ -204,7 +204,6 @@ class PayloadSerializer
         if (!is_string($value) || !is_a($class, \DateTimeInterface::class, true)) {
             return null;
         }
-        $concrete = $class === \DateTimeInterface::class ? \DateTimeImmutable::class : $class;
         // Only the wire format normalize() writes. The date constructor reads
         // '' as now and 'tomorrow' or '+1 day' as real dates, so a stray string
         // silently became a timestamp nobody sent.
@@ -223,7 +222,17 @@ class PayloadSerializer
 
         // Built from the parsed value, not the constructor: the constructor
         // cannot read the five-digit year normalize() writes for year 10000.
-        return $concrete::createFromInterface($parsed);
+        // The interface has no factory of its own; it is restored as the
+        // immutable. A subclass gets itself back: createFromInterface()
+        // returns static.
+        if (is_a($class, \DateTime::class, true)) {
+            return $class::createFromInterface($parsed);
+        }
+        if (is_a($class, \DateTimeImmutable::class, true)) {
+            return $class::createFromInterface($parsed);
+        }
+
+        return \DateTimeImmutable::createFromInterface($parsed);
     }
 
     /**
