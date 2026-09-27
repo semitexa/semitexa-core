@@ -214,7 +214,7 @@ final class JsonLdResourceRenderer
         ) {
             $resolvedDto = $context->resolved->lookup($parentIdentity, $field->name);
             if ($resolvedDto instanceof ResourceObjectInterface) {
-                $nested = $this->renderObject($resolvedDto, $context, $includes->nested($field->include));
+                $nested = $this->renderObject($resolvedDto, $context, $this->relationIncludes($includes, $field));
                 if ($value->href !== null && $value->href !== '') {
                     $nested['@id'] = $value->href;
                 }
@@ -232,7 +232,7 @@ final class JsonLdResourceRenderer
         if ($value->data !== null) {
             // Embedded: render as a full nested JSON-LD node. Identity is
             // taken from the embedded data via its metadata.
-            $nested = $this->renderObject($value->data, $context, $includes->nested($field->include));
+            $nested = $this->renderObject($value->data, $context, $this->relationIncludes($includes, $field));
             // If the parent ref carried an explicit href and the nested @id
             // came from urn fallback, prefer the href as the canonical @id.
             if ($value->href !== null && $value->href !== '') {
@@ -277,7 +277,7 @@ final class JsonLdResourceRenderer
         ) {
             $resolvedList = $context->resolved->lookup($parentIdentity, $field->name);
             if (is_array($resolvedList)) {
-                $nested = $includes->nested($field->include);
+                $nested = $this->relationIncludes($includes, $field);
                 $items  = [];
                 foreach ($resolvedList as $item) {
                     if ($item instanceof ResourceObjectInterface) {
@@ -294,7 +294,7 @@ final class JsonLdResourceRenderer
         }
 
         if ($value->data !== null) {
-            $nested = $includes->nested($field->include);
+            $nested = $this->relationIncludes($includes, $field);
             $items  = [];
             foreach ($value->data as $item) {
                 if ($item instanceof ResourceObjectInterface) {
@@ -371,6 +371,6 @@ final class JsonLdResourceRenderer
             // bare-`null` semantics for an optional relation.
             return null;
         }
-        return $this->renderObject($resolvedDto, $context, $includes->nested($field->include));
+        return $this->renderObject($resolvedDto, $context, $this->relationIncludes($includes, $field));
     }
 }

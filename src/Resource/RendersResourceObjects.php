@@ -93,6 +93,17 @@ trait RendersResourceObjects
      * a field that declares no include name is never embeddable, which is what
      * stops a renderer from walking the whole object graph.
      */
+    /**
+     * The include set a relation's rendered object sees. Without an include
+     * name nothing below the relation can have been requested, so it is
+     * empty — nested() takes a string, and metadata built or restored without
+     * a name used to hand it null and die with a TypeError.
+     */
+    private function relationIncludes(IncludeSet $includes, ResourceFieldMetadata $field): IncludeSet
+    {
+        return $field->include === null ? IncludeSet::empty() : $includes->nested($field->include);
+    }
+
     private function shouldEmbed(ResourceFieldMetadata $field, IncludeSet $includes): bool
     {
         if ($field->include === null) {
