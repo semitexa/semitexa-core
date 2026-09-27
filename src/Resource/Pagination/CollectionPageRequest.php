@@ -115,8 +115,10 @@ final readonly class CollectionPageRequest
         self::guard($name, $raw, $value, $maxPerPage);
         // (int) saturates digit strings beyond the int range at
         // PHP_INT_MAX instead of failing; numeric-string arithmetic
-        // yields a float for exactly those, so reject them here.
-        if (!is_int($raw + 0)) {
+        // yields a float for exactly those, so reject them here. The
+        // is_numeric() is always true after the regex above; it states that
+        // to the type system so the arithmetic is on a numeric-string.
+        if (!is_numeric($raw) || !is_int($raw + 0)) {
             throw new InvalidPaginationException($name, $raw, 'is too large');
         }
         return $value;

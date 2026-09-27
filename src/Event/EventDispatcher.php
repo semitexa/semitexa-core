@@ -19,6 +19,8 @@ use Semitexa\Core\Support\PayloadSerializer;
  * dispatch() runs all listeners (sync or async via the same queue as payload handlers).
  *
  * @internal Uses ContainerFactory::get() — this is core framework plumbing, not application code.
+ *
+@phpstan-type ListenerMeta array{class: string, event: string, execution: string, transport: mixed, queue: mixed, priority: int}
  */
 #[SatisfiesServiceContract(of: EventDispatcherInterface::class)]
 final class EventDispatcher implements EventDispatcherInterface
@@ -147,6 +149,7 @@ final class EventDispatcher implements EventDispatcherInterface
         }
     }
 
+    /** @param ListenerMeta $meta */
     private function runListenerSync(array $meta, object $event, ?\Semitexa\Core\Pipeline\RequestTracerInterface $tracer = null): void
     {
         $listener = $this->resolveListener($meta);
@@ -155,13 +158,19 @@ final class EventDispatcher implements EventDispatcherInterface
         // is exactly the question a slow-event hunt opens the trace to answer.
         $tracer?->begin('event.listener', ['listener' => $meta['class'], 'method' => 'handle', 'event' => get_class($event)]);
         try {
-            $listener->handle($event);
+            $listener($event);
         } finally {
             $tracer?->end('event.listener');
         }
     }
 
-    private function resolveListener(array $meta): object
+    /**
+     * The listener's handle(), bound to the resolved instance.
+     *
+     * @param ListenerMeta $meta
+     * @return \Closure(object): mixed
+     */
+    private function resolveListener(array $meta): \Closure
     {
         /** @var \Semitexa\Core\Container\SemitexaContainer $container */
         $container = ContainerFactory::get();
@@ -172,17 +181,21 @@ final class EventDispatcher implements EventDispatcherInterface
             $listener = $container->resolve($meta['class']);
         }
 
-        if (!method_exists($listener, 'handle')) {
+        // Both: method_exists() alone passes a private handle() that then
+        // fails at the call; is_callable() alone accepts a __call() stand-in.
+        $handle = [$listener, 'handle'];
+        if (!method_exists($listener, 'handle') || !is_callable($handle)) {
             throw new ConfigurationException(sprintf(
-                'Event listener %s must have a handle() method.',
+                'Event listener %s must have a public handle() method.',
                 $meta['class'],
             ));
         }
 
-        return $listener;
+        return \Closure::fromCallable($handle);
     }
 
     /** Run listener after the current request coroutine finishes. Falls back to sync anywhere else. */
+    /** @param ListenerMeta $meta */
     private function runListenerDefer(array $meta, object $event): void
     {
         // Decided on "inside a request coroutine", not on SAPI: a Swoole HTTP
@@ -203,7 +216,7 @@ final class EventDispatcher implements EventDispatcherInterface
         // Application has reset request-scoped state, so an #[ExecutionScoped]
         // listener's #[InjectAsMutable] deps must be bound before that.
         $listener = $this->resolveListener($meta);
-        $listenerClass = (string) $meta['class'];
+        $listenerClass = $meta['class'];
 
         // Coroutine::defer runs its callbacks LIFO, which would hand an
         // order-dependent listener an update before its creation event. So
@@ -231,12 +244,13 @@ final class EventDispatcher implements EventDispatcherInterface
         });
     }
 
-    private static function runDeferredListener(object $listener, object $event, string $listenerClass): void
+    /** @param \Closure(object): mixed $listener */
+    private static function runDeferredListener(\Closure $listener, object $event, string $listenerClass): void
     {
         // Nothing above a deferred callback can catch: an escaping
         // throwable would be fatal to the worker, not a 500.
         try {
-            $listener->handle($event);
+            $listener($event);
         } catch (\Throwable $e) {
             StaticLoggerBridge::error('core', 'Async event listener failed', [
                 'event' => $event::class,
@@ -247,10 +261,11 @@ final class EventDispatcher implements EventDispatcherInterface
         }
     }
 
+    /** @param ListenerMeta $meta */
     private function enqueueListener(array $meta, object $event, ?\Semitexa\Core\Pipeline\RequestTracerInterface $tracer = null): void
     {
         $transportName = $meta['transport'] ?? QueueConfig::defaultTransport();
-        $queueName = $meta['queue'] ?? QueueConfig::defaultQueueName($meta['event'] ?? 'event');
+        $queueName = $meta['queue'] ?? QueueConfig::defaultQueueName($meta['event']);
 
         $message = new \Semitexa\Core\Queue\Message\QueuedEventListenerMessage(
             listenerClass: $meta['class'],

@@ -11,7 +11,9 @@ use Semitexa\Core\Resource\GraphqlResourceRenderer;
 use Semitexa\Core\Resource\IncludeSet;
 use Semitexa\Core\Resource\JsonResourceRenderer;
 use Semitexa\Core\Resource\Metadata\ResourceMetadataExtractor;
+use Semitexa\Core\Resource\Metadata\ResourceFieldMetadata;
 use Semitexa\Core\Resource\Metadata\ResourceMetadataRegistry;
+use Semitexa\Core\Resource\Metadata\ResourceObjectMetadata;
 use Semitexa\Core\Resource\RenderContext;
 use Semitexa\Core\Resource\RenderProfile;
 use Semitexa\Core\Resource\ResolvedResourceGraph;
@@ -100,6 +102,47 @@ final class GraphqlNestedIncludeNameTest extends TestCase
         GraphqlResourceRenderer::forTesting($this->registry)->render(
             $customer,
             (new RenderContext(profile: RenderProfile::GraphQL, includes: $includes))->withResolved($graph),
+        );
+    }
+
+    #[Test]
+    public function graphql_renderer_embeds_a_relation_whose_metadata_carries_no_include_name(): void
+    {
+        // Metadata built or restored without an include name handed null to
+        // IncludeSet::nested(string) — a TypeError under strict_types.
+        $extractor = new ResourceMetadataExtractor();
+        $registry  = ResourceMetadataRegistry::forTesting($extractor);
+        $registry->register($extractor->extract(PreferencesResource::class));
+        $registry->register($extractor->extract(ProfileResource::class));
+        $meta  = $extractor->extract(AliasProfileCustomerResource::class);
+        $field = $meta->fields['authorProfile'];
+        $fields = $meta->fields;
+        $fields['authorProfile'] = new ResourceFieldMetadata(
+            name:         $field->name,
+            kind:         $field->kind,
+            nullable:     $field->nullable,
+            target:       $field->target,
+            include:      null,
+            hrefTemplate: $field->hrefTemplate,
+            expandable:   $field->expandable,
+        );
+        $registry->register(new ResourceObjectMetadata($meta->class, $meta->type, $meta->idField, $fields));
+
+        $customer = new AliasProfileCustomerResource(
+            id:            '1',
+            authorProfile: ResourceRef::embed(ResourceIdentity::of('profile', 'p1'), $this->profileWithUnloadedPreferences()),
+        );
+
+        $out = GraphqlResourceRenderer::forTesting($registry)->render(
+            $customer,
+            new RenderContext(profile: RenderProfile::GraphQL, includes: IncludeSet::fromQueryString('')),
+        );
+
+        $root = $out['data']['alias_profile_customer'] ?? null;
+        self::assertIsArray($root);
+        self::assertSame(
+            ['id' => 'p1', 'type' => 'profile', 'bio' => 'bio', 'preferences' => ['id' => 'pr1', 'type' => 'preferences', 'href' => '/profiles/p1/preferences']],
+            $root['authorProfile'] ?? null,
         );
     }
 }
