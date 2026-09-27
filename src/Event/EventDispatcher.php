@@ -181,10 +181,14 @@ final class EventDispatcher implements EventDispatcherInterface
             $listener = $container->resolve($meta['class']);
         }
 
-        // Both: method_exists() alone passes a private handle() that then
-        // fails at the call; is_callable() alone accepts a __call() stand-in.
+        // The DECLARED method must be public: method_exists() passes a private
+        // handle(), and is_callable() — or fromCallable() — would then route
+        // the call through a public __call() instead of refusing it.
         $handle = [$listener, 'handle'];
-        if (!method_exists($listener, 'handle') || !is_callable($handle)) {
+        if (!method_exists($listener, 'handle')
+            || !(new \ReflectionMethod($listener, 'handle'))->isPublic()
+            || !is_callable($handle)
+        ) {
             throw new ConfigurationException(sprintf(
                 'Event listener %s must have a public handle() method.',
                 $meta['class'],

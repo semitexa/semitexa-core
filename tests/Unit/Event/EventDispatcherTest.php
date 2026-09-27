@@ -265,4 +265,17 @@ final class PrivateHandleProbeListener
     {
         DispatcherProbeLog::$calls[] = self::class;
     }
+
+    /**
+     * A public __call() makes [$this, 'handle'] callable although handle()
+     * is private — the dispatcher must still refuse the listener.
+     *
+     * @param array<mixed> $arguments
+     */
+    public function __call(string $name, array $arguments): mixed
+    {
+        DispatcherProbeLog::$calls[] = self::class . '::__call';
+
+        return null;
+    }
 }
