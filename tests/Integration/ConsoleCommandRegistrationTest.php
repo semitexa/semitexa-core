@@ -7,7 +7,10 @@ namespace Semitexa\Core\Tests\Integration;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Semitexa\Core\Console\Application;
+use Semitexa\Core\Container\ContainerFactory;
 use Semitexa\Core\Discovery\BootDiagnostics;
+use Semitexa\Core\ModuleRegistry;
+use Symfony\Component\Console\Command\Command;
 
 /**
  * Every discovered #[AsCommand] must reach the console.
@@ -55,5 +58,37 @@ final class ConsoleCommandRegistrationTest extends TestCase
         } finally {
             $collector->setValue(null, $previous);
         }
+    }
+
+    #[Test]
+    public function a_command_asking_for_constructor_arguments_is_skipped_with_the_fix_named(): void
+    {
+        $collector = new \ReflectionProperty(BootDiagnostics::class, 'current');
+        $previous = $collector->getValue();
+
+        try {
+            BootDiagnostics::begin();
+            $application = (new \ReflectionClass(Application::class))->newInstanceWithoutConstructor();
+            $instantiate = new \ReflectionMethod(Application::class, 'instantiateCommand');
+
+            $command = $instantiate->invoke($application, ConstructorDiCommandFixture::class, ContainerFactory::get());
+
+            self::assertNull($command);
+            $messages = array_map(static fn ($w): string => $w->message, BootDiagnostics::current()->getWarnings());
+            self::assertCount(1, $messages);
+            self::assertStringContainsString(ConstructorDiCommandFixture::class, $messages[0]);
+            self::assertStringContainsString('#[InjectAsReadonly]', $messages[0]);
+        } finally {
+            $collector->setValue(null, $previous);
+        }
+    }
+}
+
+/** Not #[AsCommand]: discovery must not find it, the test above hands it over. */
+final class ConstructorDiCommandFixture extends Command
+{
+    public function __construct(public readonly ModuleRegistry $modules)
+    {
+        parent::__construct('fixture:constructor-di');
     }
 }

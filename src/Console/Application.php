@@ -112,34 +112,31 @@ class Application extends SymfonyApplication
     /**
      * Instantiate a #[AsCommand] class and hand it to the container for
      * property injection. Commands declare their dependencies exactly like
-     * services — via #[InjectAsReadonly] on protected properties — while some
-     * legacy commands still use constructor DI:
+     * services — via #[InjectAsReadonly] on protected properties — and are
+     * created with a plain `new $className()`.
      *
-     *   1. Legacy constructor DI commands are created via SemitexaContainer::resolve().
-     *   2. Attribute-only commands use plain `new $className()`.
-     *   3. Container applies #[InjectAsReadonly] property injection in both paths.
+     * Constructor DI is no longer resolved (the last framework commands moved
+     * off it on 2026-09-30). A command that still asks for constructor
+     * arguments is skipped with a diagnostic naming the fix, rather than a
+     * bare "Too few arguments".
      *
      * @param class-string<Command> $className
      * @return Command|null null if dependencies are not available
      */
     private function instantiateCommand(string $className, SemitexaContainer $container): ?Command
     {
-        $ref = new ReflectionClass($className);
-        $ctor = $ref->getConstructor();
+        $ctor = (new ReflectionClass($className))->getConstructor();
+        if ($ctor !== null && $ctor->getNumberOfRequiredParameters() > 0) {
+            BootDiagnostics::current()->skip(
+                'Console',
+                "Skip {$className}: it takes its dependencies through the constructor, which console boot does not resolve. "
+                    . 'Declare them as protected properties with #[InjectAsReadonly] and drop the constructor.',
+            );
+
+            return null;
+        }
 
         try {
-            if ($ctor !== null && $ctor->getNumberOfRequiredParameters() > 0) {
-                $resolved = $container->resolve($className);
-
-                if (!$resolved instanceof Command) {
-                    return null;
-                }
-
-                $container->injectInto($resolved);
-
-                return $resolved;
-            }
-
             /** @var Command $command */
             $command = new $className();
             $container->injectInto($command);

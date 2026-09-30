@@ -6,6 +6,7 @@ namespace Semitexa\Core\Application\Console\Command;
 
 use Semitexa\Core\Console\BaseCommand;
 use Semitexa\Core\Attribute\AsCommand;
+use Semitexa\Core\Attribute\InjectAsReadonly;
 use Semitexa\Core\Attribute\AsEventListener;
 use Semitexa\Core\Attribute\AsPipelineListener;
 use Semitexa\Core\Attribute\AsPayloadHandler;
@@ -25,11 +26,8 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 #[AsCommand(name: 'lint:scoping', description: 'Verify container-managed classes with #[InjectAsMutable] properties have explicit scoping attributes')]
 final class LintScopingCommand extends BaseCommand
 {
-    public function __construct(
-        private readonly ClassDiscovery $classDiscovery,
-    ) {
-        parent::__construct();
-    }
+    #[InjectAsReadonly]
+    protected ClassDiscovery $classDiscovery;
 
     private const SCOPING_ATTRIBUTES = [
         ExecutionScoped::class,

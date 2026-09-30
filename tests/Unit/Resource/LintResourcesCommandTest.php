@@ -33,7 +33,7 @@ final class LintResourcesCommandTest extends TestCase
             CommentResource::class,
         ]);
 
-        $command = new LintResourcesCommand($discovery);
+        $command = self::command($discovery);
         $tester  = new CommandTester($command);
 
         $exit = $tester->execute([]);
@@ -52,7 +52,7 @@ final class LintResourcesCommandTest extends TestCase
             MalformedHrefTemplateResource::class,
         ]);
 
-        $command = new LintResourcesCommand($discovery);
+        $command = self::command($discovery);
         $tester  = new CommandTester($command);
 
         $exit = $tester->execute([]);
@@ -66,12 +66,20 @@ final class LintResourcesCommandTest extends TestCase
     #[Test]
     public function reports_zero_resources_cleanly_when_classmap_is_empty(): void
     {
-        $command = new LintResourcesCommand(new InMemoryClassDiscovery([]));
+        $command = self::command(new InMemoryClassDiscovery([]));
         $tester  = new CommandTester($command);
         $exit    = $tester->execute([]);
 
         self::assertSame(0, $exit);
         self::assertStringContainsString('Discovered 0', $tester->getDisplay());
+    }
+
+    private static function command(ClassDiscovery $discovery): LintResourcesCommand
+    {
+        $command = new LintResourcesCommand();
+        (new \ReflectionProperty(LintResourcesCommand::class, 'classDiscovery'))->setValue($command, $discovery);
+
+        return $command;
     }
 }
 

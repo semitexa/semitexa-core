@@ -6,6 +6,7 @@ namespace Semitexa\Core\Application\Console\Command;
 
 use Semitexa\Core\Console\BaseCommand;
 use Semitexa\Core\Attribute\AsCommand;
+use Semitexa\Core\Attribute\InjectAsReadonly;
 use Semitexa\Core\Container\ServiceContractRegistry;
 use Semitexa\Core\Discovery\ClassDiscovery;
 use Semitexa\Core\ModuleRegistry;
@@ -27,12 +28,11 @@ class RegistrySyncContractsCommand extends BaseCommand
     private const CONTRACTS_PATH = CanonicalRegistryPaths::REGISTRY_CONTRACTS;
     private const DESCRIPTION = 'Generate contract resolvers in ' . self::CONTRACTS_PATH . ' for interfaces with 2+ implementations.';
 
-    public function __construct(
-        private readonly ClassDiscovery $classDiscovery,
-        private readonly ModuleRegistry $moduleRegistry,
-    ) {
-        parent::__construct();
-    }
+    #[InjectAsReadonly]
+    protected ClassDiscovery $classDiscovery;
+
+    #[InjectAsReadonly]
+    protected ModuleRegistry $moduleRegistry;
 
     protected function configure(): void
     {

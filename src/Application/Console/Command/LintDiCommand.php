@@ -6,6 +6,7 @@ namespace Semitexa\Core\Application\Console\Command;
 
 use Semitexa\Core\Console\BaseCommand;
 use Semitexa\Core\Attribute\AsCommand;
+use Semitexa\Core\Attribute\InjectAsReadonly;
 use Semitexa\Core\Attribute\AsEventListener;
 use Semitexa\Core\Attribute\AsPipelineListener;
 use Semitexa\Core\Attribute\AsPayloadHandler;
@@ -13,7 +14,6 @@ use Semitexa\Core\Attribute\AsService;
 use Semitexa\Core\Attribute\Config;
 use Semitexa\Core\Attribute\InjectAsFactory;
 use Semitexa\Core\Attribute\InjectAsMutable;
-use Semitexa\Core\Attribute\InjectAsReadonly;
 use Semitexa\Core\Attribute\SatisfiesServiceContract;
 use Semitexa\Core\Attribute\SatisfiesRepositoryContract;
 use Semitexa\Core\Discovery\AttributeDiscovery;
@@ -33,12 +33,11 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 #[AsCommand(name: 'lint:di', description: 'Verify DI injection rules on all container-managed classes')]
 final class LintDiCommand extends BaseCommand
 {
-    public function __construct(
-        private readonly ClassDiscovery $classDiscovery,
-        private readonly AttributeDiscovery $attributeDiscovery,
-    ) {
-        parent::__construct();
-    }
+    #[InjectAsReadonly]
+    protected ClassDiscovery $classDiscovery;
+
+    #[InjectAsReadonly]
+    protected AttributeDiscovery $attributeDiscovery;
 
     private const CONTAINER_MANAGED_ATTRIBUTES = [
         AsService::class,

@@ -6,6 +6,7 @@ namespace Semitexa\Core\Application\Console\Command;
 
 use Semitexa\Core\Console\BaseCommand;
 use Semitexa\Core\Attribute\AsCommand;
+use Semitexa\Core\Attribute\InjectAsReadonly;
 use Semitexa\Core\Attribute\AsPayloadHandler;
 use Semitexa\Core\Contract\ResourceInterface;
 use Semitexa\Core\Contract\TypedHandlerInterface;
@@ -21,11 +22,8 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 #[AsCommand(name: 'lint:handlers', description: 'Validate handler signatures, return types, and payload/resource bindings')]
 final class LintHandlersCommand extends BaseCommand
 {
-    public function __construct(
-        private readonly AttributeDiscovery $attributeDiscovery,
-    ) {
-        parent::__construct();
-    }
+    #[InjectAsReadonly]
+    protected AttributeDiscovery $attributeDiscovery;
 
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
