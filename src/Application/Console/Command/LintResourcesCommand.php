@@ -6,6 +6,7 @@ namespace Semitexa\Core\Application\Console\Command;
 
 use Semitexa\Core\Console\BaseCommand;
 use Semitexa\Core\Attribute\AsCommand;
+use Semitexa\Core\Attribute\InjectAsReadonly;
 use Semitexa\Core\Discovery\ClassDiscovery;
 use Semitexa\Core\Resource\Exception\MalformedResourceObjectException;
 use Semitexa\Core\Resource\HandlerProvidedIncludeRegistry;
@@ -20,11 +21,8 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 #[AsCommand(name: 'lint:resources', description: 'Validate ResourceDTO classes, attributes, and the relation metadata graph.')]
 final class LintResourcesCommand extends BaseCommand
 {
-    public function __construct(
-        private readonly ClassDiscovery $classDiscovery,
-    ) {
-        parent::__construct();
-    }
+    #[InjectAsReadonly]
+    protected ClassDiscovery $classDiscovery;
 
     protected function execute(InputInterface $input, OutputInterface $output): int
     {

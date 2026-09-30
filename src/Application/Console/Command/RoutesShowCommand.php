@@ -6,6 +6,7 @@ namespace Semitexa\Core\Application\Console\Command;
 
 use Semitexa\Core\Console\BaseCommand;
 use Semitexa\Core\Attribute\AsCommand;
+use Semitexa\Core\Attribute\InjectAsReadonly;
 use Semitexa\Core\Discovery\AttributeDiscovery;
 use Semitexa\Core\ModuleRegistry;
 use Symfony\Component\Console\Command\Command;
@@ -18,12 +19,11 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 #[AsCommand(name: 'routes:show', description: 'Show detailed debug information for a specific route.')]
 class RoutesShowCommand extends BaseCommand
 {
-    public function __construct(
-        private readonly AttributeDiscovery $attributeDiscovery,
-        private readonly ModuleRegistry $moduleRegistry,
-    ) {
-        parent::__construct();
-    }
+    #[InjectAsReadonly]
+    protected AttributeDiscovery $attributeDiscovery;
+
+    #[InjectAsReadonly]
+    protected ModuleRegistry $moduleRegistry;
 
     protected function configure(): void
     {

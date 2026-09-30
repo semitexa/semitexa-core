@@ -6,6 +6,7 @@ namespace Semitexa\Core\Application\Console\Command;
 
 use Semitexa\Core\Console\BaseCommand;
 use Semitexa\Core\Attribute\AsCommand;
+use Semitexa\Core\Attribute\InjectAsReadonly;
 use Semitexa\Core\ModuleRegistry;
 use Semitexa\Core\Support\ProjectRoot;
 use Symfony\Component\Console\Command\Command;
@@ -48,11 +49,8 @@ class LintTemplatesCommand extends BaseCommand
         'slots'    => 'deferred',
     ];
 
-    public function __construct(
-        private readonly ModuleRegistry $moduleRegistry,
-    ) {
-        parent::__construct();
-    }
+    #[InjectAsReadonly]
+    protected ModuleRegistry $moduleRegistry;
 
     protected function configure(): void
     {
