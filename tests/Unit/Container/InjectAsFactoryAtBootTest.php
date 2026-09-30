@@ -28,12 +28,6 @@ interface BootFactoryChannel
 {
 }
 
-enum BootFactoryChannelKind: string
-{
-    case Mail = 'mail';
-    case Sms = 'sms';
-}
-
 /** The documented shape: get() takes the contract's own enum. */
 interface FactoryBootFactoryChannel
 {
