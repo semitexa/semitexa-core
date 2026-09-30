@@ -74,10 +74,18 @@ final class ConsoleCommandRegistrationTest extends TestCase
             $command = $instantiate->invoke($application, ConstructorDiCommandFixture::class, ContainerFactory::get());
 
             self::assertNull($command);
-            $messages = array_map(static fn ($w): string => $w->message, BootDiagnostics::current()->getWarnings());
-            self::assertCount(1, $messages);
-            self::assertStringContainsString(ConstructorDiCommandFixture::class, $messages[0]);
-            self::assertStringContainsString('#[InjectAsReadonly]', $messages[0]);
+            // Console's own warnings only: building the container the first
+            // time can record others, and may begin() a fresh collector — so
+            // current() is read after the call, as in the test above.
+            $messages = array_values(array_map(
+                static fn ($w): string => $w->message,
+                array_filter(BootDiagnostics::current()->getWarnings(), static fn ($w): bool => $w->component === 'Console'),
+            ));
+            self::assertSame(
+                ['Skip ' . ConstructorDiCommandFixture::class . ': it takes its dependencies through the constructor, which console boot does not resolve. '
+                    . 'Declare them as protected properties with #[InjectAsReadonly] and drop the constructor.'],
+                $messages,
+            );
         } finally {
             $collector->setValue(null, $previous);
         }
