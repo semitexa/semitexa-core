@@ -83,6 +83,9 @@ use PHPStan\Rules\RuleErrorBuilder;
  */
 final class BuiltSqlFragmentRule implements Rule
 {
+    /** Printed with every report of this rule: why it exists, and what taught us. */
+    private const RATIONALE = 'Why: whereRaw() binds its values but pastes the fragment into the statement verbatim, so a fragment that was built rather than written is an injection door. Learned 2026-09-18: judging what the string contains fires on console output and gets switched off, so the rule asks whether the fragment is a constant expression; its first version crashed on $q->whereRaw(...), and a security rule that crashes is a security rule that is off.';
+
     private const METHOD = 'whereRaw';
 
     /** The fragment's position and name, so a named argument is found too. */
@@ -142,6 +145,7 @@ final class BuiltSqlFragmentRule implements Rule
                 . 'identifiers that already went through SqlIdentifier, record it in AcceptedViolations with '
                 . 'that reason instead of leaving the next reader to work it out.',
             )
+                ->tip(self::RATIONALE)
                 ->identifier('semitexa.builtSqlFragment')
                 ->build(),
         ];

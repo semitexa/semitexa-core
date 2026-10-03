@@ -44,6 +44,9 @@ use Semitexa\Core\Attribute\SatisfiesServiceContract;
  */
 final class WorkerServiceConnectionHandleRule implements Rule
 {
+    /** Printed with every report of this rule: why it exists, and what taught us. */
+    private const RATIONALE = 'Why: an #[AsService] is one instance per worker, so a connection handle on it is shared by concurrent coroutines and a second one runs on the socket mid-statement. Learned 2026-07-05: TransactionManager kept the active connection on a worker singleton and mixed overlapping transactions (fixed with CoroutineLocal).';
+
     private const CONTAINER_MANAGED_ATTRIBUTES = [
         AsService::class,
         SatisfiesServiceContract::class,
@@ -120,7 +123,7 @@ final class WorkerServiceConnectionHandleRule implements Rule
                     $typeName,
                     $classReflection->getName(),
                 )
-            )->identifier('semitexa.workerServiceConnectionHandle')->build(),
+            )->tip(self::RATIONALE)->identifier('semitexa.workerServiceConnectionHandle')->build(),
         ];
     }
 

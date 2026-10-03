@@ -22,6 +22,9 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 #[AsCommand(name: 'lint:handlers', description: 'Validate handler signatures, return types, and payload/resource bindings')]
 final class LintHandlersCommand extends BaseCommand
 {
+    /** Why this check exists, and what taught us; ai:verify prints it when the lint fails. */
+    public const RATIONALE = 'Why: handler signatures and payload/resource bindings are resolved by reflection, so a wrong one is otherwise found by the boot or request that first reaches it rather than before the change lands. Policy since 2026-04-30; no incident on record.';
+
     #[InjectAsReadonly]
     protected AttributeDiscovery $attributeDiscovery;
 

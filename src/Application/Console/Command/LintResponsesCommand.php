@@ -19,6 +19,9 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 #[AsCommand(name: 'lint:responses', description: 'Verify no HttpResponse construction in application code')]
 final class LintResponsesCommand extends BaseCommand
 {
+    /** Why this check exists, and what taught us; ai:verify prints it when the lint fails. */
+    public const RATIONALE = 'Why: a response built in application code skips the renderer, so content negotiation, the CSP nonce and the deferred-region manifest never reach that route. Policy since 2026-04-30; no incident on record.';
+
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
         $io = new SymfonyStyle($input, $output);

@@ -19,6 +19,9 @@ use PHPStan\Rules\RuleErrorBuilder;
  */
 final class ConfigOnArrayTypeRule implements Rule
 {
+    /** Printed with every report of this rule: why it exists, and what taught us. */
+    private const RATIONALE = 'Why: an array has no schema, so a missing or misspelt key is not caught at boot but by whichever request reads it first. Policy since 2026-03-28 (the DI attribute rules); no incident on record.';
+
     public function getNodeType(): string
     {
         return Property::class;
@@ -41,7 +44,7 @@ final class ConfigOnArrayTypeRule implements Rule
                         . 'Use a typed DTO or collection object injected via #[InjectAsReadonly] instead.',
                         $propName,
                     )
-                )->identifier('semitexa.configOnArrayType')->build(),
+                )->tip(self::RATIONALE)->identifier('semitexa.configOnArrayType')->build(),
             ];
         }
 

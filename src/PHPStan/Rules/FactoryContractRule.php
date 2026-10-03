@@ -29,6 +29,11 @@ use PHPStan\Rules\RuleErrorBuilder;
  */
 final class FactoryContractRule implements Rule
 {
+    /** Printed with every report of this rule: why it exists, and what taught us. */
+    private const RATIONALE = 'Why: narrowing get(\\BackedEnum) to a concrete enum in a child interface is a fatal error when PHP loads the interface. Learned 2026-09-26: this rule used to REQUIRE Factory* interfaces to extend ContractFactoryInterface, which is exactly that fatal; it now forbids it.';
+
+    private const GET_RATIONALE = 'Why: the contract generator reads the concrete enum from the Factory* interface\'s own get() to build its App\\Registry\\Contracts\\*Factory; a get() that is missing, or not keyed by exactly one backed enum, leaves it nothing to generate from. Policy since 2026-03-28; no incident on record.';
+
     private const CONTRACT_FACTORY_INTERFACE = 'Semitexa\\Core\\Contract\\ContractFactoryInterface';
 
     public function __construct(
@@ -56,7 +61,7 @@ final class FactoryContractRule implements Rule
                         'Factory interface %s must not extend ContractFactoryInterface: its get(\\BackedEnum) cannot be narrowed to a concrete enum, and PHP refuses to load an interface that does. Declare getDefault(), get(<YourEnum> $key) and keys() on a plain interface.',
                         $name,
                     )
-                )->identifier('semitexa.factoryContract')->build(),
+                )->tip(self::RATIONALE)->identifier('semitexa.factoryContract')->build(),
             ];
         }
 
@@ -161,6 +166,7 @@ final class FactoryContractRule implements Rule
     private function buildGetMethodError(string $message): \PHPStan\Rules\IdentifierRuleError
     {
         return RuleErrorBuilder::message($message)
+            ->tip(self::GET_RATIONALE)
             ->identifier('semitexa.factoryContract')
             ->build();
     }

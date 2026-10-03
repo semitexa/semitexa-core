@@ -20,6 +20,9 @@ use PHPStan\Rules\RuleErrorBuilder;
  */
 final class ExplicitOptionalDependencyRule implements Rule
 {
+    /** Printed with every report of this rule: why it exists, and what taught us. */
+    private const RATIONALE = 'Why: class_exists() hides a dependency from composer, so the missing package is found at runtime by a consumer instead of at install time. Policy since 2026-03-28; no incident on record.';
+
     /** Namespaces where class_exists() for Semitexa classes is allowed */
     private const ALLOWED_NAMESPACES = [
         'Semitexa\\Core\\Container\\',
@@ -88,7 +91,7 @@ final class ExplicitOptionalDependencyRule implements Rule
                     . 'required contract bindings, not runtime class_exists() checks.',
                     $className,
                 )
-            )->identifier('semitexa.explicitOptionalDependency')->build(),
+            )->tip(self::RATIONALE)->identifier('semitexa.explicitOptionalDependency')->build(),
         ];
     }
 }

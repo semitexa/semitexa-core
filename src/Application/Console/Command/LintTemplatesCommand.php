@@ -32,6 +32,9 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 )]
 class LintTemplatesCommand extends BaseCommand
 {
+    /** Why this check exists, and what taught us; ai:verify prints it when the lint fails. */
+    public const RATIONALE = 'Why: templates resolve through canonical subdirectories (pages, layouts, partials, components, deferred); a legacy themes/ directory or an invented one is a layout nobody else looks for. Policy since 2026-04-30; no incident on record.';
+
     private const CANONICAL_SUBDIRS = ['pages', 'layouts', 'partials', 'components', 'deferred'];
 
     private const SUGGESTED_RENAMES = [

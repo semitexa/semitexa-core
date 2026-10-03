@@ -21,6 +21,9 @@ use PHPStan\Rules\RuleErrorBuilder;
  */
 final class DirectResponseConstructionRule implements Rule
 {
+    /** Printed with every report of this rule: why it exists, and what taught us. */
+    private const RATIONALE = 'Why: a Response built in application code skips ResponseRenderer, so the route\'s produces list, the CSP nonce and the deferred-region manifest are never applied to it. Policy since 2026-03-28; no incident on record.';
+
     private const RESPONSE_CLASS = 'Semitexa\\Core\\Response';
 
     /** Directories where Response construction is allowed */
@@ -65,7 +68,7 @@ final class DirectResponseConstructionRule implements Rule
                     . 'Only framework kernel code (Http/, Pipeline/) may construct Response objects.',
                     $action,
                 )
-            )->identifier('semitexa.directResponseConstruction')->build(),
+            )->tip(self::RATIONALE)->identifier('semitexa.directResponseConstruction')->build(),
         ];
     }
 

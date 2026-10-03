@@ -20,6 +20,9 @@ use PHPStan\Rules\RuleErrorBuilder;
  */
 final class DiscoveryCallSiteRule implements Rule
 {
+    /** Printed with every report of this rule: why it exists, and what taught us. */
+    private const RATIONALE = 'Why: discovery is a full classmap scan meant to run once per worker, at boot. Learned 2026-07-11: lazy discovery under Swoole let the first concurrent burst after a worker boot enter the scan at once and hang the worker (two sites under load); a call outside SemitexaContainer::build() reopens that path.';
+
     private const DISCOVERY_CLASSES = [
         'Semitexa\\Core\\Discovery\\AttributeDiscovery',
         'Semitexa\\Core\\Discovery\\ClassDiscovery',
@@ -72,7 +75,7 @@ final class DiscoveryCallSiteRule implements Rule
                     . 'Discovery runs exactly once during boot.',
                     $className,
                 )
-            )->identifier('semitexa.discoveryCallSite')->build(),
+            )->tip(self::RATIONALE)->identifier('semitexa.discoveryCallSite')->build(),
         ];
     }
 }

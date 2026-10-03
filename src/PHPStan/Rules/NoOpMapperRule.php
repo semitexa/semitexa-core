@@ -24,6 +24,9 @@ use PHPStan\Rules\RuleErrorBuilder;
  */
 final class NoOpMapperRule implements Rule
 {
+    /** Printed with every report of this rule: why it exists, and what taught us. */
+    private const RATIONALE = 'Why: a mapper whose resource and domain model are the same class is a clone, and the persistence shape leaks straight into the domain. Learned 2026-07-15: an agent reused a resource class as both models in a consumer project.';
+
     public function getNodeType(): string
     {
         return Class_::class;
@@ -83,7 +86,7 @@ final class NoOpMapperRule implements Rule
                             $className,
                             $domain,
                         )
-                    )->identifier('semitexa.noOpMapper')->build(),
+                    )->tip(self::RATIONALE)->identifier('semitexa.noOpMapper')->build(),
                 ];
             }
         }

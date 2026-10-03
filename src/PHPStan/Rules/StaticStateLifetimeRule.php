@@ -82,6 +82,9 @@ use Semitexa\Core\Lifecycle\PerRequestStateRegistry;
  */
 final class StaticStateLifetimeRule implements Rule
 {
+    /** Printed with every report of this rule: why it exists, and what taught us. */
+    private const RATIONALE = 'Why: a static in a Swoole worker is shared by every request and coroutine until the worker exits. Learned in the coroutine-state audits that preceded this rule (2026-09-25): an RBAC decision cache keyed per coroutine let revoked permissions survive on SSE streams, and a factory handed every request the same execution-scoped prototype.';
+
     public function __construct(
         private readonly ReflectionProvider $reflectionProvider,
     ) {
@@ -156,7 +159,7 @@ final class StaticStateLifetimeRule implements Rule
                 $name,
                 $type?->describe(VerbosityLevel::typeOnly()) ?? 'mixed',
             ),
-        )->identifier('semitexa.staticStateLifetime')->line($line)->build();
+        )->tip(self::RATIONALE)->identifier('semitexa.staticStateLifetime')->line($line)->build();
     }
 
     private function staticLocalError(string $className, string $method, string $var, int $line): IdentifierRuleError
@@ -172,7 +175,7 @@ final class StaticStateLifetimeRule implements Rule
                 $className,
                 $method,
             ),
-        )->identifier('semitexa.staticStateLifetime')->line($line)->build();
+        )->tip(self::RATIONALE)->identifier('semitexa.staticStateLifetime')->line($line)->build();
     }
 
     private function propertyType(ClassReflection $classReflection, string $name): ?Type

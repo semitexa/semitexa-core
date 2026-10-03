@@ -33,6 +33,9 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 #[AsCommand(name: 'lint:di', description: 'Verify DI injection rules on all container-managed classes')]
 final class LintDiCommand extends BaseCommand
 {
+    /** Why this check exists, and what taught us; ai:verify prints it when the lint fails. */
+    public const RATIONALE = 'Why: the container builds container-managed classes with newInstanceWithoutConstructor() and injects properties afterwards, so a constructor parameter is never passed and a constructor body never runs. Learned 2026-09-10: a sweep across ten repositories found constructor bodies that had been silently skipped; the inert-body check dates from then.';
+
     #[InjectAsReadonly]
     protected ClassDiscovery $classDiscovery;
 

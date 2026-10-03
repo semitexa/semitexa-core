@@ -21,6 +21,9 @@ use PHPStan\Rules\RuleErrorBuilder;
  */
 final class TraitInjectionRule implements Rule
 {
+    /** Printed with every report of this rule: why it exists, and what taught us. */
+    private const RATIONALE = 'Why: the container refuses an injection attribute inside a trait with an InjectionException when it first builds the class; this rule moves that failure from the first boot to analysis. Policy since 2026-03-28; no incident on record.';
+
     private const INJECTION_ATTRIBUTES = [
         'Semitexa\\Core\\Attributes\\InjectAsReadonly',
         'Semitexa\\Core\\Attributes\\InjectAsMutable',
@@ -59,7 +62,7 @@ final class TraitInjectionRule implements Rule
                     $traitName,
                     $propName,
                 )
-            )->identifier('semitexa.traitInjection')->build(),
+            )->tip(self::RATIONALE)->identifier('semitexa.traitInjection')->build(),
         ];
     }
 
