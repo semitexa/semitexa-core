@@ -23,6 +23,9 @@ use PHPStan\Rules\RuleErrorBuilder;
  */
 final class DisallowErrorLogRule implements Rule
 {
+    /** Printed with every report of this rule: why it exists, and what taught us. */
+    private const RATIONALE = 'Why: error_log() writes outside the application log: the entry has no channel and no request context, and `ai:ask logs` cannot see it. Policy since 2026-04-09 (the logger bridge); no incident on record.';
+
     private const ALLOWED_CLASSES = [
         'Semitexa\\Core\\Server\\ServerLifecycleFallbackLogger',
         'Semitexa\\Core\\Discovery\\BootDiagnostics',
@@ -60,7 +63,7 @@ final class DisallowErrorLogRule implements Rule
                 'Direct error_log() calls are discouraged. '
                 . 'Use Semitexa\\Core\\Log\\LoggerInterface (via #[InjectAsReadonly]) '
                 . 'or Semitexa\\Core\\Log\\StaticLoggerBridge for static contexts.'
-            )->identifier('semitexa.disallowErrorLog')->build(),
+            )->tip(self::RATIONALE)->identifier('semitexa.disallowErrorLog')->build(),
         ];
     }
 }

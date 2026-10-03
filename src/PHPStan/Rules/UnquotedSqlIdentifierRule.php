@@ -45,6 +45,9 @@ use PHPStan\Rules\RuleErrorBuilder;
  */
 final class UnquotedSqlIdentifierRule implements Rule
 {
+    /** Printed with every report of this rule: why it exists, and what taught us. */
+    private const RATIONALE = 'Why: wrapping a name in backticks is not escaping it: a backtick inside the name closes the quote and the rest is parsed as SQL. Learned 2026-09-18: a hand-built ColumnRef turned countBy() into SQL with an injected subquery, while the ORM held five private escaping copies for forty-one sites. Anchored to statement verbs because a rule that fires on Markdown gets switched off within a week.';
+
     /**
      * The literal must BEGIN with one of these — leading whitespace aside — to
      * count as a statement being built rather than as prose that mentions one.
@@ -126,6 +129,7 @@ final class UnquotedSqlIdentifierRule implements Rule
                 . 'it as a parameter and leave a placeholder in the statement. This rule reads one string '
                 . 'literal and cannot tell the two positions apart, which is why it names both.',
             )
+                ->tip(self::RATIONALE)
                 ->identifier('semitexa.unquotedSqlIdentifier')
                 ->build(),
         ];

@@ -21,6 +21,9 @@ use PHPStan\Rules\RuleErrorBuilder;
  */
 final class StaticContainerAccessRule implements Rule
 {
+    /** Printed with every report of this rule: why it exists, and what taught us. */
+    private const RATIONALE = 'Why: a ContainerFactory:: call is a dependency the class does not declare: it does not show among its injection points and cannot be substituted in a test. The internal call sites still allowed only go down (StaticContainerAccessRatchetTest). Policy since 2026-03-28; no incident on record.';
+
     /**
      * Namespaces where ContainerFactory usage is allowed — core internals,
      * plus the narrow dynamic-dispatch tier: infrastructure whose whole job
@@ -105,7 +108,7 @@ final class StaticContainerAccessRule implements Rule
                     . 'Use #[InjectAsReadonly], #[InjectAsMutable], #[InjectAsFactory] property injection instead.',
                     $currentClass ?: $currentNamespace,
                 )
-            )->identifier('semitexa.staticContainerAccess')->build(),
+            )->tip(self::RATIONALE)->identifier('semitexa.staticContainerAccess')->build(),
         ];
     }
 }

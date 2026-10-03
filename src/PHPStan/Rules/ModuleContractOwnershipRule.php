@@ -21,6 +21,9 @@ use PHPStan\Rules\RuleErrorBuilder;
  */
 final class ModuleContractOwnershipRule implements Rule
 {
+    /** Printed with every report of this rule: why it exists, and what taught us. */
+    private const RATIONALE = 'Why: a capability contract parked in core waits for some other package to satisfy it and has no owner for its shape; in its module it ships with at least one implementation. Policy since 2026-03-28; no incident on record.';
+
     public function getNodeType(): string
     {
         return Interface_::class;
@@ -55,7 +58,7 @@ final class ModuleContractOwnershipRule implements Rule
                     $namespace,
                     $name,
                 )
-            )->identifier('semitexa.moduleContractOwnership')->build(),
+            )->tip(self::RATIONALE)->identifier('semitexa.moduleContractOwnership')->build(),
         ];
     }
 }

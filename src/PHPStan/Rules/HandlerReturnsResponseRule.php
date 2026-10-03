@@ -19,6 +19,9 @@ use PHPStan\Rules\RuleErrorBuilder;
  */
 final class HandlerReturnsResponseRule implements Rule
 {
+    /** Printed with every report of this rule: why it exists, and what taught us. */
+    private const RATIONALE = 'Why: a handler that returns a Response bypasses the renderer, so content negotiation, the page-document path and the shell envelope never run for that route. Policy since the handler refactoring (2026-03); no incident on record.';
+
     public function getNodeType(): string
     {
         return ClassMethod::class;
@@ -52,7 +55,7 @@ final class HandlerReturnsResponseRule implements Rule
                         . 'Use domain exceptions for errors and resource DTO methods for data.',
                         $classReflection->getName(),
                     )
-                )->identifier('semitexa.handlerReturnsResponse')->build(),
+                )->tip(self::RATIONALE)->identifier('semitexa.handlerReturnsResponse')->build(),
             ];
         }
 

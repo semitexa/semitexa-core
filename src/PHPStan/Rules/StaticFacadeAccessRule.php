@@ -29,6 +29,9 @@ use PHPStan\Rules\RuleErrorBuilder;
  */
 final class StaticFacadeAccessRule implements Rule
 {
+    /** Printed with every report of this rule: why it exists, and what taught us. */
+    private const RATIONALE = 'Why: a static facade is global state every coroutine shares, the generator of the shadow-copy bug class. Learned 2026-08-19 (ep-kill-static-facades): SseServer\'s static state was moved into an injected service; each new static call site regrows what that epic removed.';
+
     /**
      * Facade FQCN => [service callers should inject, list of exact class or
      * namespace prefixes allowed to keep calling the facade statically].
@@ -113,7 +116,7 @@ final class StaticFacadeAccessRule implements Rule
                     $service,
                     self::class,
                 )
-            )->identifier('semitexa.staticFacadeAccess')->build(),
+            )->tip(self::RATIONALE)->identifier('semitexa.staticFacadeAccess')->build(),
         ];
     }
 }

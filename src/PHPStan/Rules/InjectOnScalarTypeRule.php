@@ -20,6 +20,9 @@ use PHPStan\Rules\RuleErrorBuilder;
  */
 final class InjectOnScalarTypeRule implements Rule
 {
+    /** Printed with every report of this rule: why it exists, and what taught us. */
+    private const RATIONALE = 'Why: #[InjectAs*] resolves a class or interface from the container; a scalar has nothing to resolve, and configuration values come through #[Config]. Policy since 2026-03-28; no incident on record.';
+
     private const INJECT_ATTRIBUTES = [
         'Semitexa\\Core\\Attributes\\InjectAsReadonly',
         'Semitexa\\Core\\Attributes\\InjectAsMutable',
@@ -54,7 +57,7 @@ final class InjectOnScalarTypeRule implements Rule
                         $propName,
                         $type->name,
                     )
-                )->identifier('semitexa.injectOnScalarType')->build(),
+                )->tip(self::RATIONALE)->identifier('semitexa.injectOnScalarType')->build(),
             ];
         }
 

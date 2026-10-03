@@ -46,6 +46,11 @@ use PHPStan\Rules\RuleErrorBuilder;
  */
 final class InjectionViaConstructorRule implements Rule
 {
+    /** Printed with every report of this rule: why it exists, and what taught us. */
+    private const RATIONALE = 'Why: the container builds these classes with newInstanceWithoutConstructor() and injects properties afterwards, so constructor parameters are never passed. Learned 2026-04-30: 18 legacy classes (DumpOpenApiCommand among them) had shipped constructor injection before commands and lifecycle listeners were covered.';
+
+    private const INERT_BODY_RATIONALE = 'Why: the container never runs the constructor of a container-managed class (newInstanceWithoutConstructor()), so its body is dead code that looks like initialisation. Learned 2026-09-10: a sweep across ten repositories found such bodies silently skipped; initialize() is the hook that runs.';
+
     private const CONTAINER_MANAGED_ATTRIBUTES = [
         AsService::class,
         'Semitexa\\Orm\\Attribute\\AsRepository',
@@ -131,7 +136,7 @@ final class InjectionViaConstructorRule implements Rule
                         . 'non-container-managed types (DTOs, payloads, resources, value objects).',
                         $classReflection->getName(),
                     )
-                )->identifier('semitexa.inertConstructorBody')->build(),
+                )->tip(self::INERT_BODY_RATIONALE)->identifier('semitexa.inertConstructorBody')->build(),
             ];
         }
 
@@ -151,7 +156,7 @@ final class InjectionViaConstructorRule implements Rule
                             . '(DTOs, payloads, resources, value objects).',
                             $classReflection->getName(),
                         )
-                    )->identifier('semitexa.injectionViaConstructor')->build(),
+                    )->tip(self::RATIONALE)->identifier('semitexa.injectionViaConstructor')->build(),
             ];
         }
 

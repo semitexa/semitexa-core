@@ -19,6 +19,9 @@ use PHPStan\Rules\RuleErrorBuilder;
  */
 final class ConfigOnClassTypeRule implements Rule
 {
+    /** Printed with every report of this rule: why it exists, and what taught us. */
+    private const RATIONALE = 'Why: #[Config] resolves scalars and backed enums only; a class type there is a service dependency spelt as configuration and belongs to #[InjectAsReadonly]. Policy since 2026-03-28; no incident on record.';
+
     public function getNodeType(): string
     {
         return Property::class;
@@ -64,7 +67,7 @@ final class ConfigOnClassTypeRule implements Rule
                             $propName,
                             $resolved,
                         )
-                    )->identifier('semitexa.configOnClassType')->build(),
+                    )->tip(self::RATIONALE)->identifier('semitexa.configOnClassType')->build(),
                 ];
             }
         }

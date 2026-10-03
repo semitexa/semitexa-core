@@ -45,6 +45,9 @@ use PHPStan\Rules\RuleErrorBuilder;
  */
 final class MapperTypeConversionRule implements Rule
 {
+    /** Printed with every report of this rule: why it exists, and what taught us. */
+    private const RATIONALE = 'Why: TypeCaster already converts a BINARY(16) uuid on every read and write, so a mapper that converts it again is handed 36 characters and throws. Learned 2026-09-11: one such mapper took down every scheduler job on the first history row it wrote, after a sweep of nineteen mappers had caught nothing.';
+
     private const MAPPER_CONTRACT = 'Semitexa\\Orm\\Domain\\Contract\\ResourceModelMapperInterface';
 
     /** Converters the hydrator already applies, by class and method. */
@@ -91,7 +94,7 @@ final class MapperTypeConversionRule implements Rule
                 $called,
                 $node->name->name,
                 self::whatGoesWrong($method),
-            ))->identifier('semitexa.mapperTypeConversion')->build(),
+            ))->tip(self::RATIONALE)->identifier('semitexa.mapperTypeConversion')->build(),
         ];
     }
 

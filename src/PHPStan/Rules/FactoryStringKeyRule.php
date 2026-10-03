@@ -20,6 +20,9 @@ use PHPStan\Type\ObjectType;
  */
 final class FactoryStringKeyRule implements Rule
 {
+    /** Printed with every report of this rule: why it exists, and what taught us. */
+    private const RATIONALE = 'Why: a string key cannot be checked: a typo resolves to nothing at runtime, and no analyser can list the keys that exist. Policy since 2026-03-28; no incident on record.';
+
     public function getNodeType(): string
     {
         return MethodCall::class;
@@ -53,7 +56,7 @@ final class FactoryStringKeyRule implements Rule
                         . 'String arguments to factory get() are forbidden.',
                         $argValue->value,
                     )
-                )->identifier('semitexa.factoryStringKey')->build(),
+                )->tip(self::RATIONALE)->identifier('semitexa.factoryStringKey')->build(),
             ];
         }
 

@@ -34,6 +34,9 @@ use PHPStan\Rules\RuleErrorBuilder;
  */
 final class UnannotatedServicePropertyRule implements Rule
 {
+    /** Printed with every report of this rule: why it exists, and what taught us. */
+    private const RATIONALE = 'Why: injection is no longer inferred from a property\'s type name; a bare typed property on a container-managed class receives nothing and fails at first use. Policy since 2026-03-28, when type-name injection was retired; no incident on record.';
+
     private const KNOWN_INJECTABLE_TYPES = [
         'Semitexa\\Core\\Request',
         'Semitexa\\Core\\Session\\SessionInterface',
@@ -124,7 +127,7 @@ final class UnannotatedServicePropertyRule implements Rule
                     $typeName,
                     $classReflection->getName(),
                 )
-            )->identifier('semitexa.unannotatedServiceProperty')->build(),
+            )->tip(self::RATIONALE)->identifier('semitexa.unannotatedServiceProperty')->build(),
         ];
     }
 

@@ -21,6 +21,9 @@ use PHPStan\Rules\RuleErrorBuilder;
  */
 final class FactoryClosedWorldRule implements Rule
 {
+    /** Printed with every report of this rule: why it exists, and what taught us. */
+    private const RATIONALE = 'Why: an enum-keyed factory is checked as a closed set; an implementation added from another module is a case the owning module cannot see, and a missing one fails at runtime in a consumer. Policy since 2026-03-28; no incident on record.';
+
     public function getNodeType(): string
     {
         return Class_::class;
@@ -63,7 +66,7 @@ final class FactoryClosedWorldRule implements Rule
                         ltrim($instance->of, '\\'),
                         $instance->factoryKey::class,
                     )
-                )->identifier('semitexa.factoryClosedWorld')->build();
+                )->tip(self::RATIONALE)->identifier('semitexa.factoryClosedWorld')->build();
             }
         }
 

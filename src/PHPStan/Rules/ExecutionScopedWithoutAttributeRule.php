@@ -28,6 +28,9 @@ use PHPStan\Rules\RuleErrorBuilder;
  */
 final class ExecutionScopedWithoutAttributeRule implements Rule
 {
+    /** Printed with every report of this rule: why it exists, and what taught us. */
+    private const RATIONALE = 'Why: without a scoping attribute the container treats the class as worker-scoped and builds it once, so its #[InjectAsMutable] properties never receive per-request values. Policy since 2026-03-28; no incident on record.';
+
     private const SCOPING_ATTRIBUTES = [
         'Semitexa\\Core\\Attribute\\ExecutionScoped',
         'Semitexa\\Core\\Attribute\\AsPayloadHandler',
@@ -90,7 +93,7 @@ final class ExecutionScopedWithoutAttributeRule implements Rule
                     . 'so the container knows to clone this class per request.',
                     $className,
                 )
-            )->identifier('semitexa.executionScopedWithoutAttribute')->build(),
+            )->tip(self::RATIONALE)->identifier('semitexa.executionScopedWithoutAttribute')->build(),
         ];
     }
 

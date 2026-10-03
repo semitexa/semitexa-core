@@ -35,6 +35,9 @@ use ReflectionProperty;
  */
 final class DomainModelEncapsulationRule implements Rule
 {
+    /** Printed with every report of this rule: why it exists, and what taught us. */
+    private const RATIONALE = 'Why: a domain model with public or protected fields can be changed past its invariants by any caller; the accessors are where the invariant lives. Introduced 2026-07-15 alongside semitexa.noOpMapper as policy; no incident on record.';
+
     private const ORM_RESOURCE_ATTRIBUTE = 'Semitexa\\Orm\\Attribute\\FromTable';
 
     public function __construct(
@@ -125,7 +128,7 @@ final class DomainModelEncapsulationRule implements Rule
                     $mapperName,
                     $name,
                     $visibility,
-                ))->identifier('semitexa.domainModelEncapsulation')->build(),
+                ))->tip(self::RATIONALE)->identifier('semitexa.domainModelEncapsulation')->build(),
             ];
         }
 
@@ -145,7 +148,7 @@ final class DomainModelEncapsulationRule implements Rule
                 $studly,
                 $studly,
                 $studly,
-            ))->identifier('semitexa.domainModelEncapsulation')->build();
+            ))->tip(self::RATIONALE)->identifier('semitexa.domainModelEncapsulation')->build();
         }
 
         if (!$property->isReadOnly()) {
@@ -161,7 +164,7 @@ final class DomainModelEncapsulationRule implements Rule
                     $name,
                     $studly,
                     $studly,
-                ))->identifier('semitexa.domainModelEncapsulation')->build();
+                ))->tip(self::RATIONALE)->identifier('semitexa.domainModelEncapsulation')->build();
             }
         }
 
