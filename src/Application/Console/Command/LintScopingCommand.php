@@ -26,6 +26,9 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 #[AsCommand(name: 'lint:scoping', description: 'Verify container-managed classes with #[InjectAsMutable] properties have explicit scoping attributes')]
 final class LintScopingCommand extends BaseCommand
 {
+    /** Why this check exists, and what taught us; ai:verify prints it when the lint fails. */
+    public const RATIONALE = 'Why: without a scoping attribute the container treats a class as worker-scoped and builds it once, so its #[InjectAsMutable] properties never receive per-request values. Policy since 2026-04-30; no incident on record.';
+
     #[InjectAsReadonly]
     protected ClassDiscovery $classDiscovery;
 

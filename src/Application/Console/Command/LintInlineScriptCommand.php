@@ -43,6 +43,9 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 )]
 final class LintInlineScriptCommand extends Command
 {
+    /** Why this check exists, and what taught us; ai:verify prints it when the lint fails. */
+    public const RATIONALE = 'Why: a refused inline script fails silently: the server renders correct markup and returns 200, and the browser declines to run it. Learned 2026-09-16: the SSR deferred manifest shipped that way, and the first paint of every deferred page was unreachable for any consumer with a nonce policy.';
+
     protected function configure(): void
     {
         $this->setName('lint:inline-script')
