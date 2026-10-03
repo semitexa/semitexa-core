@@ -83,7 +83,7 @@ use Semitexa\Core\Lifecycle\PerRequestStateRegistry;
 final class StaticStateLifetimeRule implements Rule
 {
     /** Printed with every report of this rule: why it exists, and what taught us. */
-    private const RATIONALE = 'Why: a static in a Swoole worker is shared by every request and coroutine until the worker exits. Learned in the coroutine-state audits (2026-07..09): an RBAC decision cache keyed per coroutine let revoked permissions survive on SSE streams, and a factory handed every request the same execution-scoped prototype.';
+    private const RATIONALE = 'Why: a static in a Swoole worker is shared by every request and coroutine until the worker exits. Learned in the coroutine-state audits that preceded this rule (2026-09-25): an RBAC decision cache keyed per coroutine let revoked permissions survive on SSE streams, and a factory handed every request the same execution-scoped prototype.';
 
     public function __construct(
         private readonly ReflectionProvider $reflectionProvider,
