@@ -42,10 +42,15 @@ final class FactoryContractRuleBehaviourTest extends RuleTestCase
         self::assertCount(2, $errors);
 
         $reported = [];
+        $tips = [];
         foreach ($errors as $error) {
             self::assertSame('semitexa.factoryContract', $error->getIdentifier());
             $reported[$error->getLine()] = $error->getMessage();
+            $tips[$error->getLine()] = $error->getTip();
         }
+        // A missing or mis-keyed get() is not the narrowing fatal: its own reason (review of core#171).
+        $get = (new \ReflectionClass(FactoryContractRule::class))->getConstant('GET_RATIONALE');
+        self::assertSame([31 => $get, 36 => $get], $tips);
 
         self::assertSame([31, 36], array_keys($reported), 'FactoryFixtureChannel (line 22) must pass');
         self::assertStringContainsString('FactoryWithoutGet must declare get()', $reported[31]);
@@ -56,6 +61,8 @@ final class FactoryContractRuleBehaviourTest extends RuleTestCase
     {
         $errors = $this->gatherAnalyserErrors([self::NARROWING_FIXTURE]);
         $messages = array_map(static fn ($e): string => $e->getMessage(), $errors);
+        $narrowing = array_values(array_filter($errors, static fn ($e): bool => str_contains($e->getMessage(), 'must not extend ContractFactoryInterface')));
+        self::assertSame((new \ReflectionClass(FactoryContractRule::class))->getConstant('RATIONALE'), $narrowing[0]->getTip() ?? null);
 
         self::assertCount(1, array_filter(
             $messages,

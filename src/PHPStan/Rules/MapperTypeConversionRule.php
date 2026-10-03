@@ -46,7 +46,9 @@ use PHPStan\Rules\RuleErrorBuilder;
 final class MapperTypeConversionRule implements Rule
 {
     /** Printed with every report of this rule: why it exists, and what taught us. */
-    private const RATIONALE = 'Why: TypeCaster already converts a BINARY(16) uuid on every read and write, so a mapper that converts it again is handed 36 characters and throws. Learned 2026-09-11: one such mapper took down every scheduler job on the first history row it wrote, after a sweep of nineteen mappers had caught nothing.';
+    private const RATIONALE = 'Why: TypeCaster already converts a BINARY(16) uuid on every read and write, so Uuid7::fromBytes() in a mapper is handed the 36-character string and throws «Expected 16 bytes, got 36». Learned 2026-09-11: one such mapper took down every scheduler job on the first history row it wrote, after a sweep of nineteen mappers had caught nothing.';
+
+    private const TO_BYTES_RATIONALE = 'Why: TypeCaster already turns the canonical uuid string back into 16 bytes on every write, so Uuid7::toBytes() in a mapper succeeds and hands TypeCaster raw bytes where it expects the string: no exception, a rejected write or a corrupted identifier one step later. Learned 2026-09-11, in the same sweep that found the fromBytes() failure that stopped every scheduler job.';
 
     private const MAPPER_CONTRACT = 'Semitexa\\Orm\\Domain\\Contract\\ResourceModelMapperInterface';
 
@@ -82,19 +84,24 @@ final class MapperTypeConversionRule implements Rule
             return [];
         }
 
+        $message = sprintf(
+            '%s is a mapper and calls %s::%s(), which the ORM has already done. %s '
+            . 'Pass the field straight through in both directions. The hydrator owns '
+            . 'column-type conversion; a mapper owns the storage-shape decisions the column '
+            . 'type cannot express, such as a JSON string that becomes an array — keep that '
+            . 'half. Binding a value into a raw WHERE is not this: that belongs in the '
+            . 'repository, where nothing hydrates it.',
+            $class->getName(),
+            $called,
+            $node->name->name,
+            self::whatGoesWrong($method),
+        );
+
+        // Not the same failure in both directions (see whatGoesWrong()).
         return [
-            RuleErrorBuilder::message(sprintf(
-                '%s is a mapper and calls %s::%s(), which the ORM has already done. %s '
-                . 'Pass the field straight through in both directions. The hydrator owns '
-                . 'column-type conversion; a mapper owns the storage-shape decisions the column '
-                . 'type cannot express, such as a JSON string that becomes an array — keep that '
-                . 'half. Binding a value into a raw WHERE is not this: that belongs in the '
-                . 'repository, where nothing hydrates it.',
-                $class->getName(),
-                $called,
-                $node->name->name,
-                self::whatGoesWrong($method),
-            ))->tip(self::RATIONALE)->identifier('semitexa.mapperTypeConversion')->build(),
+            $method === 'frombytes'
+                ? RuleErrorBuilder::message($message)->tip(self::RATIONALE)->identifier('semitexa.mapperTypeConversion')->build()
+                : RuleErrorBuilder::message($message)->tip(self::TO_BYTES_RATIONALE)->identifier('semitexa.mapperTypeConversion')->build(),
         ];
     }
 

@@ -95,6 +95,19 @@ final class MapperTypeConversionRuleBehaviourTest extends RuleTestCase
         self::assertStringContainsString('already-converted value', $byLine[30]);
     }
 
+    /** The reason differs by direction as well (review of core#171). */
+    public function testTheRationaleMatchesTheDirectionOfTheCall(): void
+    {
+        $tips = [];
+        foreach ($this->gatherAnalyserErrors([self::FIXTURE]) as $error) {
+            $tips[$error->getLine()] = $error->getTip();
+        }
+        $rule = new \ReflectionClass(MapperTypeConversionRule::class);
+
+        self::assertSame($rule->getConstant('RATIONALE'), $tips[25]);
+        self::assertSame($rule->getConstant('TO_BYTES_RATIONALE'), $tips[30]);
+    }
+
     /**
      * Nothing else in that file is reported. The mapper that only reshapes JSON
      * is doing what a mapper owns, and the repository binds a raw WHERE value

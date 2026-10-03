@@ -49,6 +49,8 @@ final class InjectionViaConstructorRule implements Rule
     /** Printed with every report of this rule: why it exists, and what taught us. */
     private const RATIONALE = 'Why: the container builds these classes with newInstanceWithoutConstructor() and injects properties afterwards, so constructor parameters are never passed. Learned 2026-04-30: 18 legacy classes (DumpOpenApiCommand among them) had shipped constructor injection before commands and lifecycle listeners were covered.';
 
+    private const COMMAND_RATIONALE = 'Why: a command is the one container-managed class whose constructor does run (Application::instantiateCommand() uses plain new), and the console resolves its parameters only as a legacy path; property injection is the channel every other class has, so a command written that way reads and tests like the rest. Learned 2026-09-30: the framework\'s commands were moved off constructor parameters onto #[InjectAsReadonly] properties (core c57784a and its siblings).';
+
     private const INERT_BODY_RATIONALE = 'Why: the container never runs the constructor of a container-managed class (newInstanceWithoutConstructor()), so its body is dead code that looks like initialisation. Learned 2026-09-10: a sweep across ten repositories found such bodies silently skipped; initialize() is the hook that runs.';
 
     private const CONTAINER_MANAGED_ATTRIBUTES = [
@@ -141,22 +143,26 @@ final class InjectionViaConstructorRule implements Rule
         }
 
         if ($this->isContainerManaged($classReflection)) {
+            $message = sprintf(
+                'Constructor injection is not the DI channel on container-managed %s. '
+                . 'Declare dependencies as protected properties with #[InjectAsReadonly], '
+                . '#[InjectAsMutable], or #[InjectAsFactory] (and #[Config] for scalar '
+                . 'configuration) instead of constructor parameters. '
+                . 'Constructors themselves are not banned — an EMPTY parameterless '
+                . '__construct is still allowed here (the container never calls it, so '
+                . 'a body would not run); initialization belongs in '
+                . 'Semitexa\Core\Contract\InitializesAfterInjectionInterface::initialize(). '
+                . 'Constructors are unrestricted on non-container-managed types '
+                . '(DTOs, payloads, resources, value objects).',
+                $classReflection->getName(),
+            );
+
+            // A command's constructor does run, so "never passed" would be
+            // false for it: it gets the reason that is true for commands.
             return [
-                    RuleErrorBuilder::message(
-                        sprintf(
-                            'Constructor injection is not the DI channel on container-managed %s. '
-                            . 'Declare dependencies as protected properties with #[InjectAsReadonly], '
-                            . '#[InjectAsMutable], or #[InjectAsFactory] (and #[Config] for scalar '
-                            . 'configuration) instead of constructor parameters. '
-                            . 'Constructors themselves are not banned — an EMPTY parameterless '
-                            . '__construct is still allowed here (the container never calls it, so '
-                            . 'a body would not run); initialization belongs in '
-                            . 'Semitexa\Core\Contract\InitializesAfterInjectionInterface::initialize(). '
-                            . 'Constructors are unrestricted on non-container-managed types '
-                            . '(DTOs, payloads, resources, value objects).',
-                            $classReflection->getName(),
-                        )
-                    )->tip(self::RATIONALE)->identifier('semitexa.injectionViaConstructor')->build(),
+                $this->isConsoleCommand($classReflection)
+                    ? RuleErrorBuilder::message($message)->tip(self::COMMAND_RATIONALE)->identifier('semitexa.injectionViaConstructor')->build()
+                    : RuleErrorBuilder::message($message)->tip(self::RATIONALE)->identifier('semitexa.injectionViaConstructor')->build(),
             ];
         }
 
