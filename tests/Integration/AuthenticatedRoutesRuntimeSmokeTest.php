@@ -72,7 +72,7 @@ final class AuthenticatedRoutesRuntimeSmokeTest extends TestCase
      */
     private const SKIP = [
         '/__semitexa_kiss' => 'long-lived SSE keep-alive stream; would block.',
-        '/__semitexa_hug'  => 'SSR fallback streamed via TransportType::Sse; would block.',
+        '/__semitexa_hug'  => 'HUG: GET is the SSR pull fallback (would block); POST is the UI event door and needs a signed envelope.',
     ];
 
     /**
@@ -115,7 +115,6 @@ final class AuthenticatedRoutesRuntimeSmokeTest extends TestCase
         '/playground/orm'                         => 'ORM landing reads platform-user db',
         '/playground/orm/articles/{id}'           => 'ORM article lookup needs seeded id',
         '/ssr-polygon/deferred/auth-aware'        => 'auth-aware deferred slot expects shape',
-        '/__semitexa_component_event'             => 'component event handler expects valid event payload',
         '/sitemap.json'                           => 'sitemap aggregation needs configured providers',
         '/sitemap.xml'                            => 'sitemap aggregation needs configured providers',
         // Cycle-11 additions — protected ORM routes also need the seed.
