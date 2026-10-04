@@ -64,6 +64,29 @@ final class RouteExposureTest extends TestCase
         self::assertSame(RouteExposure::Hug, $resolved['exposure']);
     }
 
+    #[Test]
+    public function an_sse_route_must_be_named(): void
+    {
+        $this->expectException(ConfigurationException::class);
+        $this->expectExceptionMessageMatches('/transport: Sse and must declare an explicit name/');
+        (new PayloadAttributeSchema())->applyDefaults(
+            $this->attr(['path' => '/feed', 'exposure' => null, 'transport' => \Semitexa\Core\Attribute\TransportType::Sse]),
+            'FeedPayload',
+            'App\\FeedPayload',
+        );
+    }
+
+    #[Test]
+    public function a_named_sse_route_keeps_its_name(): void
+    {
+        $resolved = (new PayloadAttributeSchema())->applyDefaults(
+            $this->attr(['path' => '/feed', 'name' => 'app.feed', 'exposure' => null, 'transport' => \Semitexa\Core\Attribute\TransportType::Sse]),
+            'FeedPayload',
+            'App\\FeedPayload',
+        );
+        self::assertSame('app.feed', $resolved['name']);
+    }
+
     /**
      * @param array<string, mixed> $overrides
      * @return array<string, mixed>

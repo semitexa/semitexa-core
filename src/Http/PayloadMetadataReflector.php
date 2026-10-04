@@ -91,6 +91,8 @@ final class PayloadMetadataReflector
 
         $document = [
             'endpoint'  => $path,
+            // The route name: a feed is subscribed through HUG by it.
+            'name'      => is_string($route?->name) && $route->name !== '' ? $route->name : $ref->getShortName(),
             'methods'   => $methods,
             'access'    => $access,
             'transport' => $transport,

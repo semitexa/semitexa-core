@@ -71,6 +71,11 @@ final class PayloadAttributeSchema implements AttributeSchema
         } elseif ($attr['path'] === null) {
             throw new ConfigurationException("Request {$className} must define a path");
         }
+        // A feed is subscribed through HUG by name, so the name is its address
+        // and must not move when the class is renamed.
+        if (($attr['transport'] ?? null) === TransportType::Sse && (!is_string($attr['name'] ?? null) || $attr['name'] === '')) {
+            throw new ConfigurationException("Request {$className} is transport: Sse and must declare an explicit name: feeds are subscribed through HUG by name.");
+        }
 
         return [
             'path' => $attr['path'],
