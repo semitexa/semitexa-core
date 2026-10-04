@@ -71,6 +71,20 @@ final class PipelineExecutor
     }
 
     /**
+     * Only the AuthCheck phase: the route's own access listeners, no handler.
+     *
+     * For admitting a request that the caller will hand to another runner
+     * (a feed subscription is admitted on HUG, then executed on the worker
+     * that owns the KISS session).
+     */
+    public function authorize(RequestPipelineContext $context): void
+    {
+        $this->span('pipeline.auth_check', ['phase' => 'AuthCheck'], function () use ($context): void {
+            $this->dispatchPhase(AuthCheck::class, $context);
+        });
+    }
+
+    /**
      * Run $work inside a span that closes however $work leaves.
      *
      * The closing context says `unfinished` when $work threw: with the plain

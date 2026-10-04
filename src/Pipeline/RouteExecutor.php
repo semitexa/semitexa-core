@@ -6,7 +6,6 @@ namespace Semitexa\Core\Pipeline;
 
 use Semitexa\Core\Request;
 use Semitexa\Core\HttpResponse;
-use Semitexa\Core\Http\PayloadHydrator;
 use Semitexa\Core\Http\Response\ResourceResponse;
 use Semitexa\Core\Discovery\AttributeDiscovery;
 use Semitexa\Core\Discovery\DiscoveredRoute;
@@ -31,11 +30,8 @@ use Semitexa\Core\Tenant\TenantContextStoreInterface;
 use Semitexa\Core\Tenant\TenancyBootstrapperInterface;
 use Semitexa\Core\Auth\AuthBootstrapperInterface;
 use Semitexa\Core\Contract\ExceptionResponseMapperInterface;
-use Semitexa\Core\Exception\PayloadValidationException;
 use Semitexa\Core\Contract\RouteResponseDecoratorInterface;
 use Semitexa\Core\Contract\RouteMetadataResolverInterface;
-use Semitexa\Core\Contract\ValidatablePayloadInterface;
-use Semitexa\Core\Exception\ValidationException;
 use Semitexa\Core\Container\PropertyInjector;
 use Psr\Container\ContainerInterface;
 use Semitexa\Core\Container\RequestScopedContainer;
@@ -145,48 +141,9 @@ class RouteExecutor
             // is served by the generic OptionsMetadataHandler (see below).
             $isOptions = strtoupper($request->getMethod()) === 'OPTIONS';
 
-            // 1a. Create a bare payload instance (no request data yet).
-            $reqDto = $this->createBarePayload($route);
-
-            // 1b. Pre-hydration auth gate. When an authorization layer registers
-            //     a PreHydrationAuthGateInterface, it runs here so that protected
-            //     routes reject unauthenticated requests BEFORE hydration or
-            //     validation touches the request body. Public routes are a no-op.
-            //     OPTIONS is gated identically — its access model is inherited,
-            //     not bypassed.
-            if ($this->container->has(PreHydrationAuthGateInterface::class)) {
-                /** @var PreHydrationAuthGateInterface $gate */
-                $gate = $this->container->get(PreHydrationAuthGateInterface::class);
-                $tracer?->begin('auth.pre_hydration_gate', ['gate' => $gate::class, 'method' => 'gate']);
-                $gate->gate($reqDto, $request, $this->authBootstrapper);
-                $tracer?->end('auth.pre_hydration_gate');
-            } else {
-                $tracer?->mark('auth.pre_hydration_gate.absent');
-            }
-
-            // 1c. Hydrate and Validate — skipped for OPTIONS. The endpoint is
-            //     only being described, so the request body is irrelevant and a
-            //     payload's ValidatablePayloadInterface::validate() business
-            //     rules must not reject an (empty) OPTIONS probe. OPTIONS reports
-            //     type-level shape only; validate() is not reflected.
-            if (!$isOptions) {
-                $tracer?->begin('payload.hydrate_and_validate', ['payload' => $reqDto::class]);
-                [$reqDto, $validationError] = $this->fillAndValidatePayload($reqDto, $request);
-                // The hydrated DTO rides along as an object; the tracer decides
-                // what of its state survives (redacted, size-bounded snapshot).
-                // Passing values here would force the executor to know the
-                // redaction rules, which belong to the observer, not the path.
-                $tracer?->end('payload.hydrate_and_validate', [
-                    'rejected' => $validationError !== null,
-                    'payload_snapshot' => $reqDto,
-                ]);
-                // After the span closes: an asymmetric begin/end is its own bug class.
-                if ($validationError !== null) {
-                    throw $validationError;
-                }
-            } else {
-                $tracer?->mark('payload.hydrate_and_validate.skipped', ['reason' => 'OPTIONS probe']);
-            }
+            // 1a–1c. Bare payload, pre-hydration auth gate, then hydrate and
+            //        validate (skipped for an OPTIONS probe). Shared with admit().
+            $reqDto = (new PayloadAdmission($this->container, $this->authBootstrapper))->gateAndHydrate($route, $request, $isOptions, $tracer);
 
             // For OPTIONS, swap the resolved route for a variant whose sole
             // handler is the generic OptionsMetadataHandler and whose response
@@ -271,6 +228,36 @@ class RouteExecutor
             // closes on only some of them would silently mis-time the others.
             $tracer?->end('request', RequestOutcome::traceContext($sent, $escaped));
         }
+    }
+
+    /**
+     * Admit a request to a route without running its handler: the same bare
+     * payload, pre-hydration auth gate, hydration and validation as execute(),
+     * then the route's AuthCheck phase. Returns the validated payload.
+     *
+     * For a caller that runs the route elsewhere: HUG admits a feed
+     * subscription here — in the subscribing request, with its identity, tenant
+     * and validation — before handing the payload to the worker that owns the
+     * page's KISS stream, which re-executes the route on every change.
+     *
+     * @throws \Throwable whatever the gate, hydration, validation or an AuthCheck listener throws
+     */
+    public function admit(DiscoveredRoute $route, Request $request): object
+    {
+        $metadata = $this->resolveRouteMetadata($route);
+        $reqDto = (new PayloadAdmission($this->container, $this->authBootstrapper))->gateAndHydrate($route, $request, false, null);
+
+        $context = new RequestPipelineContext(
+            requestDto: $reqDto,
+            route: $route,
+            request: $request,
+            resourceDto: $this->resolveResponseDto($route, $request),
+            authBootstrapper: $this->authBootstrapper,
+            resolvedMetadata: $metadata,
+        );
+        (new PipelineExecutor($this->requestScopedContainer, $this->container))->authorize($context);
+
+        return $reqDto;
     }
 
     /**
@@ -563,70 +550,6 @@ class RouteExecutor
     }
 
     /**
-     * Build a bare payload instance (no request data) suitable for attribute
-     * resolution. Used by the pre-hydration auth gate before hydration.
-     */
-    private function createBarePayload(DiscoveredRoute $route): object
-    {
-        $requestClass = $route->requestClass;
-        if ($requestClass === '') {
-            throw new PipelineException('Route has no class defined');
-        }
-
-        $traits = $this->getPayloadPartRegistry()->getPayloadPartsForClass($requestClass);
-        $reqDto = class_exists($requestClass) ? PayloadFactory::createInstance($requestClass, $traits) : null;
-        if (!$reqDto) {
-            throw new PipelineException("Cannot instantiate request class: {$requestClass}");
-        }
-
-        PropertyInjector::inject($reqDto, $this->container);
-
-        return $reqDto;
-    }
-
-    /**
-     * Fill the bare payload from the request and run validation. The payload
-     * instance is returned in both success and failure cases so validation
-     * errors can reference the class the request was routed to.
-     *
-     * @return array{0: object, 1: ?PayloadValidationException}
-     */
-    private function fillAndValidatePayload(object $reqDto, Request $request): array
-    {
-        try {
-            $reqDto = PayloadHydrator::hydrate($reqDto, $request);
-            if (method_exists($reqDto, 'setHttpRequest')) {
-                $reqDto->setHttpRequest($request);
-            }
-            // Cross-field validation hook — fires once, after every setter
-            // has run, before any route handler. Payloads opt in by
-            // implementing ValidatablePayloadInterface; everything else
-            // skips this step entirely.
-            if ($reqDto instanceof ValidatablePayloadInterface) {
-                $errors = $reqDto->validate();
-                if ($errors !== []) {
-                    throw new ValidationException($errors);
-                }
-            }
-        } catch (\Semitexa\Core\Exception\ValidationException $e) {
-            // Re-typed, not rethrown: raised HERE it means a malformed request rather than a domain rule.
-            return [$reqDto, new PayloadValidationException($e->getErrors())];
-        } catch (\Semitexa\Core\Http\Exception\TypeMismatchException $e) {
-            return [$reqDto, new PayloadValidationException([$e->field => [$e->getMessage()]])];
-        } catch (\Throwable $e) {
-            // Security: suppress exception messages in production (VULN-007)
-            // Only expose details in debug mode for development
-            $httpRequest = method_exists($reqDto, 'getHttpRequest') ? $reqDto->getHttpRequest() : null;
-            $message = $httpRequest instanceof Request && self::isDebugMode($httpRequest)
-                ? $e->getMessage()
-                : 'Request body could not be processed';
-            return [$reqDto, new PayloadValidationException(['_body' => [$message]])];
-        }
-
-        return [$reqDto, null];
-    }
-
-    /**
      * @return list<\Semitexa\Core\Resource\RenderProfile>
      */
     private function normalizeDeclaredProfiles(mixed $renderProfile): array
@@ -732,12 +655,4 @@ class RouteExecutor
         return HttpResponse::json(['ok' => true]);
     }
 
-    /**
-     * Check if debug mode is enabled via the application environment configuration.
-     */
-    private static function isDebugMode(?Request $_request): bool
-    {
-        $debug = \Semitexa\Core\Environment::create()->appDebug;
-        return filter_var($debug, FILTER_VALIDATE_BOOL);
-    }
 }

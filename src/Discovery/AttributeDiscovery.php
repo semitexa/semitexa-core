@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Discovery;
 
+use Semitexa\Core\Attribute\RouteExposure;
 use Semitexa\Core\Attribute\AbstractPayloadRoute;
 use Semitexa\Core\Attribute\AsPayloadHandler;
 use Semitexa\Core\Attribute\AsPayloadPart;
@@ -331,6 +332,7 @@ class AttributeDiscovery
                         // Read in this same IS_INSTANCEOF pass; threaded through the
                         // override-merge so the selected route carries it.
                         'sseGateModel' => $attr->sseGateModel,
+                        'exposure' => $attr->exposure,
                         // Multi-profile dispatch metadata. Both fields
                         // pass through unchanged — RouteExecutor + dispatcher
                         // consume them at request time.
@@ -469,6 +471,7 @@ class AttributeDiscovery
             'accessType' => $resolved['accessType'],
             'type' => 'http-request',
             'transport' => $transportValue,
+            'exposure' => ($resolved['exposure'] ?? RouteExposure::Public)->value,
             'consumes' => $resolved['consumes'] ?? null,
             'produces' => $this->resolveProduces($resolved),
             'module' => $selected['module'],

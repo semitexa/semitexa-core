@@ -261,6 +261,11 @@ final class AllRoutesRuntimeSmokeTest extends TestCase
             $accessType = $route['accessType'] ?? null;
             $class = (string) ($route['class'] ?? '?');
             $transport = (string) ($route['transport'] ?? 'http');
+            if (($route['exposure'] ?? 'public') === 'hug') {
+                // Reached only by name through HUG; there is no path to request.
+                $skipped[] = ($route['name'] ?? '?') . ' :: exposure: Hug';
+                continue;
+            }
 
             if (isset(self::SKIP[$path])) {
                 $skipped[] = $path . ' :: ' . self::SKIP[$path];
