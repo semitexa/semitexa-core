@@ -11,6 +11,7 @@ use Semitexa\Core\Attribute\AsPayloadPart;
 use Semitexa\Core\Attribute\AsResource;
 use Semitexa\Core\Attribute\AsResourcePart;
 use Semitexa\Core\Attribute\AsDiscoveryContributor;
+use Semitexa\Core\Attribute\SseGateModel;
 use Semitexa\Core\Attribute\TransportType;
 use Semitexa\Core\Auth\PayloadAccessType;
 use Semitexa\Core\Config\EnvValueResolver;
@@ -32,6 +33,8 @@ use Semitexa\Core\Exception\ConfigurationException;
 /**
  * @phpstan-type Route   array<string, mixed>
  * @phpstan-type AttrMap array<string, mixed>
+ * @phpstan-type PayloadMeta array{class: string, short: string, file: string, priority: int, attr: AttrMap}
+ * @phpstan-import-type RouteCandidate from RouteOverrideChain
  */
 class AttributeDiscovery
 {
@@ -289,7 +292,7 @@ class AttributeDiscovery
      * the abstract base via IS_INSTANCEOF keeps semitexa-core decoupled from the
      * concrete attribute classes (which live in semitexa-authorization).
      *
-     * @return array<string, array<string, mixed>>
+     * @return array<string, PayloadMeta>
      */
     private function collectPayloadMetadata(BootDiagnostics $diagnostics): array
     {
@@ -357,8 +360,8 @@ class AttributeDiscovery
      * (path + methods + tenant-scope signature) so the override chain can pick
      * one winner per route.
      *
-     * @param array<string, array<string, mixed>> $requestMeta
-     * @return array<string, list<array<string, mixed>>>
+     * @param array<string, PayloadMeta> $requestMeta
+     * @return array<string, list<RouteCandidate>>
      */
     private function groupRouteCandidatesByOverride(array $requestMeta, BootDiagnostics $diagnostics): array
     {
@@ -368,8 +371,8 @@ class AttributeDiscovery
             try {
                 $resolved = $this->resolvePayloadAttributes($className, $requestMeta, $resolvedCache);
                 $meta = $requestMeta[$className];
-                $overrides = $meta['attr']['overrides'] ?? null;
-                $routeKey = self::routeBucketKey($resolved);
+                $overrides = is_string($meta['attr']['overrides'] ?? null) ? $meta['attr']['overrides'] : null;
+                $routeKey = RouteOverrideChain::bucketKey($resolved);
                 $moduleName = $this->moduleRegistry->getModuleNameForClass($className) ?? 'project';
                 $scopeSignature = TenantModuleScopeResolver::scopeSignatureForModule($moduleName);
                 $byRoute[$routeKey . "\0" . $scopeSignature][] = [
@@ -390,43 +393,16 @@ class AttributeDiscovery
     }
 
     /**
-     * The route a candidate competes for: path + normalized methods, except a
-     * HUG route, whose path is always empty — it is addressed by name, so two
-     * differently named HUG payloads are two routes, not an override pair.
-     *
-     * @param array<string, mixed> $resolved
-     */
-    private static function routeBucketKey(array $resolved): string
-    {
-        $methods = array_values(array_filter(
-            is_array($resolved['methods'] ?? null) ? $resolved['methods'] : ['GET'],
-            static fn (mixed $method): bool => is_string($method) && $method !== '',
-        ));
-        if ($methods === []) {
-            $methods = ['GET'];
-        }
-        $methods = array_map('strtoupper', $methods);
-        sort($methods);
-        $methodKey = implode(',', $methods);
-
-        if (($resolved['exposure'] ?? RouteExposure::Public) === RouteExposure::Hug) {
-            return "hug\0" . (is_string($resolved['name'] ?? null) ? $resolved['name'] : '') . "\0" . $methodKey;
-        }
-
-        return (is_string($resolved['path'] ?? null) ? $resolved['path'] : '') . "\0" . $methodKey;
-    }
-
-    /**
      * Pick the override-chain winner of each route bucket and register it on the
      * request map + route registry (running the framework-reserved-path and SSE
      * boot guards on the routed candidate).
      *
-     * @param array<string, list<array<string, mixed>>> $byRoute
+     * @param array<string, list<RouteCandidate>> $byRoute
      */
     private function registerResolvedRoutes(array $byRoute): void
     {
         foreach ($byRoute as $candidates) {
-            $selected = self::selectRequestByOverrideChain($candidates);
+            $selected = RouteOverrideChain::select($candidates);
             if ($selected === null) {
                 continue;
             }
@@ -444,7 +420,7 @@ class AttributeDiscovery
      * mutating is the order that stays correct if this is ever called somewhere
      * a throw does not end the process.
      *
-     * @param array{class: string, file: string, resolved: array<string, mixed>, module: string, tenantScopes: list<string>} $selected
+     * @param RouteCandidate $selected
      */
     private function registerRoute(array $selected): void
     {
@@ -452,13 +428,23 @@ class AttributeDiscovery
         $resolved = $selected['resolved'];
         $transportValue = self::normalizeTransport($resolved['transport'] ?? null);
 
-        $this->routeGuard->assertPathNotReserved($resolved['path'], $class);
+        // PayloadAttributeSchema::applyDefaults() refuses a route without one.
+        $path = is_string($resolved['path'] ?? null)
+            ? $resolved['path']
+            : throw new ConfigurationException("Request {$class} resolved without a path.");
+        $this->routeGuard->assertPathNotReserved($path, $class);
+
+        $sseGateModel = $resolved['sseGateModel'] ?? null;
+        $exposure = $resolved['exposure'] ?? RouteExposure::Public;
+        if (($sseGateModel !== null && !$sseGateModel instanceof SseGateModel) || !$exposure instanceof RouteExposure) {
+            throw new ConfigurationException("Request {$class} resolved with an sseGateModel or exposure that is not its enum.");
+        }
 
         $accessType = $resolved['accessType'] ?? null;
         if ($accessType instanceof PayloadAccessType) {
             $this->routeGuard->assertSseGateCoherence(
                 $transportValue,
-                $resolved['sseGateModel'] ?? null,
+                $sseGateModel,
                 $accessType,
                 $class,
             );
@@ -490,7 +476,7 @@ class AttributeDiscovery
             'accessType' => $resolved['accessType'],
             'type' => 'http-request',
             'transport' => $transportValue,
-            'exposure' => ($resolved['exposure'] ?? RouteExposure::Public)->value,
+            'exposure' => $exposure->value,
             'consumes' => $resolved['consumes'] ?? null,
             'produces' => $this->resolveProduces($resolved),
             'module' => $selected['module'],
@@ -543,65 +529,6 @@ class AttributeDiscovery
         return is_string($transport) && $transport !== ''
             ? $transport
             : TransportType::Http->value;
-    }
-
-    /**
-     * Select the single Request for a route using override chain rules.
-     * Only the current chain head can be overridden; otherwise throws.
-     *
-     * @param list<array{
-     *   class: string,
-     *   file: string,
-     *   priority: int,
-     *   overrides: ?string,
-     *   resolved: array,
-     *   module: string,
-     *   tenantScopes: list<string>
-     * }> $candidates
-     * @return array{
-     *   class: string,
-     *   file: string,
-     *   priority: int,
-     *   overrides?: ?string,
-     *   resolved: array,
-     *   module: string,
-     *   tenantScopes: list<string>
-     * }|null
-     */
-    private static function selectRequestByOverrideChain(array $candidates): ?array
-    {
-        if (empty($candidates)) {
-            return null;
-        }
-        usort($candidates, fn ($a, $b) => $a['priority'] <=> $b['priority']);
-
-        $head = null;
-        foreach ($candidates as $c) {
-            $overrides = $c['overrides'];
-            if ($overrides === null || $overrides === '') {
-                if ($head !== null) {
-                    $head = $c['priority'] > $head['priority'] ? $c : $head;
-                } else {
-                    $head = $c;
-                }
-                continue;
-            }
-            if ($head === null) {
-                throw new ConfigurationException(
-                    "Request {$c['class']} declares overrides of {$overrides}, but there is no request for this route to override. " .
-                    "Remove the overrides attribute (registry is the single source of truth; registry payloads extend module base)."
-                );
-            }
-            $headClass = $head['class'];
-            if ($overrides !== $headClass) {
-                throw new ConfigurationException(
-                    "Request override chain violation: {$c['class']} tries to override {$overrides}, but the current head for this route is {$headClass}. " .
-                    "You can only override the current head. Use overrides: {$headClass}::class to extend the chain."
-                );
-            }
-            $head = $c;
-        }
-        return $head;
     }
 
     private function processResponseAttributes(BootDiagnostics $diagnostics): void
