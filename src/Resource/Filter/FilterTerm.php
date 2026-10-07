@@ -56,10 +56,14 @@ final readonly class FilterTerm
         };
     }
 
-    /** Numbers as numbers ("9" < "10"), anything else as text (ISO dates sort as text). */
+    /**
+     * Numbers as numbers ("9" < "10"), anything else as text (ISO dates sort as text).
+     * Two numeric strings go to PHP's own numeric-string comparison, which keeps
+     * integers exact: a float cast would make 2^53 + 1 equal to 2^53.
+     */
     private static function compare(string $a, string $b): int
     {
-        return is_numeric($a) && is_numeric($b) ? ((float) $a <=> (float) $b) : strcmp($a, $b);
+        return is_numeric($a) && is_numeric($b) ? ($a <=> $b) : strcmp($a, $b);
     }
 
     /**

@@ -40,6 +40,16 @@ final class RangeFilterTest extends TestCase
     }
 
     #[Test]
+    public function large_integers_keep_their_precision(): void
+    {
+        $rows = [['price' => 9007199254740992, 'day' => 'a'], ['price' => 9007199254740993, 'day' => 'b']];
+        $pick = static fn (string $filter): array => array_column(CollectionFilterRequest::fromQueryParam($filter, self::ALLOW)->apply($rows, static fn (array $row, string $field) => $row[$field]), 'day');
+
+        self::assertSame(['b'], $pick('price:gte:9007199254740993'), '2^53 and 2^53 + 1 are the same float, not the same integer');
+        self::assertSame(['a'], $pick('price:lte:9007199254740992'));
+    }
+
+    #[Test]
     public function a_range_is_only_where_it_is_allowed(): void
     {
         $this->expectException(InvalidFilterException::class);
