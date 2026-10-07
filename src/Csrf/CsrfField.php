@@ -42,9 +42,7 @@ final class CsrfField
         if (!$session instanceof SessionInterface) {
             return '';
         }
-        $token = $session->getPayload(CsrfToken::class);
-
-        return $token instanceof CsrfToken ? $token->getValue() : '';
+        return $session->getPayload(CsrfToken::class)->getValue();
     }
 
     /** `<input type="hidden" name="_csrf" value="…">`, or '' outside a request. */

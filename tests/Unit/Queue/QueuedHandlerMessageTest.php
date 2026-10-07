@@ -36,4 +36,13 @@ final class QueuedHandlerMessageTest extends TestCase
 
         QueuedHandlerMessage::fromJson((string) json_encode(['handlerClass' => 'App\\Handler', 'responseClass' => 'App\\Response']));
     }
+
+    #[Test]
+    public function a_message_that_is_not_a_json_object_says_so(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('Queued handler message is not a JSON object.');
+
+        QueuedHandlerMessage::fromJson('"App\\\\Handler"');
+    }
 }

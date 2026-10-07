@@ -53,13 +53,20 @@ class QueuedHandlerMessage implements \JsonSerializable
     public static function fromJson(string $payload): self
     {
         $data = json_decode($payload, true, 512, JSON_THROW_ON_ERROR);
+        if (!is_array($data)) {
+            throw new \InvalidArgumentException('Queued handler message is not a JSON object.');
+        }
         // Support legacy messages without type
         $handlerClass = $data['handlerClass'] ?? $data['handler'] ?? '';
         // A message without its request or response class cannot be run;
         // say which key is missing instead of a warning and a TypeError.
         foreach (['requestClass', 'responseClass'] as $key) {
             if (!is_string($data[$key] ?? null) || $data[$key] === '') {
-                throw new \InvalidArgumentException(sprintf('Queued handler message for "%s" has no %s.', $handlerClass, $key));
+                throw new \InvalidArgumentException(sprintf(
+                    'Queued handler message for "%s" has no %s.',
+                    is_string($handlerClass) ? $handlerClass : get_debug_type($handlerClass),
+                    $key,
+                ));
             }
         }
 

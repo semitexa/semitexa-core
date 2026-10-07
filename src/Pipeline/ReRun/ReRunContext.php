@@ -47,7 +47,7 @@ final class ReRunContext
      *     server?: array<string, mixed>,
      *     cookies?: array<string, string>,
      *     content?: ?string,
-     *     files?: array<string, mixed>,
+     *     files?: array<string, list<\Semitexa\Core\Http\UploadedFile>|\Semitexa\Core\Http\UploadedFile>,
      * } $requestSnapshot
      * @param array<string, mixed>|null $broadcastProperties
      */

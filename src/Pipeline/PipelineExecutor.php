@@ -231,7 +231,12 @@ final class PipelineExecutor
     private function resolveHandler(string $handlerClass): object
     {
         try {
-            return $this->requestScopedContainer->get($handlerClass);
+            $handler = $this->requestScopedContainer->get($handlerClass);
+            if (!is_object($handler)) {
+                throw new \UnexpectedValueException('the container returned ' . get_debug_type($handler));
+            }
+
+            return $handler;
         } catch (\Throwable $e) {
             throw new PipelineException("Failed to resolve handler {$handlerClass}: " . $e->getMessage(), $e);
         }
