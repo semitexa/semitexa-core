@@ -228,7 +228,7 @@ class AttributeDiscovery
     {
         $discoveredPayloadClasses = array_keys($this->httpRequests);
         $missing = [];
-        foreach ($this->handlerRegistry->payloadClasses() as $payloadClass) {
+        foreach ($this->handlerRegistry->concretePayloadClasses() as $payloadClass) {
             $hasRoute = false;
             foreach ($discoveredPayloadClasses as $requestClass) {
                 if ($requestClass === $payloadClass || is_subclass_of($requestClass, $payloadClass)) {

@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Pipeline;
 
+use Semitexa\Core\Auth\AuthenticationMode;
+use Semitexa\Core\Auth\VisitorProbe;
+use Semitexa\Core\Lifecycle\CurrentRequestStore;
 use Semitexa\Core\Request;
 use Semitexa\Core\HttpResponse;
 use Semitexa\Core\Http\Response\ResourceResponse;
@@ -300,34 +303,29 @@ class RouteExecutor
         try {
             $metadata = $this->resolveRouteMetadata($route);
 
-            // 1. Pre-hydration auth gate — AUTH-FIRST, before any data resolution.
-            //    Fed the cached DTO for attribute resolution only; the subject is
-            //    resolved from $request (the live session), never from the DTO.
+            // 1. The execution context first (Track R · R8c-2 / Gap A): the held-open
+            //    re-run skips the lifecycle SessionPhase, so the request-scoped trio
+            //    (Request / Session / CookieJar) is set here. It must come BEFORE the
+            //    auth gate: the session handler reads who the visitor is FROM that
+            //    session — gated first, a re-run saw no session, could not resolve
+            //    anyone, and a feed went on streaming to a page whose visitor had
+            //    signed out (tk-ls-kiss-visitor). SessionPhase::finalize() (persist +
+            //    Set-Cookie) is NOT run: a re-run tick is headless.
+            $this->establishReRunExecutionContext($request);
+
+            // 1b. Pre-hydration auth gate — before any data resolution. Fed the
+            //     cached DTO for attribute resolution only; the subject is resolved
+            //     from the live session, never from the DTO.
             if ($this->container->has(PreHydrationAuthGateInterface::class)) {
                 /** @var PreHydrationAuthGateInterface $gate */
                 $gate = $this->container->get(PreHydrationAuthGateInterface::class);
                 $gate->gate($cachedDto, $request, $this->authBootstrapper);
             }
 
-            // 1b. Re-establish the execution context (Track R · R8c-2 / Gap A).
-            //     The held-open re-run skips the normal lifecycle SessionPhase, so the
-            //     request-scoped trio (Request / Session / CookieJar) is never set into
-            //     the RequestScopedContainer and `isExecutionContextReady()` stays
-            //     false — any execution-scoped pipeline listener resolved during the
-            //     AuthCheck/HandleRequest phases (e.g. ResetPlatformUiSseSessionListener)
-            //     then throws ExecutionContextNotReadyException and the whole re-run
-            //     aborts with no frame. Run SessionPhase's establish-only path here —
-            //     AFTER the auth gate (so the session it loads carries the freshly
-            //     re-resolved live subject, never the cached DTO) and BEFORE the
-            //     pipeline. SessionPhase::finalize() (session persist + Set-Cookie) is
-            //     intentionally NOT run: a re-run tick is headless and must not mutate
-            //     the stored session or emit cookies.
-            $this->establishReRunExecutionContext($request);
-
             // 1c. FILTER-ONLY view-change override (Intended Grid Model).
             //     A view-change command's new view params are merged onto the cached
-            //     DTO HERE — AFTER the auth gate (step 1) and the execution-context
-            //     re-establishment (step 1b) have already re-resolved identity from
+            //     DTO HERE — AFTER the execution-context re-establishment (step 1)
+            //     and the auth gate (step 1b) have already re-resolved identity from
             //     the live session, so the override can never influence WHO the
             //     re-run authorizes as. The merge is structurally filter-only: only
             //     fields the DTO marks #[LiveFilterParam] are writable; identity /
@@ -390,13 +388,32 @@ class RouteExecutor
     }
 
     /**
+     * Who made $request, re-established in THIS execution: its execution
+     * context (session trio, tenant, locale) as a re-run re-establishes it,
+     * then the visitor resolved from that session best-effort, as for a public
+     * page (a guest stays a guest). For work done later on another connection that must
+     * still be done as that visitor — a page's deferred blocks and components
+     * rendered over KISS, which is served outside the route pipeline, so no
+     * authentication has run there.
+     */
+    public function establishVisitor(Request $request): void
+    {
+        CurrentRequestStore::set($request);
+        // The session first: who the visitor is lives in it.
+        $this->establishReRunExecutionContext($request);
+        if ($this->authBootstrapper !== null && $this->authBootstrapper->isEnabled()) {
+            $this->authBootstrapper->handle(new VisitorProbe(), AuthenticationMode::BestEffort);
+        }
+    }
+
+    /**
      * Establish the execution context for a re-run tick by running SessionPhase's
      * establish-only path (its `execute()`, NOT `finalize()`) against the rebuilt
      * request. SessionPhase sets the request-scoped trio (Session / CookieJar /
      * Request) — which flips {@see RequestScopedContainer::isExecutionContextReady()}
-     * to true — plus the live tenant / auth / locale contexts (auth resolved fresh
-     * from the session, never the cached DTO; this runs AFTER the pre-hydration auth
-     * gate has already re-resolved the live subject). Without it, execution-scoped
+     * to true — plus the live tenant / locale contexts. It runs BEFORE the
+     * pre-hydration auth gate, which resolves the live subject from this session
+     * (never from the cached DTO). Without it, execution-scoped
      * pipeline listeners throw {@see \Semitexa\Core\Container\Exception\ExecutionContextNotReadyException}.
      *
      * Fail-soft by design: when the container cannot supply a tenant store (a minimal
