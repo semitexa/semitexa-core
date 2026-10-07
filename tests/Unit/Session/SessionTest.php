@@ -50,6 +50,27 @@ final class SessionTest extends TestCase
 
         self::assertSame(['value' => 'stable-token'], $handler->store['bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb']['__csrf__']);
     }
+
+    #[Test]
+    public function the_new_id_is_visible_as_soon_as_regenerate_returns(): void
+    {
+        $handler = new InMemorySessionHandler();
+        $handler->store['cccccccccccccccccccccccccccccccc'] = ['user_id' => 7];
+
+        $session = new Session('cccccccccccccccccccccccccccccccc', $handler, 'semitexa_session');
+        $session->regenerate();
+        $during = $session->getId();
+        $session->regenerate();
+
+        self::assertNotSame('cccccccccccccccccccccccccccccccc', $during, 'whatever is bound later in this request carries the next id');
+        self::assertArrayHasKey('cccccccccccccccccccccccccccccccc', $handler->store, 'the old data stays until save()');
+
+        $session->save();
+
+        self::assertSame($session->getId(), $session->getSessionIdForCookie());
+        self::assertSame([$session->getId()], array_keys($handler->store), 'the original id is destroyed, a second regenerate leaves nothing behind');
+        self::assertSame(7, $handler->store[$session->getId()]['user_id']);
+    }
 }
 
 final class InMemorySessionHandler implements SessionHandlerInterface
