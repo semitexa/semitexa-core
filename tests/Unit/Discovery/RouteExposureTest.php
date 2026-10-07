@@ -8,6 +8,7 @@ use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Semitexa\Core\Attribute\RouteExposure;
 use Semitexa\Core\Auth\PayloadAccessType;
+use Semitexa\Core\Discovery\AttributeDiscovery;
 use Semitexa\Core\Discovery\PayloadAttributeSchema;
 use Semitexa\Core\Discovery\RouteRegistry;
 use Semitexa\Core\Exception\ConfigurationException;
@@ -85,6 +86,22 @@ final class RouteExposureTest extends TestCase
             'App\\FeedPayload',
         );
         self::assertSame('app.feed', $resolved['name']);
+    }
+
+    #[Test]
+    public function differently_named_hug_routes_compete_for_different_buckets(): void
+    {
+        $schema = new PayloadAttributeSchema();
+        $key = new \ReflectionMethod(AttributeDiscovery::class, 'routeBucketKey');
+
+        $docA = $key->invoke(null, $schema->applyDefaults($this->attr(['name' => 'app.doc-a']), 'A', 'App\\A'));
+        $docB = $key->invoke(null, $schema->applyDefaults($this->attr(['name' => 'app.doc-b']), 'B', 'App\\B'));
+        $docAPost = $key->invoke(null, $schema->applyDefaults($this->attr(['name' => 'app.doc-a', 'methods' => ['POST']]), 'A', 'App\\A'));
+        $docAAgain = $key->invoke(null, $schema->applyDefaults($this->attr(['name' => 'app.doc-a', 'methods' => ['get']]), 'A2', 'App\\A2'));
+
+        self::assertNotSame($docA, $docB);
+        self::assertNotSame($docA, $docAPost);
+        self::assertSame($docA, $docAAgain);
     }
 
     /**

@@ -369,15 +369,7 @@ class AttributeDiscovery
                 $resolved = $this->resolvePayloadAttributes($className, $requestMeta, $resolvedCache);
                 $meta = $requestMeta[$className];
                 $overrides = $meta['attr']['overrides'] ?? null;
-                $methods = array_values(array_filter(
-                    is_array($resolved['methods'] ?? null) ? $resolved['methods'] : ['GET'],
-                    static fn (mixed $method): bool => is_string($method) && $method !== '',
-                ));
-                if ($methods === []) {
-                    $methods = ['GET'];
-                }
-                sort($methods);
-                $routeKey = $resolved['path'] . "\0" . implode(',', array_map('strtoupper', $methods));
+                $routeKey = self::routeBucketKey($resolved);
                 $moduleName = $this->moduleRegistry->getModuleNameForClass($className) ?? 'project';
                 $scopeSignature = TenantModuleScopeResolver::scopeSignatureForModule($moduleName);
                 $byRoute[$routeKey . "\0" . $scopeSignature][] = [
@@ -395,6 +387,33 @@ class AttributeDiscovery
         }
 
         return $byRoute;
+    }
+
+    /**
+     * The route a candidate competes for: path + normalized methods, except a
+     * HUG route, whose path is always empty — it is addressed by name, so two
+     * differently named HUG payloads are two routes, not an override pair.
+     *
+     * @param array<string, mixed> $resolved
+     */
+    private static function routeBucketKey(array $resolved): string
+    {
+        $methods = array_values(array_filter(
+            is_array($resolved['methods'] ?? null) ? $resolved['methods'] : ['GET'],
+            static fn (mixed $method): bool => is_string($method) && $method !== '',
+        ));
+        if ($methods === []) {
+            $methods = ['GET'];
+        }
+        $methods = array_map('strtoupper', $methods);
+        sort($methods);
+        $methodKey = implode(',', $methods);
+
+        if (($resolved['exposure'] ?? RouteExposure::Public) === RouteExposure::Hug) {
+            return "hug\0" . (is_string($resolved['name'] ?? null) ? $resolved['name'] : '') . "\0" . $methodKey;
+        }
+
+        return (is_string($resolved['path'] ?? null) ? $resolved['path'] : '') . "\0" . $methodKey;
     }
 
     /**
