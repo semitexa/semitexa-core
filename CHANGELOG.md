@@ -5,6 +5,20 @@ Changes to `semitexa/core` that a consuming application can notice. Sections are
 next release tag. This file is machine-read by `update:changelog` and the OS
 "What's new" surface — keep entries short and operator-facing.
 
+## Unreleased
+
+### Changed
+- **Request size limit is 32 MiB** (`SWOOLE_PACKAGE_MAX_LENGTH`, checked at boot,
+  minimum 64 KiB). Swoole's 2 MiB default silently dropped phone-photo uploads.
+  A request is buffered up to this size in worker memory.
+- **`Session::regenerate()` changes the id at once**; `save()` destroys the old
+  one. Contexts and state bound later in the same request follow the new id.
+- Live re-runs and KISS work run as the page's visitor (session and auth).
+
+### Added
+- `WatchScopesOf`, `DeclaresWatchScopesInterface`, `DeclaresRequiredPermissionsInterface`.
+- `gte` / `lte` collection filters; `csrf_field()`; `PageTimeline` (dev).
+
 ## 2026.09.27.0404 — 2026-09-27
 
 ### Added
