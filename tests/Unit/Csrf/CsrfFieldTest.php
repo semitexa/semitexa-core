@@ -9,6 +9,7 @@ use PHPUnit\Framework\TestCase;
 use Semitexa\Core\Csrf\CsrfField;
 use Semitexa\Core\Csrf\CsrfToken;
 use Semitexa\Core\Session\SessionInterface;
+use Semitexa\Core\Support\CoroutineLocal;
 
 /**
  * tk-la-csrf-field-helper: `{{ csrf_field() }}` gives a plain HTML form the
@@ -16,9 +17,25 @@ use Semitexa\Core\Session\SessionInterface;
  */
 final class CsrfFieldTest extends TestCase
 {
+    private const KEY = 'core.csrf_session';
+
+    /** The binding a previous test left, put back afterwards: CLI keeps one process-wide store. */
+    private ?SessionInterface $previous = null;
+
+    protected function setUp(): void
+    {
+        $previous = CoroutineLocal::get(self::KEY);
+        $this->previous = $previous instanceof SessionInterface ? $previous : null;
+    }
+
     protected function tearDown(): void
     {
-        CsrfField::clear();
+        if ($this->previous === null) {
+            CsrfField::clear();
+
+            return;
+        }
+        CsrfField::bind($this->previous);
     }
 
     #[Test]
