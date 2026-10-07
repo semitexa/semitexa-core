@@ -109,7 +109,7 @@ final class GraphBuilder
      * @param array<class-string, ContractDetail> $contractDetails
      * @param IdToClassMap $idToClass
      * @param ObjectMap $readonlyInstances (mutated in place)
-     * @param ObjectMap $executionScopedPrototypes
+     * @param array<class-string, object> $executionScopedPrototypes
      * @param InjectionsMap $injections
      */
     public function buildResolvers(
@@ -541,7 +541,7 @@ final class GraphBuilder
      *
      * @param class-string $class
      * @param ObjectMap $readonlyInstances
-     * @param ObjectMap $executionScopedPrototypes
+     * @param array<class-string, object> $executionScopedPrototypes
      * @param IdToClassMap $idToClass
      * @param InjectionsMap $injections
      */

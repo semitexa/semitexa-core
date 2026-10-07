@@ -137,7 +137,7 @@ final class LocalePhase
      * a page in a language they chose, rather than anything else that happens to
      * be a GET.
      *
-     * @param list<string> $supportedLocales
+     * @param array<string> $supportedLocales
      *
      * @internal Split out of execute() so the decision can be read and tested
      *           without standing up a request, a container and a locale pack.

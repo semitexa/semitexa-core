@@ -39,6 +39,6 @@ final readonly class CompiledCollection
             return CollectionPaginationPolicy::MODE_CURSOR;
         }
 
-        return $this->page?->mode ?? ($this->page !== null ? CollectionPaginationPolicy::MODE_PAGE : null);
+        return $this->page->mode ?? ($this->page !== null ? CollectionPaginationPolicy::MODE_PAGE : null);
     }
 }

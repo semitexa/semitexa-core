@@ -56,6 +56,6 @@ final class ResourceAttributeSchema implements AttributeSchema
             $shortName = substr($shortName, 0, -8);
         }
 
-        return strtolower(ltrim(preg_replace('/[A-Z]/', '-$0', $shortName), '-'));
+        return strtolower(ltrim(preg_replace('/[A-Z]/', '-$0', $shortName) ?? $shortName, '-'));
     }
 }
