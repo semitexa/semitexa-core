@@ -113,15 +113,10 @@ final class AuthenticatedRoutesRuntimeSmokeTest extends TestCase
     private const NEEDS_FIXTURES = [
         '/playground/customers'                   => 'lists customers from ORM seed',
         '/playground/orm'                         => 'ORM landing reads platform-user db',
-        '/playground/orm/articles/{id}'           => 'ORM article lookup needs seeded id',
         '/ssr-polygon/deferred/auth-aware'        => 'auth-aware deferred slot expects shape',
         '/sitemap.json'                           => 'sitemap aggregation needs configured providers',
         '/sitemap.xml'                            => 'sitemap aggregation needs configured providers',
         // Cycle-11 additions — protected ORM routes also need the seed.
-        '/playground/orm/articles-new'                => 'ORM new-article form needs DB',
-        '/playground/orm/articles/{id}/edit'          => 'ORM edit form needs seeded article',
-        '/playground/orm/articles/{id}/update'        => 'ORM update needs seeded article',
-        '/playground/orm/articles/{id}/delete'        => 'ORM delete needs seeded article',
         '/playground/orm/seed'                        => 'ORM seed action expects writable DB',
         // Cycle-11 surfaced: WhoAmI looks up the authenticated user in the
         // platform-user repo; demo smoke user has no DB row.

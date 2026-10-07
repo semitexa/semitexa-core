@@ -55,6 +55,13 @@ class QueuedHandlerMessage implements \JsonSerializable
         $data = json_decode($payload, true, 512, JSON_THROW_ON_ERROR);
         // Support legacy messages without type
         $handlerClass = $data['handlerClass'] ?? $data['handler'] ?? '';
+        // A message without its request or response class cannot be run;
+        // say which key is missing instead of a warning and a TypeError.
+        foreach (['requestClass', 'responseClass'] as $key) {
+            if (!is_string($data[$key] ?? null) || $data[$key] === '') {
+                throw new \InvalidArgumentException(sprintf('Queued handler message for "%s" has no %s.', $handlerClass, $key));
+            }
+        }
 
         return new self(
             handlerClass: $handlerClass,
