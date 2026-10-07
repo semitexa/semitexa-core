@@ -51,7 +51,15 @@ final readonly class FilterTerm
             FilterOperator::Contains => is_string($this->value)
                 && $this->value !== ''
                 && stripos($haystack, $this->value) !== false,
+            FilterOperator::Gte      => is_string($this->value) && $haystack !== '' && self::compare($haystack, $this->value) >= 0,
+            FilterOperator::Lte      => is_string($this->value) && $haystack !== '' && self::compare($haystack, $this->value) <= 0,
         };
+    }
+
+    /** Numbers as numbers ("9" < "10"), anything else as text (ISO dates sort as text). */
+    private static function compare(string $a, string $b): int
+    {
+        return is_numeric($a) && is_numeric($b) ? ((float) $a <=> (float) $b) : strcmp($a, $b);
     }
 
     /**
