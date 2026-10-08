@@ -51,7 +51,7 @@ class RoutesShowCommand extends BaseCommand
         $asJson = (bool) $input->getOption('json');
 
         if ($asJson) {
-            $output->writeln(json_encode($enriched, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT));
+            $output->writeln(json_encode($enriched, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT), OutputInterface::OUTPUT_RAW);
             return Command::SUCCESS;
         }
 

@@ -76,7 +76,8 @@ enum HttpStatus: int
 
     public function isSuccess(): bool
     {
-        return $this->value >= 200 && $this->value < 300;
+        // Every case is at least 200, so the upper bound is the whole test.
+        return $this->value < 300;
     }
 
     public function isRedirect(): bool

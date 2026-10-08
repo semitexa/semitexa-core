@@ -54,6 +54,28 @@ final class SseFrame
         return new self($id, $event, $data);
     }
 
+    public function id(): ?string
+    {
+        return $this->id;
+    }
+
+    public function event(): ?string
+    {
+        return $this->event;
+    }
+
+    /** @return array<array-key, mixed> */
+    public function data(): array
+    {
+        return $this->data;
+    }
+
+    /** The same frame with an `id:` line — how a stream makes its frames resumable. */
+    public function withId(string $id): self
+    {
+        return new self($id, $this->event, $this->data);
+    }
+
     /**
      * Render this frame to its SSE wire representation:
      *

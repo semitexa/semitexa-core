@@ -76,11 +76,20 @@ final class PayloadMetadataReflectorTest extends TestCase
         self::assertSame(['plain'], $doc['modes']);
         self::assertArrayNotHasKey('sseGateModel', $doc);
     }
+
+    #[Test]
+    public function the_document_names_the_route_a_feed_is_subscribed_by(): void
+    {
+        self::assertSame('test.sse-with-filter', PayloadMetadataReflector::describe(SseWithLiveFilterFixture::class)['name']);
+        // Unnamed routes carry the default name discovery gives them.
+        self::assertSame('PlainHttpFixture', PayloadMetadataReflector::describe(PlainHttpFixture::class)['name']);
+    }
 }
 
 #[AsPublicPayload(
     path: '/test/sse-with-filter',
     methods: ['GET'],
+    name: 'test.sse-with-filter',
     transport: TransportType::Sse,
     sseGateModel: SseGateModel::BearerSession,
 )]

@@ -104,6 +104,24 @@ final class HandlerRegistry
     }
 
     /**
+     * The payload classes handlers name that must each have a route of their
+     * own. A handler bound to an abstract base or an interface serves every
+     * route extending it (findHandlers() matches by is_subclass_of) — a
+     * package's generic feed handler, say — and a project with no such route
+     * yet is not misconfigured, so those are left out.
+     *
+     * @return list<string>
+     */
+    public function concretePayloadClasses(): array
+    {
+        return array_values(array_filter(
+            $this->payloadClasses(),
+            static fn (string $class): bool => !interface_exists($class)
+                && !(class_exists($class) && (new \ReflectionClass($class))->isAbstract()),
+        ));
+    }
+
+    /**
      * Every distinct payload class some handler claims to handle.
      *
      * Discovery uses this for its boot guard: a handler naming a payload that no

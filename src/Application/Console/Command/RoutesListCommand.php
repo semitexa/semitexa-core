@@ -48,7 +48,7 @@ class RoutesListCommand extends BaseCommand
                     'access' => self::stringifyAccessType($route['accessType'] ?? null),
                 ];
             }
-            $output->writeln(json_encode($rows, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT));
+            $output->writeln(json_encode($rows, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT), OutputInterface::OUTPUT_RAW);
             return Command::SUCCESS;
         }
 

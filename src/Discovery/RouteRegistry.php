@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Discovery;
 
+use Semitexa\Core\Attribute\RouteExposure;
 use Semitexa\Core\Attribute\TransportType;
 use Semitexa\Core\Support\TenantModuleScopeResolver;
 
@@ -59,6 +60,11 @@ class RouteRegistry
 
         if ($name !== null && $name !== '') {
             $this->namedIndex[$name][] = $route;
+        }
+
+        // Reached only by name through HUG: never matched by a path.
+        if (($route['exposure'] ?? null) === RouteExposure::Hug->value) {
+            return;
         }
 
         // Multi-Modal API — Mode 4: every routable payload endpoint also answers

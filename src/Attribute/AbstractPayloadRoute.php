@@ -71,6 +71,7 @@ abstract class AbstractPayloadRoute
          * of the pre-existing `renderProfile` / `responsesByProfile` parameters.
          */
         public ?SseGateModel $sseGateModel = null,
+        public RouteExposure $exposure = RouteExposure::Public,
     ) {
         $this->doc = $doc;
         if ($this->consumes !== null) {

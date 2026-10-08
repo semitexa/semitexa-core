@@ -58,7 +58,7 @@ final class SemitexaContainer implements ContainerInterface, ExecutionContextAwa
      * Per-class clone-time injection plan (the #[InjectAsMutable] and
      * #[InjectAsFactory] entries of the injection map), built on first clone.
      *
-     * @var array<string, array{mutable: array<string, array{type: string, optional: bool}>, factory: array<string, array{type: string, declared?: string}>}>
+     * @var array<string, array{mutable: array<string, array{type: class-string, optional: bool}>, factory: array<string, array{type: class-string, declared?: class-string}>}>
      */
     private array $clonePlans = [];
 
@@ -577,7 +577,7 @@ final class SemitexaContainer implements ContainerInterface, ExecutionContextAwa
      * The injection map is written once by build() and never changes after,
      * so the split below is a pure function of boot-time state.
      *
-     * @return array{mutable: array<string, array{type: string, optional: bool}>, factory: array<string, array{type: string, declared?: string}>}
+     * @return array{mutable: array<string, array{type: class-string, optional: bool}>, factory: array<string, array{type: class-string, declared?: class-string}>}
      */
     private function buildClonePlan(string $class): array
     {

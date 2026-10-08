@@ -42,7 +42,7 @@ final class CsrfListener implements PipelineListenerInterface
     private const UNSAFE_METHODS = ['POST', 'PUT', 'PATCH', 'DELETE'];
 
     private const HEADER_NAME = 'X-CSRF-Token';
-    private const FORM_FIELD = '_csrf';
+    private const FORM_FIELD = CsrfField::NAME;
     #[InjectAsMutable]
     protected SessionInterface $session;
 
