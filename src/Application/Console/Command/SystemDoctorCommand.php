@@ -87,7 +87,7 @@ final class SystemDoctorCommand extends BaseCommand
                 'artifact' => 'semitexa.system-doctor/v1',
                 'checks' => $report,
                 'healthy' => $healthy,
-            ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE));
+            ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE), OutputInterface::OUTPUT_RAW);
 
             return $healthy ? Command::SUCCESS : Command::FAILURE;
         }

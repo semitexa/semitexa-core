@@ -87,6 +87,7 @@ final class SourceOrigin
     public function isProjectClass(string $className, string $subject): bool
     {
         try {
+            // @phpstan-ignore argument.type (a name that is no class throws here, and the catch records the skip)
             $file = (new ReflectionClass($className))->getFileName();
 
             return $file !== false && $this->isProjectFile($file);

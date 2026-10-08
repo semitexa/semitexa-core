@@ -96,7 +96,7 @@ final class AttributeChainResolverTest extends TestCase
     public function the_chain_is_walked_transitively(): void
     {
         $meta = [
-            'P\\Root' => self::payloadMeta('Root', ['path' => '/root', 'accessType' => PayloadAccessType::Public, 'transport' => TransportType::Sse]),
+            'P\\Root' => self::payloadMeta('Root', ['path' => '/root', 'name' => 'root', 'accessType' => PayloadAccessType::Public, 'transport' => TransportType::Sse]),
             'P\\Mid' => self::payloadMeta('Mid', ['base' => 'P\\Root', 'path' => '/mid']),
             'P\\Leaf' => self::payloadMeta('Leaf', ['base' => 'P\\Mid', 'name' => 'leaf']),
         ];
@@ -183,6 +183,7 @@ final class AttributeChainResolverTest extends TestCase
         $map = [
             'P\\Base' => self::payloadMeta('Base', [
                 'path' => '/base',
+                'name' => 'base',
                 'transport' => TransportType::Sse,
                 'accessType' => PayloadAccessType::Public,
             ]),
@@ -236,7 +237,7 @@ final class AttributeChainResolverTest extends TestCase
     private static function resolveChain(array $base, array $child): array
     {
         $meta = [
-            'P\\Base' => self::payloadMeta('Base', $base + ['path' => '/base', 'accessType' => PayloadAccessType::Public]),
+            'P\\Base' => self::payloadMeta('Base', $base + ['path' => '/base', 'name' => 'base', 'accessType' => PayloadAccessType::Public]),
             'P\\Child' => self::payloadMeta('Child', $child + ['base' => 'P\\Base']),
         ];
 

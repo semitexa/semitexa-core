@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Pipeline;
 
+use Semitexa\Core\Auth\AuthenticationMode;
+use Semitexa\Core\Auth\VisitorProbe;
+use Semitexa\Core\Lifecycle\CurrentRequestStore;
 use Semitexa\Core\Request;
 use Semitexa\Core\HttpResponse;
-use Semitexa\Core\Http\PayloadHydrator;
 use Semitexa\Core\Http\Response\ResourceResponse;
 use Semitexa\Core\Discovery\AttributeDiscovery;
 use Semitexa\Core\Discovery\DiscoveredRoute;
@@ -31,11 +33,8 @@ use Semitexa\Core\Tenant\TenantContextStoreInterface;
 use Semitexa\Core\Tenant\TenancyBootstrapperInterface;
 use Semitexa\Core\Auth\AuthBootstrapperInterface;
 use Semitexa\Core\Contract\ExceptionResponseMapperInterface;
-use Semitexa\Core\Exception\PayloadValidationException;
 use Semitexa\Core\Contract\RouteResponseDecoratorInterface;
 use Semitexa\Core\Contract\RouteMetadataResolverInterface;
-use Semitexa\Core\Contract\ValidatablePayloadInterface;
-use Semitexa\Core\Exception\ValidationException;
 use Semitexa\Core\Container\PropertyInjector;
 use Psr\Container\ContainerInterface;
 use Semitexa\Core\Container\RequestScopedContainer;
@@ -145,48 +144,9 @@ class RouteExecutor
             // is served by the generic OptionsMetadataHandler (see below).
             $isOptions = strtoupper($request->getMethod()) === 'OPTIONS';
 
-            // 1a. Create a bare payload instance (no request data yet).
-            $reqDto = $this->createBarePayload($route);
-
-            // 1b. Pre-hydration auth gate. When an authorization layer registers
-            //     a PreHydrationAuthGateInterface, it runs here so that protected
-            //     routes reject unauthenticated requests BEFORE hydration or
-            //     validation touches the request body. Public routes are a no-op.
-            //     OPTIONS is gated identically — its access model is inherited,
-            //     not bypassed.
-            if ($this->container->has(PreHydrationAuthGateInterface::class)) {
-                /** @var PreHydrationAuthGateInterface $gate */
-                $gate = $this->container->get(PreHydrationAuthGateInterface::class);
-                $tracer?->begin('auth.pre_hydration_gate', ['gate' => $gate::class, 'method' => 'gate']);
-                $gate->gate($reqDto, $request, $this->authBootstrapper);
-                $tracer?->end('auth.pre_hydration_gate');
-            } else {
-                $tracer?->mark('auth.pre_hydration_gate.absent');
-            }
-
-            // 1c. Hydrate and Validate — skipped for OPTIONS. The endpoint is
-            //     only being described, so the request body is irrelevant and a
-            //     payload's ValidatablePayloadInterface::validate() business
-            //     rules must not reject an (empty) OPTIONS probe. OPTIONS reports
-            //     type-level shape only; validate() is not reflected.
-            if (!$isOptions) {
-                $tracer?->begin('payload.hydrate_and_validate', ['payload' => $reqDto::class]);
-                [$reqDto, $validationError] = $this->fillAndValidatePayload($reqDto, $request);
-                // The hydrated DTO rides along as an object; the tracer decides
-                // what of its state survives (redacted, size-bounded snapshot).
-                // Passing values here would force the executor to know the
-                // redaction rules, which belong to the observer, not the path.
-                $tracer?->end('payload.hydrate_and_validate', [
-                    'rejected' => $validationError !== null,
-                    'payload_snapshot' => $reqDto,
-                ]);
-                // After the span closes: an asymmetric begin/end is its own bug class.
-                if ($validationError !== null) {
-                    throw $validationError;
-                }
-            } else {
-                $tracer?->mark('payload.hydrate_and_validate.skipped', ['reason' => 'OPTIONS probe']);
-            }
+            // 1a–1c. Bare payload, pre-hydration auth gate, then hydrate and
+            //        validate (skipped for an OPTIONS probe). Shared with admit().
+            $reqDto = (new PayloadAdmission($this->container, $this->authBootstrapper))->gateAndHydrate($route, $request, $isOptions, $tracer);
 
             // For OPTIONS, swap the resolved route for a variant whose sole
             // handler is the generic OptionsMetadataHandler and whose response
@@ -274,6 +234,36 @@ class RouteExecutor
     }
 
     /**
+     * Admit a request to a route without running its handler: the same bare
+     * payload, pre-hydration auth gate, hydration and validation as execute(),
+     * then the route's AuthCheck phase. Returns the validated payload.
+     *
+     * For a caller that runs the route elsewhere: HUG admits a feed
+     * subscription here — in the subscribing request, with its identity, tenant
+     * and validation — before handing the payload to the worker that owns the
+     * page's KISS stream, which re-executes the route on every change.
+     *
+     * @throws \Throwable whatever the gate, hydration, validation or an AuthCheck listener throws
+     */
+    public function admit(DiscoveredRoute $route, Request $request): object
+    {
+        $metadata = $this->resolveRouteMetadata($route);
+        $reqDto = (new PayloadAdmission($this->container, $this->authBootstrapper))->gateAndHydrate($route, $request, false, null);
+
+        $context = new RequestPipelineContext(
+            requestDto: $reqDto,
+            route: $route,
+            request: $request,
+            resourceDto: $this->resolveResponseDto($route, $request),
+            authBootstrapper: $this->authBootstrapper,
+            resolvedMetadata: $metadata,
+        );
+        (new PipelineExecutor($this->requestScopedContainer, $this->container))->authorize($context);
+
+        return $reqDto;
+    }
+
+    /**
      * Re-run the full handler chain for an already-hydrated, cached request DTO
      * (Track R · R2; design phase2 §B.3, track-r §B.2/§B.4). This is the heart of
      * Shape 1 "re-run self-authorization": a frozen authorized request is replayed
@@ -313,34 +303,29 @@ class RouteExecutor
         try {
             $metadata = $this->resolveRouteMetadata($route);
 
-            // 1. Pre-hydration auth gate — AUTH-FIRST, before any data resolution.
-            //    Fed the cached DTO for attribute resolution only; the subject is
-            //    resolved from $request (the live session), never from the DTO.
+            // 1. The execution context first (Track R · R8c-2 / Gap A): the held-open
+            //    re-run skips the lifecycle SessionPhase, so the request-scoped trio
+            //    (Request / Session / CookieJar) is set here. It must come BEFORE the
+            //    auth gate: the session handler reads who the visitor is FROM that
+            //    session — gated first, a re-run saw no session, could not resolve
+            //    anyone, and a feed went on streaming to a page whose visitor had
+            //    signed out (tk-ls-kiss-visitor). SessionPhase::finalize() (persist +
+            //    Set-Cookie) is NOT run: a re-run tick is headless.
+            $this->establishReRunExecutionContext($request);
+
+            // 1b. Pre-hydration auth gate — before any data resolution. Fed the
+            //     cached DTO for attribute resolution only; the subject is resolved
+            //     from the live session, never from the DTO.
             if ($this->container->has(PreHydrationAuthGateInterface::class)) {
                 /** @var PreHydrationAuthGateInterface $gate */
                 $gate = $this->container->get(PreHydrationAuthGateInterface::class);
                 $gate->gate($cachedDto, $request, $this->authBootstrapper);
             }
 
-            // 1b. Re-establish the execution context (Track R · R8c-2 / Gap A).
-            //     The held-open re-run skips the normal lifecycle SessionPhase, so the
-            //     request-scoped trio (Request / Session / CookieJar) is never set into
-            //     the RequestScopedContainer and `isExecutionContextReady()` stays
-            //     false — any execution-scoped pipeline listener resolved during the
-            //     AuthCheck/HandleRequest phases (e.g. ResetPlatformUiSseSessionListener)
-            //     then throws ExecutionContextNotReadyException and the whole re-run
-            //     aborts with no frame. Run SessionPhase's establish-only path here —
-            //     AFTER the auth gate (so the session it loads carries the freshly
-            //     re-resolved live subject, never the cached DTO) and BEFORE the
-            //     pipeline. SessionPhase::finalize() (session persist + Set-Cookie) is
-            //     intentionally NOT run: a re-run tick is headless and must not mutate
-            //     the stored session or emit cookies.
-            $this->establishReRunExecutionContext($request);
-
             // 1c. FILTER-ONLY view-change override (Intended Grid Model).
             //     A view-change command's new view params are merged onto the cached
-            //     DTO HERE — AFTER the auth gate (step 1) and the execution-context
-            //     re-establishment (step 1b) have already re-resolved identity from
+            //     DTO HERE — AFTER the execution-context re-establishment (step 1)
+            //     and the auth gate (step 1b) have already re-resolved identity from
             //     the live session, so the override can never influence WHO the
             //     re-run authorizes as. The merge is structurally filter-only: only
             //     fields the DTO marks #[LiveFilterParam] are writable; identity /
@@ -403,13 +388,32 @@ class RouteExecutor
     }
 
     /**
+     * Who made $request, re-established in THIS execution: its execution
+     * context (session trio, tenant, locale) as a re-run re-establishes it,
+     * then the visitor resolved from that session best-effort, as for a public
+     * page (a guest stays a guest). For work done later on another connection that must
+     * still be done as that visitor — a page's deferred blocks and components
+     * rendered over KISS, which is served outside the route pipeline, so no
+     * authentication has run there.
+     */
+    public function establishVisitor(Request $request): void
+    {
+        CurrentRequestStore::set($request);
+        // The session first: who the visitor is lives in it.
+        $this->establishReRunExecutionContext($request);
+        if ($this->authBootstrapper !== null && $this->authBootstrapper->isEnabled()) {
+            $this->authBootstrapper->handle(new VisitorProbe(), AuthenticationMode::BestEffort);
+        }
+    }
+
+    /**
      * Establish the execution context for a re-run tick by running SessionPhase's
      * establish-only path (its `execute()`, NOT `finalize()`) against the rebuilt
      * request. SessionPhase sets the request-scoped trio (Session / CookieJar /
      * Request) — which flips {@see RequestScopedContainer::isExecutionContextReady()}
-     * to true — plus the live tenant / auth / locale contexts (auth resolved fresh
-     * from the session, never the cached DTO; this runs AFTER the pre-hydration auth
-     * gate has already re-resolved the live subject). Without it, execution-scoped
+     * to true — plus the live tenant / locale contexts. It runs BEFORE the
+     * pre-hydration auth gate, which resolves the live subject from this session
+     * (never from the cached DTO). Without it, execution-scoped
      * pipeline listeners throw {@see \Semitexa\Core\Container\Exception\ExecutionContextNotReadyException}.
      *
      * Fail-soft by design: when the container cannot supply a tenant store (a minimal
@@ -563,70 +567,6 @@ class RouteExecutor
     }
 
     /**
-     * Build a bare payload instance (no request data) suitable for attribute
-     * resolution. Used by the pre-hydration auth gate before hydration.
-     */
-    private function createBarePayload(DiscoveredRoute $route): object
-    {
-        $requestClass = $route->requestClass;
-        if ($requestClass === '') {
-            throw new PipelineException('Route has no class defined');
-        }
-
-        $traits = $this->getPayloadPartRegistry()->getPayloadPartsForClass($requestClass);
-        $reqDto = class_exists($requestClass) ? PayloadFactory::createInstance($requestClass, $traits) : null;
-        if (!$reqDto) {
-            throw new PipelineException("Cannot instantiate request class: {$requestClass}");
-        }
-
-        PropertyInjector::inject($reqDto, $this->container);
-
-        return $reqDto;
-    }
-
-    /**
-     * Fill the bare payload from the request and run validation. The payload
-     * instance is returned in both success and failure cases so validation
-     * errors can reference the class the request was routed to.
-     *
-     * @return array{0: object, 1: ?PayloadValidationException}
-     */
-    private function fillAndValidatePayload(object $reqDto, Request $request): array
-    {
-        try {
-            $reqDto = PayloadHydrator::hydrate($reqDto, $request);
-            if (method_exists($reqDto, 'setHttpRequest')) {
-                $reqDto->setHttpRequest($request);
-            }
-            // Cross-field validation hook — fires once, after every setter
-            // has run, before any route handler. Payloads opt in by
-            // implementing ValidatablePayloadInterface; everything else
-            // skips this step entirely.
-            if ($reqDto instanceof ValidatablePayloadInterface) {
-                $errors = $reqDto->validate();
-                if ($errors !== []) {
-                    throw new ValidationException($errors);
-                }
-            }
-        } catch (\Semitexa\Core\Exception\ValidationException $e) {
-            // Re-typed, not rethrown: raised HERE it means a malformed request rather than a domain rule.
-            return [$reqDto, new PayloadValidationException($e->getErrors())];
-        } catch (\Semitexa\Core\Http\Exception\TypeMismatchException $e) {
-            return [$reqDto, new PayloadValidationException([$e->field => [$e->getMessage()]])];
-        } catch (\Throwable $e) {
-            // Security: suppress exception messages in production (VULN-007)
-            // Only expose details in debug mode for development
-            $httpRequest = method_exists($reqDto, 'getHttpRequest') ? $reqDto->getHttpRequest() : null;
-            $message = $httpRequest instanceof Request && self::isDebugMode($httpRequest)
-                ? $e->getMessage()
-                : 'Request body could not be processed';
-            return [$reqDto, new PayloadValidationException(['_body' => [$message]])];
-        }
-
-        return [$reqDto, null];
-    }
-
-    /**
      * @return list<\Semitexa\Core\Resource\RenderProfile>
      */
     private function normalizeDeclaredProfiles(mixed $renderProfile): array
@@ -732,12 +672,4 @@ class RouteExecutor
         return HttpResponse::json(['ok' => true]);
     }
 
-    /**
-     * Check if debug mode is enabled via the application environment configuration.
-     */
-    private static function isDebugMode(?Request $_request): bool
-    {
-        $debug = \Semitexa\Core\Environment::create()->appDebug;
-        return filter_var($debug, FILTER_VALIDATE_BOOL);
-    }
 }

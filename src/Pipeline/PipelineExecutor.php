@@ -71,6 +71,20 @@ final class PipelineExecutor
     }
 
     /**
+     * Only the AuthCheck phase: the route's own access listeners, no handler.
+     *
+     * For admitting a request that the caller will hand to another runner
+     * (a feed subscription is admitted on HUG, then executed on the worker
+     * that owns the KISS session).
+     */
+    public function authorize(RequestPipelineContext $context): void
+    {
+        $this->span('pipeline.auth_check', ['phase' => 'AuthCheck'], function () use ($context): void {
+            $this->dispatchPhase(AuthCheck::class, $context);
+        });
+    }
+
+    /**
      * Run $work inside a span that closes however $work leaves.
      *
      * The closing context says `unfinished` when $work threw: with the plain
@@ -217,7 +231,12 @@ final class PipelineExecutor
     private function resolveHandler(string $handlerClass): object
     {
         try {
-            return $this->requestScopedContainer->get($handlerClass);
+            $handler = $this->requestScopedContainer->get($handlerClass);
+            if (!is_object($handler)) {
+                throw new \UnexpectedValueException('the container returned ' . get_debug_type($handler));
+            }
+
+            return $handler;
         } catch (\Throwable $e) {
             throw new PipelineException("Failed to resolve handler {$handlerClass}: " . $e->getMessage(), $e);
         }

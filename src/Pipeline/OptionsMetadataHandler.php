@@ -44,7 +44,6 @@ final class OptionsMetadataHandler implements PipelineListenerInterface
 
     public function handle(RequestPipelineContext $context): void
     {
-        /** @var class-string $payloadClass */
         $payloadClass = $context->requestDto::class;
 
         $responseClass = $context->resolvedMetadata?->responseClass;

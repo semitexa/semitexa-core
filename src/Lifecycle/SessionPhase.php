@@ -10,6 +10,7 @@ use Semitexa\Core\Auth\GuestAuthContext;
 use Semitexa\Core\Container\RequestScopedContainer;
 use Semitexa\Core\Cookie\CookieJar;
 use Semitexa\Core\Cookie\CookieJarInterface;
+use Semitexa\Core\Csrf\CsrfField;
 use Semitexa\Core\Csrf\CsrfToken;
 use Semitexa\Core\Environment;
 use Semitexa\Core\Http\SecureCookieMode;
@@ -77,6 +78,8 @@ final class SessionPhase
         }
 
         $this->requestScopedContainer->set(SessionInterface::class, $session);
+        // {{ csrf_field() }} reads this request's token through the session.
+        CsrfField::bind($session);
         $this->requestScopedContainer->set(CookieJarInterface::class, new CookieJar($request));
         $this->requestScopedContainer->set(Request::class, $request);
 

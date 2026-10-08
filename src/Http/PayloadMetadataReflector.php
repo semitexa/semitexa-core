@@ -34,6 +34,8 @@ use Semitexa\Core\Attribute\WorkerState;
  * with a default is `required: false` even if `validate()` rejects it blank).
  * The front-end must still submit and let the server's `validate()` be the
  * authority; OPTIONS is an advisory hint, not the gate.
+ *
+ * @phpstan-type PayloadDocument array{endpoint: string, name: string, methods: list<string>, access: 'public'|'protected'|'service', transport: string, modes: list<string>, fields: list<array<string, mixed>>, sseGateModel?: string}
  */
 final class PayloadMetadataReflector
 {
@@ -48,7 +50,7 @@ final class PayloadMetadataReflector
      */
     private const LIVE_FILTER_PARAM_ATTRIBUTE = 'Semitexa\\Core\\Attribute\\LiveFilterParam';
 
-    /** @var array<class-string, array<string, mixed>> */
+    /** @var array<class-string, PayloadDocument> */
     #[WorkerState('Reflected payload metadata keyed by class name; derived from code only.')]
     private static array $cache = [];
 
@@ -56,7 +58,7 @@ final class PayloadMetadataReflector
      * Build the canonical OPTIONS metadata document for a routable payload.
      *
      * @param class-string $payloadClass
-     * @return array<string, mixed>
+     * @return PayloadDocument
      */
     public static function describe(string $payloadClass): array
     {
@@ -80,7 +82,7 @@ final class PayloadMetadataReflector
 
         $path = is_string($route?->path) ? $route->path : '/';
         $methods = is_array($route?->methods) && $route->methods !== []
-            ? array_values($route->methods)
+            ? $route->methods
             : ['GET'];
         $transport = $route?->transport instanceof TransportType
             ? $route->transport->value
@@ -91,6 +93,8 @@ final class PayloadMetadataReflector
 
         $document = [
             'endpoint'  => $path,
+            // The route name: a feed is subscribed through HUG by it.
+            'name'      => is_string($route?->name) && $route->name !== '' ? $route->name : $ref->getShortName(),
             'methods'   => $methods,
             'access'    => $access,
             'transport' => $transport,
@@ -141,6 +145,7 @@ final class PayloadMetadataReflector
      * guarded accordingly — so it is advertised only for payloads that opt in.
      *
      * @return list<string>
+     * @param ReflectionClass<object> $ref
      */
     private static function deriveModes(string $transport, ReflectionClass $ref): array
     {
@@ -164,6 +169,7 @@ final class PayloadMetadataReflector
      * rejects truly attribute-less routables elsewhere).
      *
      * @return 'public'|'protected'|'service'
+     * @param ReflectionClass<object> $ref
      */
     private static function resolveAccessType(ReflectionClass $ref): string
     {
@@ -171,10 +177,7 @@ final class PayloadMetadataReflector
         while ($current !== false) {
             $attrs = $current->getAttributes(AbstractPayloadRoute::class, ReflectionAttribute::IS_INSTANCEOF);
             if ($attrs !== []) {
-                $type = $attrs[0]->newInstance()->getAccessType();
-                $value = is_object($type) && property_exists($type, 'value') ? $type->value : $type;
-
-                return match ((string) $value) {
+                return match ($attrs[0]->newInstance()->getAccessType()->value) {
                     'public'  => 'public',
                     'service' => 'service',
                     default   => 'protected',
@@ -199,6 +202,7 @@ final class PayloadMetadataReflector
      * is absent — forward-compatible either way.
      *
      * @return list<array<string, mixed>>
+     * @param ReflectionClass<object> $ref
      */
     private static function collectFields(ReflectionClass $ref): array
     {
@@ -290,6 +294,7 @@ final class PayloadMetadataReflector
         return class_exists(self::LIVE_FILTER_PARAM_ATTRIBUTE);
     }
 
+    /** @param ReflectionClass<object> $ref */
     private static function hasLiveFilterParam(ReflectionClass $ref): bool
     {
         if (!self::liveFilterParamExists()) {
@@ -305,6 +310,7 @@ final class PayloadMetadataReflector
         return false;
     }
 
+    /** @param ReflectionClass<object> $ref */
     private static function propertyIsLiveFilter(ReflectionClass $ref, string $propertyName): bool
     {
         if (!self::liveFilterParamExists() || !$ref->hasProperty($propertyName)) {

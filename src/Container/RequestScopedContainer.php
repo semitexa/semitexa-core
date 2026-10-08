@@ -34,6 +34,36 @@ class RequestScopedContainer implements ContainerInterface
      * Set a request-scoped instance (Session, CookieJar, Request, context interfaces).
      * When all three HTTP values are set, ExecutionContext is passed to SemitexaContainer.
      */
+    /**
+     * A request scope over the execution context already running in this
+     * coroutine — for code inside a request that runs another route's pipeline
+     * steps (HUG admitting a feed subscription) with the same session, cookies,
+     * tenant and identity, rather than an empty scope that refuses every
+     * execution-scoped service.
+     */
+    public static function forCurrentExecution(ContainerInterface $container): self
+    {
+        $scope = new self($container);
+        if ($container instanceof SemitexaContainer) {
+            $context = $container->captureExecutionContext();
+            foreach ([
+                Request::class => $context->request,
+                SessionInterface::class => $context->session,
+                CookieJarInterface::class => $context->cookieJar,
+                TenantContextInterface::class => $context->tenantContext,
+                AuthContextInterface::class => $context->authContext,
+                LocaleContextInterface::class => $context->localeContext,
+            ] as $id => $value) {
+                if ($value !== null) {
+                    $scope->requestScopedCache[$id] = $value;
+                }
+            }
+            $scope->updateExecutionContext();
+        }
+
+        return $scope;
+    }
+
     public function set(string $id, object $instance): void
     {
         $this->requestScopedCache[$id] = $instance;
