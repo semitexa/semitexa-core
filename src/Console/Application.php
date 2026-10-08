@@ -35,13 +35,18 @@ class Application extends SymfonyApplication
                 return;
             }
 
+            $environment = $container->get(\Semitexa\Core\Environment::class);
+            if (!$environment instanceof \Semitexa\Core\Environment) {
+                return;
+            }
+
             $invoker = new \Semitexa\Core\Server\Lifecycle\ServerLifecycleInvoker($registry);
             $invoker->invokePhase(
                 \Semitexa\Core\Server\Lifecycle\ServerLifecyclePhase::ConsoleStartAfterContainer,
                 new \Semitexa\Core\Server\Lifecycle\ServerLifecycleContext(
                     server: null,
                     workerId: null,
-                    environment: $container->get(\Semitexa\Core\Environment::class),
+                    environment: $environment,
                     container: $container instanceof \Semitexa\Core\Container\SemitexaContainer ? $container : null,
                 ),
                 true,

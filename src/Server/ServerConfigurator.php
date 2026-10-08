@@ -18,6 +18,9 @@ readonly class ServerConfigurator
             'max_request'      => $this->env->swooleMaxRequest,
             'enable_coroutine' => true,
             'max_coroutine'    => $this->env->swooleMaxCoroutine,
+            // The largest request accepted; a bigger one is refused before any
+            // handler runs. Uploads ride a request, so this caps them too.
+            'package_max_length' => $this->env->swoolePackageMaxLength,
             // Absolute, and the same path retention scans. Handing Swoole the raw
             // relative value meant that whenever the process CWD was not the project
             // root, rotated logs were written to one directory and pruned in another.

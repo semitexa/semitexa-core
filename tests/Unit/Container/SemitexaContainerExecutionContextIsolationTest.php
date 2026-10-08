@@ -48,6 +48,24 @@ final class SemitexaContainerExecutionContextIsolationTest extends TestCase
     }
 
     #[Test]
+    public function a_scope_for_the_current_execution_carries_the_running_context(): void
+    {
+        $container = $this->buildContainerWithExecutionScopedTarget();
+        $request = $this->makeRequest('/__semitexa_hug');
+        $session = $this->createStub(\Semitexa\Core\Session\SessionInterface::class);
+        $cookies = $this->createStub(\Semitexa\Core\Cookie\CookieJarInterface::class);
+        $container->setExecutionContext(new ExecutionContext(request: $request, session: $session, cookieJar: $cookies));
+
+        $scope = \Semitexa\Core\Container\RequestScopedContainer::forCurrentExecution($container);
+
+        // An empty scope refuses every execution-scoped service; this one serves them.
+        self::assertTrue($scope->isExecutionContextReady());
+        self::assertSame($request, $scope->get(Request::class));
+        self::assertSame($session, $scope->get(\Semitexa\Core\Session\SessionInterface::class));
+        self::assertSame($request, $scope->get(CapturesRequestViaMutable::class)->capturedRequest);
+    }
+
+    #[Test]
     public function clear_execution_context_removes_only_current_coroutine_state(): void
     {
         $container = $this->buildContainerWithExecutionScopedTarget();

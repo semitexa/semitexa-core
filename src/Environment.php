@@ -44,7 +44,34 @@ readonly class Environment
         // argument after it.
         public string $swooleLogRotation = 'daily',
         public int $swooleLogRetentionDays = 14,
+        // The largest request Swoole accepts (its package_max_length). Uploads
+        // ride a request, so this is also the ceiling of every upload field.
+        public int $swoolePackageMaxLength = self::DEFAULT_PACKAGE_MAX_LENGTH,
     ) {}
+
+    /**
+     * 32 MiB. Swoole's own default (2 MiB) is smaller than one photo from a
+     * phone camera, and a request over it is refused before PHP sees it: the
+     * visitor's upload simply never arrives (apartmens, 2026-10-06).
+     */
+    public const DEFAULT_PACKAGE_MAX_LENGTH = 33_554_432;
+
+    /** Below this an ordinary form post or HUG call no longer fits. */
+    public const MIN_PACKAGE_MAX_LENGTH = 65_536;
+
+    /**
+     * The largest request this server accepts (SWOOLE_PACKAGE_MAX_LENGTH, or
+     * the default), read where no Environment instance is at hand: the page
+     * head tells the browser, and upload fields cap themselves below it.
+     */
+    public static function requestLimit(): int
+    {
+        $configured = self::getEnvValue('SWOOLE_PACKAGE_MAX_LENGTH');
+
+        return $configured === null || $configured === ''
+            ? self::DEFAULT_PACKAGE_MAX_LENGTH
+            : self::parsePackageMaxLength($configured);
+    }
 
     public static function create(): self
     {
@@ -90,7 +117,23 @@ readonly class Environment
             redisPoolSize: $redisPoolSize,
             swooleLogRotation: is_string($logRotation) ? $logRotation : 'daily',
             swooleLogRetentionDays: SwooleLogRetention::daysFromEnv($logRetention),
+            swoolePackageMaxLength: self::parsePackageMaxLength($get('SWOOLE_PACKAGE_MAX_LENGTH', (string) self::DEFAULT_PACKAGE_MAX_LENGTH)),
         );
+    }
+
+    /**
+     * SWOOLE_PACKAGE_MAX_LENGTH, in bytes. A value Swoole would take but that
+     * breaks every POST (under 64 KiB) is refused at boot rather than
+     * discovered as dropped connections.
+     */
+    public static function parsePackageMaxLength(mixed $value): int
+    {
+        $bytes = self::parsePositiveInt($value, 'SWOOLE_PACKAGE_MAX_LENGTH');
+        if ($bytes < self::MIN_PACKAGE_MAX_LENGTH) {
+            throw new \InvalidArgumentException(sprintf('SWOOLE_PACKAGE_MAX_LENGTH must be at least %d bytes', self::MIN_PACKAGE_MAX_LENGTH));
+        }
+
+        return $bytes;
     }
 
     /** @return array<string, string> */
@@ -206,6 +249,7 @@ readonly class Environment
             'CORS_ALLOW_HEADERS' => $this->corsAllowHeaders,
             'CORS_ALLOW_CREDENTIALS' => $this->corsAllowCredentials ? '1' : '0',
             'REDIS_POOL_SIZE' => (string) $this->redisPoolSize,
+            'SWOOLE_PACKAGE_MAX_LENGTH' => (string) $this->swoolePackageMaxLength,
             default => $default
         };
     }

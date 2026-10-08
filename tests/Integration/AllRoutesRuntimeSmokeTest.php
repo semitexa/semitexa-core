@@ -89,7 +89,6 @@ final class AllRoutesRuntimeSmokeTest extends TestCase
     private const NEEDS_FIXTURES = [
         '/playground/customers'           => 'lists customers from ORM seed; no test seed in env',
         '/playground/orm'                 => 'ORM landing reads platform-user db; needs tenant + seed',
-        '/playground/orm/articles/{id}'   => 'ORM article lookup needs a seeded article id',
         '/ssr-polygon/deferred/auth-aware' => 'auth-aware deferred slot expects an auth context shape that anonymous smoke does not satisfy',
         '/sitemap.json'                   => 'sitemap aggregation reaches into multiple modules; needs configured sitemap providers',
         '/sitemap.xml'                    => 'sitemap aggregation reaches into multiple modules; needs configured sitemap providers',
@@ -261,6 +260,11 @@ final class AllRoutesRuntimeSmokeTest extends TestCase
             $accessType = $route['accessType'] ?? null;
             $class = (string) ($route['class'] ?? '?');
             $transport = (string) ($route['transport'] ?? 'http');
+            if (($route['exposure'] ?? 'public') === 'hug') {
+                // Reached only by name through HUG; there is no path to request.
+                $skipped[] = ($route['name'] ?? '?') . ' :: exposure: Hug';
+                continue;
+            }
 
             if (isset(self::SKIP[$path])) {
                 $skipped[] = $path . ' :: ' . self::SKIP[$path];

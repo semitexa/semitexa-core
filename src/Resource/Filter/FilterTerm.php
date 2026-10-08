@@ -51,7 +51,19 @@ final readonly class FilterTerm
             FilterOperator::Contains => is_string($this->value)
                 && $this->value !== ''
                 && stripos($haystack, $this->value) !== false,
+            FilterOperator::Gte      => is_string($this->value) && $haystack !== '' && self::compare($haystack, $this->value) >= 0,
+            FilterOperator::Lte      => is_string($this->value) && $haystack !== '' && self::compare($haystack, $this->value) <= 0,
         };
+    }
+
+    /**
+     * Numbers as numbers ("9" < "10"), anything else as text (ISO dates sort as text).
+     * Two numeric strings go to PHP's own numeric-string comparison, which keeps
+     * integers exact: a float cast would make 2^53 + 1 equal to 2^53.
+     */
+    private static function compare(string $a, string $b): int
+    {
+        return is_numeric($a) && is_numeric($b) ? ($a <=> $b) : strcmp($a, $b);
     }
 
     /**

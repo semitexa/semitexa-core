@@ -40,6 +40,7 @@ readonly class CorsHandler
         // but NOT Access-Control-Request-Method — it must fall through to
         // routing, where OptionsMetadataHandler serves the route contract.
         if (($request->server['request_method'] ?? '') === 'OPTIONS'
+            && is_array($request->header)
             && isset($request->header['access-control-request-method'])
         ) {
             $response->header('Access-Control-Allow-Methods', $this->env->corsAllowMethods);

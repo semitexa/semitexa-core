@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Discovery;
 
+use Semitexa\Core\Attribute\RouteExposure;
 use Semitexa\Core\Attribute\TransportType;
 use Semitexa\Core\Exception\ConfigurationException;
 
@@ -45,6 +46,7 @@ final class PayloadAttributeSchema implements AttributeSchema
             'produces',
             'transport',
             'sseGateModel',
+            'exposure',
             'renderProfile',
             'responsesByProfile',
         ];
@@ -56,8 +58,23 @@ final class PayloadAttributeSchema implements AttributeSchema
      */
     public function applyDefaults(array $attr, string $shortName, string $className): array
     {
-        if ($attr['path'] === null) {
+        $exposure = $attr['exposure'] ?? RouteExposure::Public;
+        if ($exposure === RouteExposure::Hug) {
+            // Reached only by name through HUG: a path would be a door.
+            if ($attr['path'] !== null) {
+                throw new ConfigurationException("Request {$className} is exposure: Hug, so it must not define a path (it is reached by name through HUG).");
+            }
+            if (!is_string($attr['name'] ?? null) || $attr['name'] === '') {
+                throw new ConfigurationException("Request {$className} is exposure: Hug and must declare an explicit name: HUG addresses it by name.");
+            }
+            $attr['path'] = '';
+        } elseif ($attr['path'] === null) {
             throw new ConfigurationException("Request {$className} must define a path");
+        }
+        // A feed is subscribed through HUG by name, so the name is its address
+        // and must not move when the class is renamed.
+        if (($attr['transport'] ?? null) === TransportType::Sse && (!is_string($attr['name'] ?? null) || $attr['name'] === '')) {
+            throw new ConfigurationException("Request {$className} is transport: Sse and must declare an explicit name: feeds are subscribed through HUG by name.");
         }
 
         return [
@@ -77,6 +94,7 @@ final class PayloadAttributeSchema implements AttributeSchema
             // SSE gate-model axis — passed through unchanged (null when unset).
             // The boot guard (assertSseGateCoherence) reads it off the resolved route.
             'sseGateModel' => $attr['sseGateModel'] ?? null,
+            'exposure' => $exposure,
             // Forwarded as-is from the source attribute. null when
             // unset (single-profile / no negotiation).
             'renderProfile' => $attr['renderProfile'] ?? null,

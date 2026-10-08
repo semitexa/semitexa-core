@@ -253,7 +253,7 @@ final class JsonLdResourceRenderer
      *
      * Embedded: array of JSON-LD nodes.
      *
-     * @return list<array<string, mixed>>|array{@id: string}|null
+     * @return list<array<string, mixed>>|array{'@id': string}|null
      */
     private function renderRefMany(
         ResourceObjectMetadata $parentMetadata,

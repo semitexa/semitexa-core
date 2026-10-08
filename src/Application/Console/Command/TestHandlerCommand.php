@@ -31,6 +31,10 @@ class TestHandlerCommand extends BaseCommand
     {
         $io = new SymfonyStyle($input, $output);
         $handlerClass = $input->getArgument('handler');
+        if (!is_string($handlerClass)) {
+            $io->error('Pass the handler class to test.');
+            return Command::FAILURE;
+        }
 
         $io->title('Testing Handler: ' . $handlerClass);
 

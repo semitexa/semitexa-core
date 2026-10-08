@@ -77,6 +77,10 @@ final class DefaultRouteContractAssembler implements RouteContractAssemblerInter
         return $assembler;
     }
 
+    /**
+     * @param class-string           $payloadClass
+     * @param class-string|''|null   $responseClass '' is read as "none", as null is
+     */
     public function assemble(string $payloadClass, ?string $responseClass): RouteContract
     {
         if ($responseClass === '') {
@@ -123,10 +127,11 @@ final class DefaultRouteContractAssembler implements RouteContractAssemblerInter
 
         // One Way Pattern: the contributed search declaration names the
         // free-text param; the search role lights up only for that field.
-        $searchParam = $blocks['collection']['search']['param'] ?? null;
+        $search = is_array($blocks['collection'] ?? null) ? ($blocks['collection']['search'] ?? null) : null;
+        $searchParam = is_array($search) && is_string($search['param'] ?? null) ? $search['param'] : null;
 
         $input = ResolvedPayloadContract::fromReflectedFields(
-            is_array($base['fields'] ?? null) ? $base['fields'] : [],
+            $base['fields'],
             isset($blocks['collection']),
             self::declaresGraphqlProfile($payloadClass),
             is_string($searchParam) ? $searchParam : null,

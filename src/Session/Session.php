@@ -18,7 +18,8 @@ final class Session implements SessionInterface
     private array $data = [];
     private array $flash = [];
     private array $flashNext = [];
-    private bool $regenerate = false;
+    /** The id regenerate() replaced; its stored data is destroyed on save(). */
+    private ?string $retiredId = null;
 
     /**
      * #[SessionSegment] name per payload class. A class's attributes cannot
@@ -81,7 +82,12 @@ final class Session implements SessionInterface
 
     public function regenerate(): void
     {
-        $this->regenerate = true;
+        // The new id takes effect now, not on save(): anything bound to the
+        // session later in this request (signed UI contexts, UI state keys)
+        // must carry the id the browser presents next. Taken at save() it
+        // left them on the old id, and the next request refused them.
+        $this->retiredId ??= $this->id;
+        $this->id = $this->generateId();
         // The CSRF token must not survive a privilege change: under session fixation
         // an attacker who read the token before login would otherwise still hold a
         // valid one afterwards. Rotated here rather than in save() so anything
@@ -130,10 +136,9 @@ final class Session implements SessionInterface
         $data = $this->data;
         $data['__flash__'] = $this->flashNext;
 
-        if ($this->regenerate) {
-            $this->handler->destroy($this->id);
-            $this->id = $this->generateId();
-            $this->regenerate = false;
+        if ($this->retiredId !== null) {
+            $this->handler->destroy($this->retiredId);
+            $this->retiredId = null;
         }
 
         $this->handler->write($this->id, $data, $this->lifetimeSeconds);

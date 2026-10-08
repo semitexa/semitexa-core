@@ -157,11 +157,13 @@ final class WorkerServiceConnectionHandleRule implements Rule
     }
 
     /**
+     * @param \PHPStan\BetterReflection\Reflection\Adapter\ReflectionClass|\PHPStan\BetterReflection\Reflection\Adapter\ReflectionEnum $nativeReflection
      * @param list<string> $attributeNames
      */
     private function hasAnyAttribute(\ReflectionClass $nativeReflection, array $attributeNames): bool
     {
         foreach ($attributeNames as $attributeName) {
+            // @phpstan-ignore argument.type (the bare short names are deliberate: they match an attribute written without its import)
             if ($nativeReflection->getAttributes($attributeName) !== []) {
                 return true;
             }
