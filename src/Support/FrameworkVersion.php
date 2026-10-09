@@ -52,8 +52,12 @@ class FrameworkVersion
 
     private static ?string $recorded = null;
 
-    /** Modification time of the record last read; false when there was none. */
-    private static int|false|null $recordMtime = null;
+    /**
+     * Identity of the record last read: inode, mtime and size, '' when there
+     * was none. The inode changes on every record(), which renames a fresh
+     * file into place, so two writes in the same second are still told apart.
+     */
+    private static ?string $recordKey = null;
 
     public static function current(): ?string
     {
@@ -102,8 +106,8 @@ class FrameworkVersion
     public static function forget(?string $projectRoot = null): void
     {
         $path = self::recordPath($projectRoot);
-        if (is_file($path)) {
-            @unlink($path);
+        if (is_file($path) && !@unlink($path) && is_file($path)) {
+            throw new \RuntimeException(sprintf('Cannot remove %s.', $path));
         }
     }
 
@@ -115,21 +119,22 @@ class FrameworkVersion
         self::$fixed = null;
         self::$fixedResolved = false;
         self::$recorded = null;
-        self::$recordMtime = null;
+        self::$recordKey = null;
     }
 
     private static function recorded(): ?string
     {
         $path = self::recordPath(null);
         clearstatcache(true, $path);
-        $mtime = @filemtime($path);
-        if ($mtime === self::$recordMtime) {
+        $stat = @stat($path);
+        $key = $stat === false ? '' : $stat['ino'] . ':' . $stat['mtime'] . ':' . $stat['size'];
+        if ($key === self::$recordKey) {
             return self::$recorded;
         }
 
-        self::$recordMtime = $mtime;
+        self::$recordKey = $key;
         self::$recorded = null;
-        if ($mtime === false) {
+        if ($stat === false) {
             return null;
         }
 

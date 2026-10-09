@@ -64,7 +64,6 @@ final class FrameworkVersionTest extends TestCase
         self::assertSame('2026.10.08.0620', FrameworkVersion::current());
 
         FrameworkVersion::record('2026.10.09.0714');
-        touch($this->root . '/' . FrameworkVersion::RECORD_PATH, time() + 5);
 
         self::assertSame('2026.10.09.0714', FrameworkVersion::current());
     }
@@ -82,20 +81,24 @@ final class FrameworkVersionTest extends TestCase
     #[Test]
     public function a_forgotten_record_falls_back_to_the_core_tag(): void
     {
+        $coreTag = FrameworkVersion::current();
         FrameworkVersion::record('2026.10.09.0714');
+        self::assertSame('2026.10.09.0714', FrameworkVersion::current());
+
         FrameworkVersion::forget();
 
-        self::assertNotSame('2026.10.09.0714', FrameworkVersion::current());
+        self::assertSame($coreTag, FrameworkVersion::current());
         self::assertFileDoesNotExist($this->root . '/' . FrameworkVersion::RECORD_PATH);
     }
 
     #[Test]
     public function a_record_that_is_not_a_release_is_ignored(): void
     {
+        $coreTag = FrameworkVersion::current();
         mkdir($this->root . '/var/run', 0o777, true);
         file_put_contents($this->root . '/' . FrameworkVersion::RECORD_PATH, '{"version":"dev-develop"}');
 
-        self::assertNotSame('dev-develop', FrameworkVersion::current());
+        self::assertSame($coreTag, FrameworkVersion::current());
     }
 
     #[Test]
