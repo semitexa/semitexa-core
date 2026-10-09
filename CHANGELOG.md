@@ -5,6 +5,18 @@ Changes to `semitexa/core` that a consuming application can notice. Sections are
 next release tag. This file is machine-read by `update:changelog` and the OS
 "What's new" surface — keep entries short and operator-facing.
 
+## Unreleased
+
+### Changed
+- **`FrameworkVersion::current()` names the release, not core's tag.** It now
+  reads the `semitexa/ultimate` release the updater recorded in
+  `var/run/semitexa-release.json`, between `SEMITEXA_RELEASE_VERSION` and the
+  core tag. A cut that did not re-tag core (2026.10.09.0714) left every footer
+  on the release before. A changed record is picked up without a restart.
+
+### Added
+- `FrameworkVersion::record()` / `forget()` and `FrameworkVersion::RECORD_PATH`.
+
 ## 2026.10.08.0620 — 2026-10-08
 
 ### Changed
