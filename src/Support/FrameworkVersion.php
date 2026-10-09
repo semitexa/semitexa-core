@@ -106,7 +106,8 @@ class FrameworkVersion
     public static function forget(?string $projectRoot = null): void
     {
         $path = self::recordPath($projectRoot);
-        if (is_file($path) && !@unlink($path) && is_file($path)) {
+        // An absent record fails unlink() too; only a file that stays is an error.
+        if (!@unlink($path) && file_exists($path)) {
             throw new \RuntimeException(sprintf('Cannot remove %s.', $path));
         }
     }
