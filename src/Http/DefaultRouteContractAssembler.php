@@ -32,11 +32,14 @@ use Semitexa\Core\Resource\RenderProfile;
  * of the legacy document or the core-owned `input`/`output` blocks, and the
  * first contributor to claim a key wins.
  *
- * Assembly is lazy-with-cache per (payload, response) pair: every input is
- * boot-time attribute data, so the first OPTIONS hit per route pays one
- * reflection pass and every later hit is a dictionary lookup (the design's
- * boot-time intent, realized as first-hit caching to keep worker boot
- * flat across all routes).
+ * Only the boot-time halves are cached: the reflected payload document
+ * ({@see PayloadMetadataReflector} keeps its own cache) and the resolved
+ * output contract, per (payload, response) pair. Contributed blocks are
+ * assembled on every call, because a contributor runs application code: a
+ * feed's column labels go through the translator, so they belong to the
+ * request's locale and tenant (and to that tenant's translation overrides,
+ * which are read fresh per request). Caching them per route served the first
+ * visitor's language to everyone after them in that worker.
  */
 #[AsService]
 #[SatisfiesServiceContract(of: RouteContractAssemblerInterface::class)]
@@ -60,8 +63,8 @@ final class DefaultRouteContractAssembler implements RouteContractAssemblerInter
     /** @var list<RouteContractBlockContributorInterface>|null test-injected contributor set */
     private ?array $fixedContributors = null;
 
-    /** @var array<string, RouteContract> */
-    private array $cache = [];
+    /** @var array<string, array{0: ?ResolvedResourceContract}> resolved output per (payload, response) */
+    private array $outputCache = [];
 
     /**
      * Bypass property injection for unit tests.
@@ -86,11 +89,6 @@ final class DefaultRouteContractAssembler implements RouteContractAssemblerInter
         if ($responseClass === '') {
             $responseClass = null;
         }
-        $cacheKey = $payloadClass . '|' . ($responseClass ?? '');
-        if (isset($this->cache[$cacheKey])) {
-            return $this->cache[$cacheKey];
-        }
-
         $base = PayloadMetadataReflector::describe($payloadClass);
 
         $blocks = [];
@@ -111,6 +109,36 @@ final class DefaultRouteContractAssembler implements RouteContractAssemblerInter
             }
         }
 
+        $output = $this->output($payloadClass . '|' . ($responseClass ?? ''), $resourceClass, $responseClass);
+
+        // One Way Pattern: the contributed search declaration names the
+        // free-text param; the search role lights up only for that field.
+        $search = is_array($blocks['collection'] ?? null) ? ($blocks['collection']['search'] ?? null) : null;
+        $searchParam = is_array($search) && is_string($search['param'] ?? null) ? $search['param'] : null;
+
+        $input = ResolvedPayloadContract::fromReflectedFields(
+            $base['fields'],
+            isset($blocks['collection']),
+            self::declaresGraphqlProfile($payloadClass),
+            is_string($searchParam) ? $searchParam : null,
+        );
+
+        return new RouteContract($base, $input, $output, $blocks, $isCollection);
+    }
+
+    /**
+     * The output contract: resource metadata is boot-time data, so it is
+     * resolved once per (payload, response) pair.
+     *
+     * @param class-string|null $resourceClass
+     * @param class-string|null $responseClass
+     */
+    private function output(string $cacheKey, ?string $resourceClass, ?string $responseClass): ?ResolvedResourceContract
+    {
+        if (isset($this->outputCache[$cacheKey])) {
+            return $this->outputCache[$cacheKey][0];
+        }
+
         // Fallback: a response class that IS a registered resource needs no
         // package vocabulary to link it.
         if ($resourceClass === null && $responseClass !== null && $this->registry->has($responseClass)) {
@@ -125,19 +153,9 @@ final class DefaultRouteContractAssembler implements RouteContractAssemblerInter
             }
         }
 
-        // One Way Pattern: the contributed search declaration names the
-        // free-text param; the search role lights up only for that field.
-        $search = is_array($blocks['collection'] ?? null) ? ($blocks['collection']['search'] ?? null) : null;
-        $searchParam = is_array($search) && is_string($search['param'] ?? null) ? $search['param'] : null;
+        $this->outputCache[$cacheKey] = [$output];
 
-        $input = ResolvedPayloadContract::fromReflectedFields(
-            $base['fields'],
-            isset($blocks['collection']),
-            self::declaresGraphqlProfile($payloadClass),
-            is_string($searchParam) ? $searchParam : null,
-        );
-
-        return $this->cache[$cacheKey] = new RouteContract($base, $input, $output, $blocks, $isCollection);
+        return $output;
     }
 
     /** @return list<RouteContractBlockContributorInterface> */
