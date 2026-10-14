@@ -160,14 +160,47 @@ final class DefaultRouteContractAssemblerTest extends TestCase
     }
 
     #[Test]
-    public function assembly_is_cached_per_payload_response_pair(): void
+    public function contributed_blocks_follow_the_current_request_not_the_first_one(): void
     {
-        $assembler = DefaultRouteContractAssembler::forTesting($this->registryWithResource(), []);
+        // A feed's column labels are translated, so the block a contributor
+        // returns depends on the request's locale. Caching it per route served
+        // the first visitor's language to every later visitor of the worker.
+        $contributor = new class implements RouteContractBlockContributorInterface {
+            public string $label = 'Name';
 
-        $first  = $assembler->assemble(AssemblerPayloadFixture::class, null);
-        $second = $assembler->assemble(AssemblerPayloadFixture::class, null);
+            public function contributeBlocks(string $payloadClass, ?string $responseClass): array
+            {
+                return ['ui' => ['columns' => [['field' => 'name', 'label' => $this->label]]]];
+            }
 
-        self::assertSame($first, $second);
+            public function resolveResourceClass(?string $responseClass): ?string
+            {
+                return null;
+            }
+        };
+        $assembler = DefaultRouteContractAssembler::forTesting($this->registryWithResource(), [$contributor]);
+
+        $english = $assembler->assemble(AssemblerPayloadFixture::class, null)->toDocument();
+        $contributor->label = 'Назва';
+        $ukrainian = $assembler->assemble(AssemblerPayloadFixture::class, null)->toDocument();
+
+        self::assertSame('Name', $english['ui']['columns'][0]['label']);
+        self::assertSame('Назва', $ukrainian['ui']['columns'][0]['label']);
+    }
+
+    #[Test]
+    public function the_output_contract_is_resolved_once_per_payload_response_pair(): void
+    {
+        $assembler = DefaultRouteContractAssembler::forTesting(
+            $this->registryWithResource(),
+            [self::collectionContributor()],
+        );
+
+        $first  = $assembler->assemble(AssemblerPayloadFixture::class, AssemblerResponseFixture::class);
+        $second = $assembler->assemble(AssemblerPayloadFixture::class, AssemblerResponseFixture::class);
+
+        self::assertNotNull($first->output);
+        self::assertSame($first->output, $second->output);
     }
 }
 
