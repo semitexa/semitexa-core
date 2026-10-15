@@ -97,10 +97,16 @@ final class RedisCircuitBreaker
             $wasClosed = $this->lastFailure === null;
             $this->lastFailure = $e;
             $now = ($this->clock)();
-            $this->window = $wasClosed
-                ? $this->cooldownSeconds
-                : min($this->window * 2, max($this->maxCooldownSeconds, $this->cooldownSeconds));
-            $this->openUntil = $now + $this->window;
+            if ($wasClosed) {
+                $this->window = $this->cooldownSeconds;
+                $this->openUntil = $now + $this->window;
+            } elseif ($isProbe) {
+                $this->window = min($this->window * 2, max($this->maxCooldownSeconds, $this->cooldownSeconds));
+                $this->openUntil = $now + $this->window;
+            }
+            // Otherwise a call that was already in flight when Redis went
+            // away: it neither doubles nor extends the window — with five such
+            // calls a two-second blip used to become a thirty-second outage.
             if ($isProbe && $this->probeStartedAt === $claim) {
                 $this->probeStartedAt = null;
             }

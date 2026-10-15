@@ -9,6 +9,7 @@ use PHPUnit\Framework\TestCase;
 use Psr\Container\ContainerInterface;
 use Semitexa\Core\Auth\AuthContextInterface;
 use Semitexa\Core\Container\RequestScopedContainer;
+use Semitexa\Core\Cookie\CookieJarInterface;
 use Semitexa\Core\HttpResponse;
 use Semitexa\Core\Lifecycle\RequestLifecycleContext;
 use Semitexa\Core\Lifecycle\SessionPhase;
@@ -58,10 +59,16 @@ final class SessionStoreOutageTest extends TestCase
         self::assertInstanceOf(AuthContextInterface::class, $scope->get(AuthContextInterface::class));
 
         $session->set('written_during_outage', true);
+        $jar = $scope->get(CookieJarInterface::class);
+        self::assertInstanceOf(CookieJarInterface::class, $jar);
+        $jar->set('locale', 'uk', ['path' => '/']);
         $response = $phase->finalize($context, new HttpResponse('ok'));
 
         self::assertSame([], $store->writes, 'nothing may be written back over the real session');
-        self::assertArrayNotHasKey('Set-Cookie', $response->getHeaders(), 'cookies are left as they were');
+        $cookies = implode("\n", (array) ($response->getHeaders()['Set-Cookie'] ?? []));
+        self::assertStringNotContainsString('semitexa_session=', $cookies, 'the session cookie is left as it was');
+        self::assertStringNotContainsString('XSRF-TOKEN=', $cookies, 'no CSRF token the real session does not hold');
+        self::assertStringContainsString('locale=uk', $cookies, 'cookies the request set itself still go out');
     }
 
     #[Test]
