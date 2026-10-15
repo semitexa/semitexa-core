@@ -132,7 +132,6 @@ final class RedisCircuitBreaker
         $this->openUntil = 0.0;
         $this->probeStartedAt = null;
         $this->refused = 0;
-        $this->window = 0.0;
 
         return $result;
     }

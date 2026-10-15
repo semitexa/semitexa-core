@@ -120,6 +120,15 @@ class RequestScopedContainer implements ContainerInterface
      * Use this to guard against accessing execution-scoped services
      * before SessionPhase has completed its setup.
      */
+    /**
+     * Whether THIS request's scope holds $id — unlike has(), which falls
+     * through to the root container for anything it does not manage itself.
+     */
+    public function holds(string $id): bool
+    {
+        return isset($this->requestScopedCache[$id]);
+    }
+
     public function isExecutionContextReady(): bool
     {
         return $this->executionContextSet;

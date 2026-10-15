@@ -161,23 +161,23 @@ final class ErrorRouteDispatcher
     }
 
     /**
-     * A request that failed before SessionPhase ran has no session, cookie jar
-     * or identity, and every error route needs them (its auth gate injects the
-     * auth context). Render the error page as a guest on a session that keeps
-     * nothing, instead of failing it a second time.
+     * A request that failed before or inside SessionPhase can lack a session,
+     * a cookie jar or an identity, and every error route needs them (its auth
+     * gate injects the auth context). Fill in only what is missing — a
+     * signed-in visitor keeps their identity — as a guest on a session that
+     * keeps nothing, instead of failing the error page a second time.
      */
     private function ensureGuestExecutionContext(Request $request): void
     {
-        if ($this->requestScopedContainer->isExecutionContextReady()) {
-            return;
+        // holds(), not has(): has() falls through to the root container, which
+        // knows the auth service but not this request's identity.
+        if (!$this->requestScopedContainer->holds(AuthContextInterface::class)) {
+            $this->requestScopedContainer->set(AuthContextInterface::class, GuestAuthContext::getInstance());
         }
-        // Not has(): it falls through to the root container, which knows the
-        // auth service but not this request's identity.
-        $this->requestScopedContainer->set(AuthContextInterface::class, GuestAuthContext::getInstance());
-        if (!$this->requestScopedContainer->has(CookieJarInterface::class)) {
+        if (!$this->requestScopedContainer->holds(CookieJarInterface::class)) {
             $this->requestScopedContainer->set(CookieJarInterface::class, new CookieJar($request));
         }
-        if (!$this->requestScopedContainer->has(SessionInterface::class)) {
+        if (!$this->requestScopedContainer->holds(SessionInterface::class)) {
             $this->requestScopedContainer->set(
                 SessionInterface::class,
                 new Session(bin2hex(random_bytes(16)), new TransientSessionHandler(), 'semitexa_session'),

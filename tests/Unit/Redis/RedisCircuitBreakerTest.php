@@ -87,10 +87,17 @@ final class RedisCircuitBreakerTest extends TestCase
 
         $this->now += 30.0;
         $breaker->call(static fn (): string => 'PONG');
+
+        // A new outage starts from the first window and doubles from there,
+        // not from where the previous outage left off (30 s).
         $this->expectFailure($breaker, ConnectionException::class);
         $this->now += 2.0;
+        $this->expectFailure($breaker, ConnectionException::class);
+        $this->now += 3.5;
+        $this->expectFailure($breaker, RedisUnavailableException::class);
+        $this->now += 0.5;
         $breaker->call(static fn (): string => 'PONG');
-        self::assertFalse($breaker->isOpen(), 'a new outage starts from the first window again');
+        self::assertFalse($breaker->isOpen());
     }
 
     #[Test]
