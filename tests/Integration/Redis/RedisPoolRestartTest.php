@@ -51,7 +51,8 @@ final class RedisPoolRestartTest extends TestCase
                 Coroutine::sleep(1.1);
 
                 for ($i = 0; $i < 3; $i++) {
-                    $results[] = (string) $pool->withConnection(static fn ($redis): mixed => $redis->ping());
+                    $pong = $pool->withConnection(static fn ($redis): mixed => $redis->ping());
+                    $results[] = is_scalar($pong) || $pong instanceof \Stringable ? (string) $pong : get_debug_type($pong);
                 }
                 $open = $pool->isCircuitOpen();
             } catch (\Throwable $e) {
@@ -77,9 +78,12 @@ final class RedisPoolRestartTest extends TestCase
             try {
                 // A lost response after the command ran looks exactly like this:
                 // replaying it would apply an INCR or RPUSH twice.
-                $pool->withConnection(function ($redis) use (&$runs): never {
+                $pool->withConnection(function () use (&$runs): never {
                     $runs++;
-                    throw new \Predis\Connection\ConnectionException($redis->getConnection(), 'Error while reading line from the server.');
+                    throw new \Predis\Connection\ConnectionException(
+                        $this->createStub(\Predis\Connection\NodeConnectionInterface::class),
+                        'Error while reading line from the server.',
+                    );
                 });
             } catch (\Throwable $e) {
                 $failure = $e;

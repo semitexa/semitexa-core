@@ -190,6 +190,12 @@ final class RedisConnectionPool
             $this->discardIdleClients();
 
             return $this->createClient();
+        } catch (\Throwable $e) {
+            // Redis answered (-LOADING, say): the socket is fine. Back into
+            // the pool, or a pooled client is lost until the worker restarts.
+            $this->put($client);
+
+            throw $e;
         }
     }
 
@@ -201,7 +207,7 @@ final class RedisConnectionPool
 
             return;
         }
-        for ($i = $this->pool->length(); $i > 0; $i--) {
+        for ($i = (int) $this->pool->length(); $i > 0; $i--) {
             $idle = $this->pool->pop(self::RETURN_TIMEOUT_SECONDS);
             if (!$idle instanceof ClientInterface) {
                 break;
