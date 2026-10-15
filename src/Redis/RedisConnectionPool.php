@@ -207,7 +207,8 @@ final class RedisConnectionPool
 
             return;
         }
-        for ($i = (int) $this->pool->length(); $i > 0; $i--) {
+        $idleCount = $this->pool->length();
+        for ($i = is_int($idleCount) ? $idleCount : 0; $i > 0; $i--) {
             $idle = $this->pool->pop(self::RETURN_TIMEOUT_SECONDS);
             if (!$idle instanceof ClientInterface) {
                 break;
