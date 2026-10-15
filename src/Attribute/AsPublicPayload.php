@@ -12,7 +12,8 @@ use Semitexa\Core\Auth\PayloadAccessType;
  *
  * MUST NOT be combined with #[RequiresCapability], #[RequiresPermission], or
  * any other auth requirement. PayloadAccessPolicyResolver::assertValidMetadata
- * rejects such combinations at boot with the offending FQCN.
+ * rejects such combinations with the offending FQCN when the route is first
+ * requested (PreHydrationAuthGate), not when the server boots.
  *
  * "Publicly reachable" is NOT the same as "public access": a webhook receiver
  * is reachable from the public internet but is authenticated by a signature
