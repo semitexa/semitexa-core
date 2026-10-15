@@ -6,6 +6,10 @@ namespace Semitexa\Core\Error;
 
 use Psr\Container\ContainerInterface;
 use Semitexa\Core\Auth\AuthBootstrapperInterface;
+use Semitexa\Core\Auth\AuthContextInterface;
+use Semitexa\Core\Auth\GuestAuthContext;
+use Semitexa\Core\Cookie\CookieJar;
+use Semitexa\Core\Cookie\CookieJarInterface;
 use Semitexa\Core\Container\RequestScopedContainer;
 use Semitexa\Core\Discovery\DiscoveredRoute;
 use Semitexa\Core\Discovery\HandlerRegistry;
@@ -15,9 +19,13 @@ use Semitexa\Core\Exception\DomainException;
 use Semitexa\Core\Exception\PipelineException;
 use Semitexa\Core\Http\ErrorRenderer;
 use Semitexa\Core\Http\HttpStatus;
+use Semitexa\Core\Log\StaticLoggerBridge;
 use Semitexa\Core\Pipeline\RouteExecutor;
 use Semitexa\Core\Request;
 use Semitexa\Core\HttpResponse;
+use Semitexa\Core\Session\Session;
+use Semitexa\Core\Session\SessionInterface;
+use Semitexa\Core\Session\TransientSessionHandler;
 
 final class ErrorRouteDispatcher
 {
@@ -119,6 +127,7 @@ final class ErrorRouteDispatcher
 
         try {
             $this->requestScopedContainer->set(Request::class, $request);
+            $this->ensureGuestExecutionContext($request);
             $this->requestScopedContainer->set(ErrorPageContext::class, $context);
             ErrorPageContextStore::push($context);
 
@@ -129,13 +138,50 @@ final class ErrorRouteDispatcher
 
             return $this->withStatusCode($response, $context->statusCode);
         } catch (\Throwable $routeFailure) {
+            // Show and record what actually went wrong. Rendering only the error
+            // page's own failure hid the cause: with Redis down the page said
+            // "Cannot inject AuthContext" and the connection error was logged
+            // nowhere at all.
+            StaticLoggerBridge::error('core', 'Error page failed to render; served the built-in page instead', [
+                'route' => $routeName,
+                'failure' => $routeFailure::class . ': ' . $routeFailure->getMessage(),
+                'original' => $throwable !== null
+                    ? $throwable::class . ': ' . $throwable->getMessage() . ' at ' . $throwable->getFile() . ':' . $throwable->getLine()
+                    : null,
+            ]);
+
             return ErrorRenderer::renderStatus(
-                $this->buildContext(HttpStatus::InternalServerError->value, $request, $currentRoute, $routeFailure),
+                $this->buildContext(HttpStatus::InternalServerError->value, $request, $currentRoute, $throwable ?? $routeFailure),
                 $request,
             );
         } finally {
             ErrorPageContextStore::pop();
             $state->leave($routeName);
+        }
+    }
+
+    /**
+     * A request that failed before or inside SessionPhase can lack a session,
+     * a cookie jar or an identity, and every error route needs them (its auth
+     * gate injects the auth context). Fill in only what is missing — a
+     * signed-in visitor keeps their identity — as a guest on a session that
+     * keeps nothing, instead of failing the error page a second time.
+     */
+    private function ensureGuestExecutionContext(Request $request): void
+    {
+        // holds(), not has(): has() falls through to the root container, which
+        // knows the auth service but not this request's identity.
+        if (!$this->requestScopedContainer->holds(AuthContextInterface::class)) {
+            $this->requestScopedContainer->set(AuthContextInterface::class, GuestAuthContext::getInstance());
+        }
+        if (!$this->requestScopedContainer->holds(CookieJarInterface::class)) {
+            $this->requestScopedContainer->set(CookieJarInterface::class, new CookieJar($request));
+        }
+        if (!$this->requestScopedContainer->holds(SessionInterface::class)) {
+            $this->requestScopedContainer->set(
+                SessionInterface::class,
+                new Session(bin2hex(random_bytes(16)), new TransientSessionHandler(), 'semitexa_session'),
+            );
         }
     }
 

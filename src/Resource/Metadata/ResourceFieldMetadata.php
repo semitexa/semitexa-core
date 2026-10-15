@@ -31,6 +31,14 @@ final readonly class ResourceFieldMetadata
          * or simply rendered as a link.
          */
         public ?string $resolverClass = null,
+        /**
+         * PHP type name of a `Scalar` field as declared on the property
+         * (`string`, `int`, `float`, `bool`, `array`, `mixed`, …), without
+         * the nullability marker — that lives in `$nullable`. Lets schema
+         * emitters (OpenAPI) publish the real wire type instead of guessing.
+         * `null` for non-scalar kinds.
+         */
+        public ?string $scalarType = null,
     ) {
     }
 

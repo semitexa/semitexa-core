@@ -286,6 +286,7 @@ final class ResourceMetadataExtractor
                 description: $description,
                 deprecated: $deprecated,
                 resolverClass: $resolverClass,
+                scalarType: $typeInfo['name'],
             );
         }
 

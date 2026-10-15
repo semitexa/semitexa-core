@@ -144,6 +144,15 @@ final class Session implements SessionInterface
         $this->handler->write($this->id, $data, $this->lifetimeSeconds);
     }
 
+    /**
+     * False for a request served on a {@see TransientSessionHandler} because
+     * the real store could not be read: nothing it holds is kept.
+     */
+    public function persists(): bool
+    {
+        return !$this->handler instanceof TransientSessionHandler;
+    }
+
     public function setHandler(SessionHandlerInterface $handler): void
     {
         $this->handler = $handler;

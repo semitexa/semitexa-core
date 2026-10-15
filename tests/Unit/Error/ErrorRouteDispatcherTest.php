@@ -7,7 +7,13 @@ namespace Semitexa\Core\Tests\Unit\Error;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Psr\Container\ContainerInterface;
+use Semitexa\Core\Auth\AuthContextInterface;
+use Semitexa\Core\Auth\GuestAuthContext;
+use Semitexa\Core\Container\ExecutionContext;
+use Semitexa\Core\Container\ExecutionContextAwareContainerInterface;
 use Semitexa\Core\Container\RequestScopedContainer;
+use Semitexa\Core\Cookie\CookieJar;
+use Semitexa\Core\Cookie\CookieJarInterface;
 use Semitexa\Core\Discovery\DiscoveredRoute;
 use Semitexa\Core\Discovery\RouteRegistry;
 use Semitexa\Core\Environment;
@@ -16,6 +22,9 @@ use Semitexa\Core\Error\ErrorRouteDispatcher;
 use Semitexa\Core\Exception\AccessDeniedException;
 use Semitexa\Core\Request;
 use Semitexa\Core\HttpResponse;
+use Semitexa\Core\Session\Session;
+use Semitexa\Core\Session\SessionInterface;
+use Semitexa\Core\Session\TransientSessionHandler;
 
 final class ErrorRouteDispatcherTest extends TestCase
 {
@@ -82,6 +91,90 @@ final class ErrorRouteDispatcherTest extends TestCase
         self::assertSame(500, $response->getStatusCode());
         self::assertStringContainsString(ErrorRouteDispatcher::ROUTE_NAME_500, $response->getContent());
         self::assertStringContainsString('/broken', $response->getContent());
+    }
+
+    #[Test]
+    public function a_request_that_failed_inside_session_setup_renders_its_error_page_as_a_guest(): void
+    {
+        // Request, session and cookies set; the identity never was (Redis down
+        // mid-SessionPhase). The error route's auth gate needs one.
+        $request = $this->makeHtmlRequest('/broken');
+        [$dispatcher, $scope, $seen] = $this->dispatcherRecordingIdentity();
+        $scope->set(Request::class, $request);
+        $scope->set(SessionInterface::class, new Session(str_repeat('a', 32), new TransientSessionHandler(), 'semitexa_session'));
+        $scope->set(CookieJarInterface::class, new CookieJar($request));
+
+        $response = $dispatcher->dispatchThrowable(new \RuntimeException('Boom'), $request, ['name' => 'demo.page']);
+
+        self::assertSame(500, $response?->getStatusCode());
+        self::assertSame(GuestAuthContext::getInstance(), $seen->identity);
+    }
+
+    #[Test]
+    public function a_signed_in_visitor_keeps_their_identity_on_the_error_page(): void
+    {
+        $request = $this->makeHtmlRequest('/broken');
+        [$dispatcher, $scope, $seen] = $this->dispatcherRecordingIdentity();
+        $signedIn = $this->createStub(AuthContextInterface::class);
+        $scope->set(AuthContextInterface::class, $signedIn);
+
+        $dispatcher->dispatchThrowable(new \RuntimeException('Boom'), $request, ['name' => 'demo.page']);
+
+        self::assertSame($signedIn, $seen->identity);
+    }
+
+    #[Test]
+    public function an_error_page_that_fails_itself_shows_the_original_failure(): void
+    {
+        $routes = $this->createMock(RouteRegistry::class);
+        $routes->method('findByNameTyped')->willReturn($this->makeDiscoveredRoute(ErrorRouteDispatcher::ROUTE_NAME_500));
+        $container = new InMemoryContainer();
+        $dispatcher = new ErrorRouteDispatcher(
+            routeRegistry: $routes,
+            requestScopedContainer: new RequestScopedContainer($container),
+            container: $container,
+            authBootstrapper: null,
+            environment: $this->makeEnvironment(debug: true),
+            routeExecutor: static fn (): HttpResponse => throw new \RuntimeException('Cannot inject AuthContext'),
+        );
+
+        $response = $dispatcher->dispatchThrowable(
+            new \RuntimeException('getaddrinfo for redis failed'),
+            $this->makeHtmlRequest('/broken'),
+            ['name' => 'demo.page'],
+        );
+
+        self::assertSame(500, $response?->getStatusCode());
+        self::assertStringContainsString('getaddrinfo for redis failed', (string) $response?->getContent());
+        self::assertStringNotContainsString('Cannot inject AuthContext', (string) $response?->getContent());
+    }
+
+    /** @return array{ErrorRouteDispatcher, RequestScopedContainer, \stdClass} */
+    private function dispatcherRecordingIdentity(): array
+    {
+        $routes = $this->createMock(RouteRegistry::class);
+        $routes->method('findByNameTyped')->willReturn($this->makeDiscoveredRoute(ErrorRouteDispatcher::ROUTE_NAME_500));
+        // Execution-context aware, as the real container is: setting request,
+        // session and cookies makes the context "ready", the case where the
+        // identity can still be missing.
+        $container = new ExecutionAwareInMemoryContainer();
+        $scope = new RequestScopedContainer($container);
+        $seen = new \stdClass();
+        $seen->identity = null;
+        $dispatcher = new ErrorRouteDispatcher(
+            routeRegistry: $routes,
+            requestScopedContainer: $scope,
+            container: $container,
+            authBootstrapper: null,
+            environment: $this->makeEnvironment(debug: true),
+            routeExecutor: static function () use ($scope, $seen): HttpResponse {
+                $seen->identity = $scope->get(AuthContextInterface::class);
+
+                return HttpResponse::html('<h1>error</h1>', 200);
+            },
+        );
+
+        return [$dispatcher, $scope, $seen];
     }
 
     #[Test]
@@ -282,5 +375,28 @@ final class InMemoryContainer implements ContainerInterface
     public function has(string $id): bool
     {
         return array_key_exists($id, $this->services);
+    }
+}
+
+final class ExecutionAwareInMemoryContainer implements ContainerInterface, ExecutionContextAwareContainerInterface
+{
+    public function get(string $id): mixed
+    {
+        throw new class('Unknown service: ' . $id) extends \RuntimeException implements \Psr\Container\NotFoundExceptionInterface {
+        };
+    }
+
+    public function has(string $id): bool
+    {
+        return false;
+    }
+
+    public function setExecutionContext(ExecutionContext $context): void
+    {
+    }
+
+    public function isExecutionScoped(string $id): bool
+    {
+        return false;
     }
 }
