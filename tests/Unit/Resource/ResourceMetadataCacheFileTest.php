@@ -124,4 +124,45 @@ final class ResourceMetadataCacheFileTest extends TestCase
         // Sibling relation without #[ResolveWith] survives as null.
         self::assertNull($customer->getField('addresses')?->resolverClass);
     }
+
+    #[Test]
+    public function dump_then_load_round_trip_preserves_scalar_type(): void
+    {
+        $extractor = new ResourceMetadataExtractor();
+        $original  = ResourceMetadataRegistry::forTesting($extractor);
+        $original->register($extractor->extract(AddressResource::class));
+        $original->register($extractor->extract(ProfileResource::class));
+        $original->register($extractor->extract(CustomerResource::class));
+
+        $cache = ResourceMetadataCacheFile::forPath($this->tempPath);
+        $cache->dump($original);
+
+        $rehydrated = ResourceMetadataRegistry::forTesting($extractor);
+        self::assertSame(CacheLoadResult::Hit, $cache->loadWithResult($rehydrated));
+
+        $customer = $rehydrated->get(CustomerResource::class);
+        self::assertNotNull($customer);
+        self::assertSame('string', $customer->getField('name')?->scalarType);
+        // Relations and embedded lists carry no scalar type.
+        self::assertNull($customer->getField('profile')?->scalarType);
+        self::assertNull($customer->getField('tags')?->scalarType);
+    }
+
+    #[Test]
+    public function scalar_entry_without_scalar_type_is_corrupt_so_the_registry_rebuilds(): void
+    {
+        // A payload written before `scalarType` existed.
+        file_put_contents(
+            $this->tempPath,
+            "<?php return ['version' => 1, 'metadata' => [["
+            . "'class' => 'App\\\\LegacyResource', 'type' => 'legacy', 'idField' => 'id', "
+            . "'fields' => ['id' => ['name' => 'id', 'kind' => 'scalar', 'nullable' => false]]"
+            . "]]];\n",
+        );
+
+        $cache    = ResourceMetadataCacheFile::forPath($this->tempPath);
+        $registry = ResourceMetadataRegistry::forTesting(new ResourceMetadataExtractor());
+
+        self::assertSame(CacheLoadResult::Corrupt, $cache->loadWithResult($registry, null));
+    }
 }

@@ -189,6 +189,7 @@ final class ResourceMetadataCacheFile
                 'unionTargets'  => $field->unionTargets,
                 'discriminator' => $field->discriminator,
                 'resolverClass' => $field->resolverClass,
+                'scalarType'    => $field->scalarType,
             ];
         }
 
@@ -223,6 +224,13 @@ final class ResourceMetadataCacheFile
                 return null;
             }
 
+            // A scalar entry written before `scalarType` existed cannot say
+            // its type; treat the whole payload as Corrupt so the registry
+            // rebuilds from source instead of serving it typeless.
+            if ($kind === ResourceFieldKind::Scalar && !array_key_exists('scalarType', $f)) {
+                return null;
+            }
+
             $fields[$name] = new ResourceFieldMetadata(
                 name: (string) ($f['name'] ?? $name),
                 kind: $kind,
@@ -238,6 +246,7 @@ final class ResourceMetadataCacheFile
                 unionTargets: is_array($f['unionTargets'] ?? null) ? array_values(array_map('strval', $f['unionTargets'])) : null,
                 discriminator: $this->nullableString($f['discriminator'] ?? null),
                 resolverClass: $this->nullableString($f['resolverClass'] ?? null),
+                scalarType: $this->nullableString($f['scalarType'] ?? null),
             );
         }
 
