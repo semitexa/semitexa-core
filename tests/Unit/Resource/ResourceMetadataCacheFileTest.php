@@ -144,8 +144,31 @@ final class ResourceMetadataCacheFileTest extends TestCase
         self::assertNotNull($customer);
         self::assertSame('string', $customer->getField('name')?->scalarType);
         // Relations and embedded lists carry no scalar type.
-        self::assertNull($customer->getField('profile')?->scalarType);
-        self::assertNull($customer->getField('tags')?->scalarType);
+        $profile = $customer->getField('profile');
+        $tags    = $customer->getField('tags');
+        self::assertNotNull($profile);
+        self::assertNotNull($tags);
+        self::assertNull($profile->scalarType);
+        self::assertNull($tags->scalarType);
+    }
+
+    #[Test]
+    public function scalar_entry_with_a_non_string_scalar_type_is_corrupt(): void
+    {
+        foreach (['null', "''", '42'] as $value) {
+            file_put_contents(
+                $this->tempPath,
+                "<?php return ['version' => 1, 'metadata' => [["
+                . "'class' => 'App\\\\LegacyResource', 'type' => 'legacy', 'idField' => 'id', "
+                . "'fields' => ['id' => ['name' => 'id', 'kind' => 'scalar', 'nullable' => false, 'scalarType' => {$value}]]"
+                . "]]];\n",
+            );
+
+            $cache    = ResourceMetadataCacheFile::forPath($this->tempPath);
+            $registry = ResourceMetadataRegistry::forTesting(new ResourceMetadataExtractor());
+
+            self::assertSame(CacheLoadResult::Corrupt, $cache->loadWithResult($registry, null), "scalarType => {$value}");
+        }
     }
 
     #[Test]

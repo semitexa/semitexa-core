@@ -224,10 +224,11 @@ final class ResourceMetadataCacheFile
                 return null;
             }
 
-            // A scalar entry written before `scalarType` existed cannot say
-            // its type; treat the whole payload as Corrupt so the registry
-            // rebuilds from source instead of serving it typeless.
-            if ($kind === ResourceFieldKind::Scalar && !array_key_exists('scalarType', $f)) {
+            // A scalar entry written before `scalarType` existed, or one whose
+            // type is not a non-empty string, cannot say its type; treat the
+            // whole payload as Corrupt so the registry rebuilds from source
+            // instead of serving it typeless.
+            if ($kind === ResourceFieldKind::Scalar && (!is_string($f['scalarType'] ?? null) || $f['scalarType'] === '')) {
                 return null;
             }
 
