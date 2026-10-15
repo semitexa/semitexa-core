@@ -26,6 +26,7 @@ final class RedisConnectionPool
     private int $port;
     private string $password;
     private int $size;
+    private RedisCircuitBreaker $circuit;
 
     /**
      * All bounded so a slow/broken Redis or a momentarily-exhausted pool can never
@@ -42,8 +43,9 @@ final class RedisConnectionPool
      * @param int $size Number of connections in the pool
      * @param array{scheme?:string, host?:string, port?:int, password?:string} $config Redis connection params
      */
-    public function __construct(int $size, array $config)
+    public function __construct(int $size, array $config, ?RedisCircuitBreaker $circuit = null)
     {
+        $this->circuit = $circuit ?? new RedisCircuitBreaker();
         if ($size < 1) {
             throw new \InvalidArgumentException('Redis pool size must be at least 1');
         }
@@ -135,6 +137,23 @@ final class RedisConnectionPool
      * @return T
      */
     public function withConnection(callable $callback): mixed
+    {
+        // While Redis is unreachable every call fails fast instead of paying a
+        // connect (or DNS) timeout, so an outage costs callers nothing extra.
+        return $this->circuit->call(fn (): mixed => $this->runWithConnection($callback));
+    }
+
+    public function isCircuitOpen(): bool
+    {
+        return $this->circuit->isOpen();
+    }
+
+    /**
+     * @template T
+     * @param callable(ClientInterface): T $callback
+     * @return T
+     */
+    private function runWithConnection(callable $callback): mixed
     {
         $client = $this->get();
         try {

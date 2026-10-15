@@ -21,11 +21,13 @@ use Semitexa\Core\Log\FallbackErrorLogger;
 use Semitexa\Core\Request;
 use Semitexa\Core\HttpResponse;
 use Semitexa\Core\Redis\RedisConnectionPool;
+use Semitexa\Core\Redis\RedisUnavailableException;
 use Semitexa\Core\Session\RedisSessionHandler;
 use Semitexa\Core\Session\Session;
 use Semitexa\Core\Session\SessionHandlerInterface;
 use Semitexa\Core\Session\SessionInterface;
 use Semitexa\Core\Session\SwooleTableSessionHandler;
+use Semitexa\Core\Session\TransientSessionHandler;
 use Semitexa\Core\Tenant\TenantContextInterface;
 use Semitexa\Core\Tenant\TenantContextStoreInterface;
 use Semitexa\Core\Tenant\TenancyBootstrapperInterface;
@@ -65,7 +67,14 @@ final class SessionPhase
             $sessionId = bin2hex(random_bytes(16));
         }
         $sessionLifetime = (int) (Environment::getEnvValue('SESSION_LIFETIME') ?? '3600');
-        $session = new Session($sessionId, $this->sessionHandler, $cookieName, $sessionLifetime);
+        try {
+            $session = new Session($sessionId, $this->sessionHandler, $cookieName, $sessionLifetime);
+        } catch (\Throwable $e) {
+            // The store is unreadable (Redis down). Serve the request as a guest
+            // on a session that persists nothing, rather than failing the page.
+            $this->logSessionStoreUnreadable($e, $request);
+            $session = new Session($sessionId, new TransientSessionHandler(), $cookieName, $sessionLifetime);
+        }
 
         // Ensure a CSRF token exists on this session. Generated once, then stable
         // for the session lifetime. The matching XSRF-TOKEN cookie is emitted in
@@ -99,6 +108,13 @@ final class SessionPhase
         $cookieJar = $this->requestScopedContainer->get(CookieJarInterface::class);
 
         if (!$session instanceof Session || !$cookieJar instanceof CookieJarInterface) {
+            return $response;
+        }
+
+        // A transient session (the store was unreadable) leaves the visitor's
+        // cookies alone: re-issuing them would hand open tabs a CSRF token the
+        // real session, back once the store recovers, does not hold.
+        if (!$session->persists()) {
             return $response;
         }
 
@@ -302,6 +318,24 @@ final class SessionPhase
         }
 
         FallbackErrorLogger::log($message, $context);
+    }
+
+    /**
+     * The circuit breaker already said Redis is down, once, when it opened; a
+     * call it refused is not news, so only a first-hand failure is logged here.
+     */
+    private function logSessionStoreUnreadable(\Throwable $e, Request $request): void
+    {
+        if ($e instanceof RedisUnavailableException) {
+            return;
+        }
+
+        $this->warn('Session store unreadable; serving the request with a transient guest session', [
+            'path' => $request->getPath(),
+            'method' => $request->getMethod(),
+            'exception' => $e::class,
+            'message' => $e->getMessage(),
+        ]);
     }
 
     private function logSessionPersistenceFailure(\Throwable $e, Request $request): void
