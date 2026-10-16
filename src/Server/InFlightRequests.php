@@ -67,7 +67,7 @@ final class InFlightRequests
     public static function streaming(): void
     {
         $cid = \Swoole\Coroutine::getCid();
-        if ($cid > 0) {
+        if (is_int($cid) && $cid > 0) {
             self::leave($cid);
         }
     }

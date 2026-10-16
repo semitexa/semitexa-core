@@ -138,7 +138,14 @@ final class ContentNegotiator
         // route answers it exactly when it produces that format's type.
         $formatOverride = $request->query['_format'] ?? null;
         if (is_string($formatOverride) && in_array($formatOverride, ['json', 'html', 'xml', 'txt'], true)) {
-            return in_array(self::formatKeyToMime($formatOverride), $produces, true);
+            $wanted = self::formatKeyToMime($formatOverride);
+            foreach ($produces as $mime) {
+                if (strtolower(trim(explode(';', $mime, 2)[0])) === $wanted) {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         $acceptHeader = trim((string) $request->getHeader('Accept'));

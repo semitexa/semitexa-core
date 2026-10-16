@@ -52,7 +52,7 @@ final class HandlelessResourceHonoursProducesTest extends TestCase
                 return $this->alreadySent;
             }
 
-            public function getRenderHandle(): ?string
+            public function getRenderHandle(): null
             {
                 return null;
             }
@@ -163,6 +163,7 @@ final class HandlelessResourceHonoursProducesTest extends TestCase
         $rendered = (new ResponseRenderer())->render($resource, null, $this->get($accept), $this->route(self::PRODUCES));
 
         self::assertNotInstanceOf(HttpResponse::class, $rendered);
+        self::assertTrue(method_exists($rendered, 'getContent'));
         self::assertSame('{"data":[]}', $rendered->getContent());
     }
 
@@ -173,6 +174,7 @@ final class HandlelessResourceHonoursProducesTest extends TestCase
         $rendered = (new ResponseRenderer())->render($this->resource(), null, $this->get('application/xml'), $this->route(null));
 
         self::assertNotInstanceOf(HttpResponse::class, $rendered);
+        self::assertTrue(method_exists($rendered, 'getContent'));
         self::assertSame('{"data":[]}', $rendered->getContent());
     }
 
@@ -247,6 +249,20 @@ final class HandlelessResourceHonoursProducesTest extends TestCase
         $rendered = (new ResponseRenderer())->render($resource, null, $this->get('application/json'), $this->route(['text/plain'], ServedToAnyAcceptPayload::class));
 
         self::assertSame($resource, $rendered);
+    }
+
+    /** Review of core#184: a parameterised declaration still matches `?_format=`. */
+    #[Test]
+    public function the_format_override_matches_a_declaration_with_parameters(): void
+    {
+        $rendered = (new ResponseRenderer())->render(
+            $this->resource(),
+            null,
+            $this->get('application/json', 'GET', ['_format' => 'json']),
+            $this->route(['application/json; charset=utf-8']),
+        );
+
+        self::assertNotInstanceOf(HttpResponse::class, $rendered);
     }
 }
 

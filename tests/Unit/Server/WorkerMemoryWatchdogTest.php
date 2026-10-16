@@ -33,6 +33,10 @@ final class WorkerMemoryWatchdogTest extends TestCase
         yield 'empty' => ['', null];
         yield 'nonsense' => ['lots', null];
         yield 'zero' => ['0', null];
+        // Review of core#184: past PHP_INT_MAX the product is a float, which
+        // must read as unreadable, not throw a TypeError.
+        yield 'overflows an integer' => ['9223372036854775807G', null];
+        yield 'too many digits for an integer' => ['99999999999999999999', null];
     }
 
     #[Test]

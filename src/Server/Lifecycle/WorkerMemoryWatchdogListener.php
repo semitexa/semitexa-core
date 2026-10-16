@@ -48,7 +48,7 @@ final class WorkerMemoryWatchdogListener implements ServerLifecycleListenerInter
             return;
         }
         $server = $context->server;
-        if (($server->taskworker ?? false) === true) {
+        if ($server === null || ($server->taskworker ?? false) === true) {
             return;
         }
 
@@ -83,9 +83,7 @@ final class WorkerMemoryWatchdogListener implements ServerLifecycleListenerInter
 
             $server->stop();
         });
-        if (is_int($timerId)) {
-            WorkerTimerRegistry::register($timerId);
-        }
+        WorkerTimerRegistry::register($timerId);
     }
 
     public static function ratio(): float

@@ -114,7 +114,7 @@ final class WorkerExitDrain
             $remainingMs = (int) ceil(($this->policy->graceSeconds - $sinceBegan) * 1000) + 10;
             $wake = \Swoole\Timer::after(max(10, $remainingMs), static function (): void {
             });
-            $this->wakeAtGraceEnd = is_int($wake) ? $wake : null;
+            $this->wakeAtGraceEnd = $wake;
         }
         if ($spared > 0 && !$this->toldWaiting) {
             // The one thing keeping the worker now is requests being answered;
@@ -168,9 +168,7 @@ final class WorkerExitDrain
     private static function timerIds(): array
     {
         $ids = [];
-        // The stub types list() loosely; an iterator of ints at runtime.
-        $list = \Swoole\Timer::list();
-        foreach (is_iterable($list) ? $list : [] as $id) {
+        foreach (\Swoole\Timer::list() as $id) {
             if (is_int($id)) {
                 $ids[] = $id;
             }

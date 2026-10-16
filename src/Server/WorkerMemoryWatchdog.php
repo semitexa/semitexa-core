@@ -54,12 +54,18 @@ final readonly class WorkerMemoryWatchdog
         if (preg_match('/^\s*(\d+)\s*([kmg]?)\s*$/i', $value, $m) !== 1) {
             return null;
         }
-        $bytes = (int) $m[1] * match (strtolower($m[2])) {
+        $multiplier = match (strtolower($m[2])) {
             'k' => 1024,
             'm' => 1024 ** 2,
             'g' => 1024 ** 3,
             default => 1,
         };
+        // Past PHP_INT_MAX the digits cast to a clamped int and the product
+        // turns float: either way the value is not a limit PHP could hold.
+        if (strlen(ltrim($m[1], '0')) > 19 || (int) $m[1] > intdiv(PHP_INT_MAX, $multiplier)) {
+            return null;
+        }
+        $bytes = (int) $m[1] * $multiplier;
 
         return $bytes > 0 ? $bytes : null;
     }

@@ -389,7 +389,7 @@ class SwooleBootstrap
         // Every request says it is in flight, so a worker that is leaving lets
         // it finish instead of cancelling it (WorkerExitDrainPolicy).
         $server->on(SwooleEvent::Request->value, static function (SwooleRequest $request, SwooleResponse $response) use ($handleRequest): void {
-            $cid = Coroutine::getCid();
+            $cid = Row::asInt(Coroutine::getCid());
             InFlightRequests::enter($cid);
             try {
                 $handleRequest($request, $response);

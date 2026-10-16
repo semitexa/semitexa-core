@@ -86,24 +86,27 @@ final class WorkerExitDrainPolicyTest extends TestCase
     {
         $seen = [];
         \Swoole\Coroutine\run(static function () use (&$seen): void {
-            $request = \Swoole\Coroutine::getCid();
+            $request = \Semitexa\Core\Support\Row::asInt(\Swoole\Coroutine::getCid());
             InFlightRequests::enter($request);
             $child = 0;
             $grandchild = 0;
+            // The children park on a channel only this coroutine closes, so
+            // both are alive for every assertion below (a sleep raced them).
+            $release = new \Swoole\Coroutine\Channel(1);
             $wg = new \Swoole\Coroutine\WaitGroup();
             $wg->add();
-            \Swoole\Coroutine::create(static function () use (&$child, &$grandchild, $wg): void {
-                $child = \Swoole\Coroutine::getCid();
+            \Swoole\Coroutine::create(static function () use (&$child, &$grandchild, $wg, $release): void {
+                $child = \Semitexa\Core\Support\Row::asInt(\Swoole\Coroutine::getCid());
                 $wg->add();
-                \Swoole\Coroutine::create(static function () use (&$grandchild, $wg): void {
-                    $grandchild = \Swoole\Coroutine::getCid();
-                    \Swoole\Coroutine::sleep(0.05);
+                \Swoole\Coroutine::create(static function () use (&$grandchild, $wg, $release): void {
+                    $grandchild = \Semitexa\Core\Support\Row::asInt(\Swoole\Coroutine::getCid());
+                    $release->pop();
                     $wg->done();
                 });
-                \Swoole\Coroutine::sleep(0.05);
+                $release->pop();
                 $wg->done();
             });
-            \Swoole\Coroutine::sleep(0.01);
+            $seen['alive'] = \Swoole\Coroutine::exists($child) && \Swoole\Coroutine::exists($grandchild);
             $seen['child'] = InFlightRequests::servesRequest($child);
             $seen['grandchild'] = InFlightRequests::servesRequest($grandchild);
 
@@ -112,10 +115,12 @@ final class WorkerExitDrainPolicyTest extends TestCase
             InFlightRequests::streaming();
             $seen['streamItself'] = InFlightRequests::servesRequest($request);
             $seen['streamChild'] = InFlightRequests::servesRequest($child);
+            $seen['stillAlive'] = \Swoole\Coroutine::exists($child);
+            $release->close();
             $wg->wait();
         });
 
-        self::assertSame(['child' => true, 'grandchild' => true, 'streamItself' => false, 'streamChild' => false], $seen);
+        self::assertSame(['alive' => true, 'child' => true, 'grandchild' => true, 'streamItself' => false, 'streamChild' => false, 'stillAlive' => true], $seen);
     }
 
     #[Test]
@@ -123,7 +128,7 @@ final class WorkerExitDrainPolicyTest extends TestCase
     {
         $serves = null;
         \Swoole\Coroutine\run(static function () use (&$serves): void {
-            $serves = InFlightRequests::servesRequest(\Swoole\Coroutine::getCid());
+            $serves = InFlightRequests::servesRequest(\Semitexa\Core\Support\Row::asInt(\Swoole\Coroutine::getCid()));
         });
 
         self::assertFalse($serves);
