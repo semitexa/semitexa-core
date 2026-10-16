@@ -80,29 +80,7 @@ final class ContentNegotiator
         // Sorted by q, highest first; equal q keep the order the client wrote.
         $entries = self::parseAcceptHeader($acceptHeader);
 
-        // RFC 9110 §12.5.1: a representation's quality is the q of the MOST
-        // SPECIFIC range that matches it — its exact type, then `type/*`, then
-        // `*/*` — and q=0 there is a refusal. Reading the entries in q order
-        // instead let a high `*/*` pick a type the client had ranked lower by
-        // name (`text/html;q=0.1, */*` served html), and a `*/*;q=0` refused
-        // nothing at all.
-        $quality = static function (string $mime) use ($entries): ?array {
-            [$type] = explode('/', $mime, 2);
-            $best = null;
-            foreach ($entries as $at => [$range, $q]) {
-                $specificity = match (true) {
-                    $range === $mime => 3,
-                    $range === $type . '/*' => 2,
-                    $range === '*/*' => 1,
-                    default => 0,
-                };
-                if ($specificity > 0 && ($best === null || $specificity > $best['specificity'])) {
-                    $best = ['specificity' => $specificity, 'q' => $q, 'at' => $at];
-                }
-            }
-
-            return $best;
-        };
+        $quality = static fn(string $mime): ?array => self::qualityOf($mime, $entries);
 
         // The default is a type too, and a client can refuse it.
         $defaultMime = self::DEFAULT_MIMES[$defaultFormat] ?? null;
@@ -139,6 +117,75 @@ final class ContentNegotiator
         }
 
         throw new NegotiationFailedException($produces ?? [], $acceptHeader);
+    }
+
+    /**
+     * Does the client accept at least one of these types? Missing or empty
+     * Accept accepts everything.
+     *
+     * The refusal half of negotiation, for a body that is already rendered:
+     * a resource without a render handle answers in its own type, so the only
+     * question left is whether the route may answer at all. Picking a format
+     * key here would be wrong — a produced type without one (ld+json) would
+     * fall back to the default, and a refused default would then refuse a
+     * type the client asked for by name.
+     *
+     * @param list<string> $produces
+     */
+    public static function acceptsAnyOf(array $produces, Request $request): bool
+    {
+        // `?_format=` wins over Accept, as in negotiateResponseFormat(): the
+        // route answers it exactly when it produces that format's type.
+        $formatOverride = $request->query['_format'] ?? null;
+        if (is_string($formatOverride) && in_array($formatOverride, ['json', 'html', 'xml', 'txt'], true)) {
+            return in_array(self::formatKeyToMime($formatOverride), $produces, true);
+        }
+
+        $acceptHeader = trim((string) $request->getHeader('Accept'));
+        if ($acceptHeader === '') {
+            return true;
+        }
+
+        $entries = self::parseAcceptHeader($acceptHeader);
+        foreach ($produces as $mime) {
+            $mime = strtolower(trim(explode(';', $mime, 2)[0]));
+            $match = self::qualityOf($mime, $entries);
+            if ($match !== null && $match['q'] > 0.0) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * RFC 9110 §12.5.1: a representation's quality is the q of the MOST
+     * SPECIFIC range that matches it — its exact type, then `type/*`, then
+     * `*\/*` — and q=0 there is a refusal. Reading the entries in q order
+     * instead let a high `*\/*` pick a type the client had ranked lower by
+     * name (`text/html;q=0.1, *\/*` served html), and a `*\/*;q=0` refused
+     * nothing at all.
+     *
+     * @param  list<array{0: string, 1: float}> $entries
+     * @return array{specificity: int, q: float, at: int}|null
+     */
+    private static function qualityOf(string $mime, array $entries): ?array
+    {
+        [$type] = explode('/', $mime, 2);
+        $best = null;
+        foreach ($entries as $at => [$range, $q]) {
+            $specificity = match (true) {
+                $range === $mime => 3,
+                $range === $type . '/*' => 2,
+                $range === '*/*' => 1,
+                default => 0,
+            };
+            if ($specificity > 0 && ($best === null || $specificity > $best['specificity'])) {
+                $best = ['specificity' => $specificity, 'q' => $q, 'at' => $at];
+            }
+        }
+
+        return $best;
     }
 
     /**

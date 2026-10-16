@@ -377,7 +377,7 @@ class RouteExecutor
 
             // 5. Render the freshly-resolved Resource into the frame body.
             $renderer = new ResponseRenderer();
-            $resDto = $renderer->render($resDto, $cachedDto, $request, $route);
+            $resDto = $renderer->render($resDto, $cachedDto, $request, $route, isReRun: true);
 
             return ReRunResult::frame($this->adaptResponse($resDto));
         } catch (AuthenticationException|AccessDeniedException $e) {
