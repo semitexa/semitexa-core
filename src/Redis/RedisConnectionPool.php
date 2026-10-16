@@ -6,6 +6,7 @@ namespace Semitexa\Core\Redis;
 
 use Predis\Client;
 use Predis\ClientInterface;
+use Predis\Connection\ConnectionException;
 
 /**
  * Coroutine-safe Redis connection pool backed by Swoole\Coroutine\Channel.
@@ -28,6 +29,17 @@ final class RedisConnectionPool
     private int $size;
     private RedisCircuitBreaker $circuit;
 
+    /** @var \WeakMap<ClientInterface, float> when each client last went back into the pool */
+    private \WeakMap $returnedAt;
+
+    /**
+     * A client idle at least this long is PINGed before use. After a Redis
+     * restart every pooled socket is dead, and the first command on each would
+     * fail — while the breaker is open nothing uses them, so by the time Redis
+     * is back they have all been idle longer than this.
+     */
+    private const IDLE_PING_AFTER_SECONDS = 1.0;
+
     /**
      * All bounded so a slow/broken Redis or a momentarily-exhausted pool can never
      * suspend a Swoole coroutine forever — an indefinite blocking read or an
@@ -46,6 +58,7 @@ final class RedisConnectionPool
     public function __construct(int $size, array $config, ?RedisCircuitBreaker $circuit = null)
     {
         $this->circuit = $circuit ?? new RedisCircuitBreaker();
+        $this->returnedAt = new \WeakMap();
         if ($size < 1) {
             throw new \InvalidArgumentException('Redis pool size must be at least 1');
         }
@@ -112,6 +125,7 @@ final class RedisConnectionPool
      */
     public function put(ClientInterface $client): void
     {
+        $this->returnedAt[$client] = microtime(true);
         if ($this->pool !== null) {
             // Non-blocking return: if the pool is already full (an over-cap client
             // created by a timed-out get()), drop this one instead of blocking on
@@ -140,7 +154,74 @@ final class RedisConnectionPool
     {
         // While Redis is unreachable every call fails fast instead of paying a
         // connect (or DNS) timeout, so an outage costs callers nothing extra.
+        // The callback runs exactly once: replaying it after a lost response
+        // could apply a non-idempotent command (INCR, RPUSH) twice.
         return $this->circuit->call(fn (): mixed => $this->runWithConnection($callback));
+    }
+
+    /**
+     * A borrowed client, checked with a PING when it sat in the pool long
+     * enough for its socket to have died (a Redis restart, a proxy closing
+     * idle connections). A dead one is replaced, together with every other
+     * idle client — after a restart they are all dead — by a fresh client.
+     * PING is safe to repeat; the caller's commands are never replayed.
+     */
+    private function usableClient(): ClientInterface
+    {
+        $client = $this->get();
+        $idleSince = $this->returnedAt[$client] ?? null;
+        if ($idleSince === null
+            || !$client->getConnection()->isConnected()
+            || microtime(true) - $idleSince < self::IDLE_PING_AFTER_SECONDS
+        ) {
+            return $client;
+        }
+
+        try {
+            $client->ping();
+
+            return $client;
+        } catch (ConnectionException) {
+            try {
+                $client->disconnect();
+            } catch (\Throwable) {
+                // A dead socket cannot be closed cleanly; it is dropped either way.
+            }
+            $this->discardIdleClients();
+
+            return $this->createClient();
+        } catch (\Throwable $e) {
+            // Redis answered (-LOADING, say): the socket is fine. Back into
+            // the pool, or a pooled client is lost until the worker restarts.
+            $this->put($client);
+
+            throw $e;
+        }
+    }
+
+    /** Disconnect every idle pooled client and put fresh (unconnected) ones in their place. */
+    private function discardIdleClients(): void
+    {
+        if ($this->pool === null) {
+            $this->cliFallback = null;
+
+            return;
+        }
+        $idleCount = $this->pool->length();
+        for ($i = is_int($idleCount) ? $idleCount : 0; $i > 0; $i--) {
+            $idle = $this->pool->pop(self::RETURN_TIMEOUT_SECONDS);
+            if (!$idle instanceof ClientInterface) {
+                break;
+            }
+            try {
+                $idle->disconnect();
+            } catch (\Throwable) {
+                // A dead socket cannot be closed cleanly; it is dropped either way.
+            }
+            if (!$this->pool->push($this->createClient(), self::RETURN_TIMEOUT_SECONDS)) {
+                break;
+            }
+        }
     }
 
     public function isCircuitOpen(): bool
@@ -155,7 +236,7 @@ final class RedisConnectionPool
      */
     private function runWithConnection(callable $callback): mixed
     {
-        $client = $this->get();
+        $client = $this->usableClient();
         try {
             return $callback($client);
         } catch (\Throwable $e) {

@@ -111,27 +111,27 @@ final class SessionPhase
             return $response;
         }
 
-        // A transient session (the store was unreadable) leaves the visitor's
-        // cookies alone: re-issuing them would hand open tabs a CSRF token the
-        // real session, back once the store recovers, does not hold.
-        if (!$session->persists()) {
-            return $response;
-        }
-
         $sessionPersisted = false;
 
-        try {
-            $session->save();
-            $sessionPersisted = true;
-        } catch (\Throwable $e) {
-            $this->logSessionPersistenceFailure($e, $request);
+        // A transient session (the store was unreadable) is neither saved nor
+        // re-issued — a new XSRF cookie would hand open tabs a token the real
+        // session, back once the store recovers, does not hold — but every
+        // other cookie this request set (locale, a logout clearing one) is
+        // still emitted below.
+        if ($session->persists()) {
             try {
-                $this->sessionHandler = $this->createSessionHandler();
-                $session->setHandler($this->sessionHandler);
                 $session->save();
                 $sessionPersisted = true;
-            } catch (\Throwable $retryError) {
-                $this->logSessionPersistenceFailure($retryError, $request);
+            } catch (\Throwable $e) {
+                $this->logSessionPersistenceFailure($e, $request);
+                try {
+                    $this->sessionHandler = $this->createSessionHandler();
+                    $session->setHandler($this->sessionHandler);
+                    $session->save();
+                    $sessionPersisted = true;
+                } catch (\Throwable $retryError) {
+                    $this->logSessionPersistenceFailure($retryError, $request);
+                }
             }
         }
 

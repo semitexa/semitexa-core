@@ -101,6 +101,25 @@ final class RedisCircuitBreakerTest extends TestCase
     }
 
     #[Test]
+    public function calls_already_in_flight_when_redis_failed_do_not_lengthen_the_window(): void
+    {
+        $breaker = $this->breaker();
+        // The outer call started while the breaker was closed; the inner one
+        // fails first and opens it; then the outer one fails too — as five
+        // concurrent requests do when Redis goes away under them.
+        try {
+            $breaker->call(function () use ($breaker): never {
+                $this->expectFailure($breaker, ConnectionException::class);
+                throw new ConnectionException($this->createMock(NodeConnectionInterface::class), 'in flight');
+            });
+        } catch (ConnectionException) {
+        }
+
+        $this->now += 2.0;
+        self::assertSame('PONG', $breaker->call(static fn (): string => 'PONG'), 'the first window is still 2 s');
+    }
+
+    #[Test]
     public function an_error_redis_answers_is_not_an_outage(): void
     {
         $breaker = $this->breaker();
