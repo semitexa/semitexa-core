@@ -48,6 +48,13 @@ final class MetricsHandler
         $stats = $this->server->stats();
         $stats['worker_memory_usage'] = memory_get_usage(true);
         $stats['worker_memory_peak'] = memory_get_peak_usage(true);
+        // This worker's own limit (the CLI's can differ) and where the memory
+        // watchdog recycles it; null when there is no limit or it is off.
+        $stats['worker_memory_limit'] = WorkerMemoryWatchdog::parseBytes((string) ini_get('memory_limit'));
+        $stats['worker_memory_watchdog_threshold'] = WorkerMemoryWatchdog::fromLimit(
+            (string) ini_get('memory_limit'),
+            Lifecycle\WorkerMemoryWatchdogListener::ratio(),
+        )?->thresholdBytes;
 
         if (class_exists(\Swoole\Coroutine::class, false)) {
             /** @var array<string, int> $coStats */

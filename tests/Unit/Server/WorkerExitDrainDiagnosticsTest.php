@@ -6,8 +6,7 @@ namespace Semitexa\Core\Tests\Unit\Server;
 
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
-use ReflectionMethod;
-use Semitexa\Core\Server\SwooleBootstrap;
+use Semitexa\Core\Server\CoroutineSite;
 use Swoole\Coroutine;
 
 /**
@@ -36,10 +35,7 @@ final class WorkerExitDrainDiagnosticsTest extends TestCase
 
     private static function describe(int $cid): string
     {
-        $m = new ReflectionMethod(SwooleBootstrap::class, 'describeCoroutine');
-        $m->setAccessible(true);
-
-        return (string) $m->invoke(null, $cid);
+        return CoroutineSite::describe($cid);
     }
 
     #[Test]

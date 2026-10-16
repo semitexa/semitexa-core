@@ -9,6 +9,9 @@ use Semitexa\Core\Support\ProjectRoot;
 
 readonly class ServerConfigurator
 {
+    /** How long a leaving worker may take before the manager kills it. */
+    public const MAX_WAIT_SECONDS = 3;
+
     public function __construct(private Environment $env) {}
 
     public function getServerOptions(): array
@@ -36,7 +39,7 @@ readonly class ServerConfigurator
             // Without this, workers with long-lived connections (SSE, long-poll) never exit
             // during a graceful reload and keep serving stale code indefinitely.
             'reload_async'     => true,
-            'max_wait_time'    => 3,
+            'max_wait_time'    => self::MAX_WAIT_SECONDS,
         ];
     }
 

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Semitexa\Core\Pipeline;
 
 use Semitexa\Core\Request;
+use Semitexa\Core\Attribute\ServedRegardlessOfAccept;
 use Semitexa\Core\HttpResponse;
 use Semitexa\Core\Http\RedirectTarget;
 use Semitexa\Core\Http\ContentType;
@@ -21,7 +22,11 @@ final class ResponseRenderer
     /**
      * Render the resource DTO into a response based on route metadata and content negotiation.
      */
-    public function render(object $resDto, ?object $reqDto, Request $request, DiscoveredRoute $route): object
+    /**
+     * @param bool $isReRun a live re-run renders a data frame for an open
+     *                      stream, not a response the client negotiates
+     */
+    public function render(object $resDto, ?object $reqDto, Request $request, DiscoveredRoute $route, bool $isReRun = false): object
     {
         // Redirect short-circuit: if the resource has a redirect URL, skip rendering
         if (method_exists($resDto, 'getRedirectUrl') && $resDto->getRedirectUrl() !== null) {
@@ -74,6 +79,23 @@ final class ResponseRenderer
 
         // No render handle: render as JSON if context is set, otherwise return as-is
         if (!$handle) {
+            // The body is the resource's own, so the format is not negotiated,
+            // but a declared `produces` still binds: a client that refused every
+            // type the route makes gets 406, as it does on the handle path.
+            // Without this the declaration was inert here — measured on the
+            // demo API, where `Accept: application/xml` got 200 JSON from a
+            // route that produces only JSON.
+            $produces = $route->produces;
+            if ($produces !== null && $produces !== []
+                && self::mayRefuse($resDto, $request, $isReRun)
+                && !ContentNegotiator::acceptsAnyOf($produces, $request)
+                && !self::servedRegardlessOfAccept($route)) {
+                return self::notAcceptable(
+                    'None of the media types this route produces is acceptable: ' . implode(', ', $produces),
+                    $produces,
+                );
+            }
+
             if ($context !== []) {
                 if ($format === null || $format === ResponseFormat::Layout) {
                     $format = ResponseFormat::Json;
@@ -128,11 +150,7 @@ final class ResponseRenderer
                 $negotiatedKey = ContentNegotiator::negotiateResponseFormat($produces, $request, $defaultKey);
                 $format = self::keyToFormatEnum($negotiatedKey);
             } catch (NegotiationFailedException $e) {
-                return HttpResponse::json([
-                    'error' => 'Not Acceptable',
-                    'message' => $e->getMessage(),
-                    'available' => $e->produces,
-                ], HttpStatus::NotAcceptable->value);
+                return self::notAcceptable($e->getMessage(), $e->produces);
             }
         }
 
@@ -335,6 +353,53 @@ final class ResponseRenderer
             $resDto->setHeader('Content-Type', 'text/plain; charset=utf-8');
         }
         return $resDto;
+    }
+
+    /** @param list<string> $available */
+    private static function notAcceptable(string $message, array $available): HttpResponse
+    {
+        return HttpResponse::json([
+            'error' => 'Not Acceptable',
+            'message' => $message,
+            'available' => $available,
+        ], HttpStatus::NotAcceptable->value);
+    }
+
+    /**
+     * Whether a handle-less body may still be refused for its Accept.
+     *
+     * Only a plain read that is about to be sent with success: an OPTIONS
+     * probe answers in JSON whatever the route produces; a POST such as a
+     * GraphQL subscription may answer in a stream it already wrote; a body
+     * marked already sent must not be replaced; an error status the handler
+     * chose is the answer the client needs (RFC 9110 lets an error ignore
+     * Accept); and a live re-run is a data frame, not a negotiated response.
+     */
+    private static function mayRefuse(object $resDto, Request $request, bool $isReRun): bool
+    {
+        if ($isReRun || !in_array(strtoupper($request->getMethod()), ['GET', 'HEAD'], true)) {
+            return false;
+        }
+        if (method_exists($resDto, 'isAlreadySent') && $resDto->isAlreadySent() === true) {
+            return false;
+        }
+        $status = method_exists($resDto, 'getStatusCode') ? $resDto->getStatusCode() : 200;
+
+        return is_int($status) && $status >= 200 && $status < 300;
+    }
+
+    /**
+     * Read only on the way to a refusal, which is rare, so the reflection
+     * stays off the hot path.
+     */
+    private static function servedRegardlessOfAccept(DiscoveredRoute $route): bool
+    {
+        $class = $route->requestClass;
+        if (!class_exists($class)) {
+            return false;
+        }
+
+        return (new \ReflectionClass($class))->getAttributes(ServedRegardlessOfAccept::class) !== [];
     }
 
     /**
