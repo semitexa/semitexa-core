@@ -9,7 +9,6 @@ use JsonException;
 use Semitexa\Core\Application;
 use Semitexa\Core\Container\ContainerFactory;
 use Semitexa\Core\Environment;
-use Semitexa\Core\Lifecycle\WorkerDrainSignal;
 use Semitexa\Core\Log\StaticLoggerBridge;
 use Semitexa\Core\ErrorHandler;
 use Semitexa\Core\Http\HttpStatus;
@@ -135,6 +134,7 @@ class SwooleBootstrap
         // Built here, before start(), so every worker forks its own copy: the drain it
         // reports on is the worker's own last few seconds and must not be shared.
         $drainReporter = new WorkerExitDrainReporter();
+        $drain = new WorkerExitDrain(WorkerExitDrainPolicy::forMaxWaitTime(ServerConfigurator::MAX_WAIT_SECONDS), $drainReporter);
 
         $corsHandler = new CorsHandler($env);
         // Read once at boot, not per request: it is a deployment setting, and
@@ -192,79 +192,8 @@ class SwooleBootstrap
             }
         });
 
-        $server->on(SwooleEvent::WorkerExit->value, function (Server $server, int $workerId) use ($bootstrapState, $lifecycleInvoker, $drainReporter) {
-            // Framework guarantee: a worker asked to exit must be ABLE to exit.
-            // This fires (repeatedly) during the reload_async drain window while
-            // the event loop still holds resources. Two things keep workers
-            // hostage past max_wait_time: recurring timers that keep firing into
-            // the teardown, and coroutines parked on sockets that died with the
-            // restart (a DB ping, an LLM HTTP call) — the latter end as Swoole's
-            // FATAL "all coroutines are asleep - deadlock!". Clear every user
-            // timer and cancel every parked coroutine: cancellation turns an
-            // immortal wait into a catchable failure on code that already
-            // handles transport errors.
-            // FIRST, before any cancellation is attempted: work that cancel() cannot reach
-            // stands down by reading this instead. cancel() is an attempt, not a signal —
-            // when it is refused it leaves nothing behind, so a coroutine parked on file
-            // I/O would otherwise read on to completion and hold the worker to its exit
-            // timeout. See WorkerDrainSignal for the measurement.
-            WorkerDrainSignal::begin();
-
-            \Swoole\Timer::clearAll();
-            $current = \Swoole\Coroutine::getCid();
-            $cancelled = 0;
-            $stubborn = [];
-            // The stub types this `mixed`; an older runtime can return false.
-            $live = \Swoole\Coroutine::listCoroutines();
-            foreach (is_iterable($live) ? $live : [] as $cid) {
-                $cid = Row::asInt($cid);
-                if ($cid === $current) {
-                    continue;
-                }
-                if (\Swoole\Coroutine::cancel($cid)) {
-                    $cancelled++;
-                    continue;
-                }
-                // Cancellation REFUSED. This is the interesting case and it used
-                // to be invisible: the old counter only tallied successes, so a
-                // worker held past max_wait_time reported "cancelled N" and said
-                // nothing about the one coroutine actually keeping it hostage.
-                // A coroutine blocked inside a driver's syscall (a PDO query, for
-                // instance) cannot be interrupted, and that is what turns into
-                // "worker exit timeout, forced termination" — and, on a bad day,
-                // into a crash during forced teardown.
-                $stubborn[(int) $cid] = self::describeCoroutine((int) $cid);
-            }
-            if ($cancelled > 0) {
-                // Operational breadcrumb: which exits actually had parked work.
-                // warning(), not debug(): debug() returns early when no logger is
-                // wired, while warning()/error() fall back to FallbackErrorLogger.
-                // Teardown is exactly when the container may not resolve a logger,
-                // so debug() would drop this line in the one situation it exists
-                // for. Not noise either — a non-zero count means work was parked.
-                StaticLoggerBridge::warning('lifecycle', 'Worker exit cancelled parked coroutines', [
-                    'worker_id' => $workerId,
-                    'cancelled' => $cancelled,
-                ]);
-            }
-            // WorkerExit re-fires for the whole drain window, so this loop used to
-            // re-state an unchanging fact on every pass: measured, 97 stuck coroutines
-            // wrote 110061 lines and buried every real error in the same file. The
-            // reporter keeps the first sighting and re-alarms on a clock, so a worker
-            // held hostage still says so — with how long it has been held, which is the
-            // fact that explains a restart that appears to hang.
-            foreach ($drainReporter->report($stubborn, self::monotonicSeconds()) as $sighting) {
-                // Warning, not info: this is the coroutine that will hold the
-                // worker to its exit timeout, and the frame trail is the only
-                // thing that says which one.
-                StaticLoggerBridge::warning('lifecycle', 'Worker exit: coroutine refused cancellation', [
-                    'worker_id' => $workerId,
-                    'cid' => $sighting['cid'],
-                    'parked_at' => $sighting['where'],
-                    'stuck_for_seconds' => $sighting['stuck_for'],
-                    'repeat' => $sighting['repeat'],
-                ]);
-            }
+        $server->on(SwooleEvent::WorkerExit->value, function (Server $server, int $workerId) use ($bootstrapState, $lifecycleInvoker, $drain) {
+            $drain->pass($workerId);
 
             $context = new ServerLifecycleContext(
                 server: $server,
@@ -378,7 +307,7 @@ class SwooleBootstrap
 
         $emitter = new SwooleResponseEmitter();
 
-        $server->on(SwooleEvent::Request->value, function (SwooleRequest $request, SwooleResponse $response) use ($emitter, $corsHandler, $healthHandler, $metricsHandler, $staticAssetHandler, $server, $hstsHeader, $bootGate) {
+        $handleRequest = function (SwooleRequest $request, SwooleResponse $response) use ($emitter, $corsHandler, $healthHandler, $metricsHandler, $staticAssetHandler, $server, $hstsHeader, $bootGate): void {
             // Before every early return below, because HSTS has to be on the
             // boot-timeout 503, the static asset and the health check too — a browser that learns the
             // policy from one response applies it to the host, and a path that
@@ -454,6 +383,18 @@ class SwooleBootstrap
                 if (!$sent) {
                     $ensureResponseSent();
                 }
+            }
+        };
+
+        // Every request says it is in flight, so a worker that is leaving lets
+        // it finish instead of cancelling it (WorkerExitDrainPolicy).
+        $server->on(SwooleEvent::Request->value, static function (SwooleRequest $request, SwooleResponse $response) use ($handleRequest): void {
+            $cid = Coroutine::getCid();
+            InFlightRequests::enter($cid);
+            try {
+                $handleRequest($request, $response);
+            } finally {
+                InFlightRequests::leave($cid);
             }
         });
 
@@ -598,32 +539,6 @@ class SwooleBootstrap
     private static function monotonicSeconds(): float
     {
         return \hrtime(true) / 1_000_000_000;
-    }
-
-    private static function describeCoroutine(int $cid): string
-    {
-        try {
-            $frames = \Swoole\Coroutine::getBackTrace($cid);
-        } catch (\Throwable) {
-            return 'unknown (backtrace unavailable)';
-        }
-
-        if (!is_array($frames) || $frames === []) {
-            return 'unknown (empty backtrace)';
-        }
-
-        $trail = [];
-        foreach (array_slice($frames, 0, 4) as $frame) {
-            if (!is_array($frame)) {
-                continue;
-            }
-            $values = Row::of($frame);
-            $call = $values->string('class') . $values->string('type') . $values->string('function', '?');
-            $file = $values->has('file') ? basename($values->string('file')) : null;
-            $trail[] = $file !== null ? $call . ' (' . $file . ':' . $values->string('line', '?') . ')' : $call;
-        }
-
-        return $trail === [] ? 'unknown (unreadable frames)' : implode(' <- ', $trail);
     }
 
     /**
