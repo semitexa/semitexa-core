@@ -7,6 +7,7 @@ namespace Semitexa\Core\Tests\Unit\Pipeline;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
+use Semitexa\Core\Attribute\ServedRegardlessOfAccept;
 use Semitexa\Core\Discovery\DiscoveredRoute;
 use Semitexa\Core\HttpResponse;
 use Semitexa\Core\Pipeline\ResponseRenderer;
@@ -86,13 +87,13 @@ final class HandlelessResourceHonoursProducesTest extends TestCase
     }
 
     /** @param list<string>|null $produces */
-    private function route(?array $produces): DiscoveredRoute
+    private function route(?array $produces, string $requestClass = 'Stub\\Payload'): DiscoveredRoute
     {
         return new DiscoveredRoute(
             path: '/api/products',
             methods: ['GET'],
             name: 'products',
-            requestClass: 'Stub\\Payload',
+            requestClass: $requestClass,
             responseClass: 'Stub\\Response',
             handlers: [],
             type: 'http_request',
@@ -231,4 +232,25 @@ final class HandlelessResourceHonoursProducesTest extends TestCase
         self::assertInstanceOf(HttpResponse::class, $xml);
         self::assertSame(406, $xml->getStatusCode());
     }
+
+    /**
+     * robots.txt, llms.txt and the sitemaps declare their type for the AI
+     * sitemap and the route contract, and must still be served to a client
+     * with an odd Accept: Google reads a 4xx robots.txt as "no rules", and
+     * llms.txt is fetched by agents whose Accept nobody controls.
+     */
+    #[Test]
+    public function a_payload_served_regardless_of_accept_is_not_refused(): void
+    {
+        $resource = $this->resource();
+
+        $rendered = (new ResponseRenderer())->render($resource, null, $this->get('application/json'), $this->route(['text/plain'], ServedToAnyAcceptPayload::class));
+
+        self::assertSame($resource, $rendered);
+    }
+}
+
+#[ServedRegardlessOfAccept]
+final class ServedToAnyAcceptPayload
+{
 }

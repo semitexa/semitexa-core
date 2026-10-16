@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Semitexa\Core\Pipeline;
 
 use Semitexa\Core\Request;
+use Semitexa\Core\Attribute\ServedRegardlessOfAccept;
 use Semitexa\Core\HttpResponse;
 use Semitexa\Core\Http\RedirectTarget;
 use Semitexa\Core\Http\ContentType;
@@ -87,7 +88,8 @@ final class ResponseRenderer
             $produces = $route->produces;
             if ($produces !== null && $produces !== []
                 && self::mayRefuse($resDto, $request, $isReRun)
-                && !ContentNegotiator::acceptsAnyOf($produces, $request)) {
+                && !ContentNegotiator::acceptsAnyOf($produces, $request)
+                && !self::servedRegardlessOfAccept($route)) {
                 return self::notAcceptable(
                     'None of the media types this route produces is acceptable: ' . implode(', ', $produces),
                     $produces,
@@ -384,6 +386,20 @@ final class ResponseRenderer
         $status = method_exists($resDto, 'getStatusCode') ? $resDto->getStatusCode() : 200;
 
         return is_int($status) && $status >= 200 && $status < 300;
+    }
+
+    /**
+     * Read only on the way to a refusal, which is rare, so the reflection
+     * stays off the hot path.
+     */
+    private static function servedRegardlessOfAccept(DiscoveredRoute $route): bool
+    {
+        $class = $route->requestClass;
+        if (!class_exists($class)) {
+            return false;
+        }
+
+        return (new \ReflectionClass($class))->getAttributes(ServedRegardlessOfAccept::class) !== [];
     }
 
     /**
