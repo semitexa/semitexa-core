@@ -12,7 +12,7 @@ interface DeclaresWatchScopesInterface
 {
     /**
      * @param class-string $payloadClass the class the attribute sits on
-     * @return list<string>
+     * @return array<string> the scopes; keys are ignored, the caller lists them
      */
     public function watchScopes(string $payloadClass): array;
 }

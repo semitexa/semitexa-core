@@ -40,7 +40,13 @@ use Semitexa\Core\Attribute\WorkerState;
  */
 final class LogOrigin
 {
-    /** @var (\Closure(): (array{process?: string, block?: string}|null))|null */
+    /**
+     * Read back as returning anything: {@see resolveWith()} documents the
+     * shape a resolver should give, but nothing enforces it, and current()
+     * filters the answer precisely because a bad value would cost the line.
+     *
+     * @var (\Closure(): mixed)|null
+     */
     #[WorkerState('Resolver function installed at boot; it computes the per-request answer on each call.')]
     private static ?\Closure $resolver = null;
 
