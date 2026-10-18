@@ -6,6 +6,7 @@ namespace Semitexa\Core\Validation\Trait;
 
 use InvalidArgumentException;
 use Semitexa\Core\Validation\Path;
+use Semitexa\Core\Validation\ValidatorCall;
 
 /**
  * Accumulator-style collection / nested-shape validators.
@@ -56,7 +57,7 @@ trait CollectionValidationTrait
         }
         $position = 0;
         foreach ($value as $key => $item) {
-            $itemValidator($errors, $this->composeItemPath($field, $key, $position), $item);
+            ValidatorCall::apply($itemValidator, $errors, $this->composeItemPath($field, $key, $position), $item);
             $position++;
         }
     }
@@ -81,7 +82,7 @@ trait CollectionValidationTrait
             return;
         }
         foreach ($value as $index => $item) {
-            $itemValidator($errors, Path::join($field, $index), $item);
+            ValidatorCall::apply($itemValidator, $errors, Path::join($field, $index), $item);
         }
     }
 
@@ -104,8 +105,8 @@ trait CollectionValidationTrait
         $position = 0;
         foreach ($value as $key => $item) {
             $itemPath = $this->composeItemPath($field, $key, $position);
-            $keyValidator($errors, $itemPath, $key);
-            $valueValidator($errors, $itemPath, $item);
+            ValidatorCall::apply($keyValidator, $errors, $itemPath, $key);
+            ValidatorCall::apply($valueValidator, $errors, $itemPath, $item);
             $position++;
         }
     }
@@ -137,7 +138,7 @@ trait CollectionValidationTrait
                 }
                 continue;
             }
-            $definition['validator']($errors, Path::join($field, $key), $value[$key]);
+            ValidatorCall::apply($definition['validator'], $errors, Path::join($field, $key), $value[$key]);
         }
 
         if ($allowExtraFields) {
@@ -324,7 +325,10 @@ trait CollectionValidationTrait
     }
 
     /**
-     * @param array<string, array{required: bool, validator: callable(array<string, list<string>>&, string, mixed): void}> $schema
+     * Checks developer configuration at runtime, so it takes the schema as it
+     * may actually arrive rather than as the caller's docblock promises.
+     *
+     * @param array<mixed> $schema
      * @throws InvalidArgumentException
      */
     private function guardCollectionSchema(array $schema): void

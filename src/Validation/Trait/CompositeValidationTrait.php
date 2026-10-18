@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Semitexa\Core\Validation\Trait;
 
 use InvalidArgumentException;
+use Semitexa\Core\Validation\ValidatorCall;
 
 /**
  * Accumulator-style composite validators.
@@ -42,7 +43,7 @@ trait CompositeValidationTrait
     ): void {
         $this->guardValidatorList($validators);
         foreach ($validators as $validator) {
-            $validator($errors, $field, $value);
+            ValidatorCall::apply($validator, $errors, $field, $value);
         }
     }
 
@@ -60,7 +61,7 @@ trait CompositeValidationTrait
         $this->guardValidatorList($validators);
         $before = $errors[$field] ?? [];
         foreach ($validators as $validator) {
-            $validator($errors, $field, $value);
+            ValidatorCall::apply($validator, $errors, $field, $value);
             if (($errors[$field] ?? []) !== $before) {
                 return;
             }
@@ -139,7 +140,10 @@ trait CompositeValidationTrait
     }
 
     /**
-     * @param array<int, callable(array<string, list<string>>&, string, mixed): void> $validators
+     * Checks developer configuration at runtime, so it takes the list as it may
+     * actually arrive rather than as the caller's docblock promises.
+     *
+     * @param array<mixed> $validators
      */
     private function guardValidatorList(array $validators): void
     {

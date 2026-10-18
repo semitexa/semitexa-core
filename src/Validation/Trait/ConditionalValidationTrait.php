@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Validation\Trait;
 
+use Semitexa\Core\Validation\ValidatorCall;
+
 /**
  * Accumulator-style conditional validators.
  *
@@ -117,7 +119,7 @@ trait ConditionalValidationTrait
         callable $validator,
     ): void {
         if ($condition) {
-            $validator($errors, $field, $value);
+            ValidatorCall::apply($validator, $errors, $field, $value);
         }
     }
 
@@ -134,7 +136,7 @@ trait ConditionalValidationTrait
         if ($this->isBlankForCondition($value)) {
             return;
         }
-        $validator($errors, $field, $value);
+        ValidatorCall::apply($validator, $errors, $field, $value);
     }
 
     private function isBlankForCondition(mixed $value): bool
