@@ -134,7 +134,8 @@ class SwooleBootstrap
         // Built here, before start(), so every worker forks its own copy: the drain it
         // reports on is the worker's own last few seconds and must not be shared.
         $drainReporter = new WorkerExitDrainReporter();
-        $drain = new WorkerExitDrain(WorkerExitDrainPolicy::forMaxWaitTime(ServerConfigurator::MAX_WAIT_SECONDS), $drainReporter);
+        $servedConnections = new ServedConnections();
+        $drain = new WorkerExitDrain(WorkerExitDrainPolicy::forMaxWaitTime(ServerConfigurator::MAX_WAIT_SECONDS), $drainReporter, $servedConnections);
 
         $corsHandler = new CorsHandler($env);
         // Read once at boot, not per request: it is a deployment setting, and
@@ -193,7 +194,7 @@ class SwooleBootstrap
         });
 
         $server->on(SwooleEvent::WorkerExit->value, function (Server $server, int $workerId) use ($bootstrapState, $lifecycleInvoker, $drain) {
-            $drain->pass($workerId);
+            $drain->pass($workerId, $server);
 
             $context = new ServerLifecycleContext(
                 server: $server,
@@ -387,15 +388,21 @@ class SwooleBootstrap
         };
 
         // Every request says it is in flight, so a worker that is leaving lets
-        // it finish instead of cancelling it (WorkerExitDrainPolicy).
-        $server->on(SwooleEvent::Request->value, static function (SwooleRequest $request, SwooleResponse $response) use ($handleRequest): void {
+        // it finish instead of cancelling it (WorkerExitDrainPolicy), and names
+        // its connection, which the drain closes once nothing runs (ServedConnections).
+        $server->on(SwooleEvent::Request->value, static function (SwooleRequest $request, SwooleResponse $response) use ($handleRequest, $servedConnections): void {
             $cid = Row::asInt(Coroutine::getCid());
+            $servedConnections->served($request->fd);
             InFlightRequests::enter($cid);
             try {
                 $handleRequest($request, $response);
             } finally {
                 InFlightRequests::leave($cid);
             }
+        });
+
+        $server->on(SwooleEvent::Close->value, static function (Server $server, int $sessionId) use ($servedConnections): void {
+            $servedConnections->closed($sessionId);
         });
 
         $server->start();
