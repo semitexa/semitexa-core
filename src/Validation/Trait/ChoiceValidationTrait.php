@@ -208,7 +208,7 @@ trait ChoiceValidationTrait
 
     /**
      * @param array<string, list<string>> $errors
-     * @param class-string<BackedEnum>    $enumClass
+     * @param string                      $enumClass a backed enum class; checked at runtime
      * @throws InvalidArgumentException   when `$enumClass` is not a backed enum
      */
     protected function validateBackedEnumChoice(

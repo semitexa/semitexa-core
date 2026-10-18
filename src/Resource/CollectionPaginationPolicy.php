@@ -65,15 +65,7 @@ final readonly class CollectionPaginationPolicy
                 $maxPerPage,
             ));
         }
-        foreach ($perPageOptions as $option) {
-            if (!is_int($option) || $option < 1 || $option > $maxPerPage) {
-                throw new \InvalidArgumentException(sprintf(
-                    'CollectionPaginationPolicy: perPageOption %s must be an integer within [1, %d].',
-                    is_scalar($option) ? (string) $option : get_debug_type($option),
-                    $maxPerPage,
-                ));
-            }
-        }
+        self::assertPerPageOptions($perPageOptions, $maxPerPage);
         if ($countThreshold < 1) {
             throw new \InvalidArgumentException('CollectionPaginationPolicy: countThreshold must be >= 1.');
         }
@@ -87,5 +79,24 @@ final readonly class CollectionPaginationPolicy
     public static function default(): self
     {
         return new self(declared: false);
+    }
+
+    /**
+     * Checked as untyped input: the policy is built from attribute arguments,
+     * and PHP does not hold those to the list<int> the constructor documents.
+     *
+     * @param array<mixed> $options
+     */
+    private static function assertPerPageOptions(array $options, int $maxPerPage): void
+    {
+        foreach ($options as $option) {
+            if (!is_int($option) || $option < 1 || $option > $maxPerPage) {
+                throw new \InvalidArgumentException(sprintf(
+                    'CollectionPaginationPolicy: perPageOption %s must be an integer within [1, %d].',
+                    is_scalar($option) ? (string) $option : get_debug_type($option),
+                    $maxPerPage,
+                ));
+            }
+        }
     }
 }

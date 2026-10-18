@@ -196,7 +196,7 @@ trait DateTimeValidationTrait
             return false;
         }
         $errors = DateTimeImmutable::getLastErrors();
-        if ($errors !== false && (($errors['warning_count'] ?? 0) > 0 || ($errors['error_count'] ?? 0) > 0)) {
+        if ($errors !== false && ($errors['warning_count'] > 0 || $errors['error_count'] > 0)) {
             return false;
         }
         return $parsed->format($format) === $value;
@@ -204,6 +204,8 @@ trait DateTimeValidationTrait
 
     /**
      * @param array<string, list<string>> $errors
+     * @param 'before'|'beforeOrEqual'|'after'|'afterOrEqual' $mode
+     * @param 'past'|'pastOrPresent'|'future'|'futureOrPresent'|null $messageMode
      * @throws InvalidArgumentException when `$threshold` is an unparseable string
      */
     private function compareTemporally(

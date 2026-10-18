@@ -12,6 +12,7 @@ namespace Semitexa\Core\Validation\Trait;
 trait LengthValidationTrait
 {
     /**
+     * @param string|array<mixed> $value
      * @param array<string, list<string>> $errors
      */
     protected function validateLength(string $fieldName, string|array $value, ?int $min, ?int $max, array &$errors): void
