@@ -10,7 +10,8 @@ use Semitexa\Core\Environment;
 use Semitexa\Core\Server\SwooleLogRetention;
 
 /**
- * Logger that writes JSON lines to a file. Under Swoole, writes are deferred so the request is not blocked.
+ * Logger that writes JSON lines to a file. Under the Swoole server (SAPI cli) a line is written by the
+ * logging coroutine itself; see flush() for how a burst of them shares one writer.
  * Environment is injected by the container (InjectAsReadonly); config is resolved lazily on first use.
  */
 #[SatisfiesServiceContract(of: LoggerInterface::class)]
@@ -67,6 +68,8 @@ final class AsyncJsonLogger implements LoggerInterface
     /** @var list<array<string, mixed>> */
     private array $buffer = [];
     private bool $deferScheduled = false;
+    /** A coroutine of this process is writing; see flush(). */
+    private bool $writing = false;
 
     private function ensureConfig(): void
     {
@@ -191,15 +194,38 @@ final class AsyncJsonLogger implements LoggerInterface
 
     /**
      * Write buffered entries to the log file (JSON lines). Call explicitly when not using defer.
+     *
+     * One writer per logger, and the container keeps one logger per worker: a
+     * coroutine that finds a write in progress leaves its entries to that writer,
+     * which takes the buffer again until it is empty. Under
+     * SWOOLE_HOOK_FILE a contended LOCK_EX is very slow: MEASURED on Swoole 6.2.3,
+     * 200 coroutines appending one line each took 3.4 s with every append taking
+     * the lock, 0.012 s one after another. A burst like that — the drain's own
+     * warnings plus the errors of the coroutines it cancelled — held leaving workers
+     * past max_wait_time inside file_put_contents, where cancel() cannot reach.
+     * The lock stays: it is what keeps the other worker processes from interleaving.
      */
     public function flush(): void
     {
-        if ($this->buffer === []) {
+        if ($this->writing) {
             return;
         }
+        $this->writing = true;
+        try {
+            while ($this->buffer !== []) {
+                $entries = $this->buffer;
+                $this->buffer = [];
+                $this->write($entries);
+            }
+        } finally {
+            $this->writing = false;
+        }
+    }
+
+    /** @param list<array<string, mixed>> $entries */
+    private function write(array $entries): void
+    {
         $this->ensureConfig();
-        $entries = $this->buffer;
-        $this->buffer = [];
 
         $root = $this->resolveProjectRoot();
         $path = $root . '/' . ltrim($this->logFile ?? self::DEFAULT_LOG_FILE, '/');
@@ -275,7 +301,9 @@ final class AsyncJsonLogger implements LoggerInterface
             // Substitute invalid UTF-8 with U+FFFD: one stray byte from user
             // input must not cost the whole entry.
             return json_encode($entry, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE | JSON_THROW_ON_ERROR);
-        } catch (\JsonException $exception) {
+        } catch (\Throwable $exception) {
+            // Not only JsonException: a jsonSerialize() may throw anything, and the
+            // writer encodes other coroutines' entries in the same batch.
             $fallbackEntry = [
                 'timestamp' => date('c'),
                 'level' => 'error',
