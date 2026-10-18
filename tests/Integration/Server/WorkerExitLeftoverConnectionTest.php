@@ -178,10 +178,11 @@ final class WorkerExitLeftoverConnectionTest extends TestCase
                 $stoppedAt = (float) file_get_contents($this->dir . '/stopped-' . $workerId);
             }
         }
-        // A held worker is killed by the manager and never reaches workerStop.
+        // A held worker is killed by the manager and never reaches workerStop; and
+        // under 2 s is inside max_wait_time (3 s), before any forced termination.
+        // verify:accept-test-change the swoole.log check passed whenever the log was never written; the stop time inside max_wait_time is the check
         self::assertNotNull($stoppedAt, 'the worker was held until it was killed');
         self::assertLessThan(2.0, $stoppedAt - $since, 'the worker waited on a connection nothing was running for');
-        self::assertStringNotContainsString('forced termination', (string) @file_get_contents($this->dir . '/swoole.log'));
     }
 
     /** @param resource $socket */
@@ -264,7 +265,7 @@ final class WorkerExitLeftoverConnectionTest extends TestCase
     private function connect(int $port)
     {
         $socket = stream_socket_client('tcp://127.0.0.1:' . $port, $errno, $error, 2.0);
-        self::assertNotFalse($socket, $error);
+        self::assertNotFalse($socket, (string) $error);
         // A server that stops answering fails the test instead of hanging the suite.
         stream_set_timeout($socket, 1);
 

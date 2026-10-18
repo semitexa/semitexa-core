@@ -212,7 +212,13 @@ final class AsyncJsonLoggerTest extends TestCase
 
             $lines = file($absolutePath, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
             self::assertIsArray($lines);
-            self::assertCount(200, $lines, 'a line handed to the writer in progress was lost');
+            $written = array_map(
+                static fn (string $line): int => json_decode($line, true, 512, JSON_THROW_ON_ERROR)['context']['i'],
+                $lines,
+            );
+            sort($written);
+            // Every index once: a count alone passes with one line lost and another doubled.
+            self::assertSame(range(0, 199), $written, 'a line handed to the writer in progress was lost');
             self::assertLessThan(1.0, $took, 'the burst was written one contended lock at a time');
         } finally {
             \Swoole\Runtime::enableCoroutine($hooks);
