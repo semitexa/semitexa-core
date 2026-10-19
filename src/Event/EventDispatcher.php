@@ -99,7 +99,7 @@ final class EventDispatcher implements EventDispatcherInterface
 
         try {
             foreach ($listeners as $meta) {
-                $execution = EventExecution::fromAttributeValue((string) ($meta['execution'] ?? EventExecution::Sync->value));
+                $execution = EventExecution::fromAttributeValue($meta['execution']);
                 match ($execution) {
                     EventExecution::Sync => $this->runListenerSync($meta, $event, $tracer),
                     EventExecution::Async => $this->runListenerDefer($meta, $event),
