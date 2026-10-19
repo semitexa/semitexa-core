@@ -68,7 +68,9 @@ final class AsyncJsonLoggerBurstTest extends TestCase
                 [1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
                 $pipes,
                 ProjectRoot::get(),
-                ['LOG_FILE' => $relativePath . '.log', 'LOG_LEVEL' => 'debug'] + getenv(),
+                // Rotation off: an inherited LOG_MAX_BYTES below one record would move
+                // the live file aside, and only the live file is read below.
+                ['LOG_FILE' => $relativePath . '.log', 'LOG_LEVEL' => 'debug', 'LOG_MAX_BYTES' => '0'] + getenv(),
             );
             self::assertIsResource($process);
             $took = stream_get_contents($pipes[1]);
