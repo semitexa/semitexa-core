@@ -38,8 +38,10 @@ class RoutesListCommand extends BaseCommand
 
         if ($asJson) {
             $rows = [];
-            foreach ($routes as $route) {
+            foreach ($routes as $index => $route) {
                 $rows[] = [
+                    // What routes:show takes: the only way to reach one of two routes on a path.
+                    'index' => $index,
                     'path' => $route['path'] ?? '',
                     'methods' => $route['methods'] ?? [$route['method'] ?? 'GET'],
                     'name' => $route['name'] ?? null,
