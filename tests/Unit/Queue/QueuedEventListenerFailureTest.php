@@ -44,6 +44,7 @@ final class QueuedEventListenerFailureTest extends TestCase
         ];
         QueueTransportRegistry::reset();
         QueuedListenerSpyTransport::$published = [];
+        QueuedListenerSpyTransport::$publishFails = null;
         QueueTransportRegistry::register(self::TRANSPORT, new QueuedListenerSpyTransportFactory());
         QueuedListenerFixture::$received = [];
         QueuedListenerFixture::$failWith = null;
@@ -196,6 +197,43 @@ final class QueuedEventListenerFailureTest extends TestCase
         self::assertNotSame('', (string) ($letter['error'] ?? ''));
     }
 
+    /**
+     * REGRESSION (release review). Invalid UTF-8 is a likely reason a payload
+     * cannot be read, and JSON cannot carry it: the readable copy has U+FFFD
+     * where the bad byte was. The base64 copy keeps the bytes that came.
+     */
+    #[Test]
+    public function a_payload_that_is_not_valid_utf8_is_kept_byte_for_byte_beside_its_readable_copy(): void
+    {
+        $this->worker('payments')->processPayload("{\"a\":\"\xff\"}");
+
+        self::assertCount(1, QueuedListenerSpyTransport::$published);
+        $letter = json_decode(QueuedListenerSpyTransport::$published[0][1], true);
+        self::assertSame("{\"a\":\"\u{FFFD}\"}", $letter['raw'] ?? null);
+        self::assertSame("{\"a\":\"\xff\"}", base64_decode((string) ($letter['raw_base64'] ?? ''), true));
+    }
+
+    /**
+     * When the dead letter cannot be written the worker still returns, and every
+     * transport then counts the payload as handled: the log line is all that is
+     * left of it, so it says the message may be lost and names it by size and hash.
+     */
+    #[Test]
+    public function an_unreadable_payload_whose_dead_letter_fails_is_logged_as_possibly_lost_with_its_size_and_hash(): void
+    {
+        QueuedListenerSpyTransport::$publishFails = new \RuntimeException('broker down');
+        $output = new BufferedOutput();
+        $worker = $this->worker('payments');
+        $worker->setOutput($output);
+
+        $worker->processPayload('not a message');
+
+        self::assertStringContainsString(
+            sprintf('Unreadable message may be lost: the dead letter could not be written (13 bytes, sha1 %s): broker down', sha1('not a message')),
+            $output->fetch(),
+        );
+    }
+
     private function message(int $maxRetries): string
     {
         return (new QueuedEventListenerMessage(
@@ -280,8 +318,13 @@ final class QueuedListenerSpyTransport implements QueueTransportInterface
     /** @var list<array{string, string}> */
     public static array $published = [];
 
+    public static ?\Throwable $publishFails = null;
+
     public function publish(string $queueName, string $payload): void
     {
+        if (self::$publishFails !== null) {
+            throw self::$publishFails;
+        }
         self::$published[] = [$queueName, $payload];
     }
 

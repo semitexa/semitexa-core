@@ -343,7 +343,10 @@ class QueueWorker
         $this->updateStats('failed');
     }
 
-    /** A payload that is not a message cannot be retried; it is kept as it came, to be read or replayed. */
+    /**
+     * A payload that is not a message cannot be retried; it is kept as it came, to be read or replayed.
+     * JSON cannot carry invalid UTF-8, so raw is the readable copy and raw_base64 the exact bytes.
+     */
     private function deadLetterRaw(string $payload, string $error): void
     {
         try {
@@ -351,12 +354,20 @@ class QueueWorker
             $dlqName = ($this->currentQueue ?: 'default') . '.failed';
             $transport->publish($dlqName, (string) json_encode([
                 'raw' => $payload,
+                'raw_base64' => base64_encode($payload),
                 'error' => $error,
                 'failed_at' => date(DATE_ATOM),
             ], JSON_INVALID_UTF8_SUBSTITUTE));
             $this->log("📥 Unreadable message moved to DLQ: {$dlqName}", 'warning');
         } catch (\Throwable $dlqError) {
-            $this->log("❌ Failed to move message to DLQ: {$dlqError->getMessage()}", 'error');
+            // The worker still returns, so the transport counts the payload as
+            // handled: this line is all that is left of it.
+            $this->log(sprintf(
+                '❌ Unreadable message may be lost: the dead letter could not be written (%d bytes, sha1 %s): %s',
+                strlen($payload),
+                sha1($payload),
+                $dlqError->getMessage(),
+            ), 'error');
         }
     }
 
