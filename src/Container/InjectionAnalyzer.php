@@ -13,6 +13,7 @@ use Semitexa\Core\Attribute\InjectAsMutable;
 use Semitexa\Core\Attribute\InjectAsReadonly;
 use Semitexa\Core\Container\Exception\InjectionException;
 use Semitexa\Core\Discovery\AttributeDiscovery;
+use Semitexa\Core\Discovery\BootDiagnostics;
 use Semitexa\Core\Discovery\ClassDiscovery;
 use Semitexa\Core\Environment;
 use Semitexa\Core\Registry\RegistryContractResolverGenerator;
@@ -392,12 +393,42 @@ final class InjectionAnalyzer
         }
 
         return match ($targetType) {
-            'int' => (int) $raw,
-            'float' => (float) $raw,
+            'int' => $this->numericEnvValue($envKey, $raw, $default, FILTER_VALIDATE_INT),
+            'float' => $this->numericEnvValue($envKey, $raw, $default, FILTER_VALIDATE_FLOAT),
             'string' => (string) $raw,
             'bool' => (bool) filter_var($raw, FILTER_VALIDATE_BOOLEAN),
             default => $this->resolveEnvBackedEnum($raw, $targetType, $default),
         };
+    }
+
+    /**
+     * A number, or the default. `(int) "3o"` is 3 and `(int) "abc"` is 0: a
+     * misspelled timeout or limit used to become a different number, or none
+     * at all, without a word. The framework's own knobs refuse that (SseEnv),
+     * and so does #[Config] — and it says which variable it could not read.
+     */
+    private function numericEnvValue(
+        string $envKey,
+        string $raw,
+        int|float|string|bool|\BackedEnum|null $default,
+        int $filter,
+    ): int|float|string|bool|\BackedEnum|null {
+        $value = trim($raw);
+        // filter_var refuses a leading zero ("08" reads as octal to it); a
+        // zero-padded whole number is still that number, as the (int) cast had it.
+        if ($filter === FILTER_VALIDATE_INT && preg_match('/^[+-]?0+\d+$/', $value) === 1) {
+            $value = preg_replace('/^([+-]?)0+(?=\d)/', '$1', $value) ?? $value;
+        }
+        $parsed = filter_var($value, $filter, FILTER_NULL_ON_FAILURE);
+        if ($parsed !== null) {
+            return $parsed;
+        }
+        BootDiagnostics::current()->invalidUsage(
+            'Config',
+            sprintf('%s=%s is not a %s; using the default %s.', $envKey, $raw, $filter === FILTER_VALIDATE_INT ? 'whole number' : 'number', var_export($default, true)),
+        );
+
+        return $default;
     }
 
     private function resolveEnvBackedEnum(

@@ -12,6 +12,8 @@ use Semitexa\Core\Discovery\RouteRegistry;
 use Semitexa\Core\Discovery\ResolvedRouteMetadata;
 use Semitexa\Core\Environment;
 use Semitexa\Core\Error\ErrorRouteDispatcher;
+use Semitexa\Core\Exception\PayloadValidationException;
+use Semitexa\Core\Exception\ValidationException;
 use Semitexa\Core\Pipeline\ExceptionMapper;
 use Semitexa\Core\Request;
 use Semitexa\Core\HttpResponse;
@@ -44,6 +46,32 @@ final class ExceptionMapperTest extends TestCase
         self::assertSame(500, $response->getStatusCode());
         self::assertSame('application/json', $response->getHeaders()['Content-Type']);
         self::assertStringContainsString('Internal Server Error', $response->getContent());
+    }
+
+    /**
+     * The core package's own pin of the two validation answers. The app-level
+     * suites prove them through real routes (RuntimeValidationPipelineTest,
+     * PayloadValidationEnvelopeTest); this keeps core from changing them alone.
+     */
+    #[Test]
+    public function pipeline_validation_answers_422_with_the_flat_errors_body_and_a_domain_one_with_the_envelope(): void
+    {
+        $request = new Request('POST', '/contact', ['Accept' => 'application/json'], [], [], [], []);
+        $errors = ['email' => ['Must be a valid email address.']];
+
+        $pipeline = (new ExceptionMapper())->map(new PayloadValidationException($errors), $request, $this->makeMetadata(['json']));
+        self::assertSame(422, $pipeline->getStatusCode());
+        self::assertSame(['errors' => $errors], json_decode($pipeline->getContent(), true));
+
+        $domain = (new ExceptionMapper())->map(new ValidationException($errors), $request, $this->makeMetadata(['json']));
+        self::assertSame(422, $domain->getStatusCode());
+        $body = json_decode($domain->getContent(), true);
+        self::assertIsArray($body);
+        self::assertArrayHasKey('error', $body, 'a handler stating a domain rule answers with the envelope');
+        self::assertArrayNotHasKey('errors', $body);
+        self::assertSame('validation', $body['error'], 'an envelope, not a null');
+        self::assertSame('Validation failed.', $body['message'] ?? null);
+        self::assertSame($errors, $body['context']['errors'] ?? null, 'the field errors travel inside the envelope');
     }
 
     #[Test]

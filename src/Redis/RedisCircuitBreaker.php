@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Semitexa\Core\Redis;
 
 use Predis\Connection\ConnectionException;
+use Semitexa\Core\Lifecycle\WorkerDrainSignal;
 use Semitexa\Core\Log\StaticLoggerBridge;
 
 /**
@@ -20,7 +21,7 @@ use Semitexa\Core\Log\StaticLoggerBridge;
  * the others keep failing fast until it resolves. A success closes the breaker.
  *
  * Errors Redis ANSWERS (a wrong type, a script error) are not outages and never
- * open it. Mirrors semitexa-orm's ConnectCircuitBreaker.
+ * open it, and neither is a call the exit drain cancelled. Mirrors semitexa-orm's ConnectCircuitBreaker.
  *
  * Coroutine safety: state changes happen between yield points (the only
  * suspension is inside the Redis call itself), so two coroutines of one worker
@@ -94,6 +95,19 @@ final class RedisCircuitBreaker
         try {
             $result = $call();
         } catch (ConnectionException $e) {
+            // A leaving worker cancels its parked coroutines, and a Redis read
+            // cancelled mid-flight fails exactly like a lost connection. It is
+            // not an outage: opened, the breaker failed the requests the drain
+            // was sparing so they could answer (the 72h soak, 2026-10-19).
+            // Only a call the drain actually cancelled: a real outage while a
+            // spared request answers still opens it.
+            if (self::cancelledByDrain($e)) {
+                if ($isProbe && $this->probeStartedAt === $claim) {
+                    $this->probeStartedAt = null;
+                }
+
+                throw $e;
+            }
             $wasClosed = $this->lastFailure === null;
             $this->lastFailure = $e;
             $now = ($this->clock)();
@@ -140,6 +154,27 @@ final class RedisCircuitBreaker
         $this->refused = 0;
 
         return $result;
+    }
+
+    /**
+     * The call failed because the exit drain cancelled it. Two ways to tell:
+     * this coroutine's own cancelled flag, and the failure saying so — a call
+     * cut mid-read can surface as "Operation canceled" in a coroutine whose
+     * flag reads false (measured on dev: twice in five minutes of recycles).
+     * A real outage reads otherwise: refused, timed out, getaddrinfo.
+     */
+    public static function cancelledByDrain(?\Throwable $failure = null): bool
+    {
+        if (!WorkerDrainSignal::isDraining()) {
+            return false;
+        }
+        if ($failure !== null && stripos($failure->getMessage(), 'canceled') !== false) {
+            return true;
+        }
+
+        return class_exists(\Swoole\Coroutine::class, false)
+            && \Swoole\Coroutine::getCid() > 0
+            && \Swoole\Coroutine::isCanceled();
     }
 
     public function isOpen(): bool

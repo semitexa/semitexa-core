@@ -65,7 +65,7 @@ final class WorkerExitDrain
             }
         }
 
-        $current = \Swoole\Coroutine::getCid();
+        $current = Row::asInt(\Swoole\Coroutine::getCid());
         $cancelled = 0;
         $spared = 0;
         $stubborn = [];

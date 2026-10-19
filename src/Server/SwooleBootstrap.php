@@ -392,7 +392,7 @@ class SwooleBootstrap
         // its connection, which the drain closes once nothing runs (ServedConnections).
         $server->on(SwooleEvent::Request->value, static function (SwooleRequest $request, SwooleResponse $response) use ($handleRequest, $servedConnections): void {
             $cid = Row::asInt(Coroutine::getCid());
-            $servedConnections->served($request->fd);
+            $servedConnections->served(Row::asInt($request->fd));
             InFlightRequests::enter($cid);
             try {
                 $handleRequest($request, $response);

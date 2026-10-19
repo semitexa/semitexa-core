@@ -4,11 +4,13 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Tests\Unit\Redis;
 
+use PHPUnit\Framework\Attributes\RequiresPhpExtension;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Predis\Connection\ConnectionException;
 use Predis\Connection\NodeConnectionInterface;
 use Predis\Response\ServerException;
+use Semitexa\Core\Lifecycle\WorkerDrainSignal;
 use Semitexa\Core\Redis\RedisCircuitBreaker;
 use Semitexa\Core\Redis\RedisUnavailableException;
 
@@ -145,6 +147,74 @@ final class RedisCircuitBreakerTest extends TestCase
             self::assertInstanceOf(ConnectionException::class, $e->getPrevious());
             self::assertStringContainsString('getaddrinfo for redis failed', $e->getMessage());
         }
+    }
+
+    /**
+     * A leaving worker's drain cancels its parked coroutines, and a Redis read
+     * cancelled mid-flight fails exactly like a lost connection. Read as an
+     * outage it opened the breaker, and the requests the drain was sparing so
+     * they could answer then failed their own Redis calls without trying
+     * (the 72h soak, 2026-10-19: 13 such openings in five minutes of recycles).
+     */
+    #[Test]
+    #[RequiresPhpExtension('swoole')]
+    public function a_call_the_drain_cancelled_does_not_open_it(): void
+    {
+        $breaker = $this->breaker();
+        WorkerDrainSignal::begin();
+        try {
+            \Swoole\Coroutine\run(function () use ($breaker): void {
+                $cid = \Swoole\Coroutine::create(function () use ($breaker): void {
+                    \Swoole\Coroutine::sleep(5);
+                    $this->expectFailure($breaker, ConnectionException::class);
+                });
+                \Swoole\Coroutine::cancel($cid);
+            });
+        } finally {
+            WorkerDrainSignal::reset();
+        }
+
+        self::assertFalse($breaker->isOpen(), 'a read the drain cancelled is not an outage');
+        self::assertSame('PONG', $breaker->call(static fn (): string => 'PONG'), 'the next call must still reach Redis');
+    }
+
+    /**
+     * A read cut by the cancellation of the coroutine sharing its call can say
+     * "Operation canceled" in a coroutine whose own cancelled flag is false
+     * (twice on dev in five minutes of recycles). The failure says what it is.
+     */
+    #[Test]
+    public function a_failure_that_says_it_was_canceled_while_draining_does_not_open_it(): void
+    {
+        $breaker = $this->breaker();
+        WorkerDrainSignal::begin();
+        try {
+            try {
+                $breaker->call(function (): never {
+                    throw new ConnectionException($this->createMock(NodeConnectionInterface::class), 'Operation canceled [tcp://redis:6379]');
+                });
+            } catch (ConnectionException) {
+            }
+        } finally {
+            WorkerDrainSignal::reset();
+        }
+
+        self::assertFalse($breaker->isOpen());
+    }
+
+    /** A real outage while the drain spares a request still opens it. */
+    #[Test]
+    public function a_real_failure_while_the_worker_drains_still_opens_it(): void
+    {
+        $breaker = $this->breaker();
+        WorkerDrainSignal::begin();
+        try {
+            $this->expectFailure($breaker, ConnectionException::class);
+        } finally {
+            WorkerDrainSignal::reset();
+        }
+
+        self::assertTrue($breaker->isOpen());
     }
 
     private function breaker(): RedisCircuitBreaker

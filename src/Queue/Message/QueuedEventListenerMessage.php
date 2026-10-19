@@ -15,6 +15,12 @@ class QueuedEventListenerMessage implements \JsonSerializable
         public string $eventClass,
         public array $eventPayload,
         public string $queuedAt = '',
+        // A failed listener is retried this many times, then dead-lettered
+        // (QueueWorker), as a queued handler is. Absent from a message queued
+        // before these existed: decoded as no retries.
+        public int $attempts = 0,
+        public int $maxRetries = 0,
+        public int $retryDelay = 0,
     ) {
         $this->queuedAt = $queuedAt ?: date(DATE_ATOM);
     }
@@ -27,6 +33,9 @@ class QueuedEventListenerMessage implements \JsonSerializable
             'eventClass' => $this->eventClass,
             'eventPayload' => $this->eventPayload,
             'queuedAt' => $this->queuedAt,
+            'attempts' => $this->attempts,
+            'maxRetries' => $this->maxRetries,
+            'retryDelay' => $this->retryDelay,
         ];
     }
 
@@ -46,6 +55,9 @@ class QueuedEventListenerMessage implements \JsonSerializable
             eventClass: $data['eventClass'],
             eventPayload: $data['eventPayload'] ?? [],
             queuedAt: $data['queuedAt'] ?? date(DATE_ATOM),
+            attempts: (int) ($data['attempts'] ?? 0),
+            maxRetries: (int) ($data['maxRetries'] ?? 0),
+            retryDelay: (int) ($data['retryDelay'] ?? 0),
         );
     }
 }

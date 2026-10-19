@@ -20,7 +20,7 @@ use Semitexa\Core\Support\PayloadSerializer;
  *
  * @internal Uses ContainerFactory::get() — this is core framework plumbing, not application code.
  *
-@phpstan-type ListenerMeta array{class: string, event: string, execution: string, transport: mixed, queue: mixed, priority: int}
+@phpstan-type ListenerMeta array{class: string, event: string, execution: string, transport: mixed, queue: mixed, priority: int, maxRetries?: int, retryDelay?: int}
  */
 #[SatisfiesServiceContract(of: EventDispatcherInterface::class)]
 final class EventDispatcher implements EventDispatcherInterface
@@ -99,7 +99,7 @@ final class EventDispatcher implements EventDispatcherInterface
 
         try {
             foreach ($listeners as $meta) {
-                $execution = EventExecution::fromAttributeValue((string) ($meta['execution'] ?? EventExecution::Sync->value));
+                $execution = EventExecution::fromAttributeValue($meta['execution']);
                 match ($execution) {
                     EventExecution::Sync => $this->runListenerSync($meta, $event, $tracer),
                     EventExecution::Async => $this->runListenerDefer($meta, $event),
@@ -275,6 +275,8 @@ final class EventDispatcher implements EventDispatcherInterface
             listenerClass: $meta['class'],
             eventClass: get_class($event),
             eventPayload: PayloadSerializer::toArray($event),
+            maxRetries: (int) ($meta['maxRetries'] ?? 0),
+            retryDelay: (int) ($meta['retryDelay'] ?? 0),
         );
 
         $transport = QueueTransportRegistry::create($transportName);

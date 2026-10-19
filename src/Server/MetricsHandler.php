@@ -46,6 +46,10 @@ final class MetricsHandler
 
         /** @var array<string, mixed> $stats */
         $stats = $this->server->stats();
+        // Which worker answered: every per-worker field below is that worker's,
+        // so a reader sampling /metrics repeatedly (tools/soak/soak.sh) needs to
+        // tell the workers apart to follow one worker's memory over time.
+        $stats['worker_pid'] = getmypid();
         $stats['worker_memory_usage'] = memory_get_usage(true);
         $stats['worker_memory_peak'] = memory_get_peak_usage(true);
         // This worker's own limit (the CLI's can differ) and where the memory

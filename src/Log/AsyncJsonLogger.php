@@ -8,6 +8,7 @@ use Semitexa\Core\Attribute\SatisfiesServiceContract;
 use Semitexa\Core\Attribute\InjectAsReadonly;
 use Semitexa\Core\Environment;
 use Semitexa\Core\Server\SwooleLogRetention;
+use Semitexa\Core\Support\AppendLine;
 
 /**
  * Logger that writes JSON lines to a file. Under the Swoole server (SAPI cli) a line is written by the
@@ -203,7 +204,9 @@ final class AsyncJsonLogger implements LoggerInterface
      * the lock, 0.012 s one after another. A burst like that — the drain's own
      * warnings plus the errors of the coroutines it cancelled — held leaving workers
      * past max_wait_time inside file_put_contents, where cancel() cannot reach.
-     * The lock stays: it is what keeps the other worker processes from interleaving.
+     * The lock the worker PROCESSES share is tried, not waited for
+     * ({@see AppendLine}): the 72h soak found a recycled worker killed with its
+     * requests while it waited for it.
      */
     public function flush(): void
     {
@@ -238,7 +241,7 @@ final class AsyncJsonLogger implements LoggerInterface
             $line .= $this->encodeEntry($entry) . "\n";
         }
         error_clear_last();
-        if (@file_put_contents($path, $line, FILE_APPEND | LOCK_EX) === false) {
+        if (!AppendLine::to($path, $line)) {
             $lastError = error_get_last();
             $errorMessage = is_array($lastError)
                 ? $lastError['message']
