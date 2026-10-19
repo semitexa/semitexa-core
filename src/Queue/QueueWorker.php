@@ -225,8 +225,11 @@ class QueueWorker
             $this->log("✅ Async event listener executed: {$message->listenerClass}", 'success');
             $this->updateStats('processed');
         } catch (\Throwable $e) {
+            // Retried, then dead-lettered, as a queued handler is. It used to
+            // be logged and acknowledged: the event was gone, while the docs
+            // promise retry and a DLQ for exactly the work that must not be lost.
             $this->log("❌ Error executing event listener: {$e->getMessage()}", 'error');
-            $this->updateStats('failed');
+            $this->retryOrDeadLetter($message, $e->getMessage());
         }
     }
 
@@ -289,41 +292,54 @@ class QueueWorker
             $this->updateStats('processed');
         } catch (\Throwable $e) {
             $this->log("❌ Error executing handler: {$e->getMessage()}", 'error');
-
-            if ($message->attempts < $message->maxRetries) {
-                $this->messageRetried = true;
-                $message->attempts++;
-                $delay = $message->retryDelay;
-                $this->log("ℹ️  Retrying handler ({$message->attempts}/{$message->maxRetries}) in {$delay}s...", 'warning');
-
-                if ($delay > 0) {
-                    if (\Swoole\Coroutine::getCid() > 0) {
-                        \Swoole\Coroutine::sleep($delay);
-                    } else {
-                        sleep($delay);
-                    }
-                }
-
-                if ($this->currentTransport && $this->currentQueue) {
-                    $transport = QueueTransportRegistry::create($this->currentTransport);
-                    $transport->publish($this->currentQueue, $message->toJson());
-                }
-            } else {
-                $this->log("💀 Max retries reached or no retries configured. Moving to DLQ.", 'error');
-                $this->moveToDeadLetterQueue($message, $e->getMessage());
-                $this->updateStats('failed');
-            }
+            $this->retryOrDeadLetter($message, $e->getMessage());
         }
     }
 
-    private function moveToDeadLetterQueue(QueuedHandlerMessage $message, string $error): void
+    /**
+     * A failed message gets `maxRetries` more attempts on the queue being
+     * consumed, `retryDelay` seconds apart, then goes to `<queue>.failed`.
+     */
+    private function retryOrDeadLetter(QueuedHandlerMessage|QueuedEventListenerMessage $message, string $error): void
+    {
+        if ($message->attempts < $message->maxRetries) {
+            $this->messageRetried = true;
+            $message->attempts++;
+            $delay = $message->retryDelay;
+            $kind = $message instanceof QueuedHandlerMessage ? 'handler' : 'listener';
+            $this->log("ℹ️  Retrying {$kind} ({$message->attempts}/{$message->maxRetries}) in {$delay}s...", 'warning');
+
+            if ($delay > 0) {
+                if (\Swoole\Coroutine::getCid() > 0) {
+                    \Swoole\Coroutine::sleep($delay);
+                } else {
+                    sleep($delay);
+                }
+            }
+
+            if ($this->currentTransport && $this->currentQueue) {
+                $transport = QueueTransportRegistry::create($this->currentTransport);
+                $transport->publish($this->currentQueue, $message->toJson());
+            }
+
+            return;
+        }
+
+        $this->log("💀 Max retries reached or no retries configured. Moving to DLQ.", 'error');
+        $this->moveToDeadLetterQueue($message, $error);
+        $this->updateStats('failed');
+    }
+
+    private function moveToDeadLetterQueue(QueuedHandlerMessage|QueuedEventListenerMessage $message, string $error): void
     {
         try {
             // Next to the queue being consumed: the process defaults can name a
             // different transport (in-memory when EVENTS_ASYNC is unset), where
             // the dead letter would vanish with the process.
             $transport = QueueTransportRegistry::create($this->currentTransport ?: QueueConfig::defaultTransport());
-            $dlqName = ($this->currentQueue ?: QueueConfig::defaultQueueName($message->requestClass)) . '.failed';
+            $dlqName = ($this->currentQueue ?: QueueConfig::defaultQueueName(
+                $message instanceof QueuedHandlerMessage ? $message->requestClass : $message->eventClass,
+            )) . '.failed';
             $data = $message->jsonSerialize();
             $data['error'] = $error;
             $data['failed_at'] = date(DATE_ATOM);

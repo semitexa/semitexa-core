@@ -15,6 +15,10 @@ use Semitexa\Core\Event\EventExecution;
  * Sync, Async (Swoole defer), or Queued.
  *
  * Implies #[ExecutionScoped]: a fresh clone is created for each execution.
+ *
+ * Queued only: a listener that throws is retried `maxRetries` times, `retryDelay`
+ * seconds apart, then moved to the dead-letter queue `<queue>.failed` — the same
+ * policy as {@see AsPayloadHandler}. Ignored for Sync and Async.
  */
 #[Attribute(Attribute::TARGET_CLASS)]
 class AsEventListener
@@ -27,6 +31,8 @@ class AsEventListener
         public ?string $transport = null,
         public ?string $queue = null,
         public ?int $priority = null,
+        public int $maxRetries = 0,
+        public int $retryDelay = 0,
     ) {
         $this->execution = match (true) {
             $execution instanceof EventExecution => $execution,

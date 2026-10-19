@@ -16,7 +16,7 @@ use ReflectionClass;
  */
 final class EventListenerRegistry
 {
-    /** @var array<string, array<array{class: string, event: string, execution: string, transport: mixed, queue: mixed, priority: int}>> */
+    /** @var array<string, array<array{class: string, event: string, execution: string, transport: mixed, queue: mixed, priority: int, maxRetries?: int, retryDelay?: int}>> */
     private array $listenersByEvent = [];
 
     private bool $built = false;
@@ -27,7 +27,7 @@ final class EventListenerRegistry
     ) {}
 
     /**
-     * @return array<array{class: string, event: string, execution: string, transport: mixed, queue: mixed, priority: int}>
+     * @return array<array{class: string, event: string, execution: string, transport: mixed, queue: mixed, priority: int, maxRetries?: int, retryDelay?: int}>
      */
     public function getListeners(string $eventClass): array
     {
@@ -71,6 +71,8 @@ final class EventListenerRegistry
                     'transport' => $transport ?: null,
                     'queue' => $queue ?: null,
                     'priority' => $priority,
+                    'maxRetries' => max(0, $attr->maxRetries),
+                    'retryDelay' => max(0, $attr->retryDelay),
                 ];
                 if (!isset($this->listenersByEvent[$eventClass])) {
                     $this->listenersByEvent[$eventClass] = [];
