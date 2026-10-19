@@ -174,6 +174,58 @@ final class AsyncJsonLoggerTest extends TestCase
         }
     }
 
+    /**
+     * REGRESSION. Under SWOOLE_HOOK_FILE every coroutine taking LOCK_EX on its own
+     * serialised a burst through Swoole's slow contended-lock path: 200 lines took
+     * 3.4 s, and leaving workers were held past max_wait_time inside
+     * file_put_contents, where cancel() cannot reach. One writer per process
+     * writes the same burst in milliseconds.
+     */
+    #[Test]
+    public function a_burst_of_coroutines_logging_at_once_is_written_without_lock_contention(): void
+    {
+        if (!function_exists('Swoole\Coroutine\run')) {
+            self::markTestSkipped('Needs the Swoole extension.');
+        }
+        ProjectRoot::reset();
+        $relativePath = 'var/tmp/async-json-logger-burst-' . bin2hex(random_bytes(6)) . '.log';
+        $absolutePath = ProjectRoot::get() . '/' . $relativePath;
+
+        putenv('LOG_FILE=' . $relativePath);
+        putenv('LOG_LEVEL=debug');
+
+        $hooks = \Swoole\Runtime::getHookFlags();
+        \Swoole\Runtime::enableCoroutine(SWOOLE_HOOK_ALL);
+        try {
+            $logger = new AsyncJsonLogger();
+            $this->injectEnvironment($logger);
+
+            $startedAt = microtime(true);
+            \Swoole\Coroutine\run(static function () use ($logger): void {
+                for ($i = 0; $i < 200; $i++) {
+                    \Swoole\Coroutine::create(static function () use ($logger, $i): void {
+                        $logger->warning('burst', ['i' => $i]);
+                    });
+                }
+            });
+            $took = microtime(true) - $startedAt;
+
+            $lines = file($absolutePath, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+            self::assertIsArray($lines);
+            $written = array_map(
+                static fn (string $line): int => json_decode($line, true, 512, JSON_THROW_ON_ERROR)['context']['i'],
+                $lines,
+            );
+            sort($written);
+            // Every index once: a count alone passes with one line lost and another doubled.
+            self::assertSame(range(0, 199), $written, 'a line handed to the writer in progress was lost');
+            self::assertLessThan(1.0, $took, 'the burst was written one contended lock at a time');
+        } finally {
+            \Swoole\Runtime::enableCoroutine($hooks);
+            @unlink($absolutePath);
+        }
+    }
+
     private function injectEnvironment(AsyncJsonLogger $logger): void
     {
         $property = new \ReflectionProperty($logger, 'environment');

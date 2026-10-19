@@ -19,7 +19,8 @@ use Semitexa\Core\Support\Row;
  * "all coroutines are asleep - deadlock!". So every user timer is cleared and
  * every parked coroutine cancelled: cancellation turns an immortal wait into a
  * catchable failure on code that already handles transport errors. A request
- * being answered is the exception, see {@see WorkerExitDrainPolicy}.
+ * being answered is the exception, see {@see WorkerExitDrainPolicy}. A third
+ * hostage is a connection with nothing left to run, see closeLeftoverConnections().
  *
  * Built before start(), like {@see WorkerExitDrainReporter}, so every worker
  * forks its own copy: the state here is one worker's last few seconds.
@@ -31,14 +32,18 @@ final class WorkerExitDrain
     /** @var array<int, true> */
     private array $everCancelled = [];
     private bool $toldWaiting = false;
+    /** @var array<int, true> */
+    private array $closedSessions = [];
+    private bool $toldClosed = false;
 
     public function __construct(
         private readonly WorkerExitDrainPolicy $policy,
         private readonly WorkerExitDrainReporter $reporter,
+        private readonly ServedConnections $connections,
     ) {
     }
 
-    public function pass(int $workerId): void
+    public function pass(int $workerId, \Swoole\Server $server): void
     {
         // FIRST, before any cancellation is attempted: work that cancel() cannot reach
         // stands down by reading this instead. cancel() is an attempt, not a signal —
@@ -116,6 +121,11 @@ final class WorkerExitDrain
             });
             $this->wakeAtGraceEnd = $wake;
         }
+        // Counted after the cancellations: cancel() resumes a coroutine at once, and
+        // one that ended there must not put the close off to the pass at the deadline.
+        if (self::othersAlive($current) === 0) {
+            $this->closeLeftoverConnections($server, $workerId);
+        }
         if ($spared > 0 && !$this->toldWaiting) {
             // The one thing keeping the worker now is requests being answered;
             // said once, so a slow exit is not a mystery.
@@ -156,6 +166,70 @@ final class WorkerExitDrain
                 'repeat' => $sighting['repeat'],
             ]);
         }
+    }
+
+    /**
+     * Nothing runs any more, yet Swoole can still wait on a connection. The stop
+     * removes every connection's read event, but a response still flushing then
+     * (a big page, a slow reader) keeps its write event, and when that flush ends
+     * Swoole sets the socket back to READ — re-arming the read the stop removed.
+     * An idle keep-alive client on it then holds the worker to "worker exit
+     * timeout, forced termination" with no coroutine and no timer left (measured:
+     * 23 in one platform-ui E2E run at SWOOLE_MAX_REQUEST=20, each worker's epoll
+     * holding exactly such a client socket). Closing is what the forced exit does
+     * to them anyway, only seconds later; a close on a flushing connection is
+     * queued behind its data, so no response is cut. A request still arriving,
+     * with no coroutine yet, is cut, as the forced exit would cut it. The sessions come from
+     * {@see ServedConnections}: $server->connections can miss exactly these.
+     */
+    private function closeLeftoverConnections(\Swoole\Server $server, int $workerId): void
+    {
+        // Only BASE mode keeps a worker's connections in the worker; elsewhere a
+        // close is forwarded and would cut a client another process is serving.
+        if ($server->mode !== SWOOLE_BASE) {
+            return;
+        }
+        $closed = 0;
+        foreach ($this->connections->sessionIds() as $sessionId) {
+            if (isset($this->closedSessions[$sessionId])) {
+                continue;
+            }
+            $info = $server->getClientInfo($sessionId);
+            if (!is_array($info)) {
+                $this->closedSessions[$sessionId] = true;
+                continue;
+            }
+            if (($info['reactor_id'] ?? null) !== $workerId) {
+                continue;
+            }
+            // Marked only once closed: a session Swoole is still releasing refuses
+            // the close, and a later pass must try it again.
+            if ($server->close($sessionId)) {
+                $this->closedSessions[$sessionId] = true;
+                $closed++;
+            }
+        }
+        // Once per exit: passes repeat for the whole window.
+        if ($closed > 0 && !$this->toldClosed) {
+            $this->toldClosed = true;
+            StaticLoggerBridge::warning('lifecycle', 'Worker exit closed connections nothing was running for', [
+                'worker_id' => $workerId,
+                'connections' => $closed,
+            ]);
+        }
+    }
+
+    private static function othersAlive(int $current): int
+    {
+        $alive = 0;
+        $live = \Swoole\Coroutine::listCoroutines();
+        foreach (is_iterable($live) ? $live : [] as $cid) {
+            if (Row::asInt($cid) !== $current) {
+                $alive++;
+            }
+        }
+
+        return $alive;
     }
 
     /** MONOTONIC seconds, the clock the reporter requires. */

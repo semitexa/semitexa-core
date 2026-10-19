@@ -13,4 +13,5 @@ enum SwooleEvent: string
     case Start = 'Start';
     case Shutdown = 'Shutdown';
     case Request = 'request';
+    case Close = 'close';
 }
