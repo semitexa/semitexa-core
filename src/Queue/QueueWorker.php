@@ -116,6 +116,7 @@ class QueueWorker
                 $data = json_decode($payload, true, 512, JSON_THROW_ON_ERROR);
             } catch (\Throwable $e) {
                 $this->log("❌ Failed to decode queued message: {$e->getMessage()}", 'error');
+                $this->deadLetterRaw($payload, "not JSON: {$e->getMessage()}");
                 $this->updateStats('failed');
                 return;
             }
@@ -124,6 +125,7 @@ class QueueWorker
             // root can tell a (valid, empty) object from an array message.
             if (!is_array($data) || !str_starts_with(ltrim($payload), '{')) {
                 $this->log('❌ Queued message is not a JSON object', 'error');
+                $this->deadLetterRaw($payload, 'not a JSON object');
                 $this->updateStats('failed');
                 return;
             }
@@ -193,12 +195,15 @@ class QueueWorker
             $message = QueuedEventListenerMessage::fromJson($payload);
         } catch (\Throwable $e) {
             $this->log("❌ Failed to decode event message: {$e->getMessage()}", 'error');
+            $this->deadLetterRaw($payload, "not an event message: {$e->getMessage()}");
             $this->updateStats('failed');
             return;
         }
 
+        // A class that is gone does not come back on a retry: straight to the dead letter.
         if (!class_exists($message->listenerClass)) {
             $this->log("⚠️  Event listener {$message->listenerClass} not found", 'warning');
+            $this->moveToDeadLetterQueue($message, "listener class {$message->listenerClass} not found");
             $this->updateStats('failed');
             return;
         }
@@ -211,12 +216,16 @@ class QueueWorker
             $listener = $container->get($message->listenerClass);
             if (!method_exists($listener, 'handle')) {
                 $this->log("⚠️  Listener {$message->listenerClass} has no handle() method", 'warning');
+                $this->moveToDeadLetterQueue($message, "listener {$message->listenerClass} has no handle() method");
                 $this->updateStats('failed');
                 return;
             }
         } catch (\Throwable $e) {
+            // The event could not be rebuilt or the listener not built: the
+            // listener's own policy, as for a throw inside it — not acknowledged
+            // and dropped, which lost the event on every delivery.
             $this->log("❌ Error preparing event listener: {$e->getMessage()}", 'error');
-            $this->updateStats('failed');
+            $this->retryOrDeadLetter($message, "could not prepare the listener: {$e->getMessage()}");
             return;
         }
 
@@ -239,6 +248,7 @@ class QueueWorker
             $message = QueuedHandlerMessage::fromJson($payload);
         } catch (\Throwable $e) {
             $this->log("❌ Failed to decode handler message: {$e->getMessage()}", 'error');
+            $this->deadLetterRaw($payload, "not a handler message: {$e->getMessage()}");
             $this->updateStats('failed');
             return;
         }
@@ -246,6 +256,7 @@ class QueueWorker
         $handlerClass = $message->handlerClass;
         if (!class_exists($handlerClass)) {
             $this->log("⚠️  Handler {$handlerClass} not found", 'warning');
+            $this->moveToDeadLetterQueue($message, "handler class {$handlerClass} not found");
             $this->updateStats('failed');
             return;
         }
@@ -276,12 +287,13 @@ class QueueWorker
             $handler = $container->get($handlerClass);
             if (!method_exists($handler, 'handle')) {
                 $this->log("⚠️  Handler {$handlerClass} has no handle() method", 'warning');
+                $this->moveToDeadLetterQueue($message, "handler {$handlerClass} has no handle() method");
                 $this->updateStats('failed');
                 return;
             }
         } catch (\Throwable $e) {
             $this->log("❌ Error processing payload: {$e->getMessage()}", 'error');
-            $this->updateStats('failed');
+            $this->retryOrDeadLetter($message, "could not prepare the handler: {$e->getMessage()}");
             return;
         }
 
@@ -329,6 +341,23 @@ class QueueWorker
         $this->log("💀 Max retries reached or no retries configured. Moving to DLQ.", 'error');
         $this->moveToDeadLetterQueue($message, $error);
         $this->updateStats('failed');
+    }
+
+    /** A payload that is not a message cannot be retried; it is kept as it came, to be read or replayed. */
+    private function deadLetterRaw(string $payload, string $error): void
+    {
+        try {
+            $transport = QueueTransportRegistry::create($this->currentTransport ?: QueueConfig::defaultTransport());
+            $dlqName = ($this->currentQueue ?: 'default') . '.failed';
+            $transport->publish($dlqName, (string) json_encode([
+                'raw' => $payload,
+                'error' => $error,
+                'failed_at' => date(DATE_ATOM),
+            ], JSON_INVALID_UTF8_SUBSTITUTE));
+            $this->log("📥 Unreadable message moved to DLQ: {$dlqName}", 'warning');
+        } catch (\Throwable $dlqError) {
+            $this->log("❌ Failed to move message to DLQ: {$dlqError->getMessage()}", 'error');
+        }
     }
 
     private function moveToDeadLetterQueue(QueuedHandlerMessage|QueuedEventListenerMessage $message, string $error): void

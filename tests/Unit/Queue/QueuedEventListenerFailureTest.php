@@ -138,6 +138,64 @@ final class QueuedEventListenerFailureTest extends TestCase
         self::assertSame([0, 0, 0], [$message->attempts, $message->maxRetries, $message->retryDelay]);
     }
 
+    /**
+     * REGRESSION (release review). A message that fails before the listener
+     * runs — its class is gone, or its event cannot be rebuilt (a constructor
+     * with required arguments) — was logged and acknowledged: no retry, no
+     * dead letter, the event lost on every delivery.
+     */
+    #[Test]
+    public function a_listener_class_that_no_longer_exists_is_dead_lettered(): void
+    {
+        $payload = (new QueuedEventListenerMessage(
+            listenerClass: 'App\\Gone\\RemovedListener',
+            eventClass: QueuedListenerEvent::class,
+            eventPayload: ['orderId' => 'o-9'],
+        ))->toJson();
+
+        $this->worker('payments')->processPayload($payload);
+
+        self::assertCount(1, QueuedListenerSpyTransport::$published);
+        [$queue, $letter] = QueuedListenerSpyTransport::$published[0];
+        self::assertSame('payments.failed', $queue);
+        $letter = json_decode($letter, true);
+        self::assertSame(['orderId' => 'o-9'], $letter['eventPayload'] ?? null);
+        self::assertStringContainsString('App\\Gone\\RemovedListener', (string) ($letter['error'] ?? ''));
+    }
+
+    #[Test]
+    public function an_event_that_cannot_be_rebuilt_is_retried_then_dead_lettered(): void
+    {
+        $payload = fn (int $attempts): string => (new QueuedEventListenerMessage(
+            listenerClass: QueuedListenerFixture::class,
+            eventClass: QueuedListenerEventWithRequiredArgument::class,
+            eventPayload: ['orderId' => 'o-3'],
+            attempts: $attempts,
+            maxRetries: 1,
+        ))->toJson();
+
+        $this->worker('payments')->processPayload($payload(0));
+        $this->worker('payments')->processPayload($payload(1));
+
+        self::assertSame(['payments', 'payments.failed'], array_column(QueuedListenerSpyTransport::$published, 0), 'one retry, then the dead letter');
+        $letter = json_decode(QueuedListenerSpyTransport::$published[1][1], true);
+        self::assertSame(QueuedListenerEventWithRequiredArgument::class, $letter['eventClass'] ?? null);
+        self::assertNotSame('', (string) ($letter['error'] ?? ''));
+    }
+
+    #[Test]
+    public function a_payload_that_is_not_a_message_is_dead_lettered_as_it_came(): void
+    {
+        $this->worker('payments')->processPayload('{"type": "event", broken');
+
+        self::assertCount(1, QueuedListenerSpyTransport::$published);
+        [$queue, $letter] = QueuedListenerSpyTransport::$published[0];
+        self::assertSame('payments.failed', $queue);
+        $letter = json_decode($letter, true);
+        self::assertSame('{"type": "event", broken', $letter['raw'] ?? null, 'kept byte for byte, to be read or replayed');
+        self::assertNotSame('', (string) ($letter['error'] ?? ''));
+    }
+
     private function message(int $maxRetries): string
     {
         return (new QueuedEventListenerMessage(
@@ -185,6 +243,19 @@ final class QueuedListenerEvent
     public function setOrderId(string $orderId): void
     {
         $this->orderId = $orderId;
+    }
+}
+
+/** An event the worker cannot rebuild: it hydrates through a constructor without arguments. */
+final class QueuedListenerEventWithRequiredArgument
+{
+    public function __construct(private string $orderId)
+    {
+    }
+
+    public function getOrderId(): string
+    {
+        return $this->orderId;
     }
 }
 
