@@ -8,6 +8,7 @@ use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Semitexa\Core\Attribute\Config;
 use Semitexa\Core\Container\InjectionAnalyzer;
+use Semitexa\Core\Discovery\BootDiagnostics;
 
 /**
  * What #[Config] actually puts in a property. Until this test nothing did more
@@ -19,11 +20,30 @@ final class ConfigInjectionTest extends TestCase
 {
     private const KEYS = ['SEMITEXA_CFG_TEST_INT', 'SEMITEXA_CFG_TEST_BOOL', 'SEMITEXA_CFG_TEST_MODE', 'SEMITEXA_CFG_TEST_RATIO', 'SEMITEXA_CFG_TEST_NAME'];
 
-    protected function tearDown(): void
+    /** @var array<string, string|false> what each key held before the test */
+    private array $savedEnv = [];
+
+    private ?BootDiagnostics $savedDiagnostics = null;
+
+    protected function setUp(): void
     {
         foreach (self::KEYS as $key) {
+            $this->savedEnv[$key] = getenv($key);
             putenv($key);
         }
+        // A misspelled value is recorded on the process-wide collector; give the
+        // test its own and put the suite's back after.
+        $current = new \ReflectionProperty(BootDiagnostics::class, 'current');
+        $this->savedDiagnostics = $current->getValue();
+        $current->setValue(null, null);
+    }
+
+    protected function tearDown(): void
+    {
+        foreach ($this->savedEnv as $key => $value) {
+            putenv($value === false ? $key : "{$key}={$value}");
+        }
+        (new \ReflectionProperty(BootDiagnostics::class, 'current'))->setValue(null, $this->savedDiagnostics);
     }
 
     #[Test]
@@ -81,6 +101,14 @@ final class ConfigInjectionTest extends TestCase
 
         self::assertSame(30, $target->int());
         self::assertSame(0.5, $target->ratio());
+    }
+
+    #[Test]
+    public function a_zero_padded_whole_number_is_still_that_number(): void
+    {
+        putenv('SEMITEXA_CFG_TEST_INT=08');
+
+        self::assertSame(8, $this->inject()->int());
     }
 
     private function inject(): ConfigInjectionTarget

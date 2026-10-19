@@ -310,7 +310,8 @@ class QueueWorker
             $this->log("ℹ️  Retrying {$kind} ({$message->attempts}/{$message->maxRetries}) in {$delay}s...", 'warning');
 
             if ($delay > 0) {
-                if (\Swoole\Coroutine::getCid() > 0) {
+                // A CLI worker may run without Swoole: then there is no coroutine to yield.
+                if (class_exists(\Swoole\Coroutine::class, false) && \Swoole\Coroutine::getCid() > 0) {
                     \Swoole\Coroutine::sleep($delay);
                 } else {
                     sleep($delay);

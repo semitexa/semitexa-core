@@ -69,6 +69,9 @@ final class ExceptionMapperTest extends TestCase
         self::assertIsArray($body);
         self::assertArrayHasKey('error', $body, 'a handler stating a domain rule answers with the envelope');
         self::assertArrayNotHasKey('errors', $body);
+        self::assertSame('validation', $body['error'], 'an envelope, not a null');
+        self::assertSame('Validation failed.', $body['message'] ?? null);
+        self::assertSame($errors, $body['context']['errors'] ?? null, 'the field errors travel inside the envelope');
     }
 
     #[Test]

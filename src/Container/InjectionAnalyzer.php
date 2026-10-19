@@ -413,7 +413,13 @@ final class InjectionAnalyzer
         int|float|string|bool|\BackedEnum|null $default,
         int $filter,
     ): int|float|string|bool|\BackedEnum|null {
-        $parsed = filter_var(trim($raw), $filter, FILTER_NULL_ON_FAILURE);
+        $value = trim($raw);
+        // filter_var refuses a leading zero ("08" reads as octal to it); a
+        // zero-padded whole number is still that number, as the (int) cast had it.
+        if ($filter === FILTER_VALIDATE_INT && preg_match('/^[+-]?0+\d+$/', $value) === 1) {
+            $value = preg_replace('/^([+-]?)0+(?=\d)/', '$1', $value) ?? $value;
+        }
+        $parsed = filter_var($value, $filter, FILTER_NULL_ON_FAILURE);
         if ($parsed !== null) {
             return $parsed;
         }

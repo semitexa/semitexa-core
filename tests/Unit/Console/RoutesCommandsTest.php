@@ -49,7 +49,9 @@ final class RoutesCommandsTest extends TestCase
     #[Test]
     public function every_index_routes_list_prints_is_the_route_routes_show_shows(): void
     {
-        foreach ($this->json(new RoutesListCommand(), []) as $row) {
+        $rows = $this->json(new RoutesListCommand(), []);
+        self::assertCount(3, $rows, 'an empty list would compare nothing');
+        foreach ($rows as $row) {
             $shown = $this->json(new RoutesShowCommand(), ['id' => (string) $row['index']]);
             self::assertSame([$row['path'], $row['methods'], $row['class']], [$shown['path'], $shown['methods'], $shown['payload']['class']]);
         }
