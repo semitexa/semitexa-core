@@ -21,8 +21,14 @@ class QueuedHandlerMessage implements \JsonSerializable
         public int $attempts = 0,
         public int $maxRetries = 0,
         public int $retryDelay = 0,
+        /**
+         * When it entered the queue, in ms — again on each retry, so the
+         * time a job waited is start minus this, not minus the first attempt.
+         */
+        public int $publishedAt = 0,
     ) {
         $this->queuedAt = $queuedAt ?: date(DATE_ATOM);
+        $this->publishedAt = $publishedAt ?: self::nowMs();
     }
 
     public function jsonSerialize(): array
@@ -39,6 +45,7 @@ class QueuedHandlerMessage implements \JsonSerializable
             'attempts' => $this->attempts,
             'maxRetries' => $this->maxRetries,
             'retryDelay' => $this->retryDelay,
+            'publishedAt' => $this->publishedAt,
         ];
     }
 
@@ -81,7 +88,26 @@ class QueuedHandlerMessage implements \JsonSerializable
             attempts: $data['attempts'] ?? 0,
             maxRetries: $data['maxRetries'] ?? 0,
             retryDelay: $data['retryDelay'] ?? 0,
+            publishedAt: self::publishedAtOf($data),
         );
     }
+
+    /** Now, in milliseconds: when a message enters a queue. */
+    public static function nowMs(): int
+    {
+        return (int) floor(microtime(true) * 1000);
+    }
+
+    /** A message queued before publishedAt existed: its queuedAt, to the second. */
+    private static function publishedAtOf(array $data): int
+    {
+        if (is_numeric($data['publishedAt'] ?? null)) {
+            return (int) $data['publishedAt'];
+        }
+        $queuedAt = is_string($data['queuedAt'] ?? null) ? strtotime($data['queuedAt']) : false;
+
+        return $queuedAt !== false ? $queuedAt * 1000 : self::nowMs();
+    }
+
 }
 

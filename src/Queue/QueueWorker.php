@@ -130,7 +130,9 @@ class QueueWorker
             }
 
             $type = $data['type'] ?? 'handler';
-            $target = $data['listenerClass'] ?? $data['handlerClass'] ?? $type;
+            // A handler message carries its class as `handler`; reading only
+            // `handlerClass` named every queued handler job "handler".
+            $target = $data['listenerClass'] ?? $data['handler'] ?? $data['handlerClass'] ?? $type;
             $tracer?->begin('job', [
                 'kind' => 'queue',
                 'route' => is_string($target) ? $target : 'queue-message',
@@ -331,6 +333,7 @@ class QueueWorker
             }
 
             if ($this->currentTransport && $this->currentQueue) {
+                $message->publishedAt = $message::nowMs();
                 $transport = QueueTransportRegistry::create($this->currentTransport);
                 $transport->publish($this->currentQueue, $message->toJson());
             }
