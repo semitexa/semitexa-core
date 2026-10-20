@@ -166,6 +166,9 @@ final class CurlHttpClientCoroutineTest extends TestCase
                 }
                 $results['hugePeakMb'] = (memory_get_peak_usage() - $base0) / 1e6;
 
+                $results['truncated'] = $client->get($base . '/huge', [], new HttpCallOptions(maxResponseBytes: 1000, truncateOversized: true));
+                $results['raw'] = $client->get($base . '/bomb', [], new HttpCallOptions(maxResponseBytes: 1_000_000, decodeContent: false));
+
                 $follow = new HttpCallOptions(followRedirects: true);
                 $results['away'] = $client->get($base . '/away', ['Authorization' => 'Bearer secret', 'Accept' => 'application/json'], $follow);
                 $results['home'] = $client->get($base . '/home', ['Authorization' => 'Bearer secret'], $follow);
@@ -209,6 +212,9 @@ final class CurlHttpClientCoroutineTest extends TestCase
         self::assertLessThan(10.0, $results['bombPeakMb'], 'a gzip bomb stops at the cap, not in memory');
         self::assertSame(HttpTransportKind::TooLarge, $results['huge']->kind);
         self::assertLessThan(10.0, $results['hugePeakMb'], '20 MB against a 2 MB cap stays bounded');
+
+        self::assertSame([200, 1000], [$results['truncated']->status, strlen($results['truncated']->body)], 'kept the first 1000 bytes and succeeded');
+        self::assertSame(strlen($bomb), strlen($results['raw']->body), 'decodeContent: false returns the bytes as sent');
 
         // review: a redirect to another origin carried the Authorization header there.
         self::assertSame(200, $results['away']->status);

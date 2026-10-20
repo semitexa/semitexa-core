@@ -13,6 +13,14 @@ final readonly class HttpCallOptions
         public float $connectTimeout = 5.0,
         /** A larger body fails the call (HttpTransportKind::TooLarge) instead of filling memory. */
         public int $maxResponseBytes = 16 * 1024 * 1024,
+        /** Keep the first maxResponseBytes of a larger body and succeed, instead of failing. */
+        public bool $truncateOversized = false,
+        /**
+         * Inflate a body the server encoded although identity was asked for.
+         * Off returns the bytes as sent — for a store that keeps an object's
+         * own Content-Encoding (S3) and hands it back whatever was asked.
+         */
+        public bool $decodeContent = true,
         /** Off by default: a redirect to another host would carry the request's credentials there. */
         public bool $followRedirects = false,
         /** Ignore HTTP(S)_PROXY from the environment. */

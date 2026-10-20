@@ -120,6 +120,7 @@ final class CurlHttpClient implements HttpClientInterface
         $received = 0;
         $tooLarge = false;
         $max = $options->maxResponseBytes;
+        $truncate = $options->truncateOversized;
         $onChunk = $options->onChunk;
 
         $headerLines = [];
@@ -151,12 +152,21 @@ final class CurlHttpClient implements HttpClientInterface
 
                 return strlen($line);
             },
-            CURLOPT_WRITEFUNCTION => static function ($handle, string $chunk) use (&$body, &$received, &$tooLarge, &$forwarded, &$status, $max, $onChunk): int {
-                $received += strlen($chunk);
+            CURLOPT_WRITEFUNCTION => static function ($handle, string $chunk) use (&$body, &$received, &$tooLarge, &$forwarded, &$status, $max, $truncate, $onChunk): int {
+                $length = strlen($chunk);
+                $room = $max - $received;
+                $received += $length;
                 if ($received > $max) {
-                    $tooLarge = true;
+                    if (!$truncate) {
+                        $tooLarge = true;
 
-                    return 0;
+                        return 0;
+                    }
+                    // Keep what fits, read and drop the rest.
+                    $chunk = $room > 0 ? substr($chunk, 0, $room) : '';
+                    if ($chunk === '') {
+                        return $length;
+                    }
                 }
                 // Only a successful response is a stream; an error body is kept
                 // for the caller to read, and is what a retry may discard.
@@ -167,7 +177,7 @@ final class CurlHttpClient implements HttpClientInterface
                     $body .= $chunk;
                 }
 
-                return strlen($chunk);
+                return $length;
             },
         ];
         if ($request->method === 'HEAD') {
@@ -205,7 +215,9 @@ final class CurlHttpClient implements HttpClientInterface
         }
 
         [$block, $headers] = self::finalHeaders($rawHeaders);
-        $body = self::decoded($body, $headers['content-encoding'][0] ?? null, $max, $request);
+        if ($options->decodeContent) {
+            $body = self::decoded($body, $headers['content-encoding'][0] ?? null, $max, $request);
+        }
         $code = $httpCode !== 0 ? $httpCode : $status;
 
         // The hook calls WRITEFUNCTION before HEADERFUNCTION has told the
