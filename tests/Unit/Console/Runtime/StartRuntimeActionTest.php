@@ -14,8 +14,8 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 
 /**
  * The PHP server:start (vendor/bin/semitexa on the host) chooses the same
- * compose files as bin/semitexa: the queue worker's own file with
- * EVENTS_ASYNC=1 (tk-pip-no-queue-worker), and the values the overlays give
+ * compose files as bin/semitexa: the worker's own file whenever it is there
+ * (tk-pip-no-queue-worker, tk-worker-runs-mail-work), and the values the overlays give
  * the app, written for the worker to var/run/worker.env.
  */
 final class StartRuntimeActionTest extends TestCase
@@ -73,12 +73,12 @@ final class StartRuntimeActionTest extends TestCase
     }
 
     #[Test]
-    public function without_async_events_no_worker_runs(): void
+    public function without_async_events_the_worker_still_runs_for_the_scheduler_and_webhooks(): void
     {
         $this->environment(['EVENTS_ASYNC' => '0', 'DB_DRIVER' => 'mysql', 'REDIS_HOST' => '', 'LLM_PROVIDER' => '']);
         $action = $this->action();
 
-        self::assertSame(['-f', 'docker-compose.yml', '-f', 'docker-compose.mysql.yml'], $action->getComposeArgs());
+        self::assertSame(['-f', 'docker-compose.yml', '-f', 'docker-compose.worker.yml', '-f', 'docker-compose.mysql.yml'], $action->getComposeArgs());
         self::assertSame(['DB_HOST' => 'mysql', 'DB_PORT' => '3306'], $action->workerEnvironment());
     }
 

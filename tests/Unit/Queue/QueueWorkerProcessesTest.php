@@ -73,6 +73,21 @@ final class QueueWorkerProcessesTest extends TestCase
         self::assertSame(['5 queue:work nats async'], $lines);
     }
 
+    /**
+     * A queue name the worker container cannot pass as one word is left out
+     * and said; the other queues still get their worker (review).
+     */
+    #[Test]
+    public function a_queue_name_that_is_not_one_word_is_skipped_and_the_others_still_run(): void
+    {
+        $lines = $this->queues([
+            ['class' => 'App\\Shop\\Odd', 'event' => 'App\\Shop\\OrderPaid', 'execution' => 'queued', 'transport' => null, 'queue' => 'two words'],
+            ['class' => 'App\\Shop\\Audit', 'event' => 'App\\Shop\\OrderPaid', 'execution' => 'queued', 'transport' => null, 'queue' => 'audit'],
+        ], []);
+
+        self::assertSame(['5 queue:work nats audit', '5 queue:work nats events'], $lines);
+    }
+
     /** A queue only this process can read gets no worker: nothing could consume it there. */
     #[Test]
     public function a_process_local_transport_gets_no_worker(): void

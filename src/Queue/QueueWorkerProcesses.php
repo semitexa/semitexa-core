@@ -10,6 +10,7 @@ use Semitexa\Core\Attribute\InjectAsReadonly;
 use Semitexa\Core\Contract\WorkerProcessSourceInterface;
 use Semitexa\Core\Discovery\AttributeDiscovery;
 use Semitexa\Core\Event\EventListenerRegistry;
+use Semitexa\Core\Log\StaticLoggerBridge;
 
 /**
  * One `queue:work <transport> <queue>` per queue the project's queued
@@ -57,8 +58,14 @@ final class QueueWorkerProcesses implements WorkerProcessSourceInterface
         ksort($queues);
         $processes = [];
         foreach ($queues as [$transport, $queue]) {
-            if (!QueueConfig::isProcessLocal($transport)) {
+            if (QueueConfig::isProcessLocal($transport)) {
+                continue;
+            }
+            // One odd name must not take every other queue's worker with it.
+            try {
                 $processes[] = new WorkerProcess(['queue:work', $transport, $queue]);
+            } catch (\InvalidArgumentException $e) {
+                StaticLoggerBridge::warning('core', "Queue '{$queue}' on '{$transport}' gets no worker: " . $e->getMessage(), []);
             }
         }
 

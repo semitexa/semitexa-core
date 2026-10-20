@@ -119,8 +119,9 @@ final class StartRuntimeAction
         $async = ['1', 'true', 'yes'];
 
         return array_values(array_filter([
-            // The queue worker, in a container of its own: something is queued exactly when EVENTS_ASYNC=1.
-            $this->shouldUseOverlay($projectRoot, 'docker-compose.worker.yml', 'EVENTS_ASYNC', $async) ? 'docker-compose.worker.yml' : null,
+            // The worker, in a container of its own, whatever EVENTS_ASYNC says: the
+            // scheduler and webhook delivery need no broker (bin/semitexa does the same).
+            file_exists($projectRoot . '/docker-compose.worker.yml') ? 'docker-compose.worker.yml' : null,
             $this->shouldUseOverlay($projectRoot, 'docker-compose.nats.yml', 'EVENTS_ASYNC', $async) ? 'docker-compose.nats.yml' : null,
             $this->shouldUseOverlay($projectRoot, 'docker-compose.mysql.yml', 'DB_DRIVER', ['mysql', 'mysqli', 'mariadb']) ? 'docker-compose.mysql.yml' : null,
             $this->shouldUseOverlay($projectRoot, 'docker-compose.redis.yml', 'REDIS_HOST') ? 'docker-compose.redis.yml' : null,
