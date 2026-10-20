@@ -2,24 +2,23 @@
 
 declare(strict_types=1);
 
-namespace Semitexa\Core\Tests\Unit\Console;
+namespace Semitexa\Core\Tests\Unit\Queue;
 
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
-use Semitexa\Core\Application\Console\Command\QueueQueuesCommand;
 use Semitexa\Core\Discovery\AttributeDiscovery;
 use Semitexa\Core\Discovery\HandlerRegistry;
 use Semitexa\Core\Event\EventListenerRegistry;
-use Symfony\Component\Console\Command\Command;
-use Symfony\Component\Console\Tester\CommandTester;
+use Semitexa\Core\Queue\QueueWorkerProcesses;
+use Semitexa\Core\Queue\WorkerProcess;
 
 /**
- * queue:queues — every transport and queue an installed project's worker has
- * to consume (tk-pip-no-queue-worker). queue:work consumes one queue, and the
- * demo's own listeners publish to 'async' and 'demo.notifications', not the
+ * The queue:work processes the worker container runs (tk-pip-no-queue-worker):
+ * one per transport and queue an installed project publishes to. queue:work
+ * consumes one queue, and the demo's own listeners publish to 'async', not the
  * default 'events': a worker on the default queue alone left them unconsumed.
  */
-final class QueueQueuesCommandTest extends TestCase
+final class QueueWorkerProcessesTest extends TestCase
 {
     /** @var array<string, string|false> */
     private array $env = [];
@@ -43,7 +42,7 @@ final class QueueQueuesCommandTest extends TestCase
     #[Test]
     public function it_lists_the_default_queue_and_every_queue_a_queued_listener_or_async_handler_declares(): void
     {
-        $tester = $this->queues([
+        $lines = $this->queues([
             ['class' => 'App\\Shop\\SendReceipt', 'event' => 'App\\Shop\\OrderPaid', 'execution' => 'queued', 'transport' => null, 'queue' => 'mail'],
             ['class' => 'App\\Shop\\Audit', 'event' => 'App\\Shop\\OrderPaid', 'execution' => 'queued', 'transport' => null, 'queue' => null],
             ['class' => 'App\\Shop\\Ledger', 'event' => 'App\\Shop\\OrderPaid', 'execution' => 'queued', 'transport' => 'database', 'queue' => 'ledger'],
@@ -51,16 +50,15 @@ final class QueueQueuesCommandTest extends TestCase
         ], [
             ['class' => 'App\\Shop\\ExportHandler', 'payload' => 'App\\Shop\\ExportPayload', 'resource' => 'App\\Shop\\ExportResource', 'execution' => 'async', 'transport' => null, 'queue' => 'exports', 'priority' => 0],
             ['class' => 'App\\Shop\\PageHandler', 'payload' => 'App\\Shop\\PagePayload', 'resource' => 'App\\Shop\\PageResource', 'execution' => 'sync', 'transport' => null, 'queue' => 'never-queued', 'priority' => 0],
-        ], []);
+        ]);
 
-        self::assertSame(Command::SUCCESS, $tester->getStatusCode(), $tester->getDisplay());
-        self::assertSame("database ledger\nnats events\nnats exports\nnats mail\n", $tester->getDisplay());
+        self::assertSame(['5 queue:work database ledger', '5 queue:work nats events', '5 queue:work nats exports', '5 queue:work nats mail'], $lines);
     }
 
     #[Test]
     public function with_nothing_queued_the_default_queue_is_still_listed_so_one_worker_runs(): void
     {
-        self::assertSame("nats events\n", $this->queues([], [], [])->getDisplay());
+        self::assertSame(['5 queue:work nats events'], $this->queues([], []));
     }
 
     #[Test]
@@ -68,34 +66,30 @@ final class QueueQueuesCommandTest extends TestCase
     {
         putenv('EVENTS_QUEUE_DEFAULT=async');
 
-        $tester = $this->queues([
+        $lines = $this->queues([
             ['class' => 'App\\Shop\\Audit', 'event' => 'App\\Shop\\OrderPaid', 'execution' => 'queued', 'transport' => null, 'queue' => null],
-        ], [], []);
+        ], []);
 
-        self::assertSame("nats async\n", $tester->getDisplay());
+        self::assertSame(['5 queue:work nats async'], $lines);
     }
 
+    /** A queue only this process can read gets no worker: nothing could consume it there. */
     #[Test]
-    public function json_names_what_consumes_each_queue(): void
+    public function a_process_local_transport_gets_no_worker(): void
     {
-        $tester = $this->queues([
-            ['class' => 'App\\Shop\\SendReceipt', 'event' => 'App\\Shop\\OrderPaid', 'execution' => 'queued', 'transport' => null, 'queue' => 'mail'],
-        ], [
-            ['class' => 'App\\Shop\\MailHandler', 'payload' => 'App\\Shop\\MailPayload', 'resource' => 'App\\Shop\\MailResource', 'execution' => 'async', 'transport' => null, 'queue' => 'mail', 'priority' => 0],
-        ], ['--json' => true]);
+        $lines = $this->queues([
+            ['class' => 'App\\Shop\\Audit', 'event' => 'App\\Shop\\OrderPaid', 'execution' => 'queued', 'transport' => 'in-memory', 'queue' => 'audit'],
+        ], []);
 
-        self::assertSame([
-            ['transport' => 'nats', 'queue' => 'events', 'declared_by' => []],
-            ['transport' => 'nats', 'queue' => 'mail', 'declared_by' => ['App\\Shop\\MailHandler', 'App\\Shop\\SendReceipt']],
-        ], json_decode($tester->getDisplay(), true));
+        self::assertSame(['5 queue:work nats events'], $lines);
     }
 
     /**
      * @param list<array{class: string, event: string, execution: string, transport: ?string, queue: ?string}> $listeners
      * @param list<array{class: string, payload: string, resource: string, execution: string, transport: ?string, queue: ?string, priority: int}> $handlers
-     * @param array<string, mixed> $input
+     * @return list<string> the lines worker:processes prints for them
      */
-    private function queues(array $listeners, array $handlers, array $input): CommandTester
+    private function queues(array $listeners, array $handlers): array
     {
         $registry = (new \ReflectionClass(EventListenerRegistry::class))->newInstanceWithoutConstructor();
         $byEvent = [];
@@ -110,13 +104,11 @@ final class QueueQueuesCommandTest extends TestCase
             $handlerRegistry->register($meta['payload'], $meta['resource'], $meta);
         }
 
-        $command = new QueueQueuesCommand();
-        (new \ReflectionProperty($command, 'attributeDiscovery'))->setValue($command, new QueueQueuesFixtureDiscovery($handlerRegistry));
-        (new \ReflectionProperty($command, 'eventListenerRegistry'))->setValue($command, $registry);
-        $tester = new CommandTester($command);
-        $tester->execute($input, ['decorated' => false]);
+        $source = new QueueWorkerProcesses();
+        (new \ReflectionProperty($source, 'attributeDiscovery'))->setValue($source, new QueueQueuesFixtureDiscovery($handlerRegistry));
+        (new \ReflectionProperty($source, 'eventListenerRegistry'))->setValue($source, $registry);
 
-        return $tester;
+        return array_map(static fn (WorkerProcess $p): string => $p->line(), $source->workerProcesses());
     }
 }
 
