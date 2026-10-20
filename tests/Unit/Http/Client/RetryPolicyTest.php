@@ -62,6 +62,34 @@ final class RetryPolicyTest extends TestCase
     }
 
     #[Test]
+    public function a_server_cannot_make_the_client_sleep_for_days_or_crash_it(): void
+    {
+        // review: a 23-digit Retry-After became a float (TypeError under
+        // strict_types), and linear() had no cap: 999999 s was 11.5 days.
+        $never = static fn (int $min, int $max): int => 0;
+        self::assertSame(RetryPolicy::MAX_RETRY_AFTER_MS, RetryPolicy::retryAfterMs('99999999999999999999999', 0));
+        self::assertSame(30_000, RetryPolicy::linear(3)->delayMs(1, RetryPolicy::retryAfterMs('999999', 0), $never), 'the policy cap, under the global one');
+        self::assertNull(RetryPolicy::retryAfterMs('+10 years', 0), 'only an HTTP date, not anything strtotime() takes');
+        self::assertSame(30_000, RetryPolicy::linear(1000, 500)->delayMs(999, null, $never), 'linear is capped too');
+    }
+
+    #[Test]
+    public function a_header_cannot_write_a_header_of_its_own_and_the_method_is_upper_cased(): void
+    {
+        foreach ([['X-A', "v\r\nX-Injected: 1"], ['X-A', "v\nX: 1"], ['X-A', "v\0"], ['X:A', 'v'], ['X A', 'v'], ['', 'v']] as [$name, $value]) {
+            try {
+                HttpRequest::make('GET', 'http://x.test/')->withHeader($name, $value);
+                self::fail('accepted header ' . json_encode([$name, $value]));
+            } catch (\InvalidArgumentException) {
+            }
+        }
+
+        self::assertSame('HEAD', (new HttpRequest('head', 'http://x.test/'))->method, 'a lower-case head must still set NOBODY');
+        $this->expectException(\InvalidArgumentException::class);
+        new HttpRequest("GET\r\nX: 1", 'http://x.test/');
+    }
+
+    #[Test]
     public function a_transport_failure_names_no_query_string_header_or_body(): void
     {
         $e = new HttpTransportException(HttpTransportKind::Timeout, 'GET', 'https://user:pw@api.example.test:8443/v1/x?key=sk-secret', 'Operation timed out');
