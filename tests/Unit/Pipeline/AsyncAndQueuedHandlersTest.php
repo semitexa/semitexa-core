@@ -8,9 +8,12 @@ use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Psr\Container\ContainerInterface;
 use Psr\Container\NotFoundExceptionInterface;
+use Semitexa\Core\Container\ExecutionContext;
+use Semitexa\Core\Container\SemitexaContainer;
 use Semitexa\Core\Contract\ResourceInterface;
 use Semitexa\Core\Contract\TypedHandlerInterface;
 use Semitexa\Core\Discovery\DiscoveredRoute;
+use Semitexa\Core\Lifecycle\CarriedContext;
 use Semitexa\Core\Log\LoggerInterface;
 use Semitexa\Core\Log\StaticLoggerBridge;
 use Semitexa\Core\Pipeline\PipelineExecutor;
@@ -22,18 +25,25 @@ use Semitexa\Core\Queue\QueueTransportInterface;
 use Semitexa\Core\Queue\QueueTransportRegistry;
 use Semitexa\Core\Queue\Transport\InMemoryTransport;
 use Semitexa\Core\Request;
+use Semitexa\Core\Server\AfterResponse;
 use Semitexa\Core\Server\SwooleBootstrap;
+use Semitexa\Core\Support\CoroutineLocal;
 use Semitexa\Core\Tests\Support\StaticState;
 
 /**
- * REGRESSION (tk-async-handler-without-async-events). With EVENTS_ASYNC=0 the
- * queue transport is in-memory: one per worker process, and nothing in that
- * process consumes it. An #[AsPayloadHandler(execution: Async)] handler was
- * published into it and never ran. It now runs in the process, after the
- * response, as a worker would run it: on copies, so the response it was sent
- * with stays as it was, and a failure is logged, not thrown.
+ * Where a payload handler runs (tk-handler-execution-sync-async-queued).
+ *
+ * Queued goes through a queue to a worker. With EVENTS_ASYNC=0 the transport
+ * is in-memory: one per worker process, and nothing in that process consumes
+ * it, so the handler was published into it and never ran
+ * (tk-async-handler-without-async-events). It runs in the process instead,
+ * after the response, as a worker would run it: on copies, so the response it
+ * was sent with stays as it was, and a failure is logged, not thrown.
+ *
+ * Async runs in the process always, after the response, with the request's
+ * context, and again on every re-run of a live region; Queued is not re-run.
  */
-final class AsyncHandlerWithoutAsyncEventsTest extends TestCase
+final class AsyncAndQueuedHandlersTest extends TestCase
 {
     /** @var list<string> */
     private array $errors = [];
@@ -44,6 +54,9 @@ final class AsyncHandlerWithoutAsyncEventsTest extends TestCase
     {
         AsyncProbeLog::$calls = [];
         AsyncProbeLog::$received = [];
+        AsyncProbeContextHandler::$seen = [];
+        AsyncProbeContextHandler::$cids = [];
+        AsyncProbeContextHandler::$container = null;
         $logger = (new \ReflectionProperty(StaticLoggerBridge::class, 'logger'))->getValue();
         $this->loggerSnapshot = $logger instanceof LoggerInterface ? $logger : null;
         $this->errors = [];
@@ -62,11 +75,12 @@ final class AsyncHandlerWithoutAsyncEventsTest extends TestCase
 
     protected function tearDown(): void
     {
+        CarriedContext::reset();
         (new \ReflectionProperty(StaticLoggerBridge::class, 'logger'))->setValue(null, $this->loggerSnapshot);
     }
 
     #[Test]
-    public function without_async_events_an_async_handler_runs_on_copies_and_the_response_is_untouched(): void
+    public function without_async_events_a_queued_handler_runs_on_copies_and_the_response_is_untouched(): void
     {
         $this->withoutAsyncEvents(function (): void {
             $context = $this->context([AsyncProbeHandler::class]);
@@ -120,9 +134,6 @@ final class AsyncHandlerWithoutAsyncEventsTest extends TestCase
     #[Test]
     public function inside_a_request_it_runs_after_the_request_in_the_order_declared(): void
     {
-        if (!extension_loaded('swoole')) {
-            self::markTestSkipped('needs Swoole coroutines');
-        }
         $this->withoutAsyncEvents(function (): void {
             $seenDuringRequest = null;
             \Swoole\Coroutine\run(function () use (&$seenDuringRequest): void {
@@ -138,7 +149,7 @@ final class AsyncHandlerWithoutAsyncEventsTest extends TestCase
     }
 
     #[Test]
-    public function a_failing_async_handler_is_logged_and_the_request_completes(): void
+    public function a_failing_handler_is_logged_and_the_request_completes(): void
     {
         $this->withoutAsyncEvents(function (): void {
             $context = $this->context([AsyncProbeThrowingHandler::class, AsyncProbeHandler::class]);
@@ -169,6 +180,131 @@ final class AsyncHandlerWithoutAsyncEventsTest extends TestCase
         }
     }
 
+    /**
+     * tk-deferred-work-on-held-open-connections: a re-run tick of a held-open
+     * connection acts on nothing. Its HandlerCompleted broadcast was deferred
+     * to the connection's end, one a tick, and its queued handlers ran (or
+     * were published) every time the data changed.
+     */
+    #[Test]
+    public function a_re_run_runs_no_queued_handler_and_dispatches_no_handler_completed(): void
+    {
+        $this->withoutAsyncEvents(function (): void {
+            $tracer = new AsyncProbeTracer();
+
+            $this->executor($tracer, reRun: true)->execute($this->context([AsyncProbeHandler::class]));
+
+            self::assertSame([], AsyncProbeLog::$calls);
+            self::assertSame([], $tracer->queuedInProcess());
+            self::assertSame([
+                ['pipeline.handler.skipped', ['handler' => AsyncProbeHandler::class, 'reason' => 're_run']],
+                ['pipeline.handler_completed.skipped', ['reason' => 're_run']],
+            ], $tracer->marks);
+        });
+    }
+
+    /** Async meant "through a queue" until 2026-10; it is the process now, whatever the transport. */
+    #[Test]
+    public function an_async_handler_runs_in_the_process_even_with_a_transport_a_worker_reads(): void
+    {
+        $state = StaticState::snapshot(QueueTransportRegistry::class);
+        AsyncProbeSpyTransport::$published = [];
+        QueueTransportRegistry::register('async-probe-spy', new AsyncProbeSpyTransportFactory());
+        try {
+            $this->withEnv(['EVENTS_ASYNC' => '1', 'EVENTS_TRANSPORT' => 'async-probe-spy'], function (): void {
+                $tracer = new AsyncProbeTracer();
+
+                $this->executor($tracer)->execute($this->context([AsyncProbeHandler::class], 'async'));
+
+                self::assertSame([AsyncProbeHandler::class], AsyncProbeLog::$calls);
+                self::assertSame([], AsyncProbeSpyTransport::$published);
+                self::assertSame([
+                    ['pipeline.handler.async', ['handler' => AsyncProbeHandler::class]],
+                    ['pipeline.handler_completed.skipped', ['reason' => 'no_handler_ran']],
+                ], $tracer->marks);
+            });
+        } finally {
+            StaticState::restore($state);
+        }
+    }
+
+    /** Its resource is part of the live region's frame, delivered later: a re-run needs it fresh. */
+    #[Test]
+    public function a_re_run_runs_an_async_handler_again(): void
+    {
+        $tracer = new AsyncProbeTracer();
+
+        $this->executor($tracer, reRun: true)->execute($this->context([AsyncProbeHandler::class], 'async'));
+
+        self::assertSame([AsyncProbeHandler::class], AsyncProbeLog::$calls);
+        self::assertSame([
+            ['pipeline.handler.async', ['handler' => AsyncProbeHandler::class]],
+            ['pipeline.handler_completed.skipped', ['reason' => 're_run']],
+        ], $tracer->marks);
+    }
+
+    /**
+     * It runs after the request has cleared its context: the container's
+     * execution context, and what stores keep beside it (the tenant, the
+     * signed-in user, the locale). It gets the request's. A Queued one does
+     * not, as a worker would not.
+     */
+    #[Test]
+    public function an_async_handler_runs_in_the_requests_context_and_a_queued_one_does_not(): void
+    {
+        $this->withoutAsyncEvents(function (): void {
+            [$container, $request] = $this->requestContext();
+            \Swoole\Coroutine\run(function () use ($container, $request): void {
+                $key = (new \ReflectionClassConstant(SwooleBootstrap::class, 'COROUTINE_CONTEXT_KEY'))->getValue();
+                \Swoole\Coroutine::getContext()[$key] = true;
+                $container->setExecutionContext(new ExecutionContext(request: $request));
+                CoroutineLocal::set('test.tenant', 'acme');
+                foreach (['async', 'queued'] as $execution) {
+                    $this->executor(container: $container)->execute($this->context([AsyncProbeContextHandler::class], $execution));
+                }
+                // What the request does once the response is out.
+                $container->clearExecutionContext();
+                CoroutineLocal::remove('test.tenant');
+            });
+
+            self::assertSame([[$request, 'acme'], [null, null]], AsyncProbeContextHandler::$seen);
+        });
+    }
+
+    /** On a re-run tick it runs in a coroutine of its own, which never had the request's context. */
+    #[Test]
+    public function on_a_re_run_tick_an_async_handler_still_runs_in_the_requests_context(): void
+    {
+        [$container, $request] = $this->requestContext();
+        $during = null;
+        $requestCid = 0;
+        \Swoole\Coroutine\run(function () use ($container, $request, &$during, &$requestCid): void {
+            $requestCid = (int) \Swoole\Coroutine::getCid();
+            $key = (new \ReflectionClassConstant(SwooleBootstrap::class, 'COROUTINE_CONTEXT_KEY'))->getValue();
+            \Swoole\Coroutine::getContext()[$key] = true;
+            $container->setExecutionContext(new ExecutionContext(request: $request));
+            CoroutineLocal::set('test.tenant', 'acme');
+            AfterResponse::tick(fn () => $this->executor(reRun: true, container: $container)->execute($this->context([AsyncProbeContextHandler::class], 'async')));
+            $during = AsyncProbeContextHandler::$seen;
+            \Swoole\Coroutine::sleep(0.01);
+        });
+
+        self::assertSame([], $during, 'after the tick, not in it');
+        self::assertSame([[$request, 'acme']], AsyncProbeContextHandler::$seen);
+        self::assertNotSame($requestCid, AsyncProbeContextHandler::$cids[0], 'in a coroutine of its own');
+    }
+
+    /** @return array{SemitexaContainer, Request} */
+    private function requestContext(): array
+    {
+        $container = new SemitexaContainer();
+        $container->set(PipelineListenerRegistry::class, new AsyncProbeNoListeners());
+        AsyncProbeContextHandler::$container = $container;
+        CarriedContext::carry('test.tenant');
+
+        return [$container, new Request('GET', '/report', [], [], [], [], [])];
+    }
+
     private function withoutAsyncEvents(callable $run): void
     {
         // Named, not unset: an unset value falls back to the project's .env.
@@ -192,21 +328,23 @@ final class AsyncHandlerWithoutAsyncEventsTest extends TestCase
         }
     }
 
-    private function executor(?AsyncProbeTracer $tracer = null): PipelineExecutor
+    private function executor(?AsyncProbeTracer $tracer = null, bool $reRun = false, ?ContainerInterface $container = null): PipelineExecutor
     {
         return new PipelineExecutor(
             new AsyncProbeContainer([
                 AsyncProbeHandler::class => new AsyncProbeHandler(),
                 AsyncProbeSecondHandler::class => new AsyncProbeSecondHandler(),
                 AsyncProbeThrowingHandler::class => new AsyncProbeThrowingHandler(),
+                AsyncProbeContextHandler::class => new AsyncProbeContextHandler(),
             ]),
-            new AsyncProbeContainer([PipelineListenerRegistry::class => new AsyncProbeNoListeners()]),
+            $container ?? new AsyncProbeContainer([PipelineListenerRegistry::class => new AsyncProbeNoListeners()]),
             $tracer,
+            $reRun,
         );
     }
 
     /** @param list<class-string> $handlers */
-    private function context(array $handlers): RequestPipelineContext
+    private function context(array $handlers, string $execution = 'queued'): RequestPipelineContext
     {
         $route = new DiscoveredRoute(
             path: '/export',
@@ -214,7 +352,7 @@ final class AsyncHandlerWithoutAsyncEventsTest extends TestCase
             name: 'export',
             requestClass: AsyncProbePayload::class,
             responseClass: AsyncProbeResource::class,
-            handlers: array_map(static fn (string $h): array => ['class' => $h, 'execution' => 'async'], $handlers),
+            handlers: array_map(static fn (string $h): array => ['class' => $h, 'execution' => $execution], $handlers),
             type: 'http-request',
             transport: null,
             produces: null,
@@ -300,6 +438,25 @@ final class AsyncProbeThrowingHandler implements TypedHandlerInterface
         AsyncProbeLog::$calls[] = self::class;
 
         throw new \RuntimeException('export failed');
+    }
+}
+
+final class AsyncProbeContextHandler implements TypedHandlerInterface
+{
+    public static ?SemitexaContainer $container = null;
+
+    /** @var list<array{?Request, mixed}> the request in the execution context and the carried tenant, each run */
+    public static array $seen = [];
+
+    /** @var list<int> the coroutine each run was in */
+    public static array $cids = [];
+
+    public function handle(AsyncProbePayload $payload, AsyncProbeResource $resource): AsyncProbeResource
+    {
+        self::$seen[] = [self::$container?->captureExecutionContext()->request, CoroutineLocal::get('test.tenant')];
+        self::$cids[] = (int) \Swoole\Coroutine::getCid();
+
+        return $resource;
     }
 }
 

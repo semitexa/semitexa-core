@@ -77,7 +77,7 @@ final class RoutesCommandsTest extends TestCase
         self::assertSame(RoutesFixtureCreateOrder::class, $byName['payload']['class']);
         self::assertSame(['Shop', 'protected'], [$byName['payload']['module'], $byName['accessType']]);
         self::assertSame([RoutesFixtureAuditHandler::class, RoutesFixtureCreateHandler::class], array_column($byName['handlers'], 'class'), 'highest priority first');
-        self::assertSame(['async', 'audit', 5], [$byName['handlers'][0]['execution'], $byName['handlers'][0]['queue'], $byName['handlers'][0]['maxRetries']]);
+        self::assertSame(['queued', 'audit', 5], [$byName['handlers'][0]['execution'], $byName['handlers'][0]['queue'], $byName['handlers'][0]['maxRetries']]);
         self::assertSame(['class' => RoutesFixtureOrderResource::class, 'handle' => 'shop.order'], array_intersect_key((array) $byName['resource'], ['class' => 1, 'handle' => 1]));
         self::assertSame(RoutesFixtureListOrders::class, $byPath['payload']['class']);
         self::assertSame(__FILE__, $byPath['payload']['file']);
@@ -141,7 +141,7 @@ final class RoutesFixtureDiscovery extends AttributeDiscovery
                 'responseClass' => RoutesFixtureOrderResource::class,
                 'handlers' => [
                     ['class' => RoutesFixtureCreateHandler::class, 'priority' => 0],
-                    ['class' => RoutesFixtureAuditHandler::class, 'priority' => 10, 'execution' => 'async', 'queue' => 'audit', 'maxRetries' => 5],
+                    ['class' => RoutesFixtureAuditHandler::class, 'priority' => 10, 'execution' => 'queued', 'queue' => 'audit', 'maxRetries' => 5],
                 ],
             ];
         }

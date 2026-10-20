@@ -40,7 +40,7 @@ final class QueueWorkerProcessesTest extends TestCase
     }
 
     #[Test]
-    public function it_lists_the_default_queue_and_every_queue_a_queued_listener_or_async_handler_declares(): void
+    public function it_lists_the_default_queue_and_every_queue_a_queued_listener_or_handler_declares(): void
     {
         $lines = $this->queues([
             ['class' => 'App\\Shop\\SendReceipt', 'event' => 'App\\Shop\\OrderPaid', 'execution' => 'queued', 'transport' => null, 'queue' => 'mail'],
@@ -48,7 +48,8 @@ final class QueueWorkerProcessesTest extends TestCase
             ['class' => 'App\\Shop\\Ledger', 'event' => 'App\\Shop\\OrderPaid', 'execution' => 'queued', 'transport' => 'database', 'queue' => 'ledger'],
             ['class' => 'App\\Shop\\Toast', 'event' => 'App\\Shop\\OrderPaid', 'execution' => 'async', 'transport' => null, 'queue' => 'never-queued'],
         ], [
-            ['class' => 'App\\Shop\\ExportHandler', 'payload' => 'App\\Shop\\ExportPayload', 'resource' => 'App\\Shop\\ExportResource', 'execution' => 'async', 'transport' => null, 'queue' => 'exports', 'priority' => 0],
+            ['class' => 'App\\Shop\\ExportHandler', 'payload' => 'App\\Shop\\ExportPayload', 'resource' => 'App\\Shop\\ExportResource', 'execution' => 'queued', 'transport' => null, 'queue' => 'exports', 'priority' => 0],
+            ['class' => 'App\\Shop\\PreviewHandler', 'payload' => 'App\\Shop\\PreviewPayload', 'resource' => 'App\\Shop\\PreviewResource', 'execution' => 'async', 'transport' => null, 'queue' => 'never-queued', 'priority' => 0],
             ['class' => 'App\\Shop\\PageHandler', 'payload' => 'App\\Shop\\PagePayload', 'resource' => 'App\\Shop\\PageResource', 'execution' => 'sync', 'transport' => null, 'queue' => 'never-queued', 'priority' => 0],
         ]);
 

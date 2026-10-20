@@ -300,7 +300,7 @@ class QueueWorker
             // The resource a typed handler returns is its result, as on the sync path.
             $result = $handler->handle($request, $response);
             $this->deliverAsyncResult($message->sessionId, is_object($result) ? $result : $response, $handlerClass);
-            $this->log("✅ Async handler executed: {$handlerClass}", 'success');
+            $this->log("✅ Queued handler executed: {$handlerClass}", 'success');
             $this->updateStats('processed');
         } catch (\Throwable $e) {
             $this->log("❌ Error executing handler: {$e->getMessage()}", 'error');

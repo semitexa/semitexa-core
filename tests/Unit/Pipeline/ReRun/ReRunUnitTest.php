@@ -4,6 +4,10 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Tests\Unit\Pipeline\ReRun;
 
+use Semitexa\Core\Queue\QueueTransportFactoryInterface;
+use Semitexa\Core\Queue\QueueTransportInterface;
+use Semitexa\Core\Queue\QueueTransportRegistry;
+use Semitexa\Core\Tests\Support\StaticState;
 use PHPUnit\Framework\TestCase;
 use Psr\Container\ContainerInterface;
 use Psr\Container\NotFoundExceptionInterface;
@@ -343,6 +347,75 @@ final class ReRunUnitTest extends TestCase
         $this->assertInstanceOf(HttpResponse::class, $result->getFrame(), 'A fresh frame is produced after establishment.');
     }
 
+    /**
+     * tk-deferred-work-on-held-open-connections. A re-run tick renders a fresh
+     * frame and acts on nothing: the route's queued handlers and HandlerCompleted
+     * ran with the request that opened the connection. Run on every tick, the
+     * handler published one message each time the data changed. (HandlerCompleted,
+     * and the Async handlers that do re-run: AsyncAndQueuedHandlersTest.)
+     */
+    public function testReRunQueuesNoQueuedHandler(): void
+    {
+        $state = StaticState::snapshot(QueueTransportRegistry::class);
+        ReRunSpyTransport::$published = [];
+        QueueTransportRegistry::register('rerun-spy', new ReRunSpyTransportFactory());
+        $saved = ['EVENTS_ASYNC' => getenv('EVENTS_ASYNC'), 'EVENTS_TRANSPORT' => getenv('EVENTS_TRANSPORT')];
+        putenv('EVENTS_ASYNC=1');
+        putenv('EVENTS_TRANSPORT=rerun-spy');
+        try {
+            $handler = new ReRunSpyHandler(new ReRunCounter());
+            [$reRunner] = $this->makeReRunner(handler: $handler);
+            $context = $this->makeContext(
+                cookies: ['sid' => 'sid-alice'],
+                handlers: [['class' => ReRunSpyHandler::class], ['class' => 'App\\Export\\SendReport', 'execution' => 'queued']],
+            );
+
+            $result = $reRunner->reRun($context);
+
+            $this->assertFalse($result->isTerminated());
+            $this->assertSame(1, $handler->calls, 'the data resolver still runs: the frame is fresh');
+            $this->assertSame([], ReRunSpyTransport::$published, 'no queued handler message on a re-run');
+        } finally {
+            foreach ($saved as $key => $value) {
+                putenv($value === false ? $key : "{$key}={$value}");
+            }
+            StaticState::restore($state);
+        }
+    }
+
+    /**
+     * A re-run tick runs in the held-open connection's coroutine, which exits
+     * only when the connection closes: what the tick defers (an async listener
+     * of an event a resolver dispatched) runs when the tick ends instead.
+     */
+    public function testWhatAReRunTickDefersRunsWhenTheTickEnds(): void
+    {
+        $handler = new ReRunSpyHandler(new ReRunCounter());
+        $deferring = new ReRunDeferringHandler();
+        [$reRunner] = $this->makeReRunner(handler: $handler, extraBindings: [ReRunDeferringHandler::class => $deferring]);
+        $context = $this->makeContext(
+            cookies: ['sid' => 'sid-alice'],
+            handlers: [['class' => ReRunSpyHandler::class], ['class' => ReRunDeferringHandler::class]],
+        );
+
+        $seen = [];
+        \Swoole\Coroutine\run(function () use ($reRunner, $context, $deferring, &$seen): void {
+            $key = (new \ReflectionClassConstant(\Semitexa\Core\Server\SwooleBootstrap::class, 'COROUTINE_CONTEXT_KEY'))->getValue();
+            $connection = \Swoole\Coroutine::getContext();
+            if ($connection instanceof \ArrayObject) {
+                $connection[$key] = true;
+            }
+            $reRunner->reRun($context);
+            $seen[] = $deferring->ran;
+            // The connection writes its frame and waits for the next change.
+            \Swoole\Coroutine::sleep(0.01);
+            $seen[] = $deferring->ran;
+            \Swoole\Coroutine::sleep(0.01);
+        });
+
+        $this->assertSame([false, true], $seen, 'after the frame, while the connection is still open');
+    }
+
     // ---- harness ---------------------------------------------------------------
 
     private function frameValue(ReRunResult $result): ?int
@@ -393,14 +466,16 @@ final class ReRunUnitTest extends TestCase
     }
 
     /**
-     * @param array<string, string>    $cookies
-     * @param array<string, mixed>|null $broadcastProperties
+     * @param array<string, string>          $cookies
+     * @param array<string, mixed>|null      $broadcastProperties
+     * @param list<array<string, mixed>>|null $handlers
      */
     private function makeContext(
         array $cookies,
         ?object $dto = null,
         ?TenantContextInterface $tenant = null,
         ?array $broadcastProperties = null,
+        ?array $handlers = null,
     ): ReRunContext {
         return new ReRunContext(
             cachedDto: $dto ?? new ReRunFakePayload(),
@@ -410,7 +485,7 @@ final class ReRunUnitTest extends TestCase
                 name: 'leads.live',
                 requestClass: ReRunFakePayload::class,
                 responseClass: ReRunSpyResource::class,
-                handlers: [['class' => ReRunSpyHandler::class]],
+                handlers: $handlers ?? [['class' => ReRunSpyHandler::class]],
                 type: 'http-request',
                 transport: 'sse',
                 produces: null,
@@ -667,5 +742,41 @@ final class ReRunFakeTenantContext implements TenantContextInterface
     public function hasLayer(TenantLayerInterface $layer): bool
     {
         return false;
+    }
+}
+
+final class ReRunSpyTransport implements QueueTransportInterface
+{
+    /** @var list<array{string, string}> */
+    public static array $published = [];
+
+    public function publish(string $queueName, string $payload): void
+    {
+        self::$published[] = [$queueName, $payload];
+    }
+
+    public function consume(string $queueName, callable $callback): void
+    {
+    }
+}
+
+final class ReRunSpyTransportFactory implements QueueTransportFactoryInterface
+{
+    public function create(): QueueTransportInterface
+    {
+        return new ReRunSpyTransport();
+    }
+}
+
+/** A data resolver whose work defers something past the response. */
+final class ReRunDeferringHandler
+{
+    public bool $ran = false;
+
+    public function handle(RequestPipelineContext $context): void
+    {
+        \Semitexa\Core\Server\AfterResponse::schedule(function (): void {
+            $this->ran = true;
+        });
     }
 }

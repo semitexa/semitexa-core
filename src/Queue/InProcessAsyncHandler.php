@@ -4,83 +4,91 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Queue;
 
+use Semitexa\Core\Container\SemitexaContainer;
+use Semitexa\Core\Lifecycle\CarriedContext;
 use Semitexa\Core\Log\StaticLoggerBridge;
-use Semitexa\Core\Server\SwooleBootstrap;
+use Semitexa\Core\Server\AfterResponse;
 use Semitexa\Core\Support\PayloadSerializer;
 
 /**
- * An async payload handler run in the process that served the request, for a
- * transport no worker reads. Without async events the transport is in-memory,
- * one per process, and nothing in that process consumes it: the handler's
- * message was published there and the handler never ran.
+ * A payload handler run in the process that served the request, after the
+ * response: an Async one always, and a Queued one for a transport no worker
+ * reads (without async events the transport is in-memory, one per process,
+ * and nothing in that process consumes it).
  *
- * It gets what a worker would: copies of the payload and resource rebuilt
- * from their getters through a constructor without arguments, so it cannot
- * change the response, and the resource it returns goes to the session the
- * same way. Unlike a worker's, the handler is resolved in the request scope,
- * as an async listener is. Inside a request it runs after the response, in
+ * It gets copies of the payload and resource rebuilt from their getters
+ * through a constructor without arguments, so it cannot change the response,
+ * and the resource it returns goes to the session. The handler is resolved
+ * by the caller in the request scope, as an async listener is. An Async one
+ * also runs with the request's context: the container's (session, auth,
+ * tenant, locale it injects) and what the stores keep beside it
+ * ({@see CarriedContext}: the tenant, the signed-in user, the locale and
+ * theme templates render in). The work runs after the request has cleared
+ * them, or on a re-run tick in a coroutine of its own that never had them.
+ * The session was saved with the response, so what it writes there is lost.
+ * A Queued one gets neither, as a worker would not, so one that works here
+ * works behind a queue too. Inside a request it runs after the response, in
  * the order scheduled; anywhere else, inline. A failure is logged, never
  * thrown. Retries and the dead letter do not apply.
  */
 final class InProcessAsyncHandler
 {
-    private const DEFERRED_KEY = 'semitexa.queue.deferredAsyncHandlers';
-
     /**
-     * @param object $handler resolved by the caller while the request scope is live:
-     *                        a deferred callback runs after it has been reset
+     * @param object                 $handler   resolved by the caller while the request scope is live:
+     *                                          a deferred callback runs after it has been reset
+     * @param SemitexaContainer|null $container whose execution context an Async handler gets
      * @return bool whether it was scheduled; false when it could not be, and that was logged
      */
-    public static function schedule(object $handler, object $payload, object $resource, string $sessionId): bool
-    {
+    public static function schedule(
+        object $handler,
+        object $payload,
+        object $resource,
+        string $sessionId,
+        HandlerExecution $execution,
+        ?SemitexaContainer $container = null,
+    ): bool {
         $handlerClass = $handler::class;
+        $async = $execution === HandlerExecution::Async;
+        $label = $async ? 'async' : 'queued, run in process: no async events';
         try {
             if (!method_exists($handler, 'handle')) {
                 throw new \LogicException("handler {$handlerClass} has no handle() method");
             }
             $payloadCopy = self::rebuild($payload);
             $resourceCopy = self::rebuild($resource);
+            // Now: the request's context is whole only until the response is out.
+            $context = $async ? $container?->captureExecutionContext() : null;
+            $carried = $async ? CarriedContext::capture() : null;
         } catch (\Throwable $e) {
-            self::logFailure($handlerClass, $e);
+            self::logFailure($handlerClass, $label, $e);
             return false;
         }
 
-        $run = static function () use ($handler, $handlerClass, $payloadCopy, $resourceCopy, $sessionId): void {
+        $run = static function () use ($handler, $handlerClass, $label, $payloadCopy, $resourceCopy, $sessionId): void {
             try {
                 $result = $handler->handle($payloadCopy, $resourceCopy);
             } catch (\Throwable $e) {
-                self::logFailure($handlerClass, $e);
+                self::logFailure($handlerClass, $label, $e);
                 return;
             }
             AsyncResultDeliverer::deliver($sessionId, is_object($result) ? $result : $resourceCopy, $handlerClass);
         };
+        if ($carried !== null) {
+            $inRequest = $run;
+            $run = static function () use ($container, $context, $carried, $inRequest): void {
+                CarriedContext::runWith($carried, static function () use ($container, $context, $inRequest): void {
+                    if ($container !== null && $context !== null) {
+                        $container->runWithExecutionContext($context, $inRequest);
+                    } else {
+                        $inRequest();
+                    }
+                });
+            };
+        }
 
-        // Not merely "inside a coroutine": a standing one (a consumer loop)
-        // never exits, so its deferred callbacks would never run.
-        if (!SwooleBootstrap::isRequestCoroutine()) {
-            $run();
-            return true;
-        }
-        $context = \Swoole\Coroutine::getContext();
-        if (!$context instanceof \ArrayObject) {
-            $run();
-            return true;
-        }
-
-        // Coroutine::defer runs LIFO; one deferred callback drains a FIFO
-        // queue, so two async handlers of a route run in their declared order.
-        $queue = $context[self::DEFERRED_KEY] ?? null;
-        if ($queue instanceof \ArrayObject) {
-            $queue[] = $run;
-            return true;
-        }
-        $queue = new \ArrayObject([$run]);
-        $context[self::DEFERRED_KEY] = $queue;
-        \Swoole\Coroutine::defer(static function () use ($queue): void {
-            for ($i = 0; $i < count($queue); $i++) {
-                $queue[$i]();
-            }
-        });
+        // After the response, in order, in flight while it runs; inline
+        // outside a request: AfterResponse.
+        AfterResponse::schedule($run);
 
         return true;
     }
@@ -92,11 +100,11 @@ final class InProcessAsyncHandler
         return PayloadSerializer::hydrate(new $class(), PayloadSerializer::toArray($dto));
     }
 
-    private static function logFailure(string $handlerClass, \Throwable $e): void
+    private static function logFailure(string $handlerClass, string $label, \Throwable $e): void
     {
         StaticLoggerBridge::error('core', 'Async handler failed', [
             'handler' => $handlerClass,
-            'execution' => 'async, run in process: no async events',
+            'execution' => $label,
             'exception' => $e::class,
             'message' => $e->getMessage(),
         ]);

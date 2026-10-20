@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Semitexa\Core\Pipeline;
 
 use Psr\Container\ContainerInterface;
+use Semitexa\Core\Container\SemitexaContainer;
 use Semitexa\Core\Contract\TypedHandlerInterface;
 use Semitexa\Core\Event\EventDispatcherInterface;
 use Semitexa\Core\Exception\PipelineException;
@@ -37,10 +38,20 @@ use Semitexa\Core\Queue\QueueDispatcher;
  */
 final class PipelineExecutor
 {
+    /**
+     * @param bool $reRun a re-run tick of a held-open connection: it renders a
+     *                    fresh frame and acts on nothing. The route's Queued
+     *                    handlers and HandlerCompleted ran with the request that
+     *                    opened the connection; run again on every tick they
+     *                    queued a job (or fired a push) each time the data
+     *                    changed. Async handlers do run: their resource is part
+     *                    of the frame, delivered later.
+     */
     public function __construct(
         private readonly ContainerInterface $requestScopedContainer,
         private readonly ContainerInterface $container,
         private readonly ?RequestTracerInterface $tracer = null,
+        private readonly bool $reRun = false,
     ) {
     }
 
@@ -206,10 +217,21 @@ final class PipelineExecutor
 
             $execution = $handlerMeta['execution'] ?? HandlerExecution::Sync->value;
             if ($execution === HandlerExecution::Async->value) {
+                // Here, after the response, with the request's context; on a
+                // re-run too, so the live region gets its fresh part.
+                $this->runHandlerAfterResponse($handlerClass, $context, $sessionId, HandlerExecution::Async);
+                continue;
+            }
+            if ($execution === HandlerExecution::Queued->value && $this->reRun) {
+                // One job per request: a tick per data change would queue one each.
+                $this->tracer?->mark('pipeline.handler.skipped', ['handler' => $handlerClass, 'reason' => 're_run']);
+                continue;
+            }
+            if ($execution === HandlerExecution::Queued->value) {
                 // Without async events no worker reads the transport: the
                 // handler runs here, after the response, as a worker would run it.
                 if (QueueConfig::isProcessLocal(QueueDispatcher::transportFor($handlerMeta))) {
-                    $this->runAsyncHandlerInProcess($handlerClass, $context, $sessionId);
+                    $this->runHandlerAfterResponse($handlerClass, $context, $sessionId, HandlerExecution::Queued);
                     continue;
                 }
                 QueueDispatcher::enqueue(
@@ -237,18 +259,26 @@ final class PipelineExecutor
         }
     }
 
-    private function runAsyncHandlerInProcess(string $handlerClass, RequestPipelineContext $context, string $sessionId): void
+    private function runHandlerAfterResponse(string $handlerClass, RequestPipelineContext $context, string $sessionId, HandlerExecution $execution): void
     {
+        $async = $execution === HandlerExecution::Async;
         try {
             if ($context->resourceDto === null) {
                 throw new PipelineException("Async handler {$handlerClass} requires a resource DTO, but none was provided.");
             }
             // Resolved now, while the request scope is live, as an async listener is.
-            $scheduled = InProcessAsyncHandler::schedule($this->resolveHandler($handlerClass), $context->requestDto, $context->resourceDto, $sessionId);
+            $scheduled = InProcessAsyncHandler::schedule(
+                $this->resolveHandler($handlerClass),
+                $context->requestDto,
+                $context->resourceDto,
+                $sessionId,
+                $execution,
+                $this->container instanceof SemitexaContainer ? $this->container : null,
+            );
         } catch (\Throwable $e) {
             StaticLoggerBridge::error('core', 'Async handler failed', [
                 'handler' => $handlerClass,
-                'execution' => 'async, run in process: no async events',
+                'execution' => $async ? 'async' : 'queued, run in process: no async events',
                 'exception' => $e::class,
                 'message' => $e->getMessage(),
             ]);
@@ -256,7 +286,7 @@ final class PipelineExecutor
         }
         // Only a handoff that happened, as the queued mark is only after a publish.
         if ($scheduled) {
-            $this->tracer?->mark('pipeline.handler.queued_in_process', ['handler' => $handlerClass]);
+            $this->tracer?->mark($async ? 'pipeline.handler.async' : 'pipeline.handler.queued_in_process', ['handler' => $handlerClass]);
         }
     }
 
@@ -280,6 +310,12 @@ final class PipelineExecutor
      */
     private function dispatchHandlerCompleted(RequestPipelineContext $context): void
     {
+        if ($this->reRun) {
+            $this->tracer?->mark('pipeline.handler_completed.skipped', ['reason' => 're_run']);
+
+            return;
+        }
+
         // Each way out says WHY nothing fired: "why did no SSE push happen" is
         // the question this span is opened to answer, and a bare false cannot.
         if (!$context->lastHandlerClass) {

@@ -11,6 +11,7 @@ use Semitexa\Core\Container\ContainerFactory;
 use Semitexa\Core\Log\StaticLoggerBridge;
 use Semitexa\Core\Queue\QueueConfig;
 use Semitexa\Core\Queue\QueueTransportRegistry;
+use Semitexa\Core\Server\AfterResponse;
 use Semitexa\Core\Server\SwooleBootstrap;
 use Semitexa\Core\Support\PayloadSerializer;
 
@@ -37,8 +38,6 @@ final class EventDispatcher implements EventDispatcherInterface
      */
     private array $postDispatchHooks = [];
 
-    /** Coroutine-context key of the FIFO queue drained by the one deferred callback. */
-    private const DEFERRED_LISTENERS_KEY = 'semitexa.event.deferredListeners';
     /**
      * Create an event instance. Use this instead of "new Event()" so the framework
      * can apply initialization, validation, or optimizations now or later.
@@ -215,36 +214,18 @@ final class EventDispatcher implements EventDispatcherInterface
             return;
         }
 
-        // Resolved NOW, while the ExecutionContext is live: Coroutine::defer
-        // fires at coroutine exit, after the response is emitted AND after
-        // Application has reset request-scoped state, so an #[ExecutionScoped]
-        // listener's #[InjectAsMutable] deps must be bound before that.
+        // Resolved NOW, while the ExecutionContext is live: deferred work
+        // runs after the response is emitted AND after Application has reset
+        // request-scoped state, so an #[ExecutionScoped] listener's
+        // #[InjectAsMutable] deps must be bound before that.
         $listener = $this->resolveListener($meta);
         $listenerClass = $meta['class'];
 
-        // Coroutine::defer runs its callbacks LIFO, which would hand an
-        // order-dependent listener an update before its creation event. So
-        // listeners queue in scheduling order on the coroutine's context and
-        // ONE deferred callback drains that queue FIFO — including listeners
-        // scheduled while it drains.
-        $context = \Swoole\Coroutine::getContext();
-        if (!$context instanceof \ArrayObject) {
-            $this->runListenerSync($meta, $event);
-            return;
-        }
-        $queue = $context[self::DEFERRED_LISTENERS_KEY] ?? null;
-        if ($queue instanceof \ArrayObject) {
-            $queue[] = [$listener, $event, $listenerClass];
-            return;
-        }
-        $queue = new \ArrayObject([[$listener, $event, $listenerClass]]);
-        $context[self::DEFERRED_LISTENERS_KEY] = $queue;
-
-        \Swoole\Coroutine::defer(static function () use ($queue): void {
-            for ($i = 0; $i < count($queue); $i++) {
-                [$listener, $event, $listenerClass] = $queue[$i];
-                self::runDeferredListener($listener, $event, $listenerClass);
-            }
+        // In scheduling order (an order-dependent listener must not get an
+        // update before its creation event), in flight while it runs, and at
+        // the end of the tick in a held-open connection: AfterResponse.
+        AfterResponse::schedule(static function () use ($listener, $event, $listenerClass): void {
+            self::runDeferredListener($listener, $event, $listenerClass);
         });
     }
 

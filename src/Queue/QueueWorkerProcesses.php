@@ -49,7 +49,7 @@ final class QueueWorkerProcesses implements WorkerProcessSourceInterface
         $handlers = $this->attributeDiscovery->getHandlerRegistry();
         foreach ($handlers->getHandlerClassNames() as $class) {
             $meta = $handlers->getHandlerByClass($class);
-            if ($meta === null || $meta['execution'] !== HandlerExecution::Async->value) {
+            if ($meta === null || $meta['execution'] !== HandlerExecution::Queued->value) {
                 continue;
             }
             $add(self::name($meta['transport']), self::name($meta['queue']) ?? QueueConfig::defaultQueueName($meta['payload'] ?? $class));

@@ -12,13 +12,13 @@ use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Style\SymfonyStyle;
 
-#[AsCommand(name: 'queue:work', description: 'Run async events worker (processes handlers enqueued with execution: async)')]
+#[AsCommand(name: 'queue:work', description: 'Run a queue worker (processes queued listeners and handlers enqueued with execution: queued)')]
 class QueueWorkCommand extends Command
 {
     protected function configure(): void
     {
         $this->setName('queue:work')
-            ->setDescription('Run async events worker (processes handlers enqueued with execution: async)')
+            ->setDescription('Run a queue worker (processes queued listeners and handlers enqueued with execution: queued)')
             ->addArgument('transport', InputArgument::OPTIONAL, 'Transport: nats or in-memory (default from EVENTS_ASYNC)', null)
             ->addArgument('queue', InputArgument::OPTIONAL, 'Queue name (default from EVENTS_QUEUE_DEFAULT)', null)
             ->addOption('timeout', 't', InputOption::VALUE_OPTIONAL, 'Worker timeout in seconds', null);
