@@ -30,19 +30,8 @@ final class StartRuntimeAction
             return false;
         }
 
-        $useNats = $this->shouldUseOverlay($projectRoot, 'docker-compose.nats.yml', 'EVENTS_ASYNC', ['1', 'true', 'yes']);
-        $useMysql = $this->shouldUseOverlay($projectRoot, 'docker-compose.mysql.yml', 'DB_DRIVER', ['mysql', 'mysqli', 'mariadb']);
-        $useRedis = $this->shouldUseOverlay($projectRoot, 'docker-compose.redis.yml', 'REDIS_HOST');
-        $useOllama = $this->shouldUseOverlayExact($projectRoot, 'docker-compose.ollama.yml', 'LLM_PROVIDER', 'ollama');
-
-        $composeArgs = $this->getComposeBaseArgs($projectRoot, $useNats, $useMysql, $useRedis, $useOllama);
-
-        $overlayNames = array_filter([
-            $useNats ? 'docker-compose.nats.yml' : null,
-            $useMysql ? 'docker-compose.mysql.yml' : null,
-            $useRedis ? 'docker-compose.redis.yml' : null,
-            $useOllama ? 'docker-compose.ollama.yml' : null,
-        ]);
+        $overlayNames = $this->overlays($projectRoot);
+        $composeArgs = $this->getComposeBaseArgs($overlayNames);
         if ($overlayNames !== []) {
             $this->io->text('<info>[start]</info> Using overlays: ' . implode(', ', $overlayNames));
         }
@@ -54,6 +43,7 @@ final class StartRuntimeAction
             $upArgs[] = $service;
         }
 
+        $this->writeWorkerEnvFile();
         $process = new Process(array_merge(['docker', 'compose'], $composeArgs, $upArgs), $projectRoot);
         $process->setTimeout(null);
         $process->run(fn(string $type, string $buffer) => $this->io->write($buffer));
@@ -74,13 +64,68 @@ final class StartRuntimeAction
      */
     public function getComposeArgs(): array
     {
-        $projectRoot = ProjectRoot::get();
-        $useNats = $this->shouldUseOverlay($projectRoot, 'docker-compose.nats.yml', 'EVENTS_ASYNC', ['1', 'true', 'yes']);
-        $useMysql = $this->shouldUseOverlay($projectRoot, 'docker-compose.mysql.yml', 'DB_DRIVER', ['mysql', 'mysqli', 'mariadb']);
-        $useRedis = $this->shouldUseOverlay($projectRoot, 'docker-compose.redis.yml', 'REDIS_HOST');
-        $useOllama = $this->shouldUseOverlayExact($projectRoot, 'docker-compose.ollama.yml', 'LLM_PROVIDER', 'ollama');
+        return $this->getComposeBaseArgs($this->overlays(ProjectRoot::get()));
+    }
 
-        return $this->getComposeBaseArgs($projectRoot, $useNats, $useMysql, $useRedis, $useOllama);
+    /**
+     * What the overlays set on the app, for the worker in
+     * docker-compose.worker.yml, which reads var/run/worker.env last: that
+     * file cannot name services an overlay that is not loaded does not have.
+     * bin/semitexa's compose_write_worker_env() writes the same.
+     *
+     * @return array<string, string>
+     */
+    public function workerEnvironment(): array
+    {
+        $overlays = $this->overlays(ProjectRoot::get());
+        $env = [];
+        if (in_array('docker-compose.mysql.yml', $overlays, true)) {
+            $env += ['DB_HOST' => 'mysql', 'DB_PORT' => '3306'];
+        }
+        if (in_array('docker-compose.redis.yml', $overlays, true)) {
+            $env += ['REDIS_HOST' => 'redis', 'REDIS_PORT' => '6379'];
+        }
+        if (in_array('docker-compose.nats.yml', $overlays, true)) {
+            $env['NATS_PRIMARY_URL'] = 'nats://nats:4222';
+        }
+        if (in_array('docker-compose.ollama.yml', $overlays, true)) {
+            $env['LLM_BASE_URL'] = 'http://ollama:11434';
+        }
+        return $env;
+    }
+
+    /** Rewritten on every start, so nothing stale is kept. */
+    public function writeWorkerEnvFile(): void
+    {
+        $root = ProjectRoot::get();
+        if (!file_exists($root . '/docker-compose.worker.yml') || (!is_dir($root . '/var/run') && !@mkdir($root . '/var/run', 0o775, true))) {
+            return;
+        }
+        $lines = ["# Written by semitexa server:start: the services the overlays give the app."];
+        foreach ($this->workerEnvironment() as $key => $value) {
+            $lines[] = "{$key}={$value}";
+        }
+        $tmp = $root . '/var/run/worker.env.tmp.' . getmypid();
+        if (@file_put_contents($tmp, implode("\n", $lines) . "\n") !== false) {
+            @rename($tmp, $root . '/var/run/worker.env');
+        }
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function overlays(string $projectRoot): array
+    {
+        $async = ['1', 'true', 'yes'];
+
+        return array_values(array_filter([
+            // The queue worker, in a container of its own: something is queued exactly when EVENTS_ASYNC=1.
+            $this->shouldUseOverlay($projectRoot, 'docker-compose.worker.yml', 'EVENTS_ASYNC', $async) ? 'docker-compose.worker.yml' : null,
+            $this->shouldUseOverlay($projectRoot, 'docker-compose.nats.yml', 'EVENTS_ASYNC', $async) ? 'docker-compose.nats.yml' : null,
+            $this->shouldUseOverlay($projectRoot, 'docker-compose.mysql.yml', 'DB_DRIVER', ['mysql', 'mysqli', 'mariadb']) ? 'docker-compose.mysql.yml' : null,
+            $this->shouldUseOverlay($projectRoot, 'docker-compose.redis.yml', 'REDIS_HOST') ? 'docker-compose.redis.yml' : null,
+            $this->shouldUseOverlayExact($projectRoot, 'docker-compose.ollama.yml', 'LLM_PROVIDER', 'ollama') ? 'docker-compose.ollama.yml' : null,
+        ]));
     }
 
     /**
@@ -107,16 +152,11 @@ final class StartRuntimeAction
     }
 
     /**
+     * @param list<string> $overlays
      * @return list<string>
      */
-    private function getComposeBaseArgs(string $projectRoot, bool $useNats, bool $useMysql, bool $useRedis, bool $useOllama): array
+    private function getComposeBaseArgs(array $overlays): array
     {
-        $overlays = array_filter([
-            $useNats ? 'docker-compose.nats.yml' : null,
-            $useMysql ? 'docker-compose.mysql.yml' : null,
-            $useRedis ? 'docker-compose.redis.yml' : null,
-            $useOllama ? 'docker-compose.ollama.yml' : null,
-        ]);
         if ($overlays === []) {
             return [];
         }
