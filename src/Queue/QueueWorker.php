@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Queue;
 
-use Semitexa\Core\Contract\AsyncResultDeliveryInterface;
 use Semitexa\Core\Lifecycle\PerRequestStateRegistry;
 use Semitexa\Core\Log\FallbackErrorLogger;
 use Semitexa\Core\Queue\Message\QueuedEventListenerMessage;
@@ -298,8 +297,9 @@ class QueueWorker
         }
 
         try {
-            $handler->handle($request, $response);
-            $this->deliverAsyncResult($message->sessionId, $response, $handlerClass);
+            // The resource a typed handler returns is its result, as on the sync path.
+            $result = $handler->handle($request, $response);
+            $this->deliverAsyncResult($message->sessionId, is_object($result) ? $result : $response, $handlerClass);
             $this->log("✅ Async handler executed: {$handlerClass}", 'success');
             $this->updateStats('processed');
         } catch (\Throwable $e) {
@@ -393,33 +393,7 @@ class QueueWorker
 
     private function deliverAsyncResult(string $sessionId, object $responseDto, string $handlerClass = ''): void
     {
-        if ($sessionId === '') {
-            return;
-        }
-        try {
-            $container = ContainerFactory::get();
-            if (!$container->has(AsyncResultDeliveryInterface::class)) {
-                // No delivery implementation bound — an intentional, optional
-                // configuration (fire-and-forget). Not a failure; stay silent.
-                return;
-            }
-            $delivery = $container->get(AsyncResultDeliveryInterface::class);
-            if ($delivery instanceof AsyncResultDeliveryInterface) {
-                $delivery->deliver($sessionId, $responseDto, $handlerClass);
-            }
-        } catch (\Throwable $e) {
-            // Reaching here means a BOUND delivery threw (the not-bound case
-            // returned above): the client that issued the async command never
-            // receives its result and the outcome is silently lost. The
-            // worker loop must still proceed, but the drop must be logged so
-            // a broken result channel is detectable.
-            FallbackErrorLogger::log('Async result delivery failed', [
-                'session' => $sessionId,
-                'handler' => $handlerClass !== '' ? $handlerClass : $responseDto::class,
-                'exception' => $e::class,
-                'message' => $e->getMessage(),
-            ]);
-        }
+        AsyncResultDeliverer::deliver($sessionId, $responseDto, $handlerClass);
     }
 
     /**

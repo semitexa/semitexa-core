@@ -9,12 +9,21 @@ use Semitexa\Core\Support\PayloadSerializer;
 
 class QueueDispatcher
 {
-    public static function enqueue(array $handlerMeta, object $requestDto, object $responseDto, string $sessionId = ''): void
+    /**
+     * The transport an async handler's message goes to: its own, else the default.
+     *
+     * @param array<array-key, mixed> $handlerMeta
+     */
+    public static function transportFor(array $handlerMeta): string
     {
         $transportName = $handlerMeta['transport'] ?? null;
-        if (!$transportName) {
-            $transportName = QueueConfig::defaultTransport();
-        }
+
+        return is_string($transportName) && $transportName !== '' ? $transportName : QueueConfig::defaultTransport();
+    }
+
+    public static function enqueue(array $handlerMeta, object $requestDto, object $responseDto, string $sessionId = ''): void
+    {
+        $transportName = self::transportFor($handlerMeta);
 
         $queueName = $handlerMeta['queue'] ?? null;
         if (!$queueName) {

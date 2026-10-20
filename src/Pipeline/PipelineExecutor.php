@@ -10,7 +10,10 @@ use Semitexa\Core\Event\EventDispatcherInterface;
 use Semitexa\Core\Exception\PipelineException;
 use Semitexa\Core\HttpResponse;
 use Semitexa\Core\Event\HandlerCompleted;
+use Semitexa\Core\Log\StaticLoggerBridge;
 use Semitexa\Core\Queue\HandlerExecution;
+use Semitexa\Core\Queue\InProcessAsyncHandler;
+use Semitexa\Core\Queue\QueueConfig;
 use Semitexa\Core\Queue\QueueDispatcher;
 
 /**
@@ -197,12 +200,18 @@ final class PipelineExecutor
 
         foreach ($handlers as $handlerMeta) {
             $handlerClass = $handlerMeta['class'] ?? null;
-            if (!$handlerClass) {
+            if (!is_string($handlerClass) || $handlerClass === '') {
                 continue;
             }
 
             $execution = $handlerMeta['execution'] ?? HandlerExecution::Sync->value;
             if ($execution === HandlerExecution::Async->value) {
+                // Without async events no worker reads the transport: the
+                // handler runs here, after the response, as a worker would run it.
+                if (QueueConfig::isProcessLocal(QueueDispatcher::transportFor($handlerMeta))) {
+                    $this->runAsyncHandlerInProcess($handlerClass, $context, $sessionId);
+                    continue;
+                }
                 QueueDispatcher::enqueue(
                     $handlerMeta,
                     $context->requestDto,
@@ -225,6 +234,29 @@ final class PipelineExecutor
                 $this->invokeListener($this->resolveHandler($handlerClass), $context);
                 $context->lastHandlerClass = $handlerClass;
             });
+        }
+    }
+
+    private function runAsyncHandlerInProcess(string $handlerClass, RequestPipelineContext $context, string $sessionId): void
+    {
+        try {
+            if ($context->resourceDto === null) {
+                throw new PipelineException("Async handler {$handlerClass} requires a resource DTO, but none was provided.");
+            }
+            // Resolved now, while the request scope is live, as an async listener is.
+            $scheduled = InProcessAsyncHandler::schedule($this->resolveHandler($handlerClass), $context->requestDto, $context->resourceDto, $sessionId);
+        } catch (\Throwable $e) {
+            StaticLoggerBridge::error('core', 'Async handler failed', [
+                'handler' => $handlerClass,
+                'execution' => 'async, run in process: no async events',
+                'exception' => $e::class,
+                'message' => $e->getMessage(),
+            ]);
+            $scheduled = false;
+        }
+        // Only a handoff that happened, as the queued mark is only after a publish.
+        if ($scheduled) {
+            $this->tracer?->mark('pipeline.handler.queued_in_process', ['handler' => $handlerClass]);
         }
     }
 
