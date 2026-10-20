@@ -95,6 +95,8 @@ final class QueueWorkerDeadLetterTest extends TestCase
             'messageProblem' => null,
             'messageProblemIsError' => false,
             'output' => new BufferedOutput(),
+            // verify:accept-test-change ep-queue-monitoring: no per-queue counters from a test (they went to the dev Redis under real-looking queue names)
+            'statsResolved' => true,
         ] as $field => $value) {
             (new ReflectionProperty(QueueWorker::class, $field))->setValue($worker, $value);
         }
