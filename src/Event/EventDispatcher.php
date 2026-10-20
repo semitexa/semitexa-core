@@ -269,6 +269,29 @@ final class EventDispatcher implements EventDispatcherInterface
     private function enqueueListener(array $meta, object $event, ?\Semitexa\Core\Pipeline\RequestTracerInterface $tracer = null): void
     {
         $transportName = $meta['transport'] ?? QueueConfig::defaultTransport();
+        // Without async events the transport is in-memory, and no worker reads
+        // it: the listener runs here, as an async one does (after the response
+        // in a request, inline elsewhere), and its failure is logged, not thrown.
+        // It gets what a worker would: the event rebuilt from its getters
+        // through a constructor without arguments, so a listener that works
+        // here works behind a queue too. Retries and the dead letter do not apply.
+        if (is_string($transportName) && QueueConfig::isProcessLocal($transportName)) {
+            try {
+                $class = $event::class;
+                $rebuilt = PayloadSerializer::hydrate(new $class(), PayloadSerializer::toArray($event));
+                $this->runListenerDefer($meta, $rebuilt);
+            } catch (\Throwable $e) {
+                StaticLoggerBridge::error('core', 'Async event listener failed', [
+                    'event' => $event::class,
+                    'listener' => $meta['class'],
+                    'execution' => 'queued, run in process: no async events',
+                    'exception' => $e::class,
+                    'message' => $e->getMessage(),
+                ]);
+            }
+            $tracer?->mark('event.listener.queued_in_process', ['listener' => $meta['class'], 'event' => get_class($event)]);
+            return;
+        }
         $queueName = $meta['queue'] ?? QueueConfig::defaultQueueName($meta['event']);
 
         $message = new \Semitexa\Core\Queue\Message\QueuedEventListenerMessage(
