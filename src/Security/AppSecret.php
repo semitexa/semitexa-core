@@ -27,7 +27,7 @@ final class AppSecret
             return $explicit;
         }
 
-        $appEnv = strtolower((string) Environment::getEnvValue('APP_ENV', 'prod'));
+        $appEnv = strtolower(trim((string) Environment::getEnvValue('APP_ENV', 'prod')));
         if (!in_array($appEnv, ['dev', 'test'], true)) {
             throw new \LogicException('APP_SECRET must be set outside dev and test: it signs and encrypts what the application hands out.');
         }
