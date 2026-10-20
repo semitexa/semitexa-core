@@ -119,7 +119,11 @@ final class StartRuntimeAction
             $lines[] = "{$key}={$value}";
         }
         $tmp = $root . '/var/run/worker.env.tmp.' . getmypid();
-        if (@file_put_contents($tmp, implode("\n", $lines) . "\n") === false) {
+        $content = implode("\n", $lines) . "\n";
+        // A full disk can take part of it and report the bytes it took: a short
+        // file published would start the worker without some of its addresses.
+        if (@file_put_contents($tmp, $content) !== strlen($content)) {
+            @unlink($tmp);
             return "cannot write {$tmp}";
         }
         if (!@rename($tmp, $root . '/var/run/worker.env')) {
