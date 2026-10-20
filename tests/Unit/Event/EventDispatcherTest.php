@@ -30,8 +30,13 @@ final class EventDispatcherTest extends TestCase
 
     private ?LoggerInterface $loggerSnapshot = null;
 
+    /** @var array{class: class-string, values: array<string, mixed>} */
+    private array $carriedSnapshot;
+
     protected function setUp(): void
     {
+        // The keys a test names with carry() are worker-wide: put back as found.
+        $this->carriedSnapshot = StaticState::snapshot(CarriedContext::class);
         $this->callsSnapshot = DispatcherProbeLog::$calls;
         $logger = (new \ReflectionProperty(StaticLoggerBridge::class, 'logger'))->getValue();
         $this->loggerSnapshot = $logger instanceof LoggerInterface ? $logger : null;
@@ -54,6 +59,7 @@ final class EventDispatcherTest extends TestCase
 
     protected function tearDown(): void
     {
+        StaticState::restore($this->carriedSnapshot);
         DispatcherProbeLog::$calls = $this->callsSnapshot;
         (new \ReflectionProperty(StaticLoggerBridge::class, 'logger'))->setValue(null, $this->loggerSnapshot);
     }
@@ -202,7 +208,7 @@ final class EventDispatcherTest extends TestCase
     #[Test]
     public function without_async_events_a_queued_listener_runs_in_the_dispatch(): void
     {
-        $this->withEnv(['EVENTS_ASYNC' => '0', 'EVENTS_TRANSPORT' => null], function (): void {
+        $this->withEnv(['EVENTS_ASYNC' => '0', 'EVENTS_TRANSPORT' => 'in-memory'], function (): void {
             $dispatcher = $this->dispatcherWith([[RecordingProbeListener::class, EventExecution::Queued]]);
 
             $dispatcher->dispatch(new DispatcherProbeEvent());
@@ -214,7 +220,7 @@ final class EventDispatcherTest extends TestCase
     #[Test]
     public function without_async_events_a_failing_queued_listener_is_logged_not_thrown_at_the_caller(): void
     {
-        $this->withEnv(['EVENTS_ASYNC' => '0', 'EVENTS_TRANSPORT' => null], function (): void {
+        $this->withEnv(['EVENTS_ASYNC' => '0', 'EVENTS_TRANSPORT' => 'in-memory'], function (): void {
             $dispatcher = $this->dispatcherWith([[ThrowingProbeListener::class, EventExecution::Queued]]);
 
             $dispatcher->dispatch(new DispatcherProbeEvent());
@@ -259,7 +265,7 @@ final class EventDispatcherTest extends TestCase
         QueueTransportRegistry::initialize();
         QueueTransportRegistry::register('in-memory', new DispatcherSpyTransportFactory());
         try {
-            $this->withEnv(['EVENTS_ASYNC' => '0', 'EVENTS_TRANSPORT' => null], function (): void {
+            $this->withEnv(['EVENTS_ASYNC' => '0', 'EVENTS_TRANSPORT' => 'in-memory'], function (): void {
                 $dispatcher = $this->dispatcherWith([[RecordingProbeListener::class, EventExecution::Queued]]);
 
                 $dispatcher->dispatch(new DispatcherProbeEvent());
@@ -276,7 +282,7 @@ final class EventDispatcherTest extends TestCase
     #[Test]
     public function without_async_events_a_queued_listener_gets_the_event_as_a_worker_would(): void
     {
-        $this->withEnv(['EVENTS_ASYNC' => '0', 'EVENTS_TRANSPORT' => null], function (): void {
+        $this->withEnv(['EVENTS_ASYNC' => '0', 'EVENTS_TRANSPORT' => 'in-memory'], function (): void {
             $dispatcher = $this->dispatcherWith([[RebuildProbeListener::class, EventExecution::Queued]], RebuildProbeEvent::class);
             $event = new RebuildProbeEvent();
             $event->setOrderId('o-7');
@@ -293,13 +299,32 @@ final class EventDispatcherTest extends TestCase
     #[Test]
     public function without_async_events_an_event_a_worker_could_not_rebuild_is_logged_not_run(): void
     {
-        $this->withEnv(['EVENTS_ASYNC' => '0', 'EVENTS_TRANSPORT' => null], function (): void {
+        $this->withEnv(['EVENTS_ASYNC' => '0', 'EVENTS_TRANSPORT' => 'in-memory'], function (): void {
             $dispatcher = $this->dispatcherWith([[RecordingProbeListener::class, EventExecution::Queued]], ConstructorArgumentProbeEvent::class);
 
             $dispatcher->dispatch(new ConstructorArgumentProbeEvent('o-1'));
 
             self::assertSame([], DispatcherProbeLog::$calls);
             self::assertSame(['Async event listener failed'], $this->errors);
+        });
+    }
+
+    /** The mark attests a handoff: one that never happened leaves none, one that did leaves one. */
+    #[Test]
+    public function without_async_events_the_in_process_mark_is_left_only_by_an_event_that_was_handed_over(): void
+    {
+        $this->withEnv(['EVENTS_ASYNC' => '0', 'EVENTS_TRANSPORT' => 'in-memory'], function (): void {
+            $enqueue = new \ReflectionMethod(EventDispatcher::class, 'enqueueListener');
+            $meta = static fn (string $event): array => ['class' => RecordingProbeListener::class, 'execution' => 'queued', 'event' => $event];
+
+            $refused = new MarkProbeTracer();
+            $enqueue->invoke($this->dispatcherWith([]), $meta(ConstructorArgumentProbeEvent::class), new ConstructorArgumentProbeEvent('o-1'), $refused);
+            $handedOver = new MarkProbeTracer();
+            $enqueue->invoke($this->dispatcherWith([]), $meta(DispatcherProbeEvent::class), new DispatcherProbeEvent(), $handedOver);
+
+            self::assertSame([], $refused->marks);
+            self::assertSame([['event.listener.queued_in_process', ['listener' => RecordingProbeListener::class, 'event' => DispatcherProbeEvent::class]]], $handedOver->marks);
+            self::assertSame([RecordingProbeListener::class], DispatcherProbeLog::$calls);
         });
     }
 
@@ -332,7 +357,7 @@ final class EventDispatcherTest extends TestCase
     #[Test]
     public function without_async_events_a_queued_listener_runs_without_the_context_live_where_it_is_dispatched(): void
     {
-        $this->withEnv(['EVENTS_ASYNC' => '0', 'EVENTS_TRANSPORT' => null], function (): void {
+        $this->withEnv(['EVENTS_ASYNC' => '0', 'EVENTS_TRANSPORT' => 'in-memory'], function (): void {
             $dispatcher = $this->dispatcherWith([[ContextProbeListener::class, EventExecution::Queued]]);
             CarriedContext::carry('test.tenant');
             $after = null;
@@ -407,6 +432,26 @@ final class RecordingProbeListener
     public function handle(DispatcherProbeEvent $event): void
     {
         DispatcherProbeLog::$calls[] = self::class;
+    }
+}
+
+/** Records the marks; spans are not what these tests are about. */
+final class MarkProbeTracer implements \Semitexa\Core\Pipeline\RequestTracerInterface
+{
+    /** @var list<array{string, array<string, mixed>}> */
+    public array $marks = [];
+
+    public function begin(string $name, array $context = []): void
+    {
+    }
+
+    public function end(string $name, array $context = []): void
+    {
+    }
+
+    public function mark(string $name, array $context = []): void
+    {
+        $this->marks[] = [$name, $context];
     }
 }
 

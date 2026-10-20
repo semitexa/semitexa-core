@@ -288,6 +288,9 @@ final class EventDispatcher implements EventDispatcherInterface
             try {
                 $class = $event::class;
                 $rebuilt = PayloadSerializer::hydrate(new $class(), PayloadSerializer::toArray($event));
+                // Once rebuilt it is handed over, as the queued mark is only after a
+                // publish: an event a worker could not rebuild leaves no trace claiming it.
+                $tracer?->mark('event.listener.queued_in_process', ['listener' => $meta['class'], 'event' => get_class($event)]);
                 $this->runListenerDefer($meta, $rebuilt, asAWorkerWould: true);
             } catch (\Throwable $e) {
                 StaticLoggerBridge::error('core', 'Async event listener failed', [
@@ -298,7 +301,6 @@ final class EventDispatcher implements EventDispatcherInterface
                     'message' => $e->getMessage(),
                 ]);
             }
-            $tracer?->mark('event.listener.queued_in_process', ['listener' => $meta['class'], 'event' => get_class($event)]);
             return;
         }
         $queueName = $meta['queue'] ?? QueueConfig::defaultQueueName($meta['event']);

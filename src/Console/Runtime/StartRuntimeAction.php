@@ -43,7 +43,13 @@ final class StartRuntimeAction
             $upArgs[] = $service;
         }
 
-        $this->writeWorkerEnvFile();
+        // A file left from an earlier start may name services this one does not
+        // load: starting the worker with it is worse than not starting.
+        $workerEnvError = $this->writeWorkerEnvFile();
+        if ($workerEnvError !== null) {
+            $this->io->error("The worker's service addresses could not be written ({$workerEnvError}), so it would start with stale ones.");
+            return false;
+        }
         $process = new Process(array_merge(['docker', 'compose'], $composeArgs, $upArgs), $projectRoot);
         $process->setTimeout(null);
         $process->run(fn(string $type, string $buffer) => $this->io->write($buffer));
@@ -94,21 +100,34 @@ final class StartRuntimeAction
         return $env;
     }
 
-    /** Rewritten on every start, so nothing stale is kept. */
-    public function writeWorkerEnvFile(): void
+    /**
+     * Rewritten on every start, so nothing stale is kept.
+     *
+     * @return string|null why it could not be written; null when it was, or the project has no worker
+     */
+    public function writeWorkerEnvFile(): ?string
     {
         $root = ProjectRoot::get();
-        if (!file_exists($root . '/docker-compose.worker.yml') || (!is_dir($root . '/var/run') && !@mkdir($root . '/var/run', 0o775, true))) {
-            return;
+        if (!file_exists($root . '/docker-compose.worker.yml')) {
+            return null;
+        }
+        if (!is_dir($root . '/var/run') && !@mkdir($root . '/var/run', 0o775, true) && !is_dir($root . '/var/run')) {
+            return "cannot create {$root}/var/run";
         }
         $lines = ["# Written by semitexa server:start: the services the overlays give the app."];
         foreach ($this->workerEnvironment() as $key => $value) {
             $lines[] = "{$key}={$value}";
         }
         $tmp = $root . '/var/run/worker.env.tmp.' . getmypid();
-        if (@file_put_contents($tmp, implode("\n", $lines) . "\n") !== false) {
-            @rename($tmp, $root . '/var/run/worker.env');
+        if (@file_put_contents($tmp, implode("\n", $lines) . "\n") === false) {
+            return "cannot write {$tmp}";
         }
+        if (!@rename($tmp, $root . '/var/run/worker.env')) {
+            @unlink($tmp);
+            return "cannot replace {$root}/var/run/worker.env";
+        }
+
+        return null;
     }
 
     /**

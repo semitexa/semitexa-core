@@ -7,10 +7,12 @@ namespace Semitexa\Core\Tests\Unit\Queue;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Semitexa\Core\Discovery\AttributeDiscovery;
+use Semitexa\Core\Discovery\BootDiagnostics;
 use Semitexa\Core\Discovery\HandlerRegistry;
 use Semitexa\Core\Event\EventListenerRegistry;
 use Semitexa\Core\Queue\QueueWorkerProcesses;
 use Semitexa\Core\Queue\WorkerProcess;
+use Semitexa\Core\Tests\Support\StaticState;
 
 /**
  * The queue:work processes the worker container runs (tk-pip-no-queue-worker):
@@ -23,8 +25,13 @@ final class QueueWorkerProcessesTest extends TestCase
     /** @var array<string, string|false> */
     private array $env = [];
 
+    /** @var array{class: class-string, values: array<string, mixed>} */
+    private array $diagnostics;
+
     protected function setUp(): void
     {
+        // The Async handler with a queue below is reported to the process-wide collector.
+        $this->diagnostics = StaticState::snapshot(BootDiagnostics::class);
         foreach (['EVENTS_TRANSPORT', 'EVENTS_QUEUE_DEFAULT'] as $key) {
             $this->env[$key] = getenv($key);
         }
@@ -34,6 +41,7 @@ final class QueueWorkerProcessesTest extends TestCase
 
     protected function tearDown(): void
     {
+        StaticState::restore($this->diagnostics);
         foreach ($this->env as $key => $value) {
             putenv($value === false ? $key : "{$key}={$value}");
         }

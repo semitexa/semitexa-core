@@ -8,16 +8,29 @@ use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Semitexa\Core\Lifecycle\CarriedContext;
 use Semitexa\Core\Support\CoroutineLocal;
+use Semitexa\Core\Tests\Support\StaticState;
 
 /**
  * What a request's work run elsewhere gets of its context
  * (tk-handler-execution-sync-async-queued): the keys the stores named, as the
- * request held them, and nothing else of the coroutine's. The names are
- * worker-wide and never forgotten (the stores name theirs once): each test
- * names keys of its own.
+ * request held them, and nothing else of the coroutine's.
  */
 final class CarriedContextTest extends TestCase
 {
+    /** @var array{class: class-string, values: array<string, mixed>} */
+    private array $carriedSnapshot;
+
+    protected function setUp(): void
+    {
+        // The names are worker-wide: put back as found.
+        $this->carriedSnapshot = StaticState::snapshot(CarriedContext::class);
+    }
+
+    protected function tearDown(): void
+    {
+        StaticState::restore($this->carriedSnapshot);
+    }
+
     #[Test]
     public function a_coroutine_of_its_own_gets_what_was_named_and_nothing_else(): void
     {

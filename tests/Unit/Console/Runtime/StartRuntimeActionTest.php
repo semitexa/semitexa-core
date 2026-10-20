@@ -64,12 +64,28 @@ final class StartRuntimeActionTest extends TestCase
             $action->getComposeArgs(),
         );
 
-        $action->writeWorkerEnvFile();
+        self::assertNull($action->writeWorkerEnvFile());
 
         self::assertSame(
             "# Written by semitexa server:start: the services the overlays give the app.\nDB_HOST=mysql\nDB_PORT=3306\nREDIS_HOST=redis\nREDIS_PORT=6379\nNATS_PRIMARY_URL=nats://nats:4222\nLLM_BASE_URL=http://ollama:11434\n",
             file_get_contents($this->root . '/var/run/worker.env'),
         );
+    }
+
+    /** A file left from an earlier start could name services this one does not load: said, not ignored. */
+    #[Test]
+    public function a_worker_file_that_cannot_be_replaced_is_reported_and_left_unchanged(): void
+    {
+        $this->environment(['EVENTS_ASYNC' => '1', 'DB_DRIVER' => 'mysql', 'REDIS_HOST' => '', 'LLM_PROVIDER' => '']);
+        // A directory where the file goes: rename() refuses it, root or not.
+        mkdir($this->root . '/var/run/worker.env/kept', 0o775, true);
+
+        self::assertSame(
+            'cannot replace ' . $this->root . '/var/run/worker.env',
+            $this->action()->writeWorkerEnvFile(),
+        );
+        self::assertDirectoryExists($this->root . '/var/run/worker.env/kept');
+        self::assertSame([], glob($this->root . '/var/run/worker.env.tmp.*'), 'the temporary file is removed');
     }
 
     #[Test]

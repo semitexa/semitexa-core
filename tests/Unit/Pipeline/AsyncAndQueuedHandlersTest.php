@@ -50,8 +50,13 @@ final class AsyncAndQueuedHandlersTest extends TestCase
 
     private ?LoggerInterface $loggerSnapshot = null;
 
+    /** @var array{class: class-string, values: array<string, mixed>} */
+    private array $carriedSnapshot;
+
     protected function setUp(): void
     {
+        // The keys a test names with carry() are worker-wide: put back as found.
+        $this->carriedSnapshot = StaticState::snapshot(CarriedContext::class);
         AsyncProbeLog::$calls = [];
         AsyncProbeLog::$received = [];
         AsyncProbeContextHandler::$seen = [];
@@ -76,6 +81,7 @@ final class AsyncAndQueuedHandlersTest extends TestCase
 
     protected function tearDown(): void
     {
+        StaticState::restore($this->carriedSnapshot);
         (new \ReflectionProperty(StaticLoggerBridge::class, 'logger'))->setValue(null, $this->loggerSnapshot);
     }
 

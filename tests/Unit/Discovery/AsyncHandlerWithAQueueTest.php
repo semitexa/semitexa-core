@@ -14,6 +14,7 @@ use Semitexa\Core\Discovery\ClassDiscovery;
 use Semitexa\Core\Discovery\RouteRegistry;
 use Semitexa\Core\ModuleRegistry;
 use Semitexa\Core\Queue\HandlerExecution;
+use Semitexa\Core\Tests\Support\StaticState;
 
 /**
  * Async meant "through a queue" until 2026-10 (tk-handler-execution-sync-async-queued).
@@ -22,6 +23,20 @@ use Semitexa\Core\Queue\HandlerExecution;
  */
 final class AsyncHandlerWithAQueueTest extends TestCase
 {
+    /** @var array{class: class-string, values: array<string, mixed>} */
+    private array $diagnostics;
+
+    protected function setUp(): void
+    {
+        // begin() replaces the process-wide collector: put back as found.
+        $this->diagnostics = StaticState::snapshot(BootDiagnostics::class);
+    }
+
+    protected function tearDown(): void
+    {
+        StaticState::restore($this->diagnostics);
+    }
+
     #[Test]
     public function an_async_handler_with_a_queue_is_told_to_be_queued(): void
     {
@@ -46,6 +61,8 @@ final class AsyncHandlerWithAQueueTest extends TestCase
         // The route its payload would have: discovery refuses a handler whose payload has none.
         (new \ReflectionProperty(AttributeDiscovery::class, 'httpRequests'))->setValue($discovery, [QueueProbePayload::class => []]);
         (new \ReflectionMethod(AttributeDiscovery::class, 'discoverHandlers'))->invoke($discovery, $diagnostics);
+        // An empty list below must mean "registered without a word", not "never registered".
+        self::assertSame($handlerClass, $discovery->getHandlerRegistry()->getHandlerByClass($handlerClass)['class'] ?? null, 'the handler was registered');
 
         return array_values(array_map(
             static fn (BootWarning $w): string => $w->message,
