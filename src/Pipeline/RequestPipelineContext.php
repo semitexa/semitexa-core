@@ -26,6 +26,13 @@ class RequestPipelineContext
     public ?AuthResult $authResult = null;
     public ?string $lastHandlerClass = null;
 
+    /**
+     * A live region re-running the route for a request already served (set by
+     * a re-run PipelineExecutor): not a new request, so nothing that counts
+     * requests (a rate limit) counts it again.
+     */
+    public bool $reRun = false;
+
     public function __construct(
         public readonly object $requestDto,
         public readonly DiscoveredRoute $route,

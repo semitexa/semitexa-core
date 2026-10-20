@@ -56,7 +56,10 @@ final class RateLimiter
 
         $slot = (int) floor($now / $window);
         $elapsed = $now - $slot * $window;
-        $subject = md5($bucket . '|' . $this->subject($by));
+        // The limit and the kind of key are part of the counter: a guest under
+        // `by: User` falls back to their address, and must not then count
+        // twice into an Ip limit on the same bucket.
+        $subject = md5($bucket . '|' . $limit . '|' . (is_string($by) ? 'key' : $by->value) . '|' . $this->subject($by));
         $currentKey = "{$window}:{$slot}:{$subject}";
 
         $counts = $this->storage->store()->hit($currentKey, $window . ':' . ($slot - 1) . ':' . $subject, 2 * $window);
@@ -69,12 +72,23 @@ final class RateLimiter
         $weight = 1 - $elapsed / $window;
         $estimate = $previous * $weight + $current;
         if ($estimate <= $limit) {
-            return new RateLimitDecision(true, $limit, (int) floor($limit - $estimate), 0);
+            return new RateLimitDecision(true, $limit, (int) floor($limit - $estimate), 0, $currentKey);
         }
 
         $this->storage->store()->undo($currentKey);
 
         return new RateLimitDecision(false, $limit, 0, self::retryAfter($limit, $window, $elapsed, $previous, $current - 1));
+    }
+
+    /**
+     * Take back a request that was allowed here and then refused by another
+     * limit: a client blocked for a minute must not burn its hour meanwhile.
+     */
+    public function release(RateLimitDecision $decision): void
+    {
+        if ($decision->allowed && $decision->counter !== null) {
+            $this->storage->store()->undo($decision->counter);
+        }
     }
 
     /** attempt(), refusing with RateLimitException (429, Retry-After). */
@@ -138,6 +152,12 @@ final class RateLimiter
         $binary = @inet_pton($address);
         if ($binary === false || strlen($binary) !== 16) {
             return $address;
+        }
+
+        // ::ffff:1.2.3.4 is an IPv4 client on a dual-stack socket. Its first
+        // 64 bits are zeros for EVERY such client: as a /64 they were one.
+        if (str_starts_with($binary, str_repeat("\0", 10) . "\xff\xff")) {
+            return (string) inet_ntop(substr($binary, 12));
         }
 
         return (string) inet_ntop(substr($binary, 0, 8) . str_repeat("\0", 8)) . '/64';

@@ -27,6 +27,7 @@ final class FixtureModules
     private const DIRS = [
         'Semitexa\\Core\\Tests\\Fixtures\\AuthDemo\\' => __DIR__ . '/../Fixtures/AuthDemo',
         'Semitexa\\Core\\Tests\\Fixtures\\WebhookDemo\\' => __DIR__ . '/../Fixtures/WebhookDemo',
+        'Semitexa\\Core\\Tests\\Fixtures\\RateLimitDemo\\' => __DIR__ . '/../Fixtures/RateLimitDemo',
     ];
 
     /** @var array<class-string, string>|null */

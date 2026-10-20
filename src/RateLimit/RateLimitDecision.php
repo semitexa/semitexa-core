@@ -13,5 +13,7 @@ final readonly class RateLimitDecision
         public int $remaining,
         /** Seconds until one more request would be allowed; 0 when allowed. */
         public int $retryAfter,
+        /** The counter an allowed request was counted in, for RateLimiter::release(). */
+        public ?string $counter = null,
     ) {}
 }

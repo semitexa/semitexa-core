@@ -97,7 +97,10 @@ final class RateLimiterTest extends TestCase
         $aliceElsewhere = self::limiter($store, '198.51.100.2', 'alice');
         self::assertTrue($alice->attempt('u', 1, 60, RateLimitKey::User, 10.0)->allowed);
         self::assertFalse($aliceElsewhere->attempt('u', 1, 60, RateLimitKey::User, 10.0)->allowed);
-        self::assertFalse(self::limiter($store, '203.0.113.7')->attempt('a', 1, 60, RateLimitKey::User, 10.0)->allowed);
+        $guest = self::limiter($store, '203.0.113.9');
+        self::assertTrue($guest->attempt('g', 1, 60, RateLimitKey::User, 10.0)->allowed);
+        self::assertFalse(self::limiter($store, '203.0.113.9')->attempt('g', 1, 60, RateLimitKey::User, 10.0)->allowed, 'a guest is counted by address');
+        self::assertTrue(self::limiter($store, '203.0.113.10')->attempt('g', 1, 60, RateLimitKey::User, 10.0)->allowed);
 
         // A subject of the caller's own.
         self::assertTrue($one->attempt('acct', 1, 60, 'account-42', 10.0)->allowed);
@@ -111,6 +114,39 @@ final class RateLimiterTest extends TestCase
         self::assertTrue(self::limiter($store, '2001:db8:1:2::1')->attempt('v6', 1, 60, RateLimitKey::Ip, 10.0)->allowed);
         self::assertFalse(self::limiter($store, '2001:db8:1:2:ffff::9')->attempt('v6', 1, 60, RateLimitKey::Ip, 10.0)->allowed);
         self::assertTrue(self::limiter($store, '2001:db8:1:3::1')->attempt('v6', 1, 60, RateLimitKey::Ip, 10.0)->allowed);
+    }
+
+    #[Test]
+    public function ipv4_clients_on_a_dual_stack_socket_count_apart(): void
+    {
+        // ::ffff:a.b.c.d has 64 zero bits in front for every IPv4 client: as a
+        // /64 they all shared one counter (review, rl-1).
+        $store = new InMemoryRateLimitStore();
+        self::assertSame('1.2.3.4', RateLimiter::addressBucket('::ffff:1.2.3.4'));
+        self::assertTrue(self::limiter($store, '::ffff:1.2.3.4')->attempt('v4', 1, 60, RateLimitKey::Ip, 10.0)->allowed);
+        self::assertTrue(self::limiter($store, '::ffff:9.9.9.9')->attempt('v4', 1, 60, RateLimitKey::Ip, 10.0)->allowed);
+        self::assertFalse(self::limiter($store, '1.2.3.4')->attempt('v4', 1, 60, RateLimitKey::Ip, 10.0)->allowed, 'mapped or not, one client');
+    }
+
+    #[Test]
+    public function a_guest_under_a_user_limit_does_not_count_twice_into_the_address_limit(): void
+    {
+        $limiter = self::limiter(new InMemoryRateLimitStore(), '203.0.113.7');
+
+        for ($i = 0; $i < 3; $i++) {
+            self::assertTrue($limiter->attempt('both', 100, 60, RateLimitKey::User, 10.0)->allowed);
+            self::assertTrue($limiter->attempt('both', 3, 60, RateLimitKey::Ip, 10.0)->allowed, "request {$i} fits the address limit of 3");
+        }
+    }
+
+    #[Test]
+    public function a_released_request_no_longer_counts(): void
+    {
+        $limiter = self::limiter(new InMemoryRateLimitStore(), '203.0.113.7');
+
+        $limiter->release($limiter->attempt('r', 1, 60, RateLimitKey::Ip, 10.0));
+
+        self::assertTrue($limiter->attempt('r', 1, 60, RateLimitKey::Ip, 10.0)->allowed);
     }
 
     #[Test]
@@ -181,6 +217,8 @@ final class RateLimiterTest extends TestCase
         self::assertSame('198.51.100.4', ClientIp::of(self::request('10.0.0.2', ['X-Forwarded-For' => '6.6.6.6, 198.51.100.4, 10.0.0.9'])));
         self::assertSame('10.0.0.9', ClientIp::of(self::request('10.0.0.2', ['X-Forwarded-For' => 'garbage, 10.0.0.9'])), 'a hop that is no address stops the walk');
         self::assertSame('10.0.0.2', ClientIp::of(self::request('10.0.0.2', [])));
+        self::assertSame('198.51.100.4', ClientIp::of(self::request('10.0.0.2', ['X-Forwarded-For' => '198.51.100.4:5678'])), 'a hop with a port');
+        self::assertSame('2001:db8::1', ClientIp::of(self::request('10.0.0.2', ['X-Forwarded-For' => '[2001:db8::1]:443'])), 'a bracketed IPv6 hop');
     }
 
     private static function limiter(RateLimitStoreInterface $store, string $address, ?string $userId = null): RateLimiter

@@ -27,7 +27,7 @@ final class ClientIp
 
         $hops = explode(',', (string) $request->getHeader('X-Forwarded-For'));
         for ($i = count($hops) - 1; $i >= 0; $i--) {
-            $hop = trim($hops[$i]);
+            $hop = self::address(trim($hops[$i]));
             if (@inet_pton($hop) === false) {
                 // A hop that is no address is not something a proxy we trust
                 // wrote; nothing to its left can be trusted either.
@@ -40,5 +40,17 @@ final class ClientIp
         }
 
         return $peer;
+    }
+
+    /** `1.2.3.4:5678`, `[2001:db8::1]` and `[2001:db8::1]:443` are written by real proxies. */
+    private static function address(string $hop): string
+    {
+        if (str_starts_with($hop, '[')) {
+            $end = strpos($hop, ']');
+
+            return $end === false ? $hop : substr($hop, 1, $end - 1);
+        }
+
+        return substr_count($hop, ':') === 1 ? explode(':', $hop, 2)[0] : $hop;
     }
 }
