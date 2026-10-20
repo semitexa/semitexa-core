@@ -333,7 +333,9 @@ class QueueWorker
 
     /**
      * A failed message gets `maxRetries` more attempts on the queue being
-     * consumed, `retryDelay` seconds apart, then goes to `<queue>.failed`.
+     * consumed, `retryDelay` seconds apart, then goes to `<queue>.failed`. A
+     * {@see DelayedQueueTransportInterface} holds the retry back itself;
+     * otherwise the worker waits before publishing it.
      */
     private function retryOrDeadLetter(QueuedHandlerMessage|QueuedEventListenerMessage $message, string $error): void
     {
@@ -345,8 +347,22 @@ class QueueWorker
             $kind = $message instanceof QueuedHandlerMessage ? 'handler' : 'listener';
             $this->log("ℹ️  Retrying {$kind} ({$message->attempts}/{$message->maxRetries}) in {$delay}s...", 'warning');
 
+            $transport = null;
+            if ($this->currentTransport && $this->currentQueue) {
+                $transport = QueueTransportRegistry::create($this->currentTransport);
+                if ($delay > 0 && $transport instanceof DelayedQueueTransportInterface) {
+                    // The transport holds it back; the loop goes on to the
+                    // next job. Its wait is counted from when it is due.
+                    $message->publishedAt = $message::nowMs() + $delay * 1000;
+                    $transport->publishDelayed($this->currentQueue, $message->toJson(), $delay);
+
+                    return;
+                }
+            }
+
             if ($delay > 0) {
-                // A CLI worker may run without Swoole: then there is no coroutine to yield.
+                // A transport that cannot delay: wait here, as before. A CLI
+                // worker may run without Swoole: then there is no coroutine to yield.
                 if (class_exists(\Swoole\Coroutine::class, false) && \Swoole\Coroutine::getCid() > 0) {
                     \Swoole\Coroutine::sleep($delay);
                 } else {
@@ -354,9 +370,8 @@ class QueueWorker
                 }
             }
 
-            if ($this->currentTransport && $this->currentQueue) {
+            if ($transport !== null && $this->currentQueue) {
                 $message->publishedAt = $message::nowMs();
-                $transport = QueueTransportRegistry::create($this->currentTransport);
                 $transport->publish($this->currentQueue, $message->toJson());
             }
 
