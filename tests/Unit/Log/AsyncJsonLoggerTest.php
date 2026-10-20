@@ -20,6 +20,8 @@ final class AsyncJsonLoggerTest extends TestCase
     /** @var array{class: class-string, values: array<string, mixed>} */
     private array $projectRootState;
 
+    private ?string $previousLogSink = null;
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -30,6 +32,7 @@ final class AsyncJsonLoggerTest extends TestCase
         $this->previousLogFile = getenv('LOG_FILE') !== false ? (string) getenv('LOG_FILE') : null;
         $this->previousLogLevel = getenv('LOG_LEVEL') !== false ? (string) getenv('LOG_LEVEL') : null;
         $this->previousLogMaxBytes = getenv('LOG_MAX_BYTES') !== false ? (string) getenv('LOG_MAX_BYTES') : null;
+        $this->previousLogSink = getenv('LOG_SINK') !== false ? (string) getenv('LOG_SINK') : null;
     }
 
     protected function tearDown(): void
@@ -41,6 +44,7 @@ final class AsyncJsonLoggerTest extends TestCase
         // process. putenv() is process-wide; a test that unsets what it did not
         // set poisons whatever runs after it.
         $this->restoreEnv('LOG_MAX_BYTES', $this->previousLogMaxBytes);
+        $this->restoreEnv('LOG_SINK', $this->previousLogSink);
         StaticState::restore($this->projectRootState);
 
         parent::tearDown();
@@ -171,6 +175,42 @@ final class AsyncJsonLoggerTest extends TestCase
             foreach (glob($absolutePath . '*') ?: [] as $leftover) {
                 @unlink($leftover);
             }
+        }
+    }
+
+    #[Test]
+    public function the_stderr_sink_writes_json_lines_where_a_container_collects_them(): void
+    {
+        ProjectRoot::reset();
+        $relativePath = 'var/tmp/async-json-logger-test-' . bin2hex(random_bytes(6)) . '.log';
+        $file = ProjectRoot::get() . '/' . $relativePath;
+        $stderr = sys_get_temp_dir() . '/async-json-logger-stderr-' . bin2hex(random_bytes(6));
+
+        try {
+            foreach (['stderr' => [false, true], 'both' => [true, true], 'file' => [true, false], 'nonsense' => [true, false]] as $sink => [$toFile, $toStderr]) {
+                @unlink($file);
+                @unlink($stderr);
+                putenv('LOG_FILE=' . $relativePath);
+                putenv('LOG_LEVEL=debug');
+                putenv('LOG_SINK=' . $sink);
+                $logger = new AsyncJsonLogger();
+                $this->injectEnvironment($logger);
+                (new \ReflectionProperty($logger, 'stderrTarget'))->setValue($logger, $stderr);
+
+                $logger->warning('disk almost full', ['_channel' => 'storage', 'free' => '2%']);
+                $logger->flush();
+
+                self::assertSame($toFile, is_file($file), "LOG_SINK={$sink}: file");
+                self::assertSame($toStderr, is_file($stderr), "LOG_SINK={$sink}: stderr");
+                if ($toStderr) {
+                    $entry = json_decode(trim((string) file_get_contents($stderr)), true);
+                    self::assertSame('disk almost full', $entry['message'] ?? null);
+                    self::assertSame('storage', $entry['channel'] ?? null);
+                }
+            }
+        } finally {
+            @unlink($file);
+            @unlink($stderr);
         }
     }
 

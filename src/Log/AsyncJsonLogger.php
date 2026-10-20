@@ -25,6 +25,9 @@ final class AsyncJsonLogger implements LoggerInterface
 
     private ?int $minLevel = null;
     private ?string $logFile = null;
+    private LogSink $sink = LogSink::File;
+    /** Where the stderr sink writes; a test points it at a file. */
+    private string $stderrTarget = 'php://stderr';
     private ?AppLogRotation $rotation = null;
 
     /**
@@ -84,6 +87,7 @@ final class AsyncJsonLogger implements LoggerInterface
         $this->minLevel = LogLevel::toValue($levelName);
         $logFile = Environment::getEnvValue('LOG_FILE');
         $this->logFile = $logFile !== null && $logFile !== '' ? $logFile : self::DEFAULT_LOG_FILE;
+        $this->sink = LogSink::fromEnv(Environment::getEnvValue('LOG_SINK'));
         $this->rotation = new AppLogRotation(
             AppLogRotation::maxBytesFromEnv(Environment::getEnvValue('LOG_MAX_BYTES')),
             SwooleLogRetention::daysFromEnv(Environment::getEnvValue('LOG_RETENTION_DAYS')),
@@ -230,15 +234,29 @@ final class AsyncJsonLogger implements LoggerInterface
     {
         $this->ensureConfig();
 
+        $line = '';
+        foreach ($entries as $entry) {
+            $line .= $this->encodeEntry($entry) . "\n";
+        }
+
+        if ($this->sink->writesStderr()) {
+            // One write per batch. A line up to the pipe buffer (4 KiB on
+            // Linux) reaches a container's log collector whole; a longer one
+            // may interleave with another worker's.
+            @file_put_contents($this->stderrTarget, $line, FILE_APPEND);
+        }
+        if ($this->sink->writesFile()) {
+            $this->writeFile($line, count($entries));
+        }
+    }
+
+    private function writeFile(string $line, int $entryCount): void
+    {
         $root = $this->resolveProjectRoot();
         $path = $root . '/' . ltrim($this->logFile ?? self::DEFAULT_LOG_FILE, '/');
         $dir = dirname($path);
         if (!is_dir($dir)) {
             @mkdir($dir, 0755, true);
-        }
-        $line = '';
-        foreach ($entries as $entry) {
-            $line .= $this->encodeEntry($entry) . "\n";
         }
         error_clear_last();
         if (!AppendLine::to($path, $line)) {
@@ -250,7 +268,7 @@ final class AsyncJsonLogger implements LoggerInterface
             error_log(sprintf(
                 '[Semitexa] Logger write failed: path=%s entries=%d error=%s',
                 $path,
-                count($entries),
+                $entryCount,
                 $errorMessage,
             ));
 
