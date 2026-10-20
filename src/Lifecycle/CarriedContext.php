@@ -81,10 +81,4 @@ final class CarriedContext
             }
         }
     }
-
-    /** Test-only: forget every named key. */
-    public static function reset(): void
-    {
-        self::$keys = [];
-    }
 }

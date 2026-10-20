@@ -12,15 +12,12 @@ use Semitexa\Core\Support\CoroutineLocal;
 /**
  * What a request's work run elsewhere gets of its context
  * (tk-handler-execution-sync-async-queued): the keys the stores named, as the
- * request held them, and nothing else of the coroutine's.
+ * request held them, and nothing else of the coroutine's. The names are
+ * worker-wide and never forgotten (the stores name theirs once): each test
+ * names keys of its own.
  */
 final class CarriedContextTest extends TestCase
 {
-    protected function tearDown(): void
-    {
-        CarriedContext::reset();
-    }
-
     #[Test]
     public function a_coroutine_of_its_own_gets_what_was_named_and_nothing_else(): void
     {

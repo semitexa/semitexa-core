@@ -23,6 +23,10 @@ use Semitexa\Core\Support\Row;
  *   the tick instead, once the connection's coroutine has moved on (its frame
  *   is written first), in one coroutine per connection that takes the work of
  *   every tick in order, in flight while it runs.
+ * - Once a held-open connection has written its first frame ({@see holdOpen()})
+ *   the response is out though the coroutine stays: what the request had
+ *   scheduled, and what it schedules from then on outside a tick (a heartbeat,
+ *   an auth refresh), goes to the same per-connection coroutine.
  * - Anywhere else (console, a queue worker, a consumer loop that never exits,
  *   PHPUnit) it runs inline.
  *
@@ -35,6 +39,8 @@ final class AfterResponse
     private const TICK_KEY = 'semitexa.afterResponse.tick';
     /** The connection's work of every tick so far, and whether its drain runs. */
     private const CONNECTION_KEY = 'semitexa.afterResponse.connection';
+    /** Set once a held-open connection's response is out: see holdOpen(). */
+    private const HELD_OPEN_KEY = 'semitexa.afterResponse.heldOpen';
 
     /** @param \Closure(): void $work */
     public static function schedule(\Closure $work): void
@@ -55,6 +61,11 @@ final class AfterResponse
             return;
         }
 
+        if (($context[self::HELD_OPEN_KEY] ?? false) === true) {
+            self::handToConnection($context, new \ArrayObject([$work]));
+            return;
+        }
+
         $queue = $context[self::QUEUE_KEY] ?? null;
         if ($queue instanceof \ArrayObject) {
             $queue[] = $work;
@@ -66,6 +77,43 @@ final class AfterResponse
         \Swoole\Coroutine::defer(static function () use ($queue, $cid): void {
             self::drain($queue, $cid);
         });
+    }
+
+    /**
+     * The response of this request coroutine is out, though the coroutine
+     * stays: a held-open connection (KISS, a resource stream) after its first
+     * frame. Its coroutine exits only when the connection closes, and what
+     * the request scheduled until now (an async handler declared before the
+     * stream's, a listener of an event the first frame dispatched) waited for
+     * that, hours maybe. It runs now, after the connection's coroutine yields,
+     * and so does what is scheduled outside a tick from here on.
+     */
+    public static function holdOpen(): void
+    {
+        if (!SwooleBootstrap::isRequestCoroutine()) {
+            return;
+        }
+        $context = \Swoole\Coroutine::getContext();
+        if (!$context instanceof \ArrayObject) {
+            return;
+        }
+        $context[self::HELD_OPEN_KEY] = true;
+
+        $queue = $context[self::QUEUE_KEY] ?? null;
+        if (!$queue instanceof \ArrayObject || count($queue) === 0) {
+            return;
+        }
+        // Taken out, so the deferred drain finds nothing when the coroutine exits.
+        /** @var \ArrayObject<int, \Closure(): void> $pending */
+        $pending = new \ArrayObject();
+        foreach ($queue as $work) {
+            if ($work instanceof \Closure) {
+                /** @var \Closure(): void $work only schedule() writes the queue */
+                $pending[] = $work;
+            }
+        }
+        $queue->exchangeArray([]);
+        self::handToConnection($context, $pending);
     }
 
     /**

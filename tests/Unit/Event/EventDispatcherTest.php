@@ -10,6 +10,7 @@ use Semitexa\Core\Event\EventDispatcher;
 use Semitexa\Core\Event\EventExecution;
 use Semitexa\Core\Event\EventListenerRegistry;
 use Semitexa\Core\Exception\ConfigurationException;
+use Semitexa\Core\Lifecycle\CarriedContext;
 use Semitexa\Core\Log\LoggerInterface;
 use Semitexa\Core\Log\StaticLoggerBridge;
 use Semitexa\Core\Queue\QueueTransportFactoryInterface;
@@ -17,6 +18,7 @@ use Semitexa\Core\Queue\QueueTransportInterface;
 use Semitexa\Core\Queue\QueueTransportRegistry;
 use Semitexa\Core\Tests\Support\StaticState;
 use Semitexa\Core\Server\SwooleBootstrap;
+use Semitexa\Core\Support\CoroutineLocal;
 
 final class EventDispatcherTest extends TestCase
 {
@@ -35,6 +37,7 @@ final class EventDispatcherTest extends TestCase
         $this->loggerSnapshot = $logger instanceof LoggerInterface ? $logger : null;
         DispatcherProbeLog::$calls = [];
         RebuildProbeListener::$received = null;
+        ContextProbeListener::$seen = [];
         $this->errors = [];
         $errors = &$this->errors;
         StaticLoggerBridge::set(new class ($errors) implements LoggerInterface {
@@ -300,6 +303,50 @@ final class EventDispatcherTest extends TestCase
         });
     }
 
+    /**
+     * tk-held-open-first-run-and-listener-context. The request clears its
+     * tenant and user once the response is out, and the listener runs after
+     * that: it got the defaults. It gets the request's.
+     */
+    #[Test]
+    public function an_async_listener_runs_with_the_requests_context_after_the_request_cleared_it(): void
+    {
+        $dispatcher = $this->dispatcherWith([[ContextProbeListener::class, EventExecution::Async]]);
+        CarriedContext::carry('test.tenant');
+        \Swoole\Coroutine\run(static function () use ($dispatcher): void {
+            self::markAsRequestCoroutine();
+            CoroutineLocal::set('test.tenant', 'acme');
+            $dispatcher->dispatch(new DispatcherProbeEvent());
+            // What the request does once the response is out.
+            CoroutineLocal::remove('test.tenant');
+        });
+
+        self::assertSame(['acme'], ContextProbeListener::$seen);
+    }
+
+    /**
+     * A queued listener no worker reads runs in the dispatch, and a worker has
+     * no request: in a coroutine that carries its parent's context (an SSE
+     * child, say) it must not see it, or it works here and not behind a queue.
+     */
+    #[Test]
+    public function without_async_events_a_queued_listener_runs_without_the_context_live_where_it_is_dispatched(): void
+    {
+        $this->withEnv(['EVENTS_ASYNC' => '0', 'EVENTS_TRANSPORT' => null], function (): void {
+            $dispatcher = $this->dispatcherWith([[ContextProbeListener::class, EventExecution::Queued]]);
+            CarriedContext::carry('test.tenant');
+            $after = null;
+            \Swoole\Coroutine\run(static function () use ($dispatcher, &$after): void {
+                CoroutineLocal::set('test.tenant', 'acme');
+                $dispatcher->dispatch(new DispatcherProbeEvent());
+                $after = CoroutineLocal::get('test.tenant');
+            });
+
+            self::assertSame([null], ContextProbeListener::$seen);
+            self::assertSame('acme', $after, 'and the coroutine has its own back');
+        });
+    }
+
     /** @param array<string, ?string> $values null unsets */
     private function withEnv(array $values, callable $run): void
     {
@@ -360,6 +407,17 @@ final class RecordingProbeListener
     public function handle(DispatcherProbeEvent $event): void
     {
         DispatcherProbeLog::$calls[] = self::class;
+    }
+}
+
+final class ContextProbeListener
+{
+    /** @var list<mixed> the carried tenant, each run */
+    public static array $seen = [];
+
+    public function handle(DispatcherProbeEvent $event): void
+    {
+        self::$seen[] = CoroutineLocal::get('test.tenant');
     }
 }
 

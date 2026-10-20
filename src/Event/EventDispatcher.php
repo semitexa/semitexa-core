@@ -6,6 +6,7 @@ namespace Semitexa\Core\Event;
 
 use Semitexa\Core\Attribute\InjectAsReadonly;
 use Semitexa\Core\Exception\ConfigurationException;
+use Semitexa\Core\Lifecycle\RequestContextSnapshot;
 use Semitexa\Core\Attribute\SatisfiesServiceContract;
 use Semitexa\Core\Container\ContainerFactory;
 use Semitexa\Core\Log\StaticLoggerBridge;
@@ -197,9 +198,16 @@ final class EventDispatcher implements EventDispatcherInterface
         return \Closure::fromCallable($handle);
     }
 
-    /** Run listener after the current request coroutine finishes. Falls back to sync anywhere else. */
-    /** @param ListenerMeta $meta */
-    private function runListenerDefer(array $meta, object $event): void
+    /**
+     * Run listener after the current request coroutine finishes. Falls back to sync anywhere else.
+     *
+     * @param ListenerMeta $meta
+     * @param bool $asAWorkerWould a queued listener no worker reads: no request
+     *                             context, wherever it runs (a coroutine that
+     *                             carries its parent's included), as a worker
+     *                             has none. An async one gets the request's.
+     */
+    private function runListenerDefer(array $meta, object $event, bool $asAWorkerWould = false): void
     {
         // Decided on "inside a request coroutine", not on SAPI: a Swoole HTTP
         // server always runs under the CLI SAPI. Nor merely on "inside a
@@ -210,22 +218,42 @@ final class EventDispatcher implements EventDispatcherInterface
         // coroutine (those loops, a child go(), queue worker, console,
         // PHPUnit) run inline, as before, and leave the reactor untouched.
         if (!SwooleBootstrap::isRequestCoroutine()) {
-            $this->runListenerSync($meta, $event);
+            if ($asAWorkerWould) {
+                // Resolved inside it too: what it injects from the request a
+                // worker could not inject either.
+                RequestContextSnapshot::none(ContainerFactory::get())->run(fn () => $this->runListenerSync($meta, $event));
+            } else {
+                $this->runListenerSync($meta, $event);
+            }
+            return;
+        }
+
+        $listenerClass = $meta['class'];
+        if ($asAWorkerWould) {
+            // Resolved when it runs, with no request context, as a worker resolves it.
+            $context = RequestContextSnapshot::none(ContainerFactory::get());
+            AfterResponse::schedule(function () use ($meta, $event, $listenerClass, $context): void {
+                $context->run(fn () => self::runDeferredListener(fn (object $e): mixed => $this->resolveListener($meta)($e), $event, $listenerClass));
+            });
+
             return;
         }
 
         // Resolved NOW, while the ExecutionContext is live: deferred work
         // runs after the response is emitted AND after Application has reset
         // request-scoped state, so an #[ExecutionScoped] listener's
-        // #[InjectAsMutable] deps must be bound before that.
+        // #[InjectAsMutable] deps must be bound before that. For the same
+        // reason the context it runs in is taken now: the request clears its
+        // tenant and user, and a held-open connection's deferred work runs in
+        // a coroutine of its own that never had any.
         $listener = $this->resolveListener($meta);
-        $listenerClass = $meta['class'];
+        $context = RequestContextSnapshot::capture(ContainerFactory::get());
 
         // In scheduling order (an order-dependent listener must not get an
         // update before its creation event), in flight while it runs, and at
         // the end of the tick in a held-open connection: AfterResponse.
-        AfterResponse::schedule(static function () use ($listener, $event, $listenerClass): void {
-            self::runDeferredListener($listener, $event, $listenerClass);
+        AfterResponse::schedule(static function () use ($listener, $event, $listenerClass, $context): void {
+            $context->run(static fn () => self::runDeferredListener($listener, $event, $listenerClass));
         });
     }
 
@@ -260,7 +288,7 @@ final class EventDispatcher implements EventDispatcherInterface
             try {
                 $class = $event::class;
                 $rebuilt = PayloadSerializer::hydrate(new $class(), PayloadSerializer::toArray($event));
-                $this->runListenerDefer($meta, $rebuilt);
+                $this->runListenerDefer($meta, $rebuilt, asAWorkerWould: true);
             } catch (\Throwable $e) {
                 StaticLoggerBridge::error('core', 'Async event listener failed', [
                     'event' => $event::class,

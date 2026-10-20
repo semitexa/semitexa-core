@@ -55,6 +55,7 @@ final class AsyncAndQueuedHandlersTest extends TestCase
         AsyncProbeLog::$calls = [];
         AsyncProbeLog::$received = [];
         AsyncProbeContextHandler::$seen = [];
+        AsyncProbeContainer::$resolvedWith = [];
         AsyncProbeContextHandler::$cids = [];
         AsyncProbeContextHandler::$container = null;
         $logger = (new \ReflectionProperty(StaticLoggerBridge::class, 'logger'))->getValue();
@@ -75,7 +76,6 @@ final class AsyncAndQueuedHandlersTest extends TestCase
 
     protected function tearDown(): void
     {
-        CarriedContext::reset();
         (new \ReflectionProperty(StaticLoggerBridge::class, 'logger'))->setValue(null, $this->loggerSnapshot);
     }
 
@@ -268,6 +268,7 @@ final class AsyncAndQueuedHandlersTest extends TestCase
             });
 
             self::assertSame([[$request, 'acme'], [null, null]], AsyncProbeContextHandler::$seen);
+            self::assertSame(['acme'], AsyncProbeContainer::$resolvedWith, 'the Async one in the request scope (the Queued one in the worker container)');
         });
     }
 
@@ -292,6 +293,63 @@ final class AsyncAndQueuedHandlersTest extends TestCase
         self::assertSame([], $during, 'after the tick, not in it');
         self::assertSame([[$request, 'acme']], AsyncProbeContextHandler::$seen);
         self::assertNotSame($requestCid, AsyncProbeContextHandler::$cids[0], 'in a coroutine of its own');
+    }
+
+    /**
+     * Outside a request coroutine it runs inline, and a coroutine of its own
+     * may carry its parent's context (an SSE child does): a Queued handler
+     * must not see it there either, or it works here and not behind a queue.
+     */
+    #[Test]
+    public function a_queued_handler_run_inline_in_a_coroutine_with_context_does_not_see_it(): void
+    {
+        $this->withoutAsyncEvents(function (): void {
+            [$container, $request] = $this->requestContext();
+            $after = null;
+            \Swoole\Coroutine\run(function () use ($container, $request, &$after): void {
+                $container->setExecutionContext(new ExecutionContext(request: $request));
+                CoroutineLocal::set('test.tenant', 'acme');
+                $this->executor(container: $container)->execute($this->context([AsyncProbeContextHandler::class], 'queued'));
+                $after = [$container->captureExecutionContext()->request, CoroutineLocal::get('test.tenant')];
+            });
+
+            self::assertSame([[null, null]], AsyncProbeContextHandler::$seen);
+            self::assertSame([$request, 'acme'], $after, 'and the coroutine has its own back');
+        });
+    }
+
+    /**
+     * The request scope is reset before deferred work runs (onRequest's
+     * finally), and a reset scope refuses every handler: a Queued one
+     * resolved from it never ran. It is resolved as a worker resolves it,
+     * from the worker container.
+     */
+    #[Test]
+    public function a_queued_handler_is_resolved_from_the_worker_container_after_the_request_scope_is_reset(): void
+    {
+        $this->withoutAsyncEvents(function (): void {
+            $scope = new AsyncProbeContainer([AsyncProbeHandler::class => new AsyncProbeHandler()]);
+            $executor = new PipelineExecutor(
+                $scope,
+                new AsyncProbeContainer([
+                    PipelineListenerRegistry::class => new AsyncProbeNoListeners(),
+                    AsyncProbeHandler::class => new AsyncProbeHandler(),
+                ]),
+            );
+            CarriedContext::carry('test.tenant');
+            \Swoole\Coroutine\run(function () use ($executor, $scope): void {
+                $key = (new \ReflectionClassConstant(SwooleBootstrap::class, 'COROUTINE_CONTEXT_KEY'))->getValue();
+                \Swoole\Coroutine::getContext()[$key] = true;
+                CoroutineLocal::set('test.tenant', 'acme');
+                $executor->execute($this->context([AsyncProbeHandler::class], 'queued'));
+                // What onRequest's finally does before the coroutine exits.
+                $scope->refuseEverything = true;
+            });
+
+            self::assertSame([AsyncProbeHandler::class], AsyncProbeLog::$calls);
+            self::assertSame([], $this->errors);
+            self::assertSame([null], AsyncProbeContainer::$resolvedWith, 'resolved when it runs, with no request context: what it injects, a worker could not');
+        });
     }
 
     /** @return array{SemitexaContainer, Request} */
@@ -330,14 +388,23 @@ final class AsyncAndQueuedHandlersTest extends TestCase
 
     private function executor(?AsyncProbeTracer $tracer = null, bool $reRun = false, ?ContainerInterface $container = null): PipelineExecutor
     {
+        // Async ones are resolved in the request scope, Queued ones in the
+        // worker container: both know them, as in production.
+        $handlers = [
+            AsyncProbeHandler::class => new AsyncProbeHandler(),
+            AsyncProbeSecondHandler::class => new AsyncProbeSecondHandler(),
+            AsyncProbeThrowingHandler::class => new AsyncProbeThrowingHandler(),
+            AsyncProbeContextHandler::class => new AsyncProbeContextHandler(),
+        ];
+        if ($container instanceof SemitexaContainer) {
+            foreach ($handlers as $class => $handler) {
+                $container->set($class, $handler);
+            }
+        }
+
         return new PipelineExecutor(
-            new AsyncProbeContainer([
-                AsyncProbeHandler::class => new AsyncProbeHandler(),
-                AsyncProbeSecondHandler::class => new AsyncProbeSecondHandler(),
-                AsyncProbeThrowingHandler::class => new AsyncProbeThrowingHandler(),
-                AsyncProbeContextHandler::class => new AsyncProbeContextHandler(),
-            ]),
-            $container ?? new AsyncProbeContainer([PipelineListenerRegistry::class => new AsyncProbeNoListeners()]),
+            new AsyncProbeContainer($handlers),
+            $container ?? new AsyncProbeContainer([PipelineListenerRegistry::class => new AsyncProbeNoListeners()] + $handlers),
             $tracer,
             $reRun,
         );
@@ -462,6 +529,12 @@ final class AsyncProbeContextHandler implements TypedHandlerInterface
 
 final class AsyncProbeContainer implements ContainerInterface
 {
+    /** @var list<mixed> the carried tenant at each resolution of a handler */
+    public static array $resolvedWith = [];
+
+    /** As a RequestScopedContainer does once reset: see RequestScopedContainer::get(). */
+    public bool $refuseEverything = false;
+
     /** @param array<string, object> $services */
     public function __construct(private array $services)
     {
@@ -469,6 +542,12 @@ final class AsyncProbeContainer implements ContainerInterface
 
     public function get(string $id): object
     {
+        if ($this->refuseEverything) {
+            throw new \RuntimeException("a reset request scope refuses {$id}");
+        }
+        if (str_ends_with($id, 'Handler')) {
+            self::$resolvedWith[] = CoroutineLocal::get('test.tenant');
+        }
         if (!isset($this->services[$id])) {
             throw new class("no binding for {$id}") extends \RuntimeException implements NotFoundExceptionInterface {
             };

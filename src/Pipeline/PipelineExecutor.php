@@ -266,9 +266,13 @@ final class PipelineExecutor
             if ($context->resourceDto === null) {
                 throw new PipelineException("Async handler {$handlerClass} requires a resource DTO, but none was provided.");
             }
-            // Resolved now, while the request scope is live, as an async listener is.
             $scheduled = InProcessAsyncHandler::schedule(
-                $this->resolveHandler($handlerClass),
+                $handlerClass,
+                $async
+                    ? fn (): object => $this->resolveHandler($handlerClass)
+                    // As a worker resolves it, from the worker container: it runs once
+                    // the request scope is reset, and that refuses every handler.
+                    : fn (): object => $this->resolveHandler($handlerClass, $this->container),
                 $context->requestDto,
                 $context->resourceDto,
                 $sessionId,
@@ -290,10 +294,10 @@ final class PipelineExecutor
         }
     }
 
-    private function resolveHandler(string $handlerClass): object
+    private function resolveHandler(string $handlerClass, ?ContainerInterface $from = null): object
     {
         try {
-            $handler = $this->requestScopedContainer->get($handlerClass);
+            $handler = ($from ?? $this->requestScopedContainer)->get($handlerClass);
             if (!is_object($handler)) {
                 throw new \UnexpectedValueException('the container returned ' . get_debug_type($handler));
             }

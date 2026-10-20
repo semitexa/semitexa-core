@@ -196,6 +196,55 @@ final class AfterResponseTest extends TestCase
         self::assertSame(['caught', 'response', 'request work', 'tick work'], $log);
     }
 
+    /**
+     * tk-held-open-first-run-and-listener-context. A held-open connection's
+     * coroutine exits only when it closes: what the request scheduled before
+     * its first frame (an async handler declared before the stream's) waited
+     * for that, and so did a heartbeat's or an auth refresh's work outside a
+     * tick. Once the response is out it runs after the connection yields,
+     * in order, in flight meanwhile.
+     */
+    #[Test]
+    public function once_held_open_what_was_scheduled_and_what_comes_outside_a_tick_runs_before_the_connection_closes(): void
+    {
+        $log = [];
+        $inFlight = [];
+        \Swoole\Coroutine\run(function () use (&$log, &$inFlight): void {
+            self::markAsRequestCoroutine();
+            $connection = Row::asInt(\Swoole\Coroutine::getCid());
+            $work = static function (string $name) use (&$log, &$inFlight, $connection): \Closure {
+                return static function () use ($name, &$log, &$inFlight, $connection): void {
+                    $cid = Row::asInt(\Swoole\Coroutine::getCid());
+                    $inFlight[] = $cid !== $connection && InFlightRequests::has($cid);
+                    $log[] = $name;
+                };
+            };
+            AfterResponse::schedule($work('before the first frame'));
+            $log[] = 'first frame';
+            AfterResponse::holdOpen();
+            AfterResponse::schedule($work('heartbeat'));
+            $log[] = 'loop waits';
+            \Swoole\Coroutine::sleep(0.02);
+            $log[] = 'connection closes';
+        });
+
+        self::assertSame(['first frame', 'loop waits', 'before the first frame', 'heartbeat', 'connection closes'], $log);
+        self::assertSame([true, true], $inFlight);
+    }
+
+    #[Test]
+    public function held_open_outside_a_request_does_nothing(): void
+    {
+        $log = [];
+        AfterResponse::holdOpen();
+        AfterResponse::schedule(static function () use (&$log): void {
+            $log[] = 'work';
+        });
+        $log[] = 'after';
+
+        self::assertSame(['work', 'after'], $log);
+    }
+
     #[Test]
     public function outside_a_request_it_runs_inline(): void
     {
