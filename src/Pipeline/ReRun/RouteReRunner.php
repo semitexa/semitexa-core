@@ -6,6 +6,7 @@ namespace Semitexa\Core\Pipeline\ReRun;
 
 use Psr\Container\ContainerInterface;
 use Semitexa\Core\Pipeline\RouteExecutor;
+use Semitexa\Core\Server\AfterResponse;
 use Semitexa\Core\Tenant\TenantContextStoreInterface;
 
 /**
@@ -82,12 +83,14 @@ final class RouteReRunner implements ReRunnerInterface
             //    so identity re-resolution cannot see it.
             $request = $context->rebuildRequest();
 
-            return $this->routeExecutor->reExecute(
+            // The connection's coroutine exits only when it closes: what this
+            // tick defers runs when the tick ends, not then.
+            return AfterResponse::tick(fn (): ReRunResult => $this->routeExecutor->reExecute(
                 $context->getRoute(),
                 $request,
                 $context->getCachedDto(),
                 $filterOverride,
-            );
+            ));
         } finally {
             if ($swappedStore !== null) {
                 $swappedStore->clear();

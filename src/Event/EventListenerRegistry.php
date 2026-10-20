@@ -116,6 +116,25 @@ final class EventListenerRegistry
         return array_keys($classes);
     }
 
+    /**
+     * Every listener a queue worker runs, across all events.
+     *
+     * @return list<array{class: string, event: string, execution: string, transport: mixed, queue: mixed, priority: int, maxRetries?: int, retryDelay?: int}>
+     */
+    public function queuedListeners(): array
+    {
+        $this->ensureBuilt();
+        $queued = [];
+        foreach ($this->listenersByEvent as $listeners) {
+            foreach ($listeners as $meta) {
+                if ($meta['execution'] === EventExecution::Queued->value) {
+                    $queued[] = $meta;
+                }
+            }
+        }
+        return $queued;
+    }
+
     private static function isProjectEventListeners(string $class): bool
     {
         return str_starts_with($class, 'App\\') && (

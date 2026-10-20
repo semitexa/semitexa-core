@@ -289,8 +289,8 @@ class RouteExecutor
      * after a denial.
      *
      * Headless by construction: no HTTP, no SSE loop, no connect coordinator — the
-     * caller ({@see \Semitexa\Core\Pipeline\ReRun\ReRunnerInterface}) re-establishes
-     * the immutable tenant block and hands in the rebuilt request + cached DTO; the
+     * caller (RouteReRunner) runs it as an {@see \Semitexa\Core\Server\AfterResponse::tick()},
+     * re-establishes the immutable tenant block, hands in the rebuilt request + DTO; the
      * request-scoped execution context (Session / CookieJar / Request trio + live
      * tenant/auth/locale) is re-established HERE via {@see establishReRunExecutionContext()},
      * after the auth gate and before the pipeline, so execution-scoped pipeline
@@ -368,7 +368,7 @@ class RouteExecutor
             // would also add ~16 events per second to a connection-long trace
             // and hit the event cap in minutes. Tracing re-runs needs its own
             // span identity first; until then the first run shows the shape.
-            $pipelineExecutor = new PipelineExecutor($this->requestScopedContainer, $this->container);
+            $pipelineExecutor = new PipelineExecutor($this->requestScopedContainer, $this->container, reRun: true);
             $pipelineExecutor->execute($context);
             $resDto = $context->resourceDto;
             if (!is_object($resDto)) {

@@ -36,10 +36,11 @@ final class QueueTransportDoctorCheck implements DoctorCheckInterface
             );
         }
 
-        if ($transport === 'in-memory' || $transport === 'memory') {
+        if (QueueConfig::isProcessLocal($transport)) {
             return DoctorResult::pass(
-                "Transport 'in-memory' (sync, per-process). Cross-process workers like media:work "
-                . 'will not receive messages — use DB-drain commands where available.',
+                "Transport 'in-memory' (per-process): queued listeners and async handlers run in the process that "
+                . 'dispatched them and queued mail is sent at once, without retries or a dead letter. Cross-process workers like '
+                . 'media:work will not receive messages — use DB-drain commands where available.',
             );
         }
 

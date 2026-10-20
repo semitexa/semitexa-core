@@ -10,9 +10,15 @@ use Semitexa\Core\Event\EventDispatcher;
 use Semitexa\Core\Event\EventExecution;
 use Semitexa\Core\Event\EventListenerRegistry;
 use Semitexa\Core\Exception\ConfigurationException;
+use Semitexa\Core\Lifecycle\CarriedContext;
 use Semitexa\Core\Log\LoggerInterface;
 use Semitexa\Core\Log\StaticLoggerBridge;
+use Semitexa\Core\Queue\QueueTransportFactoryInterface;
+use Semitexa\Core\Queue\QueueTransportInterface;
+use Semitexa\Core\Queue\QueueTransportRegistry;
+use Semitexa\Core\Tests\Support\StaticState;
 use Semitexa\Core\Server\SwooleBootstrap;
+use Semitexa\Core\Support\CoroutineLocal;
 
 final class EventDispatcherTest extends TestCase
 {
@@ -24,12 +30,19 @@ final class EventDispatcherTest extends TestCase
 
     private ?LoggerInterface $loggerSnapshot = null;
 
+    /** @var array{class: class-string, values: array<string, mixed>} */
+    private array $carriedSnapshot;
+
     protected function setUp(): void
     {
+        // The keys a test names with carry() are worker-wide: put back as found.
+        $this->carriedSnapshot = StaticState::snapshot(CarriedContext::class);
         $this->callsSnapshot = DispatcherProbeLog::$calls;
         $logger = (new \ReflectionProperty(StaticLoggerBridge::class, 'logger'))->getValue();
         $this->loggerSnapshot = $logger instanceof LoggerInterface ? $logger : null;
         DispatcherProbeLog::$calls = [];
+        RebuildProbeListener::$received = null;
+        ContextProbeListener::$seen = [];
         $this->errors = [];
         $errors = &$this->errors;
         StaticLoggerBridge::set(new class ($errors) implements LoggerInterface {
@@ -46,6 +59,7 @@ final class EventDispatcherTest extends TestCase
 
     protected function tearDown(): void
     {
+        StaticState::restore($this->carriedSnapshot);
         DispatcherProbeLog::$calls = $this->callsSnapshot;
         (new \ReflectionProperty(StaticLoggerBridge::class, 'logger'))->setValue(null, $this->loggerSnapshot);
     }
@@ -184,6 +198,197 @@ final class EventDispatcherTest extends TestCase
         $dispatcher->dispatch(new DispatcherProbeEvent());
     }
 
+    /**
+     * REGRESSION (tk-queued-mail-sync-without-async). With EVENTS_ASYNC=0 the
+     * queue transport is in-memory: one per worker process, and nothing in
+     * that process consumes it. A queued listener was published into it and
+     * never ran; the message stayed in the worker's memory. Without async
+     * events nothing can be queued, so it runs in the dispatch, as a sync one.
+     */
+    #[Test]
+    public function without_async_events_a_queued_listener_runs_in_the_dispatch(): void
+    {
+        $this->withEnv(['EVENTS_ASYNC' => '0', 'EVENTS_TRANSPORT' => 'in-memory'], function (): void {
+            $dispatcher = $this->dispatcherWith([[RecordingProbeListener::class, EventExecution::Queued]]);
+
+            $dispatcher->dispatch(new DispatcherProbeEvent());
+
+            self::assertSame([RecordingProbeListener::class], DispatcherProbeLog::$calls);
+        });
+    }
+
+    #[Test]
+    public function without_async_events_a_failing_queued_listener_is_logged_not_thrown_at_the_caller(): void
+    {
+        $this->withEnv(['EVENTS_ASYNC' => '0', 'EVENTS_TRANSPORT' => 'in-memory'], function (): void {
+            $dispatcher = $this->dispatcherWith([[ThrowingProbeListener::class, EventExecution::Queued]]);
+
+            $dispatcher->dispatch(new DispatcherProbeEvent());
+
+            self::assertSame([ThrowingProbeListener::class], DispatcherProbeLog::$calls);
+            self::assertSame(['Async event listener failed'], $this->errors);
+        });
+    }
+
+    #[Test]
+    public function with_a_transport_a_worker_reads_a_queued_listener_is_published_not_run(): void
+    {
+        $state = StaticState::snapshot(QueueTransportRegistry::class);
+        DispatcherSpyTransport::$published = [];
+        QueueTransportRegistry::register('dispatcher-spy', new DispatcherSpyTransportFactory());
+        try {
+            $this->withEnv(['EVENTS_ASYNC' => '1', 'EVENTS_TRANSPORT' => 'dispatcher-spy'], function (): void {
+                $dispatcher = $this->dispatcherWith([[RecordingProbeListener::class, EventExecution::Queued]]);
+
+                $dispatcher->dispatch(new DispatcherProbeEvent());
+
+                self::assertSame([], DispatcherProbeLog::$calls);
+                self::assertSame(['events'], array_column(DispatcherSpyTransport::$published, 0));
+            });
+        } finally {
+            StaticState::restore($state);
+        }
+    }
+
+    /**
+     * The replay sandbox registers a capturing transport under 'in-memory':
+     * what decides is the transport the registry hands out, not its name, so
+     * a sandboxed request still captures its queued listeners.
+     */
+    #[Test]
+    public function a_transport_registered_under_the_in_memory_name_still_receives_the_message(): void
+    {
+        $state = StaticState::snapshot(QueueTransportRegistry::class);
+        DispatcherSpyTransport::$published = [];
+        // As ReplayRunner::stubQueueTransports() does it.
+        QueueTransportRegistry::reset();
+        QueueTransportRegistry::initialize();
+        QueueTransportRegistry::register('in-memory', new DispatcherSpyTransportFactory());
+        try {
+            $this->withEnv(['EVENTS_ASYNC' => '0', 'EVENTS_TRANSPORT' => 'in-memory'], function (): void {
+                $dispatcher = $this->dispatcherWith([[RecordingProbeListener::class, EventExecution::Queued]]);
+
+                $dispatcher->dispatch(new DispatcherProbeEvent());
+
+                self::assertSame([], DispatcherProbeLog::$calls);
+                self::assertCount(1, DispatcherSpyTransport::$published);
+            });
+        } finally {
+            StaticState::restore($state);
+        }
+    }
+
+    /** What a worker would get: the event rebuilt from its getters, not the object the caller still holds. */
+    #[Test]
+    public function without_async_events_a_queued_listener_gets_the_event_as_a_worker_would(): void
+    {
+        $this->withEnv(['EVENTS_ASYNC' => '0', 'EVENTS_TRANSPORT' => 'in-memory'], function (): void {
+            $dispatcher = $this->dispatcherWith([[RebuildProbeListener::class, EventExecution::Queued]], RebuildProbeEvent::class);
+            $event = new RebuildProbeEvent();
+            $event->setOrderId('o-7');
+            $event->unreadable = 'no getter';
+
+            $dispatcher->dispatch($event);
+
+            self::assertNotSame($event, RebuildProbeListener::$received);
+            self::assertSame('o-7', RebuildProbeListener::$received?->getOrderId());
+            self::assertSame('', RebuildProbeListener::$received->unreadable, 'a value without a getter does not travel');
+        });
+    }
+
+    #[Test]
+    public function without_async_events_an_event_a_worker_could_not_rebuild_is_logged_not_run(): void
+    {
+        $this->withEnv(['EVENTS_ASYNC' => '0', 'EVENTS_TRANSPORT' => 'in-memory'], function (): void {
+            $dispatcher = $this->dispatcherWith([[RecordingProbeListener::class, EventExecution::Queued]], ConstructorArgumentProbeEvent::class);
+
+            $dispatcher->dispatch(new ConstructorArgumentProbeEvent('o-1'));
+
+            self::assertSame([], DispatcherProbeLog::$calls);
+            self::assertSame(['Async event listener failed'], $this->errors);
+        });
+    }
+
+    /** The mark attests a handoff: one that never happened leaves none, one that did leaves one. */
+    #[Test]
+    public function without_async_events_the_in_process_mark_is_left_only_by_an_event_that_was_handed_over(): void
+    {
+        $this->withEnv(['EVENTS_ASYNC' => '0', 'EVENTS_TRANSPORT' => 'in-memory'], function (): void {
+            $enqueue = new \ReflectionMethod(EventDispatcher::class, 'enqueueListener');
+            $meta = static fn (string $event): array => ['class' => RecordingProbeListener::class, 'execution' => 'queued', 'event' => $event];
+
+            $refused = new MarkProbeTracer();
+            $enqueue->invoke($this->dispatcherWith([]), $meta(ConstructorArgumentProbeEvent::class), new ConstructorArgumentProbeEvent('o-1'), $refused);
+            $handedOver = new MarkProbeTracer();
+            $enqueue->invoke($this->dispatcherWith([]), $meta(DispatcherProbeEvent::class), new DispatcherProbeEvent(), $handedOver);
+
+            self::assertSame([], $refused->marks);
+            self::assertSame([['event.listener.queued_in_process', ['listener' => RecordingProbeListener::class, 'event' => DispatcherProbeEvent::class]]], $handedOver->marks);
+            self::assertSame([RecordingProbeListener::class], DispatcherProbeLog::$calls);
+        });
+    }
+
+    /**
+     * tk-held-open-first-run-and-listener-context. The request clears its
+     * tenant and user once the response is out, and the listener runs after
+     * that: it got the defaults. It gets the request's.
+     */
+    #[Test]
+    public function an_async_listener_runs_with_the_requests_context_after_the_request_cleared_it(): void
+    {
+        $dispatcher = $this->dispatcherWith([[ContextProbeListener::class, EventExecution::Async]]);
+        CarriedContext::carry('test.tenant');
+        \Swoole\Coroutine\run(static function () use ($dispatcher): void {
+            self::markAsRequestCoroutine();
+            CoroutineLocal::set('test.tenant', 'acme');
+            $dispatcher->dispatch(new DispatcherProbeEvent());
+            // What the request does once the response is out.
+            CoroutineLocal::remove('test.tenant');
+        });
+
+        self::assertSame(['acme'], ContextProbeListener::$seen);
+    }
+
+    /**
+     * A queued listener no worker reads runs in the dispatch, and a worker has
+     * no request: in a coroutine that carries its parent's context (an SSE
+     * child, say) it must not see it, or it works here and not behind a queue.
+     */
+    #[Test]
+    public function without_async_events_a_queued_listener_runs_without_the_context_live_where_it_is_dispatched(): void
+    {
+        $this->withEnv(['EVENTS_ASYNC' => '0', 'EVENTS_TRANSPORT' => 'in-memory'], function (): void {
+            $dispatcher = $this->dispatcherWith([[ContextProbeListener::class, EventExecution::Queued]]);
+            CarriedContext::carry('test.tenant');
+            $after = null;
+            \Swoole\Coroutine\run(static function () use ($dispatcher, &$after): void {
+                CoroutineLocal::set('test.tenant', 'acme');
+                $dispatcher->dispatch(new DispatcherProbeEvent());
+                $after = CoroutineLocal::get('test.tenant');
+            });
+
+            self::assertSame([null], ContextProbeListener::$seen);
+            self::assertSame('acme', $after, 'and the coroutine has its own back');
+        });
+    }
+
+    /** @param array<string, ?string> $values null unsets */
+    private function withEnv(array $values, callable $run): void
+    {
+        $saved = [];
+        foreach ($values as $key => $value) {
+            $saved[$key] = getenv($key);
+            putenv($value === null ? $key : "{$key}={$value}");
+        }
+        try {
+            $run();
+        } finally {
+            foreach ($saved as $key => $value) {
+                putenv($value === false ? $key : "{$key}={$value}");
+            }
+        }
+    }
+
     /** What SwooleBootstrap's onRequest sets on the coroutine a request runs in. */
     private static function markAsRequestCoroutine(): void
     {
@@ -193,15 +398,16 @@ final class EventDispatcherTest extends TestCase
 
     /**
      * @param list<array{0: class-string, 1: EventExecution}> $listeners
+     * @param class-string $eventClass
      */
-    private function dispatcherWith(array $listeners): EventDispatcher
+    private function dispatcherWith(array $listeners, string $eventClass = DispatcherProbeEvent::class): EventDispatcher
     {
         $registryRef = new \ReflectionClass(EventListenerRegistry::class);
         $registry = $registryRef->newInstanceWithoutConstructor();
         $registryRef->getProperty('built')->setValue($registry, true);
         $registryRef->getProperty('listenersByEvent')->setValue($registry, [
-            DispatcherProbeEvent::class => array_map(
-                static fn (array $l): array => ['class' => $l[0], 'execution' => $l[1]->value, 'event' => DispatcherProbeEvent::class],
+            $eventClass => array_map(
+                static fn (array $l): array => ['class' => $l[0], 'execution' => $l[1]->value, 'event' => $eventClass],
                 $listeners,
             ),
         ]);
@@ -226,6 +432,37 @@ final class RecordingProbeListener
     public function handle(DispatcherProbeEvent $event): void
     {
         DispatcherProbeLog::$calls[] = self::class;
+    }
+}
+
+/** Records the marks; spans are not what these tests are about. */
+final class MarkProbeTracer implements \Semitexa\Core\Pipeline\RequestTracerInterface
+{
+    /** @var list<array{string, array<string, mixed>}> */
+    public array $marks = [];
+
+    public function begin(string $name, array $context = []): void
+    {
+    }
+
+    public function end(string $name, array $context = []): void
+    {
+    }
+
+    public function mark(string $name, array $context = []): void
+    {
+        $this->marks[] = [$name, $context];
+    }
+}
+
+final class ContextProbeListener
+{
+    /** @var list<mixed> the carried tenant, each run */
+    public static array $seen = [];
+
+    public function handle(DispatcherProbeEvent $event): void
+    {
+        self::$seen[] = CoroutineLocal::get('test.tenant');
     }
 }
 
@@ -277,5 +514,67 @@ final class PrivateHandleProbeListener
         DispatcherProbeLog::$calls[] = self::class . '::__call';
 
         return null;
+    }
+}
+
+final class DispatcherSpyTransport implements QueueTransportInterface
+{
+    /** @var list<array{string, string}> */
+    public static array $published = [];
+
+    public function publish(string $queueName, string $payload): void
+    {
+        self::$published[] = [$queueName, $payload];
+    }
+
+    public function consume(string $queueName, callable $callback): void
+    {
+    }
+}
+
+final class DispatcherSpyTransportFactory implements QueueTransportFactoryInterface
+{
+    public function create(): QueueTransportInterface
+    {
+        return new DispatcherSpyTransport();
+    }
+}
+
+final class RebuildProbeEvent
+{
+    private string $orderId = '';
+
+    public string $unreadable = '';
+
+    public function getOrderId(): string
+    {
+        return $this->orderId;
+    }
+
+    public function setOrderId(string $orderId): void
+    {
+        $this->orderId = $orderId;
+    }
+}
+
+final class RebuildProbeListener
+{
+    public static ?RebuildProbeEvent $received = null;
+
+    public function handle(RebuildProbeEvent $event): void
+    {
+        self::$received = $event;
+    }
+}
+
+final class ConstructorArgumentProbeEvent
+{
+    public function __construct(private string $orderId)
+    {
+    }
+
+    public function getOrderId(): string
+    {
+        return $this->orderId;
     }
 }

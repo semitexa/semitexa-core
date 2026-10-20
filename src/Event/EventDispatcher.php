@@ -6,11 +6,13 @@ namespace Semitexa\Core\Event;
 
 use Semitexa\Core\Attribute\InjectAsReadonly;
 use Semitexa\Core\Exception\ConfigurationException;
+use Semitexa\Core\Lifecycle\RequestContextSnapshot;
 use Semitexa\Core\Attribute\SatisfiesServiceContract;
 use Semitexa\Core\Container\ContainerFactory;
 use Semitexa\Core\Log\StaticLoggerBridge;
 use Semitexa\Core\Queue\QueueConfig;
 use Semitexa\Core\Queue\QueueTransportRegistry;
+use Semitexa\Core\Server\AfterResponse;
 use Semitexa\Core\Server\SwooleBootstrap;
 use Semitexa\Core\Support\PayloadSerializer;
 
@@ -37,8 +39,6 @@ final class EventDispatcher implements EventDispatcherInterface
      */
     private array $postDispatchHooks = [];
 
-    /** Coroutine-context key of the FIFO queue drained by the one deferred callback. */
-    private const DEFERRED_LISTENERS_KEY = 'semitexa.event.deferredListeners';
     /**
      * Create an event instance. Use this instead of "new Event()" so the framework
      * can apply initialization, validation, or optimizations now or later.
@@ -198,9 +198,16 @@ final class EventDispatcher implements EventDispatcherInterface
         return \Closure::fromCallable($handle);
     }
 
-    /** Run listener after the current request coroutine finishes. Falls back to sync anywhere else. */
-    /** @param ListenerMeta $meta */
-    private function runListenerDefer(array $meta, object $event): void
+    /**
+     * Run listener after the current request coroutine finishes. Falls back to sync anywhere else.
+     *
+     * @param ListenerMeta $meta
+     * @param bool $asAWorkerWould a queued listener no worker reads: no request
+     *                             context, wherever it runs (a coroutine that
+     *                             carries its parent's included), as a worker
+     *                             has none. An async one gets the request's.
+     */
+    private function runListenerDefer(array $meta, object $event, bool $asAWorkerWould = false): void
     {
         // Decided on "inside a request coroutine", not on SAPI: a Swoole HTTP
         // server always runs under the CLI SAPI. Nor merely on "inside a
@@ -211,40 +218,42 @@ final class EventDispatcher implements EventDispatcherInterface
         // coroutine (those loops, a child go(), queue worker, console,
         // PHPUnit) run inline, as before, and leave the reactor untouched.
         if (!SwooleBootstrap::isRequestCoroutine()) {
-            $this->runListenerSync($meta, $event);
-            return;
-        }
-
-        // Resolved NOW, while the ExecutionContext is live: Coroutine::defer
-        // fires at coroutine exit, after the response is emitted AND after
-        // Application has reset request-scoped state, so an #[ExecutionScoped]
-        // listener's #[InjectAsMutable] deps must be bound before that.
-        $listener = $this->resolveListener($meta);
-        $listenerClass = $meta['class'];
-
-        // Coroutine::defer runs its callbacks LIFO, which would hand an
-        // order-dependent listener an update before its creation event. So
-        // listeners queue in scheduling order on the coroutine's context and
-        // ONE deferred callback drains that queue FIFO — including listeners
-        // scheduled while it drains.
-        $context = \Swoole\Coroutine::getContext();
-        if (!$context instanceof \ArrayObject) {
-            $this->runListenerSync($meta, $event);
-            return;
-        }
-        $queue = $context[self::DEFERRED_LISTENERS_KEY] ?? null;
-        if ($queue instanceof \ArrayObject) {
-            $queue[] = [$listener, $event, $listenerClass];
-            return;
-        }
-        $queue = new \ArrayObject([[$listener, $event, $listenerClass]]);
-        $context[self::DEFERRED_LISTENERS_KEY] = $queue;
-
-        \Swoole\Coroutine::defer(static function () use ($queue): void {
-            for ($i = 0; $i < count($queue); $i++) {
-                [$listener, $event, $listenerClass] = $queue[$i];
-                self::runDeferredListener($listener, $event, $listenerClass);
+            if ($asAWorkerWould) {
+                // Resolved inside it too: what it injects from the request a
+                // worker could not inject either.
+                RequestContextSnapshot::none(ContainerFactory::get())->run(fn () => $this->runListenerSync($meta, $event));
+            } else {
+                $this->runListenerSync($meta, $event);
             }
+            return;
+        }
+
+        $listenerClass = $meta['class'];
+        if ($asAWorkerWould) {
+            // Resolved when it runs, with no request context, as a worker resolves it.
+            $context = RequestContextSnapshot::none(ContainerFactory::get());
+            AfterResponse::schedule(function () use ($meta, $event, $listenerClass, $context): void {
+                $context->run(fn () => self::runDeferredListener(fn (object $e): mixed => $this->resolveListener($meta)($e), $event, $listenerClass));
+            });
+
+            return;
+        }
+
+        // Resolved NOW, while the ExecutionContext is live: deferred work
+        // runs after the response is emitted AND after Application has reset
+        // request-scoped state, so an #[ExecutionScoped] listener's
+        // #[InjectAsMutable] deps must be bound before that. For the same
+        // reason the context it runs in is taken now: the request clears its
+        // tenant and user, and a held-open connection's deferred work runs in
+        // a coroutine of its own that never had any.
+        $listener = $this->resolveListener($meta);
+        $context = RequestContextSnapshot::capture(ContainerFactory::get());
+
+        // In scheduling order (an order-dependent listener must not get an
+        // update before its creation event), in flight while it runs, and at
+        // the end of the tick in a held-open connection: AfterResponse.
+        AfterResponse::schedule(static function () use ($listener, $event, $listenerClass, $context): void {
+            $context->run(static fn () => self::runDeferredListener($listener, $event, $listenerClass));
         });
     }
 
@@ -269,6 +278,31 @@ final class EventDispatcher implements EventDispatcherInterface
     private function enqueueListener(array $meta, object $event, ?\Semitexa\Core\Pipeline\RequestTracerInterface $tracer = null): void
     {
         $transportName = $meta['transport'] ?? QueueConfig::defaultTransport();
+        // Without async events the transport is in-memory, and no worker reads
+        // it: the listener runs here, as an async one does (after the response
+        // in a request, inline elsewhere), and its failure is logged, not thrown.
+        // It gets what a worker would: the event rebuilt from its getters
+        // through a constructor without arguments, so a listener that works
+        // here works behind a queue too. Retries and the dead letter do not apply.
+        if (is_string($transportName) && QueueConfig::isProcessLocal($transportName)) {
+            try {
+                $class = $event::class;
+                $rebuilt = PayloadSerializer::hydrate(new $class(), PayloadSerializer::toArray($event));
+                // Once rebuilt it is handed over, as the queued mark is only after a
+                // publish: an event a worker could not rebuild leaves no trace claiming it.
+                $tracer?->mark('event.listener.queued_in_process', ['listener' => $meta['class'], 'event' => get_class($event)]);
+                $this->runListenerDefer($meta, $rebuilt, asAWorkerWould: true);
+            } catch (\Throwable $e) {
+                StaticLoggerBridge::error('core', 'Async event listener failed', [
+                    'event' => $event::class,
+                    'listener' => $meta['class'],
+                    'execution' => 'queued, run in process: no async events',
+                    'exception' => $e::class,
+                    'message' => $e->getMessage(),
+                ]);
+            }
+            return;
+        }
         $queueName = $meta['queue'] ?? QueueConfig::defaultQueueName($meta['event']);
 
         $message = new \Semitexa\Core\Queue\Message\QueuedEventListenerMessage(

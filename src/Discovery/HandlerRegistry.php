@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Discovery;
 
+use Semitexa\Core\Queue\HandlerExecution;
+
 /**
  * Stores handler→payload+resource mappings discovered at boot time.
  * Provides handler lookup by payload and resource class for route execution.
@@ -36,6 +38,14 @@ final class HandlerRegistry
      */
     public function register(string $payloadClass, string $resourceClass, array $handlerMeta): void
     {
+        // Async meant "through a queue" until 2026-10: a handler that still
+        // names one now runs in process, and the queue goes unused.
+        if ($handlerMeta['execution'] === HandlerExecution::Async->value
+            && (($handlerMeta['transport'] ?? null) !== null || ($handlerMeta['queue'] ?? null) !== null || ($handlerMeta['maxRetries'] ?? 0) > 0 || ($handlerMeta['retryDelay'] ?? 0) > 0)) {
+            BootDiagnostics::current()->invalidUsage('HandlerRegistry', "Handler {$handlerMeta['class']} is Async with a transport, queue or retries, "
+                . 'which apply only to Queued: Async runs in the process that served the request. '
+                . 'For a worker, set execution: HandlerExecution::Queued.');
+        }
         $key = $payloadClass . "\0" . $resourceClass;
         $this->handlersByPayloadAndResource[$key][] = $handlerMeta;
         $this->handlersByClass[$handlerMeta['class']] = $handlerMeta;
