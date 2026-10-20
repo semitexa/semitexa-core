@@ -60,6 +60,32 @@ final class QueueWorkerDeadLetterTest extends TestCase
         self::assertSame('boom', json_decode($payload, true)['error'] ?? null);
     }
 
+    /**
+     * REGRESSION (release review). A handler message whose handler class is
+     * gone used to be logged and acknowledged — the request lost — instead of
+     * reaching the dead letter like one whose handler threw.
+     */
+    #[Test]
+    public function a_handler_class_that_no_longer_exists_is_dead_lettered(): void
+    {
+        $worker = $this->worker(self::TRANSPORT, 'orders');
+        $stats = sys_get_temp_dir() . '/semitexa-dlq-stats-' . bin2hex(random_bytes(4)) . '.json';
+        (new ReflectionProperty(QueueWorker::class, 'statsFile'))->setValue($worker, $stats);
+
+        try {
+            $worker->processPayload((new QueuedHandlerMessage('App\\Gone\\RemovedHandler', 'App\\Req', 'App\\Res', ['id' => 'r-1'], []))->toJson());
+        } finally {
+            @unlink($stats);
+        }
+
+        self::assertCount(1, DeadLetterSpyTransport::$published);
+        [$queue, $payload] = DeadLetterSpyTransport::$published[0];
+        self::assertSame('orders.failed', $queue);
+        $letter = json_decode($payload, true);
+        self::assertSame(['id' => 'r-1'], $letter['requestPayload'] ?? null, 'the dead letter carries the request to replay');
+        self::assertStringContainsString('App\\Gone\\RemovedHandler', (string) ($letter['error'] ?? ''));
+    }
+
     private function worker(?string $transport, ?string $queue): QueueWorker
     {
         $worker = (new \ReflectionClass(QueueWorker::class))->newInstanceWithoutConstructor();

@@ -44,6 +44,7 @@ final class QueuedEventListenerFailureTest extends TestCase
         ];
         QueueTransportRegistry::reset();
         QueuedListenerSpyTransport::$published = [];
+        QueuedListenerSpyTransport::$publishFails = null;
         QueueTransportRegistry::register(self::TRANSPORT, new QueuedListenerSpyTransportFactory());
         QueuedListenerFixture::$received = [];
         QueuedListenerFixture::$failWith = null;
@@ -138,6 +139,101 @@ final class QueuedEventListenerFailureTest extends TestCase
         self::assertSame([0, 0, 0], [$message->attempts, $message->maxRetries, $message->retryDelay]);
     }
 
+    /**
+     * REGRESSION (release review). A message that fails before the listener
+     * runs — its class is gone, or its event cannot be rebuilt (a constructor
+     * with required arguments) — was logged and acknowledged: no retry, no
+     * dead letter, the event lost on every delivery.
+     */
+    #[Test]
+    public function a_listener_class_that_no_longer_exists_is_dead_lettered(): void
+    {
+        $payload = (new QueuedEventListenerMessage(
+            listenerClass: 'App\\Gone\\RemovedListener',
+            eventClass: QueuedListenerEvent::class,
+            eventPayload: ['orderId' => 'o-9'],
+        ))->toJson();
+
+        $this->worker('payments')->processPayload($payload);
+
+        self::assertCount(1, QueuedListenerSpyTransport::$published);
+        [$queue, $letter] = QueuedListenerSpyTransport::$published[0];
+        self::assertSame('payments.failed', $queue);
+        $letter = json_decode($letter, true);
+        self::assertSame(['orderId' => 'o-9'], $letter['eventPayload'] ?? null);
+        self::assertStringContainsString('App\\Gone\\RemovedListener', (string) ($letter['error'] ?? ''));
+    }
+
+    #[Test]
+    public function an_event_that_cannot_be_rebuilt_is_retried_then_dead_lettered(): void
+    {
+        $payload = fn (int $attempts): string => (new QueuedEventListenerMessage(
+            listenerClass: QueuedListenerFixture::class,
+            eventClass: QueuedListenerEventWithRequiredArgument::class,
+            eventPayload: ['orderId' => 'o-3'],
+            attempts: $attempts,
+            maxRetries: 1,
+        ))->toJson();
+
+        $this->worker('payments')->processPayload($payload(0));
+        $this->worker('payments')->processPayload($payload(1));
+
+        self::assertSame(['payments', 'payments.failed'], array_column(QueuedListenerSpyTransport::$published, 0), 'one retry, then the dead letter');
+        $letter = json_decode(QueuedListenerSpyTransport::$published[1][1], true);
+        self::assertSame(QueuedListenerEventWithRequiredArgument::class, $letter['eventClass'] ?? null);
+        self::assertNotSame('', (string) ($letter['error'] ?? ''));
+    }
+
+    #[Test]
+    public function a_payload_that_is_not_a_message_is_dead_lettered_as_it_came(): void
+    {
+        $this->worker('payments')->processPayload('{"type": "event", broken');
+
+        self::assertCount(1, QueuedListenerSpyTransport::$published);
+        [$queue, $letter] = QueuedListenerSpyTransport::$published[0];
+        self::assertSame('payments.failed', $queue);
+        $letter = json_decode($letter, true);
+        self::assertSame('{"type": "event", broken', $letter['raw'] ?? null, 'kept byte for byte, to be read or replayed');
+        self::assertNotSame('', (string) ($letter['error'] ?? ''));
+    }
+
+    /**
+     * REGRESSION (release review). Invalid UTF-8 is a likely reason a payload
+     * cannot be read, and JSON cannot carry it: the readable copy has U+FFFD
+     * where the bad byte was. The base64 copy keeps the bytes that came.
+     */
+    #[Test]
+    public function a_payload_that_is_not_valid_utf8_is_kept_byte_for_byte_beside_its_readable_copy(): void
+    {
+        $this->worker('payments')->processPayload("{\"a\":\"\xff\"}");
+
+        self::assertCount(1, QueuedListenerSpyTransport::$published);
+        $letter = json_decode(QueuedListenerSpyTransport::$published[0][1], true);
+        self::assertSame("{\"a\":\"\u{FFFD}\"}", $letter['raw'] ?? null);
+        self::assertSame("{\"a\":\"\xff\"}", base64_decode((string) ($letter['raw_base64'] ?? ''), true));
+    }
+
+    /**
+     * When the dead letter cannot be written the worker still returns, and every
+     * transport then counts the payload as handled: the log line is all that is
+     * left of it, so it says the message may be lost and names it by size and hash.
+     */
+    #[Test]
+    public function an_unreadable_payload_whose_dead_letter_fails_is_logged_as_possibly_lost_with_its_size_and_hash(): void
+    {
+        QueuedListenerSpyTransport::$publishFails = new \RuntimeException('broker down');
+        $output = new BufferedOutput();
+        $worker = $this->worker('payments');
+        $worker->setOutput($output);
+
+        $worker->processPayload('not a message');
+
+        self::assertStringContainsString(
+            sprintf('Unreadable message may be lost: the dead letter could not be written (13 bytes, sha1 %s): broker down', sha1('not a message')),
+            $output->fetch(),
+        );
+    }
+
     private function message(int $maxRetries): string
     {
         return (new QueuedEventListenerMessage(
@@ -188,6 +284,19 @@ final class QueuedListenerEvent
     }
 }
 
+/** An event the worker cannot rebuild: it hydrates through a constructor without arguments. */
+final class QueuedListenerEventWithRequiredArgument
+{
+    public function __construct(private string $orderId)
+    {
+    }
+
+    public function getOrderId(): string
+    {
+        return $this->orderId;
+    }
+}
+
 final class QueuedListenerFixture
 {
     /** @var list<QueuedListenerEvent> */
@@ -209,8 +318,13 @@ final class QueuedListenerSpyTransport implements QueueTransportInterface
     /** @var list<array{string, string}> */
     public static array $published = [];
 
+    public static ?\Throwable $publishFails = null;
+
     public function publish(string $queueName, string $payload): void
     {
+        if (self::$publishFails !== null) {
+            throw self::$publishFails;
+        }
         self::$published[] = [$queueName, $payload];
     }
 
