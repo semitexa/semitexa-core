@@ -63,7 +63,7 @@ final class QueueWorkerProcesses implements WorkerProcessSourceInterface
             }
             // One odd name must not take every other queue's worker with it.
             try {
-                $processes[] = new WorkerProcess(['queue:work', $transport, $queue]);
+                $processes[] = new WorkerProcess(['queue:work', $transport, $queue], reads: [$transport, $queue]);
             } catch (\InvalidArgumentException $e) {
                 StaticLoggerBridge::warning('core', "Queue '{$queue}' on '{$transport}' gets no worker: " . $e->getMessage(), []);
             }

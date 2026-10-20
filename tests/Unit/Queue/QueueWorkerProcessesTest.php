@@ -55,6 +55,17 @@ final class QueueWorkerProcessesTest extends TestCase
         self::assertSame(['5 queue:work database ledger', '5 queue:work nats events', '5 queue:work nats exports', '5 queue:work nats mail'], $lines);
     }
 
+    /** So worker:processes can refuse another kind of worker on the same queue. */
+    #[Test]
+    public function each_queue_worker_says_which_queue_it_reads(): void
+    {
+        $processes = $this->processes([
+            ['class' => 'App\\Shop\\Ledger', 'event' => 'App\\Shop\\OrderPaid', 'execution' => 'queued', 'transport' => 'database', 'queue' => 'ledger'],
+        ], []);
+
+        self::assertSame([['database', 'ledger'], ['nats', 'events']], array_map(static fn (WorkerProcess $p): ?array => $p->reads, $processes));
+    }
+
     #[Test]
     public function with_nothing_queued_the_default_queue_is_still_listed_so_one_worker_runs(): void
     {
@@ -106,6 +117,16 @@ final class QueueWorkerProcessesTest extends TestCase
      */
     private function queues(array $listeners, array $handlers): array
     {
+        return array_map(static fn (WorkerProcess $p): string => $p->line(), $this->processes($listeners, $handlers));
+    }
+
+    /**
+     * @param list<array{class: string, event: string, execution: string, transport: ?string, queue: ?string}> $listeners
+     * @param list<array{class: string, payload: string, resource: string, execution: string, transport: ?string, queue: ?string, priority: int}> $handlers
+     * @return list<WorkerProcess>
+     */
+    private function processes(array $listeners, array $handlers): array
+    {
         $registry = (new \ReflectionClass(EventListenerRegistry::class))->newInstanceWithoutConstructor();
         $byEvent = [];
         foreach ($listeners as $meta) {
@@ -123,7 +144,7 @@ final class QueueWorkerProcessesTest extends TestCase
         (new \ReflectionProperty($source, 'attributeDiscovery'))->setValue($source, new QueueQueuesFixtureDiscovery($handlerRegistry));
         (new \ReflectionProperty($source, 'eventListenerRegistry'))->setValue($source, $registry);
 
-        return array_map(static fn (WorkerProcess $p): string => $p->line(), $source->workerProcesses());
+        return $source->workerProcesses();
     }
 }
 

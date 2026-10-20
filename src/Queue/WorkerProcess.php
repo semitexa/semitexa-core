@@ -12,10 +12,15 @@ namespace Semitexa\Core\Queue;
  */
 final readonly class WorkerProcess
 {
-    /** @param list<string> $command the command and its arguments, as after `bin/semitexa` */
+    /**
+     * @param list<string>                $command the command and its arguments, as after `bin/semitexa`
+     * @param array{string, string}|null  $reads   the transport and queue it consumes, if it consumes one:
+     *                                             worker:processes refuses two kinds of worker on one queue
+     */
     public function __construct(
         public array $command,
         public int $pauseSeconds = 5,
+        public ?array $reads = null,
     ) {
         if ($command === []) {
             throw new \InvalidArgumentException('A worker process needs a command.');

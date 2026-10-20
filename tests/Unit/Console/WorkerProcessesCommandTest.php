@@ -57,6 +57,58 @@ final class WorkerProcessesCommandTest extends TestCase
         self::assertSame(Command::FAILURE, $this->runCommand([WorkerProcessesFixtureBroken::class])->getStatusCode());
     }
 
+    /**
+     * tk-nats-consumer-name-collision: a listener that names the mail queue
+     * puts its messages where mail:work reads, and mail where queue:work reads.
+     * Each failed the other's messages. Neither runs now, and the clash is said.
+     */
+    #[Test]
+    public function two_kinds_of_worker_on_one_queue_are_both_refused_and_the_clash_is_said(): void
+    {
+        $tester = $this->runCommand([
+            WorkerProcessesFixtureMailQueue::class,
+            WorkerProcessesFixtureMailer::class,
+            WorkerProcessesFixtureScheduler::class,
+        ]);
+
+        self::assertSame(Command::SUCCESS, $tester->getStatusCode());
+        self::assertSame("60 scheduler:plan\n5 scheduler:work\n", $tester->getDisplay());
+        self::assertSame(
+            "worker:processes: queue 'mail' on nats is read by 'queue:work nats mail' (" . WorkerProcessesFixtureMailQueue::class
+            . ") and 'mail:work nats mail' (" . WorkerProcessesFixtureMailer::class
+            . "): each would take messages only another can read. None of them runs; give each its own queue.\n",
+            $tester->getErrorOutput(),
+        );
+    }
+
+    /**
+     * A source failed and the rest was refused: the listing still succeeded.
+     * A failed one makes the worker fall back to queue:work, which would put
+     * a refused queue's worker back (review).
+     */
+    #[Test]
+    public function a_listing_that_only_refused_is_not_a_failed_one(): void
+    {
+        $tester = $this->runCommand([
+            WorkerProcessesFixtureBroken::class,
+            WorkerProcessesFixtureMailQueue::class,
+            WorkerProcessesFixtureMailer::class,
+        ]);
+
+        self::assertSame(Command::SUCCESS, $tester->getStatusCode());
+        self::assertSame('', $tester->getDisplay());
+    }
+
+    /** The same kind twice on one queue is two consumers of one queue, which is fine. */
+    #[Test]
+    public function one_kind_of_worker_named_twice_on_a_queue_is_not_a_clash(): void
+    {
+        $tester = $this->runCommand([WorkerProcessesFixtureMailer::class, WorkerProcessesFixtureSlowMailer::class]);
+
+        self::assertSame("5 mail:work nats mail\n30 mail:work nats mail\n", $tester->getDisplay());
+        self::assertSame('', $tester->getErrorOutput());
+    }
+
     #[Test]
     public function json_names_the_source_of_each_process(): void
     {
@@ -159,5 +211,29 @@ final class WorkerProcessesFixtureBroken implements WorkerProcessSourceInterface
     public function workerProcesses(): array
     {
         throw new \RuntimeException('MAIL_QUEUE is not readable');
+    }
+}
+
+final class WorkerProcessesFixtureMailQueue implements WorkerProcessSourceInterface
+{
+    public function workerProcesses(): array
+    {
+        return [new WorkerProcess(['queue:work', 'nats', 'mail'], reads: ['nats', 'mail'])];
+    }
+}
+
+final class WorkerProcessesFixtureMailer implements WorkerProcessSourceInterface
+{
+    public function workerProcesses(): array
+    {
+        return [new WorkerProcess(['mail:work', 'nats', 'mail'], reads: ['nats', 'mail'])];
+    }
+}
+
+final class WorkerProcessesFixtureSlowMailer implements WorkerProcessSourceInterface
+{
+    public function workerProcesses(): array
+    {
+        return [new WorkerProcess(['mail:work', 'nats', 'mail'], 30, ['nats', 'mail'])];
     }
 }
