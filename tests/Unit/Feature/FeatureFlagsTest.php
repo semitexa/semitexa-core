@@ -47,7 +47,11 @@ final class FeatureFlagsTest extends TestCase
         self::assertFalse($flags->isEnabled('checkout.new-flow'));
         self::assertTrue($flags->isEnabled('search.semantic'));
         self::assertFalse($flags->isEnabled('never.declared'));
-        self::assertFalse($flags->isEnabled('rollout.half'), 'no subject: the declared default (off)');
+        self::assertSame(
+            FeatureFlag::rollsOutTo('rollout.half', 50, 'default'),
+            $flags->isEnabled('rollout.half'),
+            'a guest on a single-site install is decided by the `default` site',
+        );
     }
 
     #[Test]

@@ -24,7 +24,8 @@ final class DefaultFeatureFlags implements FeatureFlagsInterface
     #[InjectAsReadonly]
     protected FeatureFlagRegistry $registry;
 
-    #[InjectAsMutable]
+    /** Optional: a command or a job has no request, and asks forSubject() instead. */
+    #[InjectAsMutable(optional: true)]
     protected AuthContextInterface $auth;
 
     #[InjectAsReadonly]
@@ -44,7 +45,8 @@ final class DefaultFeatureFlags implements FeatureFlagsInterface
 
     public function isEnabled(string $flag): bool
     {
-        return $this->registry->get($flag)?->defaultFor($this->userId() ?? $this->tenantId()) ?? false;
+        // A guest is decided by site; on a single-site install the site is `default`.
+        return $this->registry->get($flag)?->defaultFor($this->userId() ?? $this->tenantId() ?? 'default') ?? false;
     }
 
     public function forSubject(?string $tenantId, ?string $userId): FeatureFlagsInterface
