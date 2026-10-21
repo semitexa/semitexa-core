@@ -183,6 +183,21 @@ final class CurlHttpClientCoroutineTest extends TestCase
                 ));
                 $results['streamChunks'] = $chunks;
 
+                // Under the hook the status comes after the body, so a stream
+                // was held whole in a string until then: a 20 MB object, 20 MB
+                // of memory (S3Driver::readStream).
+                $streamed = 0;
+                memory_reset_peak_usage();
+                $base1 = memory_get_usage();
+                $results['hugeStream'] = $client->get($base . '/huge', [], new HttpCallOptions(
+                    maxResponseBytes: PHP_INT_MAX,
+                    onChunk: static function (string $chunk) use (&$streamed): void {
+                        $streamed += strlen($chunk);
+                    },
+                ));
+                $results['hugeStreamBytes'] = $streamed;
+                $results['hugeStreamPeakMb'] = (memory_get_peak_usage() - $base1) / 1e6;
+
                 $server->shutdown();
             });
         } finally {
@@ -225,6 +240,8 @@ final class CurlHttpClientCoroutineTest extends TestCase
         // review: a stream handed the caller the 503 body, then the retried one.
         self::assertSame('data: 1', $results['streamChunks']);
         self::assertSame(2, $results['stream']->attempts);
+        self::assertSame([200, 20_000_000, ''], [$results['hugeStream']->status, $results['hugeStreamBytes'], $results['hugeStream']->body]);
+        self::assertLessThan(10.0, $results['hugeStreamPeakMb'], 'a 20 MB stream is held on a temp stream, not in memory');
         self::assertSame(HttpTransportKind::Connect, $results['refused']->kind);
         self::assertSame(2, $results['refused']->attempts);
     }

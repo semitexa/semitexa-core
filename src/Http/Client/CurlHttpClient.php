@@ -119,6 +119,9 @@ final class CurlHttpClient implements HttpClientInterface
         $body = '';
         $received = 0;
         $tooLarge = false;
+        /** @var resource|false|null $held false: no temp stream could be opened, the body stays a string */
+        $held = null;
+        $heldShort = false;
         $max = $options->maxResponseBytes;
         $truncate = $options->truncateOversized;
         $onChunk = $options->onChunk;
@@ -152,7 +155,7 @@ final class CurlHttpClient implements HttpClientInterface
 
                 return strlen($line);
             },
-            CURLOPT_WRITEFUNCTION => static function ($handle, string $chunk) use (&$body, &$received, &$tooLarge, &$forwarded, &$status, $max, $truncate, $onChunk): int {
+            CURLOPT_WRITEFUNCTION => static function ($handle, string $chunk) use (&$body, &$held, &$heldShort, &$received, &$tooLarge, &$forwarded, &$status, $max, $truncate, $onChunk): int {
                 $length = strlen($chunk);
                 $room = $max - $received;
                 $received += $length;
@@ -170,9 +173,24 @@ final class CurlHttpClient implements HttpClientInterface
                 }
                 // Only a successful response is a stream; an error body is kept
                 // for the caller to read, and is what a retry may discard.
-                if ($onChunk !== null && $status >= 200 && $status < 300) {
+                if ($onChunk !== null && $held === null && $status >= 200 && $status < 300) {
                     $forwarded = true;
                     $onChunk($chunk);
+                } elseif ($onChunk !== null && $held !== false && ($status === 0 || $held !== null)) {
+                    // The hook tells the status only after the body (below):
+                    // a stream is held on a temp stream, which spills to disk
+                    // past 2 MiB, not in a string the size of the object. Once
+                    // holding, it holds the rest too: the order is kept.
+                    $held ??= fopen('php://temp', 'w+b');
+                    if ($held === false) {
+                        $body .= $chunk;
+                    } elseif (@fwrite($held, $chunk) !== strlen($chunk)) {
+                        // The temp disk is full: stop here, or the part that
+                        // fitted would be handed on as the whole body.
+                        $heldShort = true;
+
+                        return 0;
+                    }
                 } else {
                     $body .= $chunk;
                 }
@@ -207,6 +225,13 @@ final class CurlHttpClient implements HttpClientInterface
         $error = curl_error($handle);
         unset($handle);
 
+        if (is_resource($held) && ($tooLarge || $heldShort || $ok === false || $errno !== 0)) {
+            fclose($held);
+            $held = null;
+        }
+        if ($heldShort) {
+            throw new HttpTransportException(HttpTransportKind::Protocol, $request->method, $request->url, 'the body could not be held on a temp stream (disk full?)');
+        }
         if ($tooLarge) {
             throw new HttpTransportException(HttpTransportKind::TooLarge, $request->method, $request->url, "the body passed {$max} bytes");
         }
@@ -215,6 +240,27 @@ final class CurlHttpClient implements HttpClientInterface
         }
 
         [$block, $headers] = self::finalHeaders($rawHeaders);
+        if (is_resource($held)) {
+            // A held stream goes on in pieces once the status is known; an
+            // error, or a body still to be inflated, is read back whole.
+            $heldCode = $httpCode !== 0 ? $httpCode : $status;
+            $encoding = strtolower($headers['content-encoding'][0] ?? 'identity');
+            try {
+                rewind($held);
+                if ($onChunk !== null && $heldCode >= 200 && $heldCode < 300 && (!$options->decodeContent || $encoding === 'identity')) {
+                    $forwarded = true;
+                    while (($piece = fread($held, 65536)) !== false && $piece !== '') {
+                        $onChunk($piece);
+                    }
+                } else {
+                    $body = (string) stream_get_contents($held) . $body;
+                }
+            } finally {
+                // Also when the callback throws: a caller that stops a stream
+                // that way left the temp file open.
+                fclose($held);
+            }
+        }
         if ($options->decodeContent) {
             $body = self::decoded($body, $headers['content-encoding'][0] ?? null, $max, $request);
         }
@@ -332,9 +378,12 @@ final class CurlHttpClient implements HttpClientInterface
             return $body;
         }
 
+        // One past the cap tells "over" from "exactly at"; PHP_INT_MAX + 1 is
+        // a float, which gzdecode() refuses (a TypeError, not a limit).
+        $limit = $max < PHP_INT_MAX ? $max + 1 : PHP_INT_MAX;
         $inflated = match ($encoding) {
-            'gzip', 'x-gzip' => @gzdecode($body, $max + 1),
-            'deflate' => @gzuncompress($body, $max + 1) ?: @gzinflate($body, $max + 1),
+            'gzip', 'x-gzip' => @gzdecode($body, $limit),
+            'deflate' => @gzuncompress($body, $limit) ?: @gzinflate($body, $limit),
             default => throw new HttpTransportException(HttpTransportKind::Protocol, $request->method, $request->url, "an unsupported content encoding: {$encoding}"),
         };
         if (!is_string($inflated)) {
