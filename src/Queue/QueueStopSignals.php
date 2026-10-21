@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Queue;
 
+use Semitexa\Core\Lifecycle\StopSignals;
+
 /**
  * SIGTERM and SIGINT stop a worker's consume loop after the message in hand.
  *
@@ -23,26 +25,10 @@ final class QueueStopSignals
      */
     public static function install(QueueTransportInterface $transport, ?\Closure $say = null): bool
     {
-        if (!$transport instanceof StoppableQueueTransportInterface
-            || !function_exists('pcntl_async_signals') || !function_exists('pcntl_signal')
-            || !defined('SIGTERM') || !defined('SIGINT')) {
+        if (!$transport instanceof StoppableQueueTransportInterface) {
             return false;
         }
 
-        pcntl_async_signals(true);
-        $handler = static function (int $signal) use ($transport, $say): void {
-            // The second signal is not a request: Ctrl-C twice ends a worker
-            // stuck in a long job, as it did before.
-            pcntl_signal(SIGTERM, SIG_DFL);
-            pcntl_signal(SIGINT, SIG_DFL);
-            $transport->stop();
-            if ($say !== null) {
-                $say(sprintf('Signal %d: stopping after the message in hand (again to stop at once).', $signal));
-            }
-        };
-        pcntl_signal(SIGTERM, $handler);
-        pcntl_signal(SIGINT, $handler);
-
-        return true;
+        return StopSignals::install(static fn () => $transport->stop(), $say, 'the message in hand');
     }
 }
