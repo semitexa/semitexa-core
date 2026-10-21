@@ -31,8 +31,10 @@ final class SodiumEncrypterTest extends TestCase
     {
         $encrypter = SodiumEncrypter::withSecrets('secret-a');
         $token = $encrypter->encrypt('user=42');
-        $last = substr($token, -1);
-        $changed = substr($token, 0, -1) . ($last === 'A' ? 'B' : 'A');
+        // A middle character: the last one of a base64 token can carry only
+        // padding bits, so changing A to B there sometimes changed nothing.
+        $at = intdiv(strlen($token), 2);
+        $changed = substr_replace($token, $token[$at] === 'A' ? 'B' : 'A', $at, 1);
 
         $this->expectException(DecryptionException::class);
         $encrypter->decrypt($changed);
