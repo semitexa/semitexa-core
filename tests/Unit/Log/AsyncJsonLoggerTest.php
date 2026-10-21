@@ -214,6 +214,61 @@ final class AsyncJsonLoggerTest extends TestCase
         }
     }
 
+    #[Test]
+    public function log_channels_route_a_channel_to_its_own_file_to_stderr_or_nowhere(): void
+    {
+        // A channel was a field on the line: every channel went to the one sink.
+        ProjectRoot::reset();
+        $tag = bin2hex(random_bytes(6));
+        $main = "var/tmp/async-json-logger-main-{$tag}.log";
+        $audit = "var/log/async-json-logger-audit-{$tag}.log";
+        $stderr = sys_get_temp_dir() . "/async-json-logger-stderr-{$tag}";
+        $previous = getenv('LOG_CHANNELS');
+        try {
+            putenv('LOG_FILE=' . $main);
+            putenv('LOG_LEVEL=debug');
+            putenv('LOG_SINK=file');
+            putenv("LOG_CHANNELS=audit={$audit}, security=stderr, sql=off, broken=../../etc/x.log, swoole=var/log/swoole.log");
+            $logger = new AsyncJsonLogger();
+            $this->injectEnvironment($logger);
+            (new \ReflectionProperty($logger, 'stderrTarget'))->setValue($logger, $stderr);
+
+            $logger->info('signed in', ['_channel' => 'audit']);
+            $logger->warning('token reused', ['_channel' => 'security']);
+            $logger->debug('select 1', ['_channel' => 'sql']);
+            $logger->info('no channel');
+            $logger->info('unsafe route ignored', ['_channel' => 'broken']);
+            $logger->info('framework log refused', ['_channel' => 'swoole']);
+            $logger->flush();
+
+            $messages = static fn (string $path): array => is_file($path)
+                ? array_map(static fn (string $l): string => json_decode($l, true)['message'], array_filter(explode("\n", (string) file_get_contents($path))))
+                : [];
+            self::assertSame(['signed in'], $messages(ProjectRoot::get() . '/' . $audit));
+            self::assertSame(['token reused'], $messages($stderr));
+            self::assertSame(['no channel', 'unsafe route ignored', 'framework log refused'], array_values($messages(ProjectRoot::get() . '/' . $main)), 'sql is off; the rest follows LOG_SINK');
+
+            // A batch (as under Swoole's defer): a file two routes write keeps the logged order.
+            @unlink(ProjectRoot::get() . '/' . $main);
+            putenv('LOG_CHANNELS=security=both');
+            $batched = new AsyncJsonLogger();
+            $this->injectEnvironment($batched);
+            (new \ReflectionProperty($batched, 'stderrTarget'))->setValue($batched, $stderr);
+            (new \ReflectionProperty($batched, 'buffer'))->setValue($batched, [
+                ['timestamp' => 't', 'level' => 'info', 'message' => 'A', 'context' => []],
+                ['timestamp' => 't', 'level' => 'info', 'message' => 'S', 'context' => [], 'channel' => 'security'],
+                ['timestamp' => 't', 'level' => 'info', 'message' => 'B', 'context' => []],
+            ]);
+            $batched->flush();
+            self::assertSame(['A', 'S', 'B'], array_values($messages(ProjectRoot::get() . '/' . $main)));
+        } finally {
+            $previous === false ? putenv('LOG_CHANNELS') : putenv('LOG_CHANNELS=' . $previous);
+            @unlink(ProjectRoot::get() . '/' . $main);
+            @unlink(ProjectRoot::get() . '/' . $audit);
+            @unlink($stderr);
+        }
+    }
+
     // verify:accept-test-change the burst regression moved to tests/Integration/Log/AsyncJsonLoggerBurstTest: it switched Swoole hooks on for the rest of the suite
 
     private function injectEnvironment(AsyncJsonLogger $logger): void

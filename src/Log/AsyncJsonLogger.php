@@ -26,18 +26,22 @@ final class AsyncJsonLogger implements LoggerInterface
     private ?int $minLevel = null;
     private ?string $logFile = null;
     private LogSink $sink = LogSink::File;
+    /** @var array<string, LogRoute> LOG_CHANNELS: channel => where its entries go */
+    private array $routes = [];
     /** Where the stderr sink writes; a test points it at a file. */
     private string $stderrTarget = 'php://stderr';
     private ?AppLogRotation $rotation = null;
 
     /**
-     * Bytes appended since the last size check. Rotation needs the file size, and a
+     * Bytes appended since the last size check, per file. Rotation needs the file size, and a
      * stat per flush would be a syscall on the request path for a question whose answer
      * cannot change by more than what this worker just wrote. Counting locally and only
      * asking the filesystem once a slice's worth has accumulated keeps the check off the
      * hot path while still bounding the overshoot to roughly that slice per worker.
+     *
+     * @var array<string, int>
      */
-    private int $bytesSinceSizeCheck = 0;
+    private array $bytesSinceSizeCheck = [];
 
     /**
      * Whether this worker has looked at the real file size even once.
@@ -65,7 +69,8 @@ final class AsyncJsonLogger implements LoggerInterface
      * fixes it at startup: chown var/log to the host user, chmod u+rwX,g+rwX.
      * Doing it from here would mean a logger that chowns files, which is worse.
      */
-    private bool $sizeCheckedOnce = false;
+    /** @var array<string, true> */
+    private array $sizeCheckedOnce = [];
 
     /** How much this worker may append before it re-reads the real file size. */
     private const SIZE_CHECK_EVERY_BYTES = 1_048_576;
@@ -88,6 +93,13 @@ final class AsyncJsonLogger implements LoggerInterface
         $logFile = Environment::getEnvValue('LOG_FILE');
         $this->logFile = $logFile !== null && $logFile !== '' ? $logFile : self::DEFAULT_LOG_FILE;
         $this->sink = LogSink::fromEnv(Environment::getEnvValue('LOG_SINK'));
+        $rejected = [];
+        $this->routes = LogChannelRoutes::fromEnv(Environment::getEnvValue('LOG_CHANNELS'), $this->logFile, $rejected);
+        if ($rejected !== []) {
+            // Said once per worker: a typo (`sql=of`) otherwise sent the
+            // channel to LOG_SINK without a word.
+            FallbackErrorLogger::log('LOG_CHANNELS: ignored ' . implode(', ', $rejected) . ' (a route is file, stderr, both, off or a var/log/*.log file of its own); those channels follow LOG_SINK.');
+        }
         $this->rotation = new AppLogRotation(
             AppLogRotation::maxBytesFromEnv(Environment::getEnvValue('LOG_MAX_BYTES')),
             SwooleLogRetention::daysFromEnv(Environment::getEnvValue('LOG_RETENTION_DAYS')),
@@ -234,26 +246,46 @@ final class AsyncJsonLogger implements LoggerInterface
     {
         $this->ensureConfig();
 
-        $line = '';
+        // Lines collected per destination, each in the order logged: a
+        // channel LOG_CHANNELS names goes where its route says, every other
+        // entry where LOG_SINK says. Grouped by route instead, a file two
+        // routes write (LOG_SINK=file, security=both) got its lines reordered.
+        $default = LogRoute::forSink($this->sink, $this->logFile ?? self::DEFAULT_LOG_FILE);
+        $stderr = '';
+        $files = [];
         foreach ($entries as $entry) {
-            $line .= $this->encodeEntry($entry) . "\n";
+            $channel = is_scalar($entry['channel'] ?? null) ? (string) $entry['channel'] : null;
+            $route = $channel !== null ? ($this->routes[$channel] ?? $default) : $default;
+            if ($route->writesNothing()) {
+                continue;
+            }
+            $encoded = $this->encodeEntry($entry) . "\n";
+            if ($route->stderr) {
+                $stderr .= $encoded;
+            }
+            if ($route->file !== null) {
+                $file = LogChannelRoutes::normalize($route->file);
+                $files[$file] ??= ['line' => '', 'count' => 0];
+                $files[$file]['line'] .= $encoded;
+                $files[$file]['count']++;
+            }
         }
 
-        if ($this->sink->writesStderr()) {
+        if ($stderr !== '') {
             // One write per batch. A line up to the pipe buffer (4 KiB on
             // Linux) reaches a container's log collector whole; a longer one
             // may interleave with another worker's.
-            @file_put_contents($this->stderrTarget, $line, FILE_APPEND);
+            @file_put_contents($this->stderrTarget, $stderr, FILE_APPEND);
         }
-        if ($this->sink->writesFile()) {
-            $this->writeFile($line, count($entries));
+        foreach ($files as $file => ['line' => $line, 'count' => $count]) {
+            $this->writeFile($file, $line, $count);
         }
     }
 
-    private function writeFile(string $line, int $entryCount): void
+    private function writeFile(string $file, string $line, int $entryCount): void
     {
         $root = $this->resolveProjectRoot();
-        $path = $root . '/' . ltrim($this->logFile ?? self::DEFAULT_LOG_FILE, '/');
+        $path = $root . '/' . ltrim($file, '/');
         $dir = dirname($path);
         if (!is_dir($dir)) {
             @mkdir($dir, 0755, true);
@@ -294,12 +326,13 @@ final class AsyncJsonLogger implements LoggerInterface
             return;
         }
 
-        $this->bytesSinceSizeCheck += $appended;
-        if ($this->sizeCheckedOnce && $this->bytesSinceSizeCheck < self::SIZE_CHECK_EVERY_BYTES) {
+        // Counted per file: a channel's own log rotates on its own size.
+        $this->bytesSinceSizeCheck[$path] = ($this->bytesSinceSizeCheck[$path] ?? 0) + $appended;
+        if (isset($this->sizeCheckedOnce[$path]) && $this->bytesSinceSizeCheck[$path] < self::SIZE_CHECK_EVERY_BYTES) {
             return;
         }
-        $this->sizeCheckedOnce = true;
-        $this->bytesSinceSizeCheck = 0;
+        $this->sizeCheckedOnce[$path] = true;
+        $this->bytesSinceSizeCheck[$path] = 0;
 
         clearstatcache(true, $path);
         $size = @filesize($path);
