@@ -30,6 +30,7 @@ final class AsyncJsonLogger implements LoggerInterface
     private array $routes = [];
     /** Where the stderr sink writes; a test points it at a file. */
     private string $stderrTarget = 'php://stderr';
+    private ?UdpLogShipper $remote = null;
     private ?AppLogRotation $rotation = null;
 
     /**
@@ -93,6 +94,11 @@ final class AsyncJsonLogger implements LoggerInterface
         $logFile = Environment::getEnvValue('LOG_FILE');
         $this->logFile = $logFile !== null && $logFile !== '' ? $logFile : self::DEFAULT_LOG_FILE;
         $this->sink = LogSink::fromEnv(Environment::getEnvValue('LOG_SINK'));
+        $remoteRejected = [];
+        $this->remote = UdpLogShipper::fromEnv(Environment::getEnvValue('LOG_REMOTE'), $remoteRejected);
+        if ($remoteRejected !== []) {
+            FallbackErrorLogger::log('LOG_REMOTE: ignored ' . $remoteRejected[0] . ' (it takes udp://<IPv4 address>:<port>).');
+        }
         $rejected = [];
         $this->routes = LogChannelRoutes::fromEnv(Environment::getEnvValue('LOG_CHANNELS'), $this->logFile, $rejected);
         if ($rejected !== []) {
@@ -259,7 +265,9 @@ final class AsyncJsonLogger implements LoggerInterface
             if ($route->writesNothing()) {
                 continue;
             }
-            $encoded = $this->encodeEntry($entry) . "\n";
+            $encoded = $this->encodeEntry($entry);
+            $this->remote?->ship($encoded, $entry);
+            $encoded .= "\n";
             if ($route->stderr) {
                 $stderr .= $encoded;
             }
