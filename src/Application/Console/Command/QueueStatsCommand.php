@@ -8,8 +8,7 @@ use Semitexa\Core\Attribute\AsCommand;
 use Semitexa\Core\Attribute\InjectAsReadonly;
 use Semitexa\Core\Console\BaseCommand;
 use Semitexa\Core\Queue\QueueInspection;
-use Semitexa\Core\Queue\QueueStatsStores;
-use Semitexa\Core\Queue\QueueStatsWindow;
+use Semitexa\Core\Queue\QueueStatsReport;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Helper\Table;
 use Symfony\Component\Console\Input\InputInterface;
@@ -45,54 +44,51 @@ final class QueueStatsCommand extends BaseCommand
 
             return Command::FAILURE;
         }
-        $store = QueueStatsStores::fromEnvironment();
-        $now = intdiv(time(), 60);
-
-        $rows = [];
-        foreach ($this->inspection->targets(self::option($input, 'transport'), self::option($input, 'queue')) as $target) {
-            $stats = new QueueStatsWindow($store?->sum($target['queue'], $now - $window + 1, $now) ?? [], $window);
-            $inspector = $target['inspector'];
-            $rows[] = [
-                'transport' => $target['transport'],
-                'queue' => $target['queue'],
-                'processed' => $stats->count('processed'),
-                'retried' => $stats->count('retried'),
-                'dead_lettered' => $stats->count('dead_lettered'),
-                'per_minute' => round($stats->perMinute(), 2),
-                'wait_ms' => ['avg' => $stats->averageMs('wait'), 'p50' => $stats->percentileMs('wait', 0.5), 'p95' => $stats->percentileMs('wait', 0.95)],
-                'run_ms' => ['avg' => $stats->averageMs('run'), 'p50' => $stats->percentileMs('run', 0.5), 'p95' => $stats->percentileMs('run', 0.95)],
-                'waiting' => $inspector?->depth($target['queue']),
-                'oldest_waiting_seconds' => $inspector?->oldestAgeSeconds($target['queue']),
-            ];
-        }
+        $report = QueueStatsReport::build($this->inspection, $window, self::option($input, 'transport'), self::option($input, 'queue'));
+        $rows = $report['queues'];
+        // A queue or its counters that could not be read fail the command in
+        // both forms: a monitor reading --json is told by the exit code too.
+        $status = array_filter($rows, static fn (array $r): bool => $r['error'] !== null || $r['counters_error'] !== null) === []
+            ? Command::SUCCESS
+            : Command::FAILURE;
 
         if ((bool) $input->getOption('json')) {
-            $output->writeln((string) json_encode([
+            $output->writeln(json_encode([
                 'window_minutes' => $window,
-                'store' => $store?->describe() ?? 'off',
+                'store' => $report['store'],
                 'queues' => $rows,
-            ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES), OutputInterface::OUTPUT_RAW);
+            ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE | JSON_THROW_ON_ERROR), OutputInterface::OUTPUT_RAW);
 
-            return Command::SUCCESS;
+            return $status;
         }
 
-        $output->writeln(sprintf('Last %d min, counters in %s. Percentiles are bucket bounds (p95 ≤ x).', $window, $store?->describe() ?? 'nothing (QUEUE_STATS_STORE=off)'));
+        $output->writeln(sprintf('Last %d min, counters in %s. Percentiles are bucket bounds (p95 ≤ x).', $window, $report['store'] !== 'off' ? $report['store'] : 'nothing (QUEUE_STATS_STORE=off)'));
         (new Table($output))
             ->setHeaders(['queue', 'done', 'retried', 'dead', '/min', 'wait avg · p95', 'run avg · p95', 'waiting', 'oldest'])
             ->setRows(array_map(static fn (array $r): array => [
                 "{$r['transport']}/{$r['queue']}",
-                $r['processed'],
-                $r['retried'],
-                $r['dead_lettered'],
-                $r['per_minute'],
-                self::ms($r['wait_ms']['avg']) . ' · ' . self::ms($r['wait_ms']['p95']),
-                self::ms($r['run_ms']['avg']) . ' · ' . self::ms($r['run_ms']['p95']),
+                $r['processed'] ?? '?',
+                $r['retried'] ?? '?',
+                $r['dead_lettered'] ?? '?',
+                $r['per_minute'] ?? '?',
+                QueueStatsReport::ms($r['wait_ms']['avg']) . ' · ' . QueueStatsReport::ms($r['wait_ms']['p95']),
+                QueueStatsReport::ms($r['run_ms']['avg']) . ' · ' . QueueStatsReport::ms($r['run_ms']['p95']),
                 $r['waiting'] ?? '?',
                 $r['oldest_waiting_seconds'] !== null ? $r['oldest_waiting_seconds'] . ' s' : '',
             ], $rows))
             ->render();
 
-        return Command::SUCCESS;
+        // What could not be read is a "?" in the table: say why.
+        foreach ($rows as $r) {
+            if ($r['error'] !== null) {
+                $output->writeln("<error>{$r['transport']}/{$r['queue']}: {$r['error']}</error>");
+            }
+            if ($r['counters_error'] !== null) {
+                $output->writeln("<error>{$r['transport']}/{$r['queue']} counters ({$report['store']}): {$r['counters_error']}</error>");
+            }
+        }
+
+        return $status;
     }
 
     private static function minutes(string $value): ?int
@@ -102,15 +98,6 @@ final class QueueStatsCommand extends BaseCommand
         }
 
         return min(7 * 1440, ($m[2] ?? 'm') === 'h' ? (int) $m[1] * 60 : (int) $m[1]);
-    }
-
-    private static function ms(int|string|null $value): string
-    {
-        return match (true) {
-            $value === null => '—',
-            $value === 'inf' => '>30 s',
-            default => $value . ' ms',
-        };
     }
 
     private static function option(InputInterface $input, string $name): ?string
