@@ -227,6 +227,24 @@ final class CurlHttpClientCoroutineTest extends TestCase
                 }
                 gc_collect_cycles();
                 $results['throwLeakMb'] = (memory_get_usage() - $mem0) / 1e6;
+
+                // Each call is a http.client span in a dev trace.
+                $traced = new CurlHttpClient();
+                $spans = new class implements \Semitexa\Core\Pipeline\RequestTracerInterface {
+                    /** @var list<array{string, string, array<string, mixed>}> */
+                    public array $calls = [];
+                    public function begin(string $name, array $context = []): void { $this->calls[] = ['begin', $name, $context]; }
+                    public function end(string $name, array $context = []): void { $this->calls[] = ['end', $name, $context]; }
+                    public function mark(string $name, array $context = []): void {}
+                };
+                (new \ReflectionProperty(CurlHttpClient::class, 'tracer'))->setValue($traced, $spans);
+                $traced->get($base . '/mb?secret=1');
+                $traced->get($base . '/bot123456:AAH-secret/sendMessage');
+                try {
+                    $traced->get('http://127.0.0.1:1/');
+                } catch (HttpTransportException) {
+                }
+                $results['spans'] = $spans->calls;
                 $results['thrown'] = $thrown;
 
                 $server->shutdown();
@@ -276,6 +294,16 @@ final class CurlHttpClientCoroutineTest extends TestCase
         self::assertLessThan(2.0, $results['leakMb'], 'ten 1 MB responses are not kept by their handles');
         self::assertSame(10, $results['thrown']);
         self::assertLessThan(2.0, $results['throwLeakMb'], 'nor by a stream its caller stopped by throwing');
+
+        [$begin, $end, $botBegin, , $failBegin, $failEnd] = $results['spans'];
+        self::assertSame(['begin', 'http.client'], [$begin[0], $begin[1]]);
+        self::assertSame('GET', $begin[2]['method']);
+        self::assertStringEndsWith('/mb', $begin[2]['url'], 'no query string in a trace: it can carry a key');
+        self::assertStringEndsWith('/…', $botBegin[2]['url'], 'a path secret (a bot token, a webhook key) stays out of the trace');
+        self::assertStringNotContainsString('AAH-secret', $botBegin[2]['url']);
+        self::assertStringNotContainsString('sendMessage', $botBegin[2]['url']);
+        self::assertSame(['end', 'http.client', 200, 1_000_000], [$end[0], $end[1], $end[2]['status'], $end[2]['bytes']]);
+        self::assertSame(['begin', 'end', 'connect'], [$failBegin[0], $failEnd[0], $failEnd[2]['error']], 'a failed call closes its span too');
         self::assertSame(HttpTransportKind::Connect, $results['refused']->kind);
         self::assertSame(2, $results['refused']->attempts);
     }

@@ -4,8 +4,12 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Http\Client;
 
+use Semitexa\Core\Attribute\InjectAsReadonly;
 use Semitexa\Core\Attribute\SatisfiesServiceContract;
 use Semitexa\Core\Http\Exception\HttpTransportException;
+use Semitexa\Core\Pipeline\RecordingAwareTracerInterface;
+use Semitexa\Core\Pipeline\RequestTracerInterface;
+use Semitexa\Core\Pipeline\SafeRequestTracer;
 
 /**
  * HttpClientInterface over ext-curl. Under the Swoole server curl is hooked
@@ -31,6 +35,15 @@ final class CurlHttpClient implements HttpClientInterface
 
     /** Headers a request keeps when a redirect leaves its origin. */
     private const CROSS_ORIGIN_SAFE_HEADERS = ['accept', 'accept-language', 'user-agent'];
+
+    /**
+     * The dev tracer, when one is bound: each call is a `http.client` span, so
+     * a trace shows which outbound request a page's milliseconds went to — an
+     * LLM answer, an S3 read, a webhook. Built with `new`, the client traces
+     * nothing.
+     */
+    #[InjectAsReadonly(optional: true)]
+    protected RequestTracerInterface $tracer;
 
     /** @var (\Closure(int): void)|null */
     private ?\Closure $sleep = null;
@@ -60,10 +73,30 @@ final class CurlHttpClient implements HttpClientInterface
             throw new \LogicException('pinnedResolve with followRedirects: a redirect would reach a host nobody checked.');
         }
 
-        $started = hrtime(true);
-        $response = $this->sendFollowing($request, $options);
+        // Per call: SafeRequestTracer keeps a span stack of its own, and it is
+        // what makes an observer that throws, or one recording nothing, cost
+        // the call nothing.
+        $tracer = isset($this->tracer)
+            && !($this->tracer instanceof RecordingAwareTracerInterface && !$this->tracer->isRecording())
+            ? SafeRequestTracer::wrap($this->tracer)
+            : null;
+        $tracer?->begin('http.client', ['method' => $request->method, 'url' => self::spanUrl($request->url)]);
 
-        return $response->withAttempts($response->attempts, (hrtime(true) - $started) / 1_000_000);
+        $started = hrtime(true);
+        try {
+            $response = $this->sendFollowing($request, $options);
+        } catch (HttpTransportException $e) {
+            $tracer?->end('http.client', ['error' => $e->kind->value, 'attempts' => $e->attempts]);
+            throw $e;
+        } catch (\Throwable $e) {
+            $tracer?->end('http.client', ['error' => $e::class]);
+            throw $e;
+        }
+        $response = $response->withAttempts($response->attempts, (hrtime(true) - $started) / 1_000_000);
+        $tracer?->end('http.client', ['status' => $response->status, 'attempts' => $response->attempts]
+            + ($options->onChunk !== null ? ['streamed' => true] : ['bytes' => strlen($response->body)]));
+
+        return $response;
     }
 
     private function sendFollowing(HttpRequest $request, HttpCallOptions $options): HttpResponse
@@ -303,6 +336,29 @@ final class CurlHttpClient implements HttpClientInterface
      * another origin keeps only harmless headers: Authorization, cookies and
      * API keys stay with the origin they were meant for.
      */
+    /**
+     * The URL a trace keeps: scheme, host, port and the first path segment —
+     * enough to tell an LLM call from an S3 read — and nothing after it. A
+     * webhook or bot URL carries its secret in the path (`/bot<token>/…`,
+     * `/services/T/B/<secret>`), and a trace is written to disk, rendered and
+     * exported. A first segment that looks like a credential is masked too.
+     */
+    private static function spanUrl(string $url): string
+    {
+        $origin = HttpTransportException::safeUrl((string) preg_replace('#^([a-z][a-z0-9+.-]*://[^/?\#]*).*$#i', '$1', $url));
+        $path = (string) parse_url($url, PHP_URL_PATH);
+        $segments = array_values(array_filter(explode('/', $path), static fn (string $s): bool => $s !== ''));
+        if ($segments === []) {
+            return $origin;
+        }
+        $first = $segments[0];
+        if (preg_match('/^bot\d+:/i', $first) === 1 || strlen($first) > 24) {
+            $first = '…';
+        }
+
+        return $origin . '/' . $first . (count($segments) > 1 ? '/…' : '');
+    }
+
     private static function redirected(HttpRequest $request, int $status, string $location, HttpCallOptions $options): HttpRequest
     {
         $next = self::resolveUrl($request->url, $location);
