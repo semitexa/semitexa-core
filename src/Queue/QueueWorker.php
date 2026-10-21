@@ -105,6 +105,7 @@ class QueueWorker
         $this->currentQueue = $queueName ?: QueueConfig::defaultQueueName('default');
 
         $transport = QueueTransportRegistry::create($this->currentTransport);
+        QueueStopSignals::install($transport, fn (string $message) => $this->log($message));
 
         $this->log("👷  Queue worker started (transport={$this->currentTransport}, queue={$this->currentQueue})");
 
