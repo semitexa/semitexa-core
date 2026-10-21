@@ -27,6 +27,21 @@ final class QueueStatsRecorder
         private readonly ?\Closure $clock = null,
     ) {}
 
+    /**
+     * From QUEUE_STATS_STORE; null when it is off or cannot be opened (a
+     * worker runs without counters rather than not at all).
+     */
+    public static function fromEnvironment(): ?self
+    {
+        try {
+            $store = QueueStatsStores::fromEnvironment();
+        } catch (\Throwable) {
+            return null;
+        }
+
+        return $store === null ? null : new self($store);
+    }
+
     /** @param 'processed'|'dead_lettered' $outcome */
     public function record(string $queue, string $outcome, bool $retried, ?int $waitMs, int $runMs): void
     {

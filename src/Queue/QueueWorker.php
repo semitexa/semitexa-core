@@ -459,12 +459,7 @@ class QueueWorker
         }
         if (!$this->statsResolved) {
             $this->statsResolved = true;
-            try {
-                $store = QueueStatsStores::fromEnvironment();
-                $this->stats = $store === null ? null : new QueueStatsRecorder($store);
-            } catch (\Throwable) {
-                $this->stats = null;
-            }
+            $this->stats = QueueStatsRecorder::fromEnvironment();
         }
         $this->stats?->record(
             (string) $this->currentQueue,
