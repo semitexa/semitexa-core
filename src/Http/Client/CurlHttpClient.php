@@ -218,12 +218,31 @@ final class CurlHttpClient implements HttpClientInterface
         }
 
         $handle = curl_init();
-        curl_setopt_array($handle, $curlOptions);
-        $ok = curl_exec($handle);
-        $httpCode = (int) curl_getinfo($handle, CURLINFO_HTTP_CODE);
-        $errno = curl_errno($handle);
-        $error = curl_error($handle);
-        unset($handle);
+        try {
+            curl_setopt_array($handle, $curlOptions);
+            $ok = curl_exec($handle);
+            $httpCode = (int) curl_getinfo($handle, CURLINFO_HTTP_CODE);
+            $errno = curl_errno($handle);
+            $error = curl_error($handle);
+        } catch (\Throwable $e) {
+            // The caller's onChunk threw mid-transfer: the held stream too.
+            if (is_resource($held)) {
+                fclose($held);
+            }
+            throw $e;
+        } finally {
+            // The hook's handle (Swoole\Curl\Handler) with a WRITEFUNCTION is
+            // freed only by curl_close(): unset alone kept every response body
+            // and its socket for the life of the worker (ten 1 MB GETs: +10
+            // open sockets, +11.5 MB), and so did an onChunk that threw. A
+            // native handle needs no close, and PHP 8.5 deprecates closing
+            // one. By exact class: the hook's handle extends \CurlHandle, so
+            // instanceof cannot tell them apart.
+            if ($handle::class !== \CurlHandle::class) {
+                curl_close($handle);
+            }
+            unset($handle);
+        }
 
         if (is_resource($held) && ($tooLarge || $heldShort || $ok === false || $errno !== 0)) {
             fclose($held);

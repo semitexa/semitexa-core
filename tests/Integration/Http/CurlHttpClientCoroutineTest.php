@@ -61,6 +61,9 @@ final class CurlHttpClientCoroutineTest extends TestCase
                             $response->header('Content-Encoding', 'gzip');
                             $response->end($bomb);
                         })(),
+                        '/mb' => (static function () use ($response): void {
+                            $response->end(str_repeat('m', 1_000_000));
+                        })(),
                         '/huge' => (static function () use ($response): void {
                             for ($i = 0; $i < 20; $i++) {
                                 $response->write(str_repeat('x', 1_000_000));
@@ -198,6 +201,34 @@ final class CurlHttpClientCoroutineTest extends TestCase
                 $results['hugeStreamBytes'] = $streamed;
                 $results['hugeStreamPeakMb'] = (memory_get_peak_usage() - $base1) / 1e6;
 
+                // The hook's handle extends \CurlHandle and was never closed:
+                // each request kept its body and its socket for the life of
+                // the worker.
+                $client->get($base . '/mb');
+                gc_collect_cycles();
+                $mem0 = memory_get_usage();
+                for ($i = 0; $i < 10; $i++) {
+                    $client->get($base . '/mb');
+                }
+                gc_collect_cycles();
+                $results['leakMb'] = (memory_get_usage() - $mem0) / 1e6;
+
+                // A caller that stops a stream by throwing from onChunk.
+                $mem0 = memory_get_usage();
+                $thrown = 0;
+                for ($i = 0; $i < 10; $i++) {
+                    try {
+                        $client->get($base . '/mb', [], new HttpCallOptions(onChunk: static function (string $chunk): void {
+                            throw new \RuntimeException('enough');
+                        }));
+                    } catch (\RuntimeException) {
+                        $thrown++;
+                    }
+                }
+                gc_collect_cycles();
+                $results['throwLeakMb'] = (memory_get_usage() - $mem0) / 1e6;
+                $results['thrown'] = $thrown;
+
                 $server->shutdown();
             });
         } finally {
@@ -242,6 +273,9 @@ final class CurlHttpClientCoroutineTest extends TestCase
         self::assertSame(2, $results['stream']->attempts);
         self::assertSame([200, 20_000_000, ''], [$results['hugeStream']->status, $results['hugeStreamBytes'], $results['hugeStream']->body]);
         self::assertLessThan(10.0, $results['hugeStreamPeakMb'], 'a 20 MB stream is held on a temp stream, not in memory');
+        self::assertLessThan(2.0, $results['leakMb'], 'ten 1 MB responses are not kept by their handles');
+        self::assertSame(10, $results['thrown']);
+        self::assertLessThan(2.0, $results['throwLeakMb'], 'nor by a stream its caller stopped by throwing');
         self::assertSame(HttpTransportKind::Connect, $results['refused']->kind);
         self::assertSame(2, $results['refused']->attempts);
     }
