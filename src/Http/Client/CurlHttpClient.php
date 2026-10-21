@@ -420,7 +420,10 @@ final class CurlHttpClient implements HttpClientInterface
     {
         return match ($errno) {
             6 => HttpTransportKind::Dns,                          // COULDNT_RESOLVE_HOST
-            28 => HttpTransportKind::Timeout,                     // OPERATION_TIMEDOUT
+            // The Swoole hook reports the system's errno, not curl's: 110
+            // ETIMEDOUT for a timeout (a "connect" failure until 2026-10-21),
+            // 111 ECONNREFUSED. No curl code is that high.
+            28, 110 => HttpTransportKind::Timeout,                // OPERATION_TIMEDOUT, ETIMEDOUT
             35, 51, 53, 54, 58, 59, 60, 64, 66, 77, 80, 82, 83, 90, 91 => HttpTransportKind::Tls,
             63 => HttpTransportKind::TooLarge,                    // FILESIZE_EXCEEDED
             1, 3 => HttpTransportKind::Protocol,                  // UNSUPPORTED_PROTOCOL, URL_MALFORMAT

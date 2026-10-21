@@ -16,7 +16,7 @@ namespace Semitexa\Core\Http\Client;
  *   tolerate a repeat.
  *
  * Retried: a transport failure worth retrying (HttpTransportKind::isRetryable)
- * and statuses 429, 500, 502, 503, 504. A Retry-After header, in seconds or as
+ * and statuses 429, 500, 502, 503, 504 and 529 (overloaded). A Retry-After header, in seconds or as
  * a date, is honoured up to the cap.
  */
 final readonly class RetryPolicy
@@ -25,7 +25,8 @@ final readonly class RetryPolicy
 
     /** No Retry-After, however large, makes a call wait longer than this. */
     public const MAX_RETRY_AFTER_MS = 60_000;
-    private const RETRYABLE_STATUSES = [429, 500, 502, 503, 504];
+    /** 529: "overloaded", as Anthropic's API answers a busy moment. */
+    private const RETRYABLE_STATUSES = [429, 500, 502, 503, 504, 529];
 
     public function __construct(
         public int $maxAttempts = 1,

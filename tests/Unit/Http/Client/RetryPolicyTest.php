@@ -29,7 +29,7 @@ final class RetryPolicyTest extends TestCase
     public function the_statuses_worth_another_try(): void
     {
         $policy = RetryPolicy::idempotent();
-        foreach ([429, 500, 502, 503, 504] as $status) {
+        foreach ([429, 500, 502, 503, 504, 529] as $status) {
             self::assertTrue($policy->retriesStatus($status), (string) $status);
         }
         foreach ([200, 400, 401, 404, 409, 501] as $status) {
