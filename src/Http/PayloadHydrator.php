@@ -299,6 +299,13 @@ class PayloadHydrator
             if ($type->allowsNull() && ($value === null || $value === '')) {
                 return null;
             }
+            // Two files under one field, or a text value (empty included) under
+            // a file field's name, reached the setter and failed as a TypeError:
+            // a generic 422 that named no field. Only for a setter typed exactly
+            // UploadedFile: a union such as UploadedFile|string takes text.
+            if ($typeName === UploadedFile::class && !$value instanceof UploadedFile) {
+                throw new TypeMismatchException($fieldName, 'one uploaded file', $value);
+            }
             return self::castToType($value, $typeName, $fieldName, $strict);
         }
 

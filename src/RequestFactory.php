@@ -11,6 +11,8 @@ use Semitexa\Core\Http\UploadedFile;
  */
 class RequestFactory
 {
+    private const MAX_FILE_NAME_DEPTH = 16;
+
     /**
      * Create Request (Swoole-only)
      */
@@ -115,9 +117,11 @@ class RequestFactory
      * @param mixed $files
      * @return array<string, UploadedFile|list<UploadedFile>>
      */
-    public static function normalizeFiles(mixed $files): array
+    public static function normalizeFiles(mixed $files, int $depth = 0): array
     {
-        if (!is_array($files)) {
+        // Nested names are followed this deep; a form never needs more, and a
+        // hostile `a[x][x]…` costs memory with the square of its depth.
+        if (!is_array($files) || $depth > self::MAX_FILE_NAME_DEPTH) {
             return [];
         }
 
@@ -171,6 +175,20 @@ class RequestFactory
                 $list = self::explodeParallelFileEntry($field, $entry);
                 if ($list !== []) {
                     $out[$field] = $list;
+                }
+                continue;
+            }
+
+            // Shape 4: a nested field name. Swoole hands `doc[avatar]` over as
+            // ['doc' => ['avatar' => entry]], and it used to be dropped: the
+            // upload vanished without a word. Each file is kept under the
+            // name the form gave it, `doc[avatar]`, `deep[x][y]`.
+            foreach ($entry as $subField => $subEntry) {
+                if (!is_string($subField) && !is_int($subField)) {
+                    continue;
+                }
+                foreach (self::normalizeFiles([$field . '[' . $subField . ']' => $subEntry], $depth + 1) as $name => $file) {
+                    $out[$name] = $file;
                 }
             }
         }

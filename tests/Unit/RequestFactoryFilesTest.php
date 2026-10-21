@@ -129,6 +129,41 @@ final class RequestFactoryFilesTest extends TestCase
         @unlink($tmp);
     }
 
+    #[Test]
+    public function a_nested_field_name_keeps_its_files_under_the_name_the_form_gave_them(): void
+    {
+        // The shape Swoole 6.2 hands over for doc[avatar], doc[cv],
+        // deep[x][y] and doc[photos][]: it used to be dropped entirely.
+        $entry = fn (string $name): array => ['name' => $name, 'type' => 'text/plain', 'tmp_name' => $this->writeTmp('x'), 'error' => UPLOAD_ERR_OK, 'size' => 1];
+        $files = RequestFactory::normalizeFiles([
+            'doc' => ['avatar' => $entry('a.png'), 'cv' => $entry('cv.pdf'), 'photos' => [$entry('p1.jpg'), $entry('p2.jpg')]],
+            'deep' => ['x' => ['y' => $entry('y.txt')]],
+        ]);
+
+        self::assertSame(['doc[avatar]', 'doc[cv]', 'doc[photos]', 'deep[x][y]'], array_keys($files));
+        self::assertInstanceOf(UploadedFile::class, $files['doc[avatar]']);
+        self::assertSame('cv.pdf', $files['doc[cv]'] instanceof UploadedFile ? $files['doc[cv]']->clientFilename : null);
+        self::assertIsArray($files['doc[photos]']);
+        self::assertCount(2, $files['doc[photos]']);
+        self::assertSame('doc[avatar]', $files['doc[avatar]'] instanceof UploadedFile ? $files['doc[avatar]']->field : null);
+        foreach ($files as $file) {
+            foreach (is_array($file) ? $file : [$file] as $one) {
+                @unlink($one->tmpPath);
+            }
+        }
+    }
+
+    #[Test]
+    public function a_name_nested_past_any_form_is_not_followed(): void
+    {
+        $nested = ['name' => 'a.txt', 'type' => 'text/plain', 'tmp_name' => '/tmp/none', 'error' => UPLOAD_ERR_OK, 'size' => 1];
+        for ($i = 0; $i < 40; $i++) {
+            $nested = ['x' => $nested];
+        }
+
+        self::assertSame([], RequestFactory::normalizeFiles(['a' => $nested]));
+    }
+
     private function writeTmp(string $bytes): string
     {
         $tmp = tempnam(sys_get_temp_dir(), 'pt-');

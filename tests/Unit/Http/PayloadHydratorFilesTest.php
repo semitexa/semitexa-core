@@ -6,6 +6,7 @@ namespace Semitexa\Core\Tests\Unit\Http;
 
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
+use Semitexa\Core\Http\Exception\TypeMismatchException;
 use Semitexa\Core\Http\PayloadHydrator;
 use Semitexa\Core\Http\UploadedFile;
 use Semitexa\Core\RequestFactory;
@@ -60,6 +61,30 @@ final class PayloadHydratorFilesTest extends TestCase
 
         self::assertSame('No file here', $dto->getTitle());
         self::assertNull($dto->getDocument());
+    }
+
+    #[Test]
+    public function two_files_or_text_under_a_single_file_field_name_the_field(): void
+    {
+        // They reached the setter and failed as a TypeError: a generic 422
+        // that named no field.
+        $tmp = tempnam(sys_get_temp_dir(), 'pt-');
+        self::assertIsString($tmp);
+        $entry = ['name' => 'a.txt', 'type' => 'text/plain', 'tmp_name' => $tmp, 'error' => UPLOAD_ERR_OK, 'size' => 0];
+
+        foreach ([
+            'two files' => ['files' => ['document' => [$entry, $entry]]],
+            'text' => ['post' => ['document' => 'not a file']],
+            'an empty value' => ['post' => ['document' => '']],
+        ] as $case => $parts) {
+            try {
+                PayloadHydrator::hydrate(new HydratorFilesFixturePayload(), RequestFactory::fromArray(['method' => 'POST', 'uri' => '/upload'] + $parts));
+                self::fail("{$case}: accepted");
+            } catch (TypeMismatchException $e) {
+                self::assertSame('document', $e->field, $case);
+            }
+        }
+        @unlink($tmp);
     }
 }
 
