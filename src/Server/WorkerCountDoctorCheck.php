@@ -53,12 +53,14 @@ final class WorkerCountDoctorCheck implements DoctorCheckInterface
             : 'with SWOOLE_MAX_REQUEST=' . $maxRequest . ' as well, Swoole runs that worker without a manager, so '
                 . 'a memory-watchdog recycle or a fatal error ends the whole server: requests are refused and open '
                 . 'connections are cut until the container is started again.';
-        if ($appEnv !== 'prod') {
+        // Any APP_ENV but dev and test is a server: `production` and
+        // `staging` passed with one worker, as Environment counts them non-dev.
+        if (in_array(strtolower($appEnv), ['dev', 'test', 'testing', 'local', ''], true)) {
             return DoctorResult::pass('One worker (APP_ENV=' . $appEnv . '); in production, ' . $consequence);
         }
 
         return DoctorResult::warn(
-            'SWOOLE_WORKER_NUM=1 in APP_ENV=prod: ' . $consequence,
+            'SWOOLE_WORKER_NUM=1 in APP_ENV=' . $appEnv . ': ' . $consequence,
             'Set SWOOLE_WORKER_NUM to 2 or more in .env, so a recycled worker is replaced while another serves.',
         );
     }

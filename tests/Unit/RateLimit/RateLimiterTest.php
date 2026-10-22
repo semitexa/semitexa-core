@@ -191,16 +191,73 @@ final class RateLimiterTest extends TestCase
         self::assertSame(1, $store->count());
     }
 
+    /**
+     * A full table said it could not count, which lets every request through:
+     * ~50 000 distinct subjects switched every limit on the server off. It
+     * sweeps at once, and what it still cannot hold counts in this worker.
+     */
     #[Test]
-    public function a_full_table_counts_nothing_rather_than_refusing(): void
+    public function a_full_table_still_counts_in_this_worker(): void
     {
-        $store = SwooleTableRateLimitStore::create(1);
-        $last = [];
-        for ($i = 0; $i < 4096 && $last !== null; $i++) {
-            $last = $store->hit("60:1:k{$i}", "60:0:k{$i}", 120);
+        $store = SwooleTableRateLimitStore::create(1, static fn (): int => 90);
+        for ($i = 0; $i < 4096; $i++) {
+            self::assertNotNull($store->hit("60:1:k{$i}", "60:0:k{$i}", 120), "subject {$i} was not counted");
         }
 
-        self::assertNull($last, 'a one-row table filled up');
+        // A subject the table has no room for keeps its count, and undo reaches it.
+        self::assertSame([2, 0], $store->hit('60:1:k4095', '60:0:k4095', 120));
+        $store->undo('60:1:k4095');
+        self::assertSame([2, 0], $store->hit('60:1:k4095', '60:0:k4095', 120));
+    }
+
+    /**
+     * Review: a subject counting in the overflow restarted at 1 in the table
+     * once a sweep freed rows, and its previous window, counted in the table,
+     * was not read while it counted in the overflow.
+     */
+    #[Test]
+    public function a_subject_in_the_overflow_keeps_its_count_and_its_previous_window(): void
+    {
+        $now = 60;
+        $store = SwooleTableRateLimitStore::create(1, static function () use (&$now): int {
+            return $now;
+        });
+        $table = (new \ReflectionProperty($store, 'table'))->getValue($store);
+        // The previous window of `s`, counted in the table.
+        $table->set('60:0:s', ['n' => 3]);
+        for ($i = 0; $i < 4096; $i++) {
+            $store->hit("60:1:fill{$i}", "60:0:fill{$i}", 120);
+        }
+        self::assertFalse($table->exist('60:1:s'), 'the table is full');
+
+        self::assertSame([1, 3], $store->hit('60:1:s', '60:0:s', 120), 'the previous window, from the table');
+        // Rows freed meanwhile (another worker's sweep): `s` stays where it counts.
+        foreach (range(0, 40) as $i) {
+            $table->del("60:1:fill{$i}");
+        }
+        self::assertSame([2, 3], $store->hit('60:1:s', '60:0:s', 120));
+        $store->undo('60:1:s');
+        self::assertSame([2, 3], $store->hit('60:1:s', '60:0:s', 120));
+        self::assertFalse($table->exist('60:1:s'));
+    }
+
+    #[Test]
+    public function a_full_table_sweeps_old_windows_before_it_overflows(): void
+    {
+        $now = 0;
+        $store = SwooleTableRateLimitStore::create(1, static function () use (&$now): int {
+            return $now;
+        });
+        // Fill it with slot-1 rows of a 60 s window, then move to slot 5: they are stale.
+        for ($i = 0; $i < 4096 && $store->count() < 1024; $i++) {
+            $store->hit("60:1:old{$i}", "60:0:old{$i}", 120);
+        }
+        $full = $store->count();
+        $now = 5 * 60;
+
+        self::assertSame([1, 0], $store->hit('60:5:fresh', '60:4:fresh', 120));
+        self::assertLessThan($full, $store->count(), 'the stale rows were swept to make room');
+        self::assertSame(1, (int) (new \ReflectionProperty($store, 'table'))->getValue($store)->get('60:5:fresh', 'n'), 'the fresh subject counts in the shared table');
     }
 
     #[Test]
@@ -219,6 +276,7 @@ final class RateLimiterTest extends TestCase
         self::assertSame('10.0.0.2', ClientIp::of(self::request('10.0.0.2', [])));
         self::assertSame('198.51.100.4', ClientIp::of(self::request('10.0.0.2', ['X-Forwarded-For' => '198.51.100.4:5678'])), 'a hop with a port');
         self::assertSame('2001:db8::1', ClientIp::of(self::request('10.0.0.2', ['X-Forwarded-For' => '[2001:db8::1]:443'])), 'a bracketed IPv6 hop');
+        self::assertSame('198.51.100.4', ClientIp::of(self::request('::ffff:10.0.0.2', ['X-Forwarded-For' => '198.51.100.4'])), 'a dual-stack listener names an IPv4 proxy ::ffff:a.b.c.d');
     }
 
     private static function limiter(RateLimitStoreInterface $store, string $address, ?string $userId = null): RateLimiter

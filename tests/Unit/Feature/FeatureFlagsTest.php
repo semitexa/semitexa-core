@@ -54,6 +54,18 @@ final class FeatureFlagsTest extends TestCase
         );
     }
 
+    /** '' was taken for a user, so a percentage rollout skipped a guest pinned this way. */
+    #[Test]
+    public function an_empty_user_id_is_no_user(): void
+    {
+        $registry = self::registry();
+
+        self::assertSame(
+            DefaultFeatureFlags::of($registry)->forSubject(null, null)->isEnabled('rollout.half'),
+            DefaultFeatureFlags::of($registry)->forSubject(null, '')->isEnabled('rollout.half'),
+        );
+    }
+
     #[Test]
     public function a_rollout_keeps_each_subject_in_or_out_and_raising_it_only_adds(): void
     {

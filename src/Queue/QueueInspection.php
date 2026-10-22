@@ -31,6 +31,11 @@ final class QueueInspection
     /** @return list<array{transport: string, queue: string, inspector: ?QueueInspectorInterface}> */
     public function targets(?string $transport = null, ?string $queue = null): array
     {
+        // A NATS wildcard or a blank token would read other queues' dead
+        // letters under its own name: `--queue='*'` listed every queue's.
+        if ($queue !== null && preg_match('/^[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)*$/', $queue) !== 1) {
+            throw new \InvalidArgumentException("Not a queue name: '{$queue}' (letters, digits, '-', '_', dot-separated).");
+        }
         $known = $this->allQueues();
         if ($queue !== null) {
             // The transport the queue runs on, when --transport did not say:

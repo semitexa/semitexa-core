@@ -133,8 +133,11 @@ final class CurlHttpClient implements HttpClientInterface
             }
 
             if (!$forwarded && $policy->retriesStatus($response->status) && $policy->appliesTo($request->method) && $attempt < $policy->maxAttempts) {
-                $this->pause($policy->delayMs($attempt, RetryPolicy::retryAfterMs($response->header('Retry-After'), time()), $this->random()));
-                continue;
+                $retryAfter = RetryPolicy::retryAfterMs($response->header('Retry-After'), time());
+                if ($policy->honours($retryAfter)) {
+                    $this->pause($policy->delayMs($attempt, $retryAfter, $this->random()));
+                    continue;
+                }
             }
 
             return $response->withAttempts($attempt, 0.0);
@@ -180,6 +183,9 @@ final class CurlHttpClient implements HttpClientInterface
             CURLOPT_TIMEOUT_MS => max(1, (int) ceil($options->timeout * 1000)),
             CURLOPT_CONNECTTIMEOUT_MS => max(1, (int) ceil($options->connectTimeout * 1000)),
             CURLOPT_FOLLOWLOCATION => false,
+            // libcurl's defaults, said: the coroutine hook does not share them.
+            CURLOPT_SSL_VERIFYPEER => true,
+            CURLOPT_SSL_VERIFYHOST => 2,
             CURLOPT_HEADERFUNCTION => static function ($handle, string $line) use (&$rawHeaders, &$status): int {
                 $rawHeaders .= $line;
                 if (preg_match('#^HTTP/\S+\s+(\d{3})#', $line, $m) === 1) {
@@ -253,6 +259,7 @@ final class CurlHttpClient implements HttpClientInterface
         $handle = curl_init();
         try {
             curl_setopt_array($handle, $curlOptions);
+            self::verifyTlsUnderTheHook($handle, $request->url);
             $ok = curl_exec($handle);
             $httpCode = (int) curl_getinfo($handle, CURLINFO_HTTP_CODE);
             $errno = curl_errno($handle);
@@ -314,7 +321,7 @@ final class CurlHttpClient implements HttpClientInterface
             }
         }
         if ($options->decodeContent) {
-            $body = self::decoded($body, $headers['content-encoding'][0] ?? null, $max, $request);
+            $body = self::decoded($body, $headers['content-encoding'][0] ?? null, $max, $request, $truncate);
         }
         $code = $httpCode !== 0 ? $httpCode : $status;
 
@@ -446,11 +453,14 @@ final class CurlHttpClient implements HttpClientInterface
     }
 
     /** A body the server encoded although we asked for identity, inflated no further than the cap. */
-    private static function decoded(string $body, ?string $encoding, int $max, HttpRequest $request): string
+    private static function decoded(string $body, ?string $encoding, int $max, HttpRequest $request, bool $truncate = false): string
     {
         $encoding = strtolower(trim((string) $encoding));
         if ($body === '' || $encoding === '' || $encoding === 'identity') {
             return $body;
+        }
+        if ($truncate && in_array($encoding, ['gzip', 'x-gzip', 'deflate'], true)) {
+            return self::inflatedUpTo($body, $encoding, $max, $request);
         }
 
         // One past the cap tells "over" from "exactly at"; PHP_INT_MAX + 1 is
@@ -470,6 +480,75 @@ final class CurlHttpClient implements HttpClientInterface
         }
 
         return $inflated;
+    }
+
+    /**
+     * truncateOversized on a compressed body: what inflates within the cap,
+     * the rest dropped. gzdecode() with a limit only fails past it, so an
+     * oversized gzip answer threw too_large even when truncation was asked
+     * for. Inflated a piece at a time, so nothing past the cap is ever held;
+     * a body the write callback already cut short inflates as far as it goes.
+     */
+    private static function inflatedUpTo(string $body, string $encoding, int $max, HttpRequest $request): string
+    {
+        $modes = $encoding === 'deflate' ? [ZLIB_ENCODING_DEFLATE, ZLIB_ENCODING_RAW] : [ZLIB_ENCODING_GZIP];
+        foreach ($modes as $mode) {
+            $context = @inflate_init($mode);
+            if ($context === false) {
+                continue;
+            }
+            $out = '';
+            $failed = false;
+            // Small pieces: 1 KiB of a bomb inflates to about 1 MiB, 64 KiB to 64.
+            foreach (str_split($body, 1024) as $piece) {
+                $inflated = @inflate_add($context, $piece, ZLIB_SYNC_FLUSH);
+                if ($inflated === false) {
+                    $failed = $out === '';
+                    break;
+                }
+                $out .= $inflated;
+                if (strlen($out) >= $max) {
+                    return substr($out, 0, $max);
+                }
+            }
+            if (!$failed) {
+                return $out;
+            }
+        }
+
+        throw new HttpTransportException(HttpTransportKind::Protocol, $request->method, $request->url, "the {$encoding} body does not inflate");
+    }
+
+    /**
+     * Inside the server curl is Swoole's hook, a PHP handler over its
+     * coroutine client, which checks no certificate unless told to and drops
+     * CURLOPT_SSL_VERIFYHOST: every HTTPS call took a self-signed, expired or
+     * wrong-host certificate, so anyone on the path read the API keys. Peer
+     * verification is told, and the host name, which the hook would never
+     * pass on, is set on the client directly.
+     */
+    private static function verifyTlsUnderTheHook(mixed $handle, string $url): void
+    {
+        if (!is_object($handle) || $handle::class !== 'Swoole\\Curl\\Handler') {
+            return;
+        }
+        $host = parse_url($url, PHP_URL_HOST);
+        if (!is_string($host) || $host === '') {
+            return;
+        }
+        $host = trim($host, '[]');
+        // Swoole checks the name with X509_check_host, which no IP address in
+        // a certificate ever matches: for an IP the chain is still checked,
+        // and libcurl's IP-SAN check is not there to stand in for it.
+        $name = filter_var($host, FILTER_VALIDATE_IP) === false ? $host : null;
+        \Closure::bind(static function (object $hooked) use ($name): void {
+            // @phpstan-ignore property.notFound (Swoole's handler, not in the stubs)
+            $hooked->clientOptions['ssl_verify_peer'] = true;
+            if ($name !== null) {
+                // @phpstan-ignore property.notFound
+                $hooked->clientOptions['ssl_host_name'] = $name;
+            }
+        }, null, $handle::class)($handle);
     }
 
     private static function kindOf(int $errno): HttpTransportKind

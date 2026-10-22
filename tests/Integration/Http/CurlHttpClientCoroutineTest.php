@@ -160,6 +160,12 @@ final class CurlHttpClientCoroutineTest extends TestCase
                 }
                 $results['bombPeakMb'] = (memory_get_peak_usage() - $base0) / 1e6;
 
+                // truncateOversized on a compressed body threw too_large too.
+                memory_reset_peak_usage();
+                $base0 = memory_get_usage();
+                $results['bombCut'] = $client->get($base . '/bomb', [], new HttpCallOptions(maxResponseBytes: 1_000_000, truncateOversized: true));
+                $results['bombCutPeakMb'] = (memory_get_peak_usage() - $base0) / 1e6;
+
                 memory_reset_peak_usage();
                 $base0 = memory_get_usage();
                 try {
@@ -279,6 +285,9 @@ final class CurlHttpClientCoroutineTest extends TestCase
         // review: the cap was checked after the body (and its inflation) was in memory.
         self::assertSame(HttpTransportKind::TooLarge, $results['bomb']->kind);
         self::assertLessThan(10.0, $results['bombPeakMb'], 'a gzip bomb stops at the cap, not in memory');
+        self::assertSame([200, 1_000_000], [$results['bombCut']->status, strlen($results['bombCut']->body)], 'truncation keeps what inflates within the cap');
+        self::assertSame(str_repeat("\0", 1_000_000), $results['bombCut']->body);
+        self::assertLessThan(10.0, $results['bombCutPeakMb'], 'and inflates no further than it');
         self::assertSame(HttpTransportKind::TooLarge, $results['huge']->kind);
         self::assertLessThan(10.0, $results['hugePeakMb'], '20 MB against a 2 MB cap stays bounded');
 

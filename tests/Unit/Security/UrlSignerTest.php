@@ -60,6 +60,25 @@ final class UrlSignerTest extends TestCase
         self::assertSame(SignatureCheck::Invalid, $signer->check('/files/a/b', $query));
     }
 
+    /** A literal "%2F" in a path (sent as %252F) signed the same as an encoded slash. */
+    #[Test]
+    public function an_encoded_percent_is_not_an_encoded_slash(): void
+    {
+        $signer = UrlSigner::withSecrets('secret-a');
+        $query = (string) parse_url($signer->sign('/files/a%2Fb'), PHP_URL_QUERY);
+
+        self::assertSame(SignatureCheck::Valid, $signer->check('/files/a%2Fb', $query));
+        self::assertSame(SignatureCheck::Invalid, $signer->check('/files/a%252Fb', $query));
+    }
+
+    /** PHP_INT_MAX overflowed into `expires=9.22E+18`, expired from the start. */
+    #[Test]
+    public function a_ttl_past_ten_years_is_refused(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        UrlSigner::withSecrets('secret-a')->sign('/a', PHP_INT_MAX);
+    }
+
     #[Test]
     public function the_link_keeps_its_host_and_its_query_as_written(): void
     {

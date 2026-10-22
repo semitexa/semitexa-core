@@ -48,8 +48,14 @@ final class LogChannelRoutes
     public static function normalize(string $path): string
     {
         $path = (string) preg_replace('#/+#', '/', ltrim($path, '/'));
+        // Every `./` segment, not only a leading one: `var/log/./swoole.log`
+        // passed as another file than swoole.log, and its rotation renamed
+        // the server's own log from under it.
+        do {
+            $path = (string) preg_replace('#(^|/)\./#', '$1', $path, -1, $count);
+        } while ($count > 0);
 
-        return (string) preg_replace('#^(\./)+#', '', $path);
+        return $path;
     }
 
     private static function parse(string $route, string $logFile): ?LogRoute

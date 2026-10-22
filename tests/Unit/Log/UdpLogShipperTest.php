@@ -138,4 +138,40 @@ final class UdpLogShipperTest extends TestCase
 
         return (string) stream_socket_recvfrom($this->server, 65535);
     }
+
+    /** The context went to the collector as written, passwords included, over plain UDP. */
+    #[Test]
+    public function secrets_in_the_context_do_not_leave_the_machine(): void
+    {
+        $entry = ['message' => 'login', 'context' => [
+            'password' => 'hunter2',
+            'headers' => ['Authorization' => 'Bearer abc', 'Accept' => 'text/html'],
+            'api_key' => 'sk-123',
+            'prompt_tokens' => 812,
+            'user' => 'ann',
+            'request_headers' => ['authorization' => ['Bearer abc']],
+            'cookies' => ['sid' => 's3cr3t'],
+            'pin_password' => 123456,
+            'csrf_token' => 'x',
+            'dsn' => 'mysql://u:pw@h/db',
+            'passenger' => 'Ann Lee',
+        ]];
+
+        $redacted = UdpLogShipper::redacted($entry);
+
+        self::assertNotNull($redacted);
+        self::assertSame('[redacted]', $redacted['context']['password']);
+        self::assertSame('[redacted]', $redacted['context']['headers']['Authorization']);
+        self::assertSame('text/html', $redacted['context']['headers']['Accept']);
+        self::assertSame('[redacted]', $redacted['context']['api_key']);
+        self::assertSame(812, $redacted['context']['prompt_tokens'], 'a count is not a secret');
+        self::assertSame('ann', $redacted['context']['user']);
+        self::assertSame('[redacted]', $redacted['context']['request_headers']['authorization'], 'a header map holds a list');
+        self::assertSame('[redacted]', $redacted['context']['cookies'], 'a cookie map');
+        self::assertSame('[redacted]', $redacted['context']['pin_password'], 'a number under a secret key');
+        self::assertSame('[redacted]', $redacted['context']['csrf_token']);
+        self::assertSame('[redacted]', $redacted['context']['dsn']);
+        self::assertSame('Ann Lee', $redacted['context']['passenger'], 'not every word starting with pass');
+        self::assertNull(UdpLogShipper::redacted(['message' => 'ok', 'context' => ['user' => 'ann']]), 'nothing to redact, nothing re-encoded');
+    }
 }

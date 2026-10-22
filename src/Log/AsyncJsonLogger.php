@@ -90,7 +90,11 @@ final class AsyncJsonLogger implements LoggerInterface
         if ($levelName === null || $levelName === '' || !LogLevel::isValid($levelName)) {
             $levelName = $this->environment->isDev() ? 'info' : 'warning';
         }
-        $this->minLevel = LogLevel::toValue($levelName);
+        // minLevel is the "configured" mark, so it is set last: set first, a
+        // read below that yields (a hooked file read of the env cache) let
+        // another coroutine log with the defaults — the file, no remote
+        // copy, no channel routes, an `off` channel written anyway.
+        $minLevel = LogLevel::toValue($levelName);
         $logFile = Environment::getEnvValue('LOG_FILE');
         $this->logFile = $logFile !== null && $logFile !== '' ? $logFile : self::DEFAULT_LOG_FILE;
         $this->sink = LogSink::fromEnv(Environment::getEnvValue('LOG_SINK'));
@@ -110,6 +114,7 @@ final class AsyncJsonLogger implements LoggerInterface
             AppLogRotation::maxBytesFromEnv(Environment::getEnvValue('LOG_MAX_BYTES')),
             SwooleLogRetention::daysFromEnv(Environment::getEnvValue('LOG_RETENTION_DAYS')),
         );
+        $this->minLevel = $minLevel;
     }
 
     /** @param array<string, mixed> $context */
@@ -266,7 +271,11 @@ final class AsyncJsonLogger implements LoggerInterface
                 continue;
             }
             $encoded = $this->encodeEntry($entry);
-            $this->remote?->ship($encoded, $entry);
+            if ($this->remote !== null) {
+                // The copy that leaves the machine carries no secrets.
+                $redacted = UdpLogShipper::redacted($entry);
+                $this->remote->ship($redacted !== null ? $this->encodeEntry($redacted) : $encoded, $redacted ?? $entry);
+            }
             $encoded .= "\n";
             if ($route->stderr) {
                 $stderr .= $encoded;

@@ -12,7 +12,11 @@ namespace Semitexa\Core\Log;
  * the worker moves on, where a syslog socket or a TCP connection to a slow
  * collector held the worker (and, during a drain, past its grace). The price
  * is UDP's: a line the network or a busy collector drops is gone, and nothing
- * says so beyond a counter in the next line that gets through. An IPv4
+ * says so beyond a counter in the next line that gets through. The traffic
+ * is not encrypted: keep the collector on a private network. A value under a
+ * key that names a secret (password, token, cookie, authorization, api key…)
+ * leaves as "[redacted]", whatever it holds: the context a line carries went
+ * out as written. An IPv4
  * address only: a host name would be looked up on the first send, a wait
  * outside a coroutine nothing can cut short, and the coroutine runtime opens
  * every udp:// socket as IPv4.
@@ -28,7 +32,42 @@ final class UdpLogShipper
     private float $failedAt = 0.0;
     private int $dropped = 0;
 
+    /**
+     * Keys that name a secret. `token` only at the end (csrf_token, api-token,
+     * not prompt_tokens, a count); `pass` only whole (not passenger, passport).
+     */
+    private const SECRET_KEY = '/password|passwd|passphrase|^pass$|secret|token$|authorization|cookie|api[_-]?key|credential|private[_-]?key|signature|^dsn$/i';
+
     private function __construct(private readonly string $address) {}
+
+    /**
+     * The entry with every value under a secret-naming key replaced, at any
+     * depth; null when it holds none, so the common line is not encoded twice.
+     *
+     * @param array<string, mixed> $entry
+     * @return array<string, mixed>|null
+     */
+    public static function redacted(array $entry): ?array
+    {
+        $changed = false;
+        $walk = static function (array $values) use (&$walk, &$changed): array {
+            foreach ($values as $key => $value) {
+                // The whole value, whatever its type: a header map holds a list
+                // (`authorization: ['Bearer …']`), cookies a map, a PIN an int.
+                if (is_string($key) && $value !== null && $value !== '' && $value !== [] && preg_match(self::SECRET_KEY, $key) === 1) {
+                    $values[$key] = '[redacted]';
+                    $changed = true;
+                } elseif (is_array($value)) {
+                    $values[$key] = $walk($value);
+                }
+            }
+
+            return $values;
+        };
+        $result = $walk($entry);
+
+        return $changed ? $result : null;
+    }
 
     /**
      * @param list<string> $rejected the value, when it is not a udp:// address

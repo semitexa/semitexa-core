@@ -170,7 +170,10 @@ class RequestFactory
             }
 
             // Shape 3b: $_FILES-style array of arrays — `name`, `type`, `tmp_name`, … all parallel lists.
-            if (isset($entry['name']) && is_array($entry['name'])) {
+            // Lists of strings, not any array: a nested group with a file field
+            // called `name` (doc[name] beside doc[avatar]) was read as this
+            // shape, and became a list of empty uploads with doc[avatar] gone.
+            if (isset($entry['name'], $entry['tmp_name']) && self::isStringList($entry['name']) && self::isStringList($entry['tmp_name'])) {
                 /** @var array<string, mixed> $entry */
                 $list = self::explodeParallelFileEntry($field, $entry);
                 if ($list !== []) {
@@ -194,6 +197,20 @@ class RequestFactory
         }
 
         return $out;
+    }
+
+    private static function isStringList(mixed $value): bool
+    {
+        if (!is_array($value) || $value === []) {
+            return false;
+        }
+        foreach ($value as $item) {
+            if (!is_string($item)) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /**

@@ -83,6 +83,11 @@ final class TrustedProxies
         if ($ipBin === false) {
             return false;
         }
+        // A dual-stack listener reports an IPv4 peer as ::ffff:a.b.c.d, which
+        // never matched an IPv4 entry: the proxy was not trusted.
+        if (strlen($ipBin) === 16 && str_starts_with($ipBin, str_repeat("\0", 10) . "\xff\xff") && !str_contains($entry, ':')) {
+            $ipBin = substr($ipBin, 12);
+        }
 
         if (!str_contains($entry, '/')) {
             $entryBin = @inet_pton($entry);

@@ -49,6 +49,18 @@ final class InMemoryRateLimitStore implements RateLimitStoreInterface
         }
     }
 
+    /** Whether $key is counting here, in a window not yet over. */
+    public function holds(string $key): bool
+    {
+        return isset($this->counters[$key]) && $this->counters[$key]['until'] > $this->now();
+    }
+
+    /** $key's count, without counting a request. */
+    public function counted(string $key): int
+    {
+        return $this->holds($key) ? $this->counters[$key]['n'] : 0;
+    }
+
     private function now(): int
     {
         return $this->clock !== null ? (int) ($this->clock)() : time();

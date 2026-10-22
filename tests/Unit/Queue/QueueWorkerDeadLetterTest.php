@@ -39,6 +39,7 @@ final class QueueWorkerDeadLetterTest extends TestCase
         ];
         QueueTransportRegistry::reset();
         DeadLetterSpyTransport::$published = [];
+        DeadLetterSpyTransport::$refuse = false;
         QueueTransportRegistry::register(self::TRANSPORT, new DeadLetterSpyTransportFactory());
     }
 
@@ -86,6 +87,28 @@ final class QueueWorkerDeadLetterTest extends TestCase
         self::assertStringContainsString('App\\Gone\\RemovedHandler', (string) ($letter['error'] ?? ''));
     }
 
+    /**
+     * The dead letter could not be written and the error was only logged: the
+     * transport acknowledged the message, and it was gone. It throws now, so
+     * the transport hands the message back to be delivered again.
+     */
+    #[Test]
+    public function a_dead_letter_that_cannot_be_written_leaves_the_message_on_the_queue(): void
+    {
+        $worker = $this->worker(self::TRANSPORT, 'orders');
+        $stats = sys_get_temp_dir() . '/semitexa-dlq-stats-' . bin2hex(random_bytes(4)) . '.json';
+        (new ReflectionProperty(QueueWorker::class, 'statsFile'))->setValue($worker, $stats);
+        DeadLetterSpyTransport::$refuse = true;
+
+        try {
+            $this->expectException(\RuntimeException::class);
+            $this->expectExceptionMessage('The dead letter could not be written');
+            $worker->processPayload((new QueuedHandlerMessage('App\\Gone\\RemovedHandler', 'App\\Req', 'App\\Res', ['id' => 'r-1'], []))->toJson());
+        } finally {
+            @unlink($stats);
+        }
+    }
+
     private function worker(?string $transport, ?string $queue): QueueWorker
     {
         $worker = (new \ReflectionClass(QueueWorker::class))->newInstanceWithoutConstructor();
@@ -115,8 +138,13 @@ final class DeadLetterSpyTransport implements QueueTransportInterface
     /** @var list<array{string, string}> */
     public static array $published = [];
 
+    public static bool $refuse = false;
+
     public function publish(string $queueName, string $payload): void
     {
+        if (self::$refuse) {
+            throw new \RuntimeException('nats: connection refused');
+        }
         self::$published[] = [$queueName, $payload];
     }
 

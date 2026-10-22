@@ -153,6 +153,22 @@ final class RequestFactoryFilesTest extends TestCase
         }
     }
 
+    /** doc[name] beside doc[avatar] read as the parallel-list shape: doc[avatar] was gone. */
+    #[Test]
+    public function a_nested_file_field_called_name_is_a_field_like_any_other(): void
+    {
+        $entry = fn (string $name): array => ['name' => $name, 'type' => 'text/plain', 'tmp_name' => $this->writeTmp('x'), 'error' => UPLOAD_ERR_OK, 'size' => 1];
+        $files = RequestFactory::normalizeFiles([
+            'doc' => ['avatar' => $entry('a.png'), 'name' => $entry('n.txt')],
+        ]);
+
+        self::assertSame(['doc[avatar]', 'doc[name]'], array_keys($files));
+        self::assertSame('n.txt', $files['doc[name]'] instanceof UploadedFile ? $files['doc[name]']->clientFilename : null);
+        foreach ($files as $file) {
+            @unlink($file->tmpPath);
+        }
+    }
+
     #[Test]
     public function a_name_nested_past_any_form_is_not_followed(): void
     {

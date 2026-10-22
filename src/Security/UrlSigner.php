@@ -24,6 +24,8 @@ final class UrlSigner
     public const EXPIRES = 'expires';
     private const PURPOSE = 'url';
 
+    private const MAX_TTL_SECONDS = 10 * 366 * 86400;
+
     /** @var list<string>|null */
     private ?array $secrets = null;
 
@@ -57,6 +59,11 @@ final class UrlSigner
         if ($ttlSeconds !== null) {
             if ($ttlSeconds < 1) {
                 throw new \InvalidArgumentException('A signed URL needs a TTL of at least one second.');
+            }
+            // PHP_INT_MAX overflowed into a float (`expires=9.22E+18`), a link
+            // that was expired from the start. A link for ever has no TTL.
+            if ($ttlSeconds > self::MAX_TTL_SECONDS) {
+                throw new \InvalidArgumentException('A signed URL TTL is at most ten years; leave it out for a link that does not expire.');
             }
             $pairs[] = self::EXPIRES . '=' . (($now ?? time()) + $ttlSeconds);
         }
@@ -113,8 +120,9 @@ final class UrlSigner
         // Decoded, so `/files/a%20b` and `/files/a b` are one path whichever
         // form the server hands over — except an encoded slash, which the
         // router keeps apart from a real one: `/files/a%2Fb` must not verify
-        // as `/files/a/b`, another route.
-        $canonicalPath = rawurldecode((string) preg_replace('/%2F/i', '%252F', $path));
+        // as `/files/a/b`, another route. An encoded % stays encoded too, or
+        // `/files/a%252Fb` (a literal "%2F") signed the same as `a%2Fb`.
+        $canonicalPath = rawurldecode((string) preg_replace('/%(25|2F)/i', '%25$1', $path));
         $mac = hash_hmac('sha256', $canonicalPath . '?' . self::canonicalQuery($query), AppSecret::derive($secret, self::PURPOSE), true);
 
         return rtrim(strtr(base64_encode($mac), '+/', '-_'), '=');
