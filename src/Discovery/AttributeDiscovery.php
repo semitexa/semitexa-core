@@ -666,8 +666,8 @@ class AttributeDiscovery
                 if (!empty($attrs)) {
                     /** @var AsPayloadHandler $attr */
                     $attr = $attrs[0]->newInstance();
-                    $payloadClass = $attr->payload;
-                    $resourceClass = $attr->resource;
+                    [$payloadClass, $resourceClass] = [$attr->payload, $attr->resource];
+                    HandlerExecution::isKnown($attr->execution ?? null) || BootDiagnostics::current()->invalidUsage('AttributeDiscovery', "Handler {$className} has execution '" . (string) $attr->execution . "', which is not sync, async or queued: it runs Sync.");
                     $execution = HandlerExecution::normalize($attr->execution ?? null);
                     $transport = $attr->transport !== null ? EnvValueResolver::resolve($attr->transport) : null;
                     $queue = $attr->queue !== null ? EnvValueResolver::resolve($attr->queue) : null;

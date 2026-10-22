@@ -46,6 +46,14 @@ final class HandlerRegistry
                 . 'which apply only to Queued: Async runs in the process that served the request. '
                 . 'For a worker, set execution: HandlerExecution::Queued.');
         }
+        // A queue named on a Sync handler (no execution given, or a word the
+        // enum does not know, which also reads as Sync) is never used: the
+        // handler runs in the request, and nothing said so.
+        if ($handlerMeta['execution'] === HandlerExecution::Sync->value
+            && (($handlerMeta['transport'] ?? null) !== null || ($handlerMeta['queue'] ?? null) !== null)) {
+            BootDiagnostics::current()->invalidUsage('HandlerRegistry', "Handler {$handlerMeta['class']} names a transport or queue but runs Sync, in the request: "
+                . 'set execution: HandlerExecution::Queued for a worker.');
+        }
         $key = $payloadClass . "\0" . $resourceClass;
         $this->handlersByPayloadAndResource[$key][] = $handlerMeta;
         $this->handlersByClass[$handlerMeta['class']] = $handlerMeta;

@@ -53,8 +53,28 @@ final class AsyncHandlerWithAQueueTest extends TestCase
         self::assertSame([], $this->invalidUsages(QueuedWithQueueHandler::class));
     }
 
+    /** A queue on a handler that runs Sync (no execution given) was never used, without a word. */
+    #[Test]
+    public function a_sync_handler_with_a_queue_is_told_it_runs_in_the_request(): void
+    {
+        self::assertSame([
+            'Handler ' . SyncWithQueueHandler::class . ' names a transport or queue but runs Sync, in the request: '
+                . 'set execution: HandlerExecution::Queued for a worker.',
+        ], $this->invalidUsages(SyncWithQueueHandler::class));
+    }
+
+    /** `queud` read as Sync, in the request, and nothing said so. */
+    #[Test]
+    public function an_execution_word_the_enum_does_not_know_is_said(): void
+    {
+        self::assertContains(
+            'Handler ' . TypoExecutionHandler::class . " has execution 'queud', which is not sync, async or queued: it runs Sync.",
+            $this->invalidUsages(TypoExecutionHandler::class, 'AttributeDiscovery'),
+        );
+    }
+
     /** @return list<string> */
-    private function invalidUsages(string $handlerClass): array
+    private function invalidUsages(string $handlerClass, string $component = 'HandlerRegistry'): array
     {
         $diagnostics = BootDiagnostics::begin();
         $discovery = new AttributeDiscovery($this->discoveryReturning($handlerClass), new ModuleRegistry(), new RouteRegistry());
@@ -66,7 +86,7 @@ final class AsyncHandlerWithAQueueTest extends TestCase
 
         return array_values(array_map(
             static fn (BootWarning $w): string => $w->message,
-            array_filter($diagnostics->getWarnings(), static fn (BootWarning $w): bool => $w->component === 'HandlerRegistry'),
+            array_filter($diagnostics->getWarnings(), static fn (BootWarning $w): bool => $w->component === $component),
         ));
     }
 
@@ -109,5 +129,15 @@ final class AsyncPlainHandler
 
 #[AsPayloadHandler(payload: QueueProbePayload::class, resource: QueueProbeResource::class, execution: HandlerExecution::Queued, queue: 'reports', maxRetries: 3)]
 final class QueuedWithQueueHandler
+{
+}
+
+#[AsPayloadHandler(payload: QueueProbePayload::class, resource: QueueProbeResource::class, queue: 'reports')]
+final class SyncWithQueueHandler
+{
+}
+
+#[AsPayloadHandler(payload: QueueProbePayload::class, resource: QueueProbeResource::class, execution: 'queud')]
+final class TypoExecutionHandler
 {
 }
