@@ -18,7 +18,8 @@ use Semitexa\Core\Event\EventExecution;
  *
  * Queued only: a listener that throws is retried `maxRetries` times, `retryDelay`
  * seconds apart, then moved to the dead-letter queue `<queue>.failed` — the same
- * policy as {@see AsPayloadHandler}. Ignored for Sync and Async.
+ * policy as {@see AsPayloadHandler}. Ignored for Sync and Async, and reported
+ * at boot when given there, as are a transport and a queue.
  */
 #[Attribute(Attribute::TARGET_CLASS)]
 class AsEventListener

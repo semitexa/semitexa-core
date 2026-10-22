@@ -74,6 +74,11 @@ final class EventListenerRegistry
                     'maxRetries' => max(0, $attr->maxRetries),
                     'retryDelay' => max(0, $attr->retryDelay),
                 ];
+                // A queue, transport or retries apply to Queued only: on a Sync or
+                // Async listener (in process) they were never used, and nothing said so.
+                if ($execution !== EventExecution::Queued && ($meta['transport'] !== null || $meta['queue'] !== null || $meta['maxRetries'] > 0 || $meta['retryDelay'] > 0)) {
+                    BootDiagnostics::current()->invalidUsage('EventListenerRegistry', "Listener {$className} is {$execution->name} but names a transport, queue or retries, which apply only to Queued: it runs in process. For a worker, set execution: EventExecution::Queued.");
+                }
                 if (!isset($this->listenersByEvent[$eventClass])) {
                     $this->listenersByEvent[$eventClass] = [];
                 }
