@@ -50,6 +50,28 @@ final class AsyncJsonLoggerTest extends TestCase
         parent::tearDown();
     }
 
+    /**
+     * One write per batch: past the 4 KiB a pipe takes whole, another
+     * worker's write could land mid-line in the container's log.
+     */
+    #[Test]
+    public function stderr_is_written_in_pipe_sized_runs_of_whole_lines(): void
+    {
+        $chunks = new \ReflectionMethod(AsyncJsonLogger::class, 'pipeSizedChunks');
+        $line = str_repeat('x', 999) . "\n";
+        $batch = str_repeat($line, 10) . str_repeat('y', 5000) . "\n" . $line;
+
+        /** @var list<string> $written */
+        $written = $chunks->invoke(null, $batch);
+
+        self::assertSame($batch, implode('', $written), 'nothing lost or reordered');
+        foreach ($written as $chunk) {
+            self::assertStringEndsWith("\n", $chunk, 'never a line cut in two');
+            self::assertTrue(strlen($chunk) <= 4096 || substr_count($chunk, "\n") === 1, 'a run fits a pipe write, or is one long line alone');
+        }
+        self::assertSame([str_repeat('a', 10) . "\n"], $chunks->invoke(null, str_repeat('a', 10) . "\n"), 'a short batch is one write');
+    }
+
     #[Test]
     public function flush_falls_back_when_context_cannot_be_json_encoded(): void
     {

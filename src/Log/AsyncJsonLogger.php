@@ -289,14 +289,55 @@ final class AsyncJsonLogger implements LoggerInterface
         }
 
         if ($stderr !== '') {
-            // One write per batch. A line up to the pipe buffer (4 KiB on
-            // Linux) reaches a container's log collector whole; a longer one
-            // may interleave with another worker's.
-            @file_put_contents($this->stderrTarget, $stderr, FILE_APPEND);
+            $this->writeStderr($stderr);
         }
         foreach ($files as $file => ['line' => $line, 'count' => $count]) {
             $this->writeFile($file, $line, $count);
         }
+    }
+
+    /** What one write to a pipe delivers whole (PIPE_BUF on Linux). */
+    private const PIPE_ATOMIC_BYTES = 4096;
+
+    /**
+     * A batch in writes of at most PIPE_ATOMIC_BYTES, never splitting a
+     * line: a pipe takes a write that size whole, a longer one in pieces
+     * another worker's write can land between. One write per batch did that
+     * to a busy worker's lines, mid-line, in the container's log. A single
+     * line longer than that still goes alone and may interleave.
+     */
+    private function writeStderr(string $lines): void
+    {
+        $handle = @fopen($this->stderrTarget, 'ab');
+        if ($handle === false) {
+            return;
+        }
+        // A stream on a descriptor is unbuffered: one fwrite, one write(2).
+        foreach (self::pipeSizedChunks($lines) as $chunk) {
+            @fwrite($handle, $chunk);
+        }
+        @fclose($handle);
+    }
+
+    /** @return list<string> whole lines, joined up to PIPE_ATOMIC_BYTES */
+    private static function pipeSizedChunks(string $lines): array
+    {
+        if (strlen($lines) <= self::PIPE_ATOMIC_BYTES) {
+            return [$lines];
+        }
+        $chunks = [];
+        $chunk = '';
+        foreach (explode("\n", rtrim($lines, "\n")) as $line) {
+            $line .= "\n";
+            if ($chunk !== '' && strlen($chunk) + strlen($line) > self::PIPE_ATOMIC_BYTES) {
+                $chunks[] = $chunk;
+                $chunk = '';
+            }
+            $chunk .= $line;
+        }
+        $chunks[] = $chunk;
+
+        return $chunks;
     }
 
     private function writeFile(string $file, string $line, int $entryCount): void
