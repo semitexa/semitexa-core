@@ -9,9 +9,13 @@ use Semitexa\Core\Attribute\ExecutionScoped;
 use Semitexa\Core\Attribute\InjectAsMutable;
 use Semitexa\Core\Attribute\InjectAsReadonly;
 use Semitexa\Core\Auth\AuthContextInterface;
+use Semitexa\Core\Environment;
 use Semitexa\Core\Exception\RateLimitException;
 use Semitexa\Core\Http\ClientIp;
 use Semitexa\Core\Request;
+use Semitexa\Core\Security\AppSecret;
+use Semitexa\Core\Tenant\TenantContextAccess;
+use Semitexa\Core\Tenant\TenantContextStoreInterface;
 
 /**
  * "At most N per window", for a route (#[RateLimit]) or from any service:
@@ -39,6 +43,9 @@ final class RateLimiter
     #[InjectAsMutable]
     protected AuthContextInterface $authContext;
 
+    #[InjectAsReadonly]
+    protected TenantContextStoreInterface $tenants;
+
     /**
      * @param RateLimitKey|string $by whose requests count together; a string
      *        is a subject of the caller's own (an account id, an address)
@@ -59,7 +66,10 @@ final class RateLimiter
         // The limit and the kind of key are part of the counter: a guest under
         // `by: User` falls back to their address, and must not then count
         // twice into an Ip limit on the same bucket.
-        $subject = md5($bucket . '|' . $limit . '|' . (is_string($by) ? 'key' : $by->value) . '|' . $this->subject($by));
+        // The application too: apps sharing one Redis counted a bucket
+        // together, so a client's logins on one site used up its tries on the
+        // other.
+        $subject = md5(self::appScope() . '|' . $bucket . '|' . $limit . '|' . (is_string($by) ? 'key' : $by->value) . '|' . $this->subject($by));
         $currentKey = "{$window}:{$slot}:{$subject}";
 
         $counts = $this->storage->store()->hit($currentKey, $window . ':' . ($slot - 1) . ':' . $subject, 2 * $window);
@@ -130,6 +140,22 @@ final class RateLimiter
         return max(1, (int) ceil($wait));
     }
 
+    /**
+     * Which application counts: a key derived from APP_SECRET, the same on
+     * every server of one app. Rotating the secret starts the counters over.
+     */
+    private static function appScope(): string
+    {
+        try {
+            return bin2hex(substr(AppSecret::derive(AppSecret::current(), 'rate-limit'), 0, 8));
+        } catch (\LogicException) {
+            // No APP_SECRET outside dev: refused everywhere else, but a limit
+            // must not take the request down with it.
+            return 'app:' . (string) Environment::getEnvValue('APP_NAME', '');
+        }
+    }
+
+
     private function subject(RateLimitKey|string $by): string
     {
         if (is_string($by)) {
@@ -139,7 +165,12 @@ final class RateLimiter
         if ($by === RateLimitKey::User && isset($this->authContext) && !$this->authContext->isGuest()) {
             $id = $this->authContext->getUser()?->getId();
             if ($id !== null && $id !== '') {
-                return 'user:' . $id;
+                // User 42 of one tenant is not user 42 of another. An address
+                // stays counted across tenants: per tenant, a client guessing
+                // passwords got a fresh budget on every tenant's host.
+                $tenant = isset($this->tenants) ? TenantContextAccess::tenantIdOrDefault($this->tenants->tryGet()) : 'default';
+
+                return 'user:' . $tenant . ':' . $id;
             }
         }
 

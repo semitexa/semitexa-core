@@ -17,6 +17,10 @@ use Semitexa\Core\RateLimit\RateLimitStorage;
 use Semitexa\Core\RateLimit\RateLimitStoreInterface;
 use Semitexa\Core\RateLimit\SwooleTableRateLimitStore;
 use Semitexa\Core\Request;
+use Semitexa\Core\Tenant\Layer\TenantLayerInterface;
+use Semitexa\Core\Tenant\Layer\TenantLayerValueInterface;
+use Semitexa\Core\Tenant\TenantContextInterface;
+use Semitexa\Core\Tenant\TenantContextStoreInterface;
 
 final class RateLimiterTest extends TestCase
 {
@@ -279,7 +283,43 @@ final class RateLimiterTest extends TestCase
         self::assertSame('198.51.100.4', ClientIp::of(self::request('::ffff:10.0.0.2', ['X-Forwarded-For' => '198.51.100.4'])), 'a dual-stack listener names an IPv4 proxy ::ffff:a.b.c.d');
     }
 
-    private static function limiter(RateLimitStoreInterface $store, string $address, ?string $userId = null): RateLimiter
+    /** User 42 of one tenant was user 42 of every tenant: one's failed logins locked the other out. */
+    #[Test]
+    public function users_count_per_tenant_and_addresses_across_tenants(): void
+    {
+        $store = new InMemoryRateLimitStore();
+        $acme = self::limiter($store, '203.0.113.7', 'user-42', 'acme');
+        $globex = self::limiter($store, '203.0.113.7', 'user-42', 'globex');
+
+        self::assertTrue($acme->attempt('login', 1, 60, RateLimitKey::User, 1000.0)->allowed);
+        self::assertFalse($acme->attempt('login', 1, 60, RateLimitKey::User, 1000.0)->allowed);
+        self::assertTrue($globex->attempt('login', 1, 60, RateLimitKey::User, 1000.0)->allowed, 'another tenant, its own count');
+        self::assertTrue($globex->attempt('ip-only', 1, 60, RateLimitKey::Ip, 1000.0)->allowed);
+        self::assertFalse(
+            $acme->attempt('ip-only', 1, 60, RateLimitKey::Ip, 1000.0)->allowed,
+            'one address across tenants: per tenant, password guessing got a fresh budget on every tenant host',
+        );
+    }
+
+    /** Two apps on one Redis counted a bucket together. */
+    #[Test]
+    public function applications_with_different_secrets_count_apart(): void
+    {
+        $store = new InMemoryRateLimitStore();
+        $saved = getenv('APP_SECRET');
+        try {
+            putenv('APP_SECRET=first-app-secret');
+            self::assertTrue(self::limiter($store, '203.0.113.7')->attempt('login', 1, 60, RateLimitKey::Ip, 1000.0)->allowed);
+            self::assertFalse(self::limiter($store, '203.0.113.7')->attempt('login', 1, 60, RateLimitKey::Ip, 1000.0)->allowed);
+
+            putenv('APP_SECRET=second-app-secret');
+            self::assertTrue(self::limiter($store, '203.0.113.7')->attempt('login', 1, 60, RateLimitKey::Ip, 1000.0)->allowed);
+        } finally {
+            putenv($saved === false ? 'APP_SECRET' : 'APP_SECRET=' . $saved);
+        }
+    }
+
+    private static function limiter(RateLimitStoreInterface $store, string $address, ?string $userId = null, ?string $tenantId = null): RateLimiter
     {
         $storage = new RateLimitStorage();
         $storage->use($store);
@@ -287,6 +327,9 @@ final class RateLimiterTest extends TestCase
         self::set($limiter, 'storage', $storage);
         self::set($limiter, 'request', self::request($address, []));
         self::set($limiter, 'authContext', self::auth($userId));
+        if ($tenantId !== null) {
+            self::set($limiter, 'tenants', self::tenants($tenantId));
+        }
 
         return $limiter;
     }
@@ -295,6 +338,24 @@ final class RateLimiterTest extends TestCase
     private static function request(string $address, array $headers): Request
     {
         return new Request('GET', '/', $headers, [], [], ['remote_addr' => $address], []);
+    }
+
+    private static function tenants(string $tenantId): TenantContextStoreInterface
+    {
+        $context = new class ($tenantId) implements TenantContextInterface {
+            public function __construct(private string $id) {}
+            public function getTenantId(): string { return $this->id; }
+            public function getLayer(TenantLayerInterface $layer): ?TenantLayerValueInterface { return null; }
+            public function hasLayer(TenantLayerInterface $layer): bool { return false; }
+        };
+
+        return new class ($context) implements TenantContextStoreInterface {
+            public function __construct(private TenantContextInterface $context) {}
+            public function get(): TenantContextInterface { return $this->context; }
+            public function tryGet(): ?TenantContextInterface { return $this->context; }
+            public function set(TenantContextInterface $context): void { $this->context = $context; }
+            public function clear(): void {}
+        };
     }
 
     private static function auth(?string $userId): AuthContextInterface
