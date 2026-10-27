@@ -26,6 +26,41 @@ final class QueueStatsTest extends TestCase
         @rmdir($this->dir);
     }
 
+    /** add() returned quietly, so the recorder never said the counts were lost. */
+    #[Test]
+    public function a_directory_that_cannot_be_made_throws(): void
+    {
+        file_put_contents($this->dir, 'a file where the directory should go');
+        try {
+            (new FileQueueStatsStore($this->dir . '/stats'))->add('mail', 100, ['processed' => 1]);
+            self::fail('add() returned');
+        } catch (\RuntimeException $e) {
+            self::assertSame("Cannot create {$this->dir}/stats", $e->getMessage());
+        } finally {
+            unlink($this->dir);
+        }
+    }
+
+    /** A day file that could not be decoded was written over with one minute's counts. */
+    #[Test]
+    public function an_unreadable_day_is_moved_aside_not_written_over(): void
+    {
+        mkdir($this->dir);
+        file_put_contents($this->dir . '/mail.0.json', '{"100":{"processed":7}');
+        $store = new FileQueueStatsStore($this->dir);
+
+        try {
+            $store->add('mail', 100, ['processed' => 1]);
+            self::fail('add() returned');
+        } catch (\RuntimeException $e) {
+            self::assertSame("{$this->dir}/mail.0.json could not be read; moved aside to {$this->dir}/mail.0.json.unreadable", $e->getMessage());
+        }
+        self::assertSame('{"100":{"processed":7}', file_get_contents($this->dir . '/mail.0.json.unreadable'));
+
+        $store->add('mail', 100, ['processed' => 1]);
+        self::assertSame(['processed' => 1], $store->sum('mail', 100, 100), 'the next job starts the day again');
+    }
+
     #[Test]
     public function every_finished_job_is_written_at_once_into_its_minute(): void
     {

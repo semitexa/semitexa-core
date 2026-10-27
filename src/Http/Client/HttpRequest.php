@@ -23,7 +23,8 @@ final readonly class HttpRequest
         public string $body = '',
     ) {
         $this->method = strtoupper($method);
-        if (preg_match('/^[A-Z]+$/', $this->method) !== 1) {
+        // D: without it `$` matches before a final newline, and "GET\n" passed.
+        if (preg_match('/^[A-Z]+$/D', $this->method) !== 1) {
             throw new \InvalidArgumentException('An HTTP method is letters only.');
         }
         foreach ($headers as $name => $values) {

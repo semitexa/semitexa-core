@@ -24,7 +24,7 @@ final class UrlSigner
     public const EXPIRES = 'expires';
     private const PURPOSE = 'url';
 
-    /** @var list<string>|null */
+    /** @var non-empty-list<string>|null */
     private ?array $secrets = null;
 
     /** @param list<string> $previous */
@@ -113,8 +113,9 @@ final class UrlSigner
         // Decoded, so `/files/a%20b` and `/files/a b` are one path whichever
         // form the server hands over — except an encoded slash, which the
         // router keeps apart from a real one: `/files/a%2Fb` must not verify
-        // as `/files/a/b`, another route.
-        $canonicalPath = rawurldecode((string) preg_replace('/%2F/i', '%252F', $path));
+        // as `/files/a/b`, another route. An encoded % stays encoded too, or
+        // `/files/a%252Fb` (a literal "%2F") signed the same as `a%2Fb`.
+        $canonicalPath = rawurldecode((string) preg_replace('/%(25|2F)/i', '%25$1', $path));
         $mac = hash_hmac('sha256', $canonicalPath . '?' . self::canonicalQuery($query), AppSecret::derive($secret, self::PURPOSE), true);
 
         return rtrim(strtr(base64_encode($mac), '+/', '-_'), '=');

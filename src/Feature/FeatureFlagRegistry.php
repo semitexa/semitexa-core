@@ -53,6 +53,8 @@ final class FeatureFlagRegistry
         $flags = [];
         foreach ($this->classDiscovery->findClassesWithAttribute(AsFeatureFlag::class) as $class) {
             if (!class_exists($class)) {
+                // Every flag it declares would read as off, `default: true` too.
+                StaticLoggerBridge::warning('feature', 'A class with feature flag declarations could not be loaded; its flags are ignored', ['class' => $class]);
                 continue;
             }
             foreach ((new \ReflectionClass($class))->getAttributes(AsFeatureFlag::class) as $attribute) {

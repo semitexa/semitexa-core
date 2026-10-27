@@ -255,6 +255,11 @@ final class CurlHttpClient implements HttpClientInterface
 
         $headers = $request->headers;
         if (self::origin($next) !== self::origin($request->url)) {
+            // A 307/308 replays the body, and a body carries credentials too:
+            // a client_secret in a form, a token in JSON.
+            if ($body !== '') {
+                throw new HttpTransportException(HttpTransportKind::Protocol, $request->method, $request->url, 'a cross-origin redirect would resend the request body');
+            }
             $headers = array_filter(
                 $headers,
                 static fn (string $name): bool => in_array(strtolower($name), self::CROSS_ORIGIN_SAFE_HEADERS, true),

@@ -14,6 +14,7 @@ use Semitexa\Core\RateLimit\InMemoryRateLimitStore;
 use Semitexa\Core\RateLimit\RateLimiter;
 use Semitexa\Core\RateLimit\RateLimitListener;
 use Semitexa\Core\RateLimit\RateLimitStorage;
+use Semitexa\Core\RateLimit\RateLimitStoreInterface;
 use Semitexa\Core\Request;
 
 #[RateLimit(1, 60)]
@@ -67,18 +68,30 @@ final class RateLimitListenerTest extends TestCase
     #[Test]
     public function a_payload_without_a_limit_is_never_counted(): void
     {
-        $listener = self::listener();
+        $store = new class implements RateLimitStoreInterface {
+            public int $hits = 0;
+
+            public function hit(string $currentKey, string $previousKey, int $ttlSeconds): ?array
+            {
+                $this->hits++;
+
+                return [1, 0];
+            }
+
+            public function undo(string $currentKey): void {}
+        };
+        $listener = self::listener($store);
         for ($i = 0; $i < 5; $i++) {
             $listener->handle(self::context(reRun: false, payload: new \stdClass()));
         }
 
-        $this->addToAssertionCount(1);
+        self::assertSame(0, $store->hits, 'no counter was touched');
     }
 
-    private static function listener(): RateLimitListener
+    private static function listener(?RateLimitStoreInterface $store = null): RateLimitListener
     {
         $storage = new RateLimitStorage();
-        $storage->use(new InMemoryRateLimitStore());
+        $storage->use($store ?? new InMemoryRateLimitStore());
         $limiter = new RateLimiter();
         (new \ReflectionProperty($limiter, 'storage'))->setValue($limiter, $storage);
         (new \ReflectionProperty($limiter, 'request'))->setValue($limiter, self::request());

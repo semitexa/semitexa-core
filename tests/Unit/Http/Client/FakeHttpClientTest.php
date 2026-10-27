@@ -32,6 +32,23 @@ final class FakeHttpClientTest extends TestCase
         self::assertSame(['POST', 'GET', 'POST', 'GET'], array_map(static fn (HttpRequest $r): string => $r->method, $http->recorded()));
     }
 
+    /** `defaults + $headers` kept the default over a caller's 'Accept' or 'Content-Type'. */
+    #[Test]
+    public function a_callers_accept_or_content_type_replaces_the_default_in_any_case(): void
+    {
+        $http = (new FakeHttpClient())->queue(HttpResponse::make(200), HttpResponse::make(200), HttpResponse::make(200));
+
+        $http->postJson('https://api.test/a', [], ['Accept' => 'text/event-stream']);
+        $http->postJson('https://api.test/b', [], ['content-type' => 'application/merge-patch+json']);
+        $http->postForm('https://api.test/c', ['a' => '1'], ['Content-Type' => 'application/x-www-form-urlencoded; charset=utf-8']);
+
+        self::assertSame([
+            ['application/json', 'text/event-stream'],
+            ['application/merge-patch+json', 'application/json'],
+            ['application/x-www-form-urlencoded; charset=utf-8', null],
+        ], array_map(static fn (HttpRequest $r): array => [$r->header('Content-Type'), $r->header('Accept')], $http->recorded()));
+    }
+
     #[Test]
     public function an_unanswered_request_fails_instead_of_inventing_a_response(): void
     {
