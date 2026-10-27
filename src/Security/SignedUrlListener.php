@@ -10,6 +10,8 @@ use Semitexa\Core\Attribute\RequiresSignedUrl;
 use Semitexa\Core\Pipeline\AuthCheck;
 use Semitexa\Core\Pipeline\PipelineListenerInterface;
 use Semitexa\Core\Pipeline\RequestPipelineContext;
+use Semitexa\Core\Tenant\TenantContextAccess;
+use Semitexa\Core\Tenant\TenantContextStoreInterface;
 
 /**
  * Refuses a #[RequiresSignedUrl] route whose URL is unsigned, changed or
@@ -21,6 +23,9 @@ final class SignedUrlListener implements PipelineListenerInterface
 {
     #[InjectAsReadonly]
     protected UrlSigner $signer;
+
+    #[InjectAsReadonly(optional: true)]
+    protected TenantContextStoreInterface $tenants;
 
     public function handle(RequestPipelineContext $context): void
     {
@@ -44,6 +49,14 @@ final class SignedUrlListener implements PipelineListenerInterface
         $check = $this->signer->checkRequest($request);
         if ($check !== SignatureCheck::Valid) {
             throw new InvalidSignatureException($check);
+        }
+        // Made for one site: refused on any other (the parameter is signed).
+        $site = $request->getQuery(UrlSigner::TENANT);
+        if ($site !== '') {
+            $current = isset($this->tenants) ? TenantContextAccess::tenantIdOrDefault($this->tenants->tryGet()) : 'default';
+            if ($site !== $current) {
+                throw new InvalidSignatureException(SignatureCheck::Invalid);
+            }
         }
     }
 

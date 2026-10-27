@@ -14,14 +14,18 @@ use Semitexa\Core\Request;
  * The signature covers the path and every query parameter, so changing any of
  * them breaks it; `expires` (unix seconds) is one of the parameters. The host
  * is not covered: the same link verifies behind any proxy or domain the
- * application answers on. Parameter order and encoding do not matter: both
- * sides compare the query as PHP parses it.
+ * application answers on. On a multi-site install a link made for one site
+ * then verified on every other with the same path: pass the site to sign()
+ * ($tenantId, kept as `signed_tenant`) and SignedUrlListener refuses it
+ * anywhere else. Parameter order and encoding do not matter: both sides
+ * compare the query as PHP parses it.
  */
 #[AsService]
 final class UrlSigner
 {
     public const SIGNATURE = 'signature';
     public const EXPIRES = 'expires';
+    public const TENANT = 'signed_tenant';
     private const PURPOSE = 'url';
 
     private const MAX_TTL_SECONDS = 10 * 366 * 86400;
@@ -40,9 +44,10 @@ final class UrlSigner
 
     /**
      * Sign a path (`/unsubscribe?list=news`) or an absolute URL. With a TTL the
-     * link stops verifying that many seconds from now.
+     * link stops verifying that many seconds from now; with $tenantId only on
+     * that site.
      */
-    public function sign(string $url, ?int $ttlSeconds = null, ?int $now = null): string
+    public function sign(string $url, ?int $ttlSeconds = null, ?int $now = null, ?string $tenantId = null): string
     {
         $parts = parse_url($url);
         if ($parts === false) {
@@ -54,8 +59,11 @@ final class UrlSigner
         $pairs = array_values(array_filter(
             explode('&', $parts['query'] ?? ''),
             static fn (string $pair): bool => $pair !== ''
-                && !in_array(urldecode(explode('=', $pair, 2)[0]), [self::SIGNATURE, self::EXPIRES], true),
+                && !in_array(urldecode(explode('=', $pair, 2)[0]), [self::SIGNATURE, self::EXPIRES, self::TENANT], true),
         ));
+        if ($tenantId !== null && trim($tenantId) !== '') {
+            $pairs[] = self::TENANT . '=' . rawurlencode(trim($tenantId));
+        }
         if ($ttlSeconds !== null) {
             if ($ttlSeconds < 1) {
                 throw new \InvalidArgumentException('A signed URL needs a TTL of at least one second.');

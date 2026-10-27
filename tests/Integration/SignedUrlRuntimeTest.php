@@ -75,6 +75,18 @@ final class SignedUrlRuntimeTest extends TestCase
         self::assertSame(200, $this->get($link)->getStatusCode());
     }
 
+    /** Without a site in it, a link made for one site verified on every other with the same path. */
+    #[Test]
+    public function a_link_signed_for_a_site_is_refused_on_another(): void
+    {
+        $signer = ContainerFactory::get()->get(UrlSigner::class);
+
+        self::assertSame(200, $this->get($signer->sign(SignedDownloadPayload::PATH . '?file=report.pdf', tenantId: 'default'))->getStatusCode());
+        self::assertSame(403, $this->get($signer->sign(SignedDownloadPayload::PATH . '?file=report.pdf', tenantId: 'acme'))->getStatusCode(), 'this request is the default site');
+        $forged = str_replace('signed_tenant=acme', 'signed_tenant=default', $signer->sign(SignedDownloadPayload::PATH . '?file=report.pdf', tenantId: 'acme'));
+        self::assertSame(403, $this->get($forged)->getStatusCode(), 'the site is signed');
+    }
+
     /** The signature does not cover the method: a link handed out for a GET was good for a DELETE. */
     #[Test]
     public function a_signed_link_is_good_for_get_and_head_only(): void
