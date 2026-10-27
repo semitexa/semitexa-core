@@ -153,6 +153,14 @@ class LintTemplatesCommand extends BaseCommand
             return;
         }
 
+        foreach (self::mixedEscapingIncludes($templatesDir) as [$file, $included, $strategy]) {
+            $warnings[] = [
+                'module'  => $module,
+                'path'    => $this->relativePath($file, $projectRoot),
+                'message' => "Includes '{$included}', which is escaped as {$strategy}: inside this HTML template its variables print unescaped by HTML rules. Render it apart, or give the HTML a template of its own.",
+            ];
+        }
+
         foreach (glob($templatesDir . '/*', GLOB_ONLYDIR) ?: [] as $subdir) {
             $name = basename($subdir);
             if (in_array($name, self::CANONICAL_SUBDIRS, true)) {
@@ -171,6 +179,49 @@ class LintTemplatesCommand extends BaseCommand
                 'message' => "Non-canonical subdirectory '{$name}'.{$hint}",
             ];
         }
+    }
+
+    /**
+     * HTML templates that include, embed or import a template escaped by
+     * another strategy: escaping follows each template's own extension
+     * ('autoescape' => 'name'), so a .txt.twig inside a page prints its
+     * variables raw into HTML. Literal names only.
+     *
+     * @return list<array{string, string, string}> [file, included name, its strategy]
+     */
+    public static function mixedEscapingIncludes(string $dir): array
+    {
+        $found = [];
+        $files = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($dir, \FilesystemIterator::SKIP_DOTS));
+        foreach ($files as $file) {
+            $path = $file->getPathname();
+            if (!str_ends_with($path, '.twig') || self::escapingOf($path) !== 'html') {
+                continue;
+            }
+            $source = (string) @file_get_contents($path);
+            preg_match_all('/(?:\{%-?\s*(?:include|embed|import|from)\s+|\b(?:include|source)\(\s*)[\'"]([^\'"]+\.twig)[\'"]/', $source, $matches);
+            foreach (array_unique($matches[1]) as $included) {
+                $strategy = self::escapingOf($included);
+                if ($strategy !== 'html') {
+                    $found[] = [$path, $included, $strategy];
+                }
+            }
+        }
+
+        return $found;
+    }
+
+    /** The strategy ModuleTemplateCatalog's 'autoescape' => 'name' gives a template of this name. */
+    private static function escapingOf(string $name): string
+    {
+        $name = preg_replace('/\.twig\z/', '', $name) ?? $name;
+
+        return match (strtolower(pathinfo($name, PATHINFO_EXTENSION))) {
+            'txt' => 'plain text (not at all)',
+            'js', 'json' => 'JavaScript',
+            'css' => 'CSS',
+            default => 'html',
+        };
     }
 
     private function relativePath(string $path, string $root): string
