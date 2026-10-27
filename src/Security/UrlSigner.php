@@ -5,7 +5,10 @@ declare(strict_types=1);
 namespace Semitexa\Core\Security;
 
 use Semitexa\Core\Attribute\AsService;
+use Semitexa\Core\Attribute\InjectAsReadonly;
 use Semitexa\Core\Request;
+use Semitexa\Core\Tenant\TenantContextAccess;
+use Semitexa\Core\Tenant\TenantContextStoreInterface;
 
 /**
  * Links that prove they were made by this application: an unsubscribe link,
@@ -16,7 +19,7 @@ use Semitexa\Core\Request;
  * is not covered: the same link verifies behind any proxy or domain the
  * application answers on. On a multi-site install a link made for one site
  * then verified on every other with the same path: pass the site to sign()
- * ($tenantId, kept as `signed_tenant`) and SignedUrlListener refuses it
+ * ($tenantId, kept as `signed_tenant`) and checkRequest() refuses it
  * anywhere else. Parameter order and encoding do not matter: both sides
  * compare the query as PHP parses it.
  */
@@ -32,6 +35,9 @@ final class UrlSigner
 
     /** @var list<string>|null */
     private ?array $secrets = null;
+
+    #[InjectAsReadonly(optional: true)]
+    protected TenantContextStoreInterface $tenants;
 
     /** @param list<string> $previous */
     public static function withSecrets(string $current, array $previous = []): self
@@ -116,10 +122,24 @@ final class UrlSigner
         return SignatureCheck::Valid;
     }
 
-    /** The path the visitor asked for (locale prefix included) and its query. */
+    /**
+     * The path the visitor asked for (locale prefix included) and its query,
+     * and a link made for one site (`signed_tenant`) only on that site.
+     */
     public function checkRequest(Request $request, ?int $now = null): SignatureCheck
     {
-        return $this->check($request->getServedPath(), $request->getQueryString(), $now);
+        $check = $this->check($request->getServedPath(), $request->getQueryString(), $now);
+        if ($check !== SignatureCheck::Valid) {
+            return $check;
+        }
+        parse_str($request->getQueryString(), $query);
+        $site = $query[self::TENANT] ?? null;
+        if ($site === null) {
+            return $check;
+        }
+        $current = isset($this->tenants) ? TenantContextAccess::tenantIdOrDefault($this->tenants->tryGet()) : 'default';
+
+        return is_string($site) && $site === $current ? $check : SignatureCheck::Invalid;
     }
 
     /** @param array<array-key, mixed> $query */
