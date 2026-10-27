@@ -9,8 +9,23 @@ use Semitexa\Core\Support\ProjectRoot;
 
 readonly class ServerConfigurator
 {
-    /** How long a leaving worker may take before the manager kills it. */
-    public const MAX_WAIT_SECONDS = 3;
+    /**
+     * How long a leaving worker may take before the manager kills it, unless
+     * SWOOLE_MAX_WAIT_TIME says otherwise. Its requests in flight get a second
+     * less (WorkerExitDrainPolicy). It was 3: a request longer than 2 s was
+     * cancelled at every recycle and answered 500 (13 times on one route in a
+     * 50 h soak). Streams are cut at once whatever this is, so only real
+     * requests hold a leaving worker this long.
+     */
+    public const MAX_WAIT_SECONDS = 10;
+
+    /** SWOOLE_MAX_WAIT_TIME in whole seconds, 2 to 300; MAX_WAIT_SECONDS when unset or not a number. */
+    public static function maxWaitSeconds(): int
+    {
+        $value = trim((string) Environment::getEnvValue('SWOOLE_MAX_WAIT_TIME', ''));
+
+        return ctype_digit($value) ? max(2, min(300, (int) $value)) : self::MAX_WAIT_SECONDS;
+    }
 
     public function __construct(private Environment $env) {}
 
@@ -39,7 +54,7 @@ readonly class ServerConfigurator
             // Without this, workers with long-lived connections (SSE, long-poll) never exit
             // during a graceful reload and keep serving stale code indefinitely.
             'reload_async'     => true,
-            'max_wait_time'    => self::MAX_WAIT_SECONDS,
+            'max_wait_time'    => self::maxWaitSeconds(),
         ];
     }
 
