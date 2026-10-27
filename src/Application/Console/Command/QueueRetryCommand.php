@@ -22,6 +22,9 @@ use Symfony\Component\Console\Output\OutputInterface;
 #[AsCommand(name: 'queue:retry', description: 'Retry (or --forget) a dead letter by id, or --all of a queue.')]
 final class QueueRetryCommand extends BaseCommand
 {
+    /** Dead letters one --all run takes. */
+    private const ALL_LIMIT = 1000;
+
     #[InjectAsReadonly]
     protected QueueInspection $inspection;
 
@@ -58,7 +61,7 @@ final class QueueRetryCommand extends BaseCommand
         }
 
         $forget = (bool) $input->getOption('forget');
-        $ids = $all ? array_map(static fn ($l): string => $l->id, $inspector->deadLetters($queue, 1000)) : [$id];
+        $ids = $all ? array_map(static fn ($l): string => $l->id, $inspector->deadLetters($queue, self::ALL_LIMIT)) : [$id];
         $done = 0;
         $failed = 0;
         foreach ($ids as $letterId) {
@@ -88,6 +91,10 @@ final class QueueRetryCommand extends BaseCommand
         }
 
         $output->writeln(sprintf('<info>%s %d dead letter(s) of %s.</info>', $forget ? 'Forgot' : 'Queued again', $done, $queue));
+        if ($all && count($ids) === self::ALL_LIMIT) {
+            // Said last, where it is read: a full batch read as a drained queue.
+            $output->writeln(sprintf('<comment>--all takes the newest %d dead letters at a time; more may be left: run it again.</comment>', self::ALL_LIMIT));
+        }
 
         return $failed > 0 ? Command::FAILURE : Command::SUCCESS;
     }

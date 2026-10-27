@@ -44,6 +44,7 @@ final class CurlHttpClientCoroutineTest extends TestCase
         }
         $bomb .= deflate_add($deflate, '', ZLIB_FINISH);
 
+        $hooks = Runtime::getHookFlags();
         Runtime::enableCoroutine(SWOOLE_HOOK_ALL);
         try {
             Coroutine\run(function () use (&$results, &$flaky, &$limited, &$sleeps, &$flakyStream, $bomb): void {
@@ -256,12 +257,14 @@ final class CurlHttpClientCoroutineTest extends TestCase
                 $server->shutdown();
             });
         } finally {
-            // Hooks off outside a coroutine, and every Co\run() hooking again, as it
-            // does after any Co\run(). A bare enableCoroutine(0) left later Co\run() calls with
-            // no hooks at all: the next test talking to a socket inside one blocked
-            // the whole process (a NATS test hung the full suite at 45%).
+            // Hooks off outside a coroutine, and every Co\run() hooking as it did
+            // before this test (all, after any Co\run(), when it was 0). A bare
+            // enableCoroutine(0) left later Co\run() calls with no hooks at all: the
+            // next test talking to a socket inside one blocked the whole process
+            // (a NATS test hung the full suite at 45%). Not enableCoroutine($hooks):
+            // hooks switched on outside a coroutine broke PDO in later tests.
             Runtime::enableCoroutine(0);
-            \Swoole\Coroutine::set(['hook_flags' => SWOOLE_HOOK_ALL]);
+            \Swoole\Coroutine::set(['hook_flags' => $hooks ?: SWOOLE_HOOK_ALL]);
         }
 
         $echo = $results['echo']->json();
@@ -273,7 +276,9 @@ final class CurlHttpClientCoroutineTest extends TestCase
         self::assertSame(200, $results['flaky']->status);
         self::assertSame(3, $results['flaky']->attempts);
         self::assertSame(200, $results['limited']->status);
-        self::assertContains(1000, $sleeps, 'Retry-After: 1 waited one second');
+        // Two for /flaky, Retry-After: 1 for /limited, the refused connect,
+        // /flaky-stream; a POST and a 404 do not wait.
+        self::assertSame([50, 50, 1000, 50, 50], $sleeps, 'jittered retries, and one Retry-After: 1 wait of a second');
         self::assertSame(1, $results['postNotRetried']->attempts, 'a POST is not resent');
 
         self::assertSame(200, $results['head']->status);

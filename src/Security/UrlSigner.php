@@ -33,7 +33,7 @@ final class UrlSigner
 
     private const MAX_TTL_SECONDS = 10 * 366 * 86400;
 
-    /** @var list<string>|null */
+    /** @var non-empty-list<string>|null */
     private ?array $secrets = null;
 
     #[InjectAsReadonly(optional: true)]

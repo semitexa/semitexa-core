@@ -75,13 +75,17 @@ final class RateLimiterTest extends TestCase
     public function a_refused_request_does_not_count(): void
     {
         $limiter = self::limiter(new InMemoryRateLimitStore(static fn (): int => 0), '203.0.113.7');
-        $limiter->attempt('hammer', 1, 60, RateLimitKey::Ip, 0.0);
+        $limiter->attempt('hammer', 2, 60, RateLimitKey::Ip, 0.0);
+        $limiter->attempt('hammer', 2, 60, RateLimitKey::Ip, 0.0);
         for ($i = 0; $i < 50; $i++) {
-            $limiter->attempt('hammer', 1, 60, RateLimitKey::Ip, 1.0);
+            self::assertFalse($limiter->attempt('hammer', 2, 60, RateLimitKey::Ip, 1.0)->allowed);
         }
 
-        // Only the one allowed request weighs on the next slot.
-        self::assertTrue($limiter->attempt('hammer', 1, 60, RateLimitKey::Ip, 120.0)->allowed);
+        // Slot 1, 30 s in, where slot 0 still weighs half: the two allowed
+        // requests make 2 * 0.5 + 1 = 2, which fits. Counted, the fifty
+        // refusals would make 52 * 0.5 + 1. (A probe at 120 s, two slots on,
+        // passed either way: slot 0 no longer weighed.)
+        self::assertTrue($limiter->attempt('hammer', 2, 60, RateLimitKey::Ip, 90.0)->allowed);
     }
 
     #[Test]

@@ -22,20 +22,39 @@ final class FileQueueStatsStore implements QueueStatsStoreInterface
         if ($deltas === []) {
             return;
         }
-        @mkdir($this->directory, 0777, true);
+        // Every failure throws: QueueStatsRecorder says a lost count only when
+        // add() does, and a store that returned quietly showed zeros instead.
+        if (!is_dir($this->directory) && !@mkdir($this->directory, 0777, true) && !is_dir($this->directory)) {
+            throw new \RuntimeException("Cannot create {$this->directory}");
+        }
         $file = $this->file($queue, intdiv($minute, 1440));
         $lock = @fopen($file . '.lock', 'c');
-        if ($lock === false || !flock($lock, LOCK_EX)) {
-            return;
+        if ($lock === false) {
+            throw new \RuntimeException("Cannot open {$file}.lock");
+        }
+        if (!flock($lock, LOCK_EX)) {
+            fclose($lock);
+            throw new \RuntimeException("Cannot lock {$file}.lock");
         }
         try {
             $data = self::read($file);
+            if ($data === null) {
+                // Written over, the day's counters were gone for one minute's.
+                // Moved aside, the next job starts the day again.
+                @rename($file, $file . '.unreadable');
+                throw new \RuntimeException("{$file} could not be read; moved aside to {$file}.unreadable");
+            }
             foreach ($deltas as $field => $amount) {
                 $data[$minute][$field] = (int) ($data[$minute][$field] ?? 0) + $amount;
             }
             $temp = $file . '.' . getmypid() . '.tmp';
-            if (@file_put_contents($temp, (string) json_encode($data)) !== false) {
-                rename($temp, $file);
+            if (@file_put_contents($temp, (string) json_encode($data)) === false) {
+                @unlink($temp);
+                throw new \RuntimeException("Cannot write {$temp}");
+            }
+            if (!@rename($temp, $file)) {
+                @unlink($temp);
+                throw new \RuntimeException("Cannot replace {$file}");
             }
         } finally {
             flock($lock, LOCK_UN);
@@ -48,7 +67,7 @@ final class FileQueueStatsStore implements QueueStatsStoreInterface
     {
         $total = [];
         for ($day = intdiv($fromMinute, 1440); $day <= intdiv($toMinute, 1440); $day++) {
-            foreach (self::read($this->file($queue, $day)) as $minute => $fields) {
+            foreach (self::read($this->file($queue, $day)) ?? [] as $minute => $fields) {
                 if ((int) $minute < $fromMinute || (int) $minute > $toMinute || !is_array($fields)) {
                     continue;
                 }
@@ -66,12 +85,20 @@ final class FileQueueStatsStore implements QueueStatsStoreInterface
         return 'file (' . $this->directory . ')';
     }
 
-    /** @return array<int|string, mixed> */
-    private static function read(string $file): array
+    /**
+     * Empty for a day not written yet, null for a file that cannot be read.
+     *
+     * @return array<int|string, mixed>|null
+     */
+    private static function read(string $file): ?array
     {
-        $data = json_decode((string) @file_get_contents($file), true);
+        if (!is_file($file)) {
+            return [];
+        }
+        $text = @file_get_contents($file);
+        $data = $text === false ? null : json_decode($text, true);
 
-        return is_array($data) ? $data : [];
+        return is_array($data) ? $data : null;
     }
 
     private function prune(string $queue, int $today): void

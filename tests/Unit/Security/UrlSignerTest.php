@@ -80,6 +80,47 @@ final class UrlSignerTest extends TestCase
     }
 
     #[Test]
+    public function a_zero_ttl_or_a_url_that_does_not_parse_is_refused(): void
+    {
+        $signer = UrlSigner::withSecrets('secret-a');
+        foreach ([['/x', 0], ['http://', null]] as [$url, $ttl]) {
+            try {
+                $signer->sign($url, $ttl);
+                self::fail('signed ' . $url);
+            } catch (\InvalidArgumentException $e) {
+                self::assertSame(
+                    $ttl === 0 ? 'A signed URL needs a TTL of at least one second.' : "Cannot sign '{$url}': not a URL.",
+                    $e->getMessage(),
+                );
+            }
+        }
+    }
+
+    #[Test]
+    public function an_empty_or_array_signature_is_invalid(): void
+    {
+        $signer = UrlSigner::withSecrets('secret-a');
+
+        self::assertSame(SignatureCheck::Invalid, $signer->check('/x', 'signature='));
+        self::assertSame(SignatureCheck::Invalid, $signer->check('/x', 'signature[]=a'));
+    }
+
+    /** A signed expiry that is not whole seconds is expired, never valid for ever. */
+    #[Test]
+    public function a_signed_but_malformed_expiry_is_expired(): void
+    {
+        $signer = UrlSigner::withSecrets('secret-a');
+        // sign() writes expires itself, so a malformed one is signed by hand.
+        $signature = new \ReflectionMethod($signer, 'signature');
+        foreach (['abc', ['1']] as $expires) {
+            $query = http_build_query(['expires' => $expires]);
+            $mac = $signature->invoke($signer, 'secret-a', '/x', ['expires' => $expires]);
+
+            self::assertSame(SignatureCheck::Expired, $signer->check('/x', $query . '&signature=' . $mac, 0), json_encode($expires));
+        }
+    }
+
+    #[Test]
     public function the_link_keeps_its_host_and_its_query_as_written(): void
     {
         $link = UrlSigner::withSecrets('secret-a')->sign('https://example.org/confirm?a.b=1&x=y#top', ttlSeconds: 60, now: 0);

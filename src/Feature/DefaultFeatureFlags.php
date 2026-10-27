@@ -53,9 +53,10 @@ final class DefaultFeatureFlags implements FeatureFlagsInterface
     {
         $pinned = clone $this;
         $pinned->pinned = true;
-        $pinned->tenantId = $tenantId;
-        // '' is no user, as SettingsFeatureFlags reads it: taken for one, a
-        // percentage rollout skipped every guest pinned this way.
+        // '' is no user and no site, as the request-bound path reads them:
+        // taken for one, a percentage rollout skipped every guest pinned this
+        // way, and a pinned '' site skipped the `default` site's bucket.
+        $pinned->tenantId = $tenantId !== '' ? $tenantId : null;
         $pinned->userId = $userId !== '' ? $userId : null;
 
         return $pinned;

@@ -383,7 +383,7 @@ class QueueWorker
                 }
             }
 
-            if ($transport !== null && $this->currentQueue) {
+            if ($transport !== null) {
                 $message->publishedAt = $message::nowMs();
                 $transport->publish($this->currentQueue, $message->toJson());
             }

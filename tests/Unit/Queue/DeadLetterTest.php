@@ -44,6 +44,17 @@ final class DeadLetterTest extends TestCase
         $letter->retryPayload();
     }
 
+    /** A stored error that was not a string printed as "Array", with a warning. */
+    #[Test]
+    public function an_unreadable_payload_keeps_only_a_string_error_and_a_non_object_is_unreadable(): void
+    {
+        $letter = DeadLetter::fromStored('9', 'mail', '{"raw":"{oops","error":["nested"],"failed_at":"2026-10-21T00:00:05+00:00"}');
+        self::assertSame(['', '2026-10-21T00:00:05+00:00'], [$letter->error, $letter->failedAt?->format(DATE_ATOM)]);
+
+        $scalar = DeadLetter::fromStored('10', 'mail', '"just text"');
+        self::assertSame(['unreadable', null, false], [$scalar->error, $scalar->failedAt, $scalar->retryable]);
+    }
+
     #[Test]
     public function published_at_is_stamped_and_an_older_message_falls_back_to_queued_at(): void
     {

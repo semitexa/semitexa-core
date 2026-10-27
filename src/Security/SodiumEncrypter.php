@@ -19,7 +19,7 @@ final class SodiumEncrypter implements EncrypterInterface
     private const PREFIX = 'se1.';
     private const PURPOSE = 'encrypt';
 
-    /** @var list<string>|null secrets for a hand-built instance; null reads the environment */
+    /** @var non-empty-list<string>|null secrets for a hand-built instance; null reads the environment */
     private ?array $secrets = null;
 
     /** @param list<string> $previous */

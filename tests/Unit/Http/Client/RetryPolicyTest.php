@@ -93,8 +93,40 @@ final class RetryPolicyTest extends TestCase
         }
 
         self::assertSame('HEAD', (new HttpRequest('head', 'http://x.test/'))->method, 'a lower-case head must still set NOBODY');
+        // `$` alone matched before a final newline: "GET\n" passed as a method.
+        foreach (["GET\n", "HEAD\n"] as $method) {
+            try {
+                new HttpRequest($method, 'http://x.test/');
+                self::fail('accepted method ' . json_encode($method));
+            } catch (\InvalidArgumentException $e) {
+                self::assertSame('An HTTP method is letters only.', $e->getMessage());
+            }
+        }
         $this->expectException(\InvalidArgumentException::class);
         new HttpRequest("GET\r\nX: 1", 'http://x.test/');
+    }
+
+    /** A 307/308 to another origin replayed the body there: a client_secret, a token. */
+    #[Test]
+    public function a_cross_origin_redirect_that_would_resend_the_body_is_refused(): void
+    {
+        $redirected = new \ReflectionMethod(\Semitexa\Core\Http\Client\CurlHttpClient::class, 'redirected');
+        $post = HttpRequest::make('POST', 'https://api.a.test/token')->withHeader('Content-Type', 'application/x-www-form-urlencoded')->withBody('client_secret=s');
+        $follow = new \Semitexa\Core\Http\Client\HttpCallOptions(followRedirects: true);
+
+        foreach ([307, 308] as $status) {
+            try {
+                $redirected->invoke(null, $post, $status, 'https://b.test/x', $follow);
+                self::fail("followed a {$status} to another origin with the body");
+            } catch (HttpTransportException $e) {
+                self::assertSame([HttpTransportKind::Protocol, 'a cross-origin redirect would resend the request body'], [$e->kind, $e->detail]);
+            }
+        }
+
+        $same = $redirected->invoke(null, $post, 307, '/token2', $follow);
+        self::assertSame(['POST', 'https://api.a.test/token2', 'client_secret=s'], [$same->method, $same->url, $same->body], 'the same origin keeps it');
+        $seeOther = $redirected->invoke(null, $post, 303, 'https://b.test/done', $follow);
+        self::assertSame(['GET', 'https://b.test/done', '', []], [$seeOther->method, $seeOther->url, $seeOther->body, $seeOther->headers], 'a 303 drops the body, so it may leave');
     }
 
     #[Test]

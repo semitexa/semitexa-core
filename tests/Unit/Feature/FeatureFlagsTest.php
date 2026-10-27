@@ -12,6 +12,8 @@ use Semitexa\Core\Feature\DefaultFeatureFlags;
 use Semitexa\Core\Feature\FeatureFlag;
 use Semitexa\Core\Feature\FeatureFlagRegistry;
 use Semitexa\Core\Feature\InMemoryFeatureFlags;
+use Semitexa\Core\Log\LoggerInterface;
+use Semitexa\Core\Log\StaticLoggerBridge;
 
 #[AsFeatureFlag('checkout.new-flow', description: 'One-page checkout')]
 #[AsFeatureFlag('search.semantic', default: true)]
@@ -39,6 +41,35 @@ final class FeatureFlagsTest extends TestCase
         self::assertSame('One-page checkout', $flags['checkout.new-flow']->description);
     }
 
+    /** A class discovery named but autoload could not find dropped its flags without a word. */
+    #[Test]
+    public function a_declaring_class_that_does_not_load_is_said(): void
+    {
+        $logger = new class implements LoggerInterface {
+            /** @var list<array{string, array<string, mixed>}> */
+            public array $warnings = [];
+
+            public function error(string $message, array $context = []): void {}
+            public function critical(string $message, array $context = []): void {}
+            public function warning(string $message, array $context = []): void { $this->warnings[] = [$message, $context]; }
+            public function info(string $message, array $context = []): void {}
+            public function notice(string $message, array $context = []): void {}
+            public function debug(string $message, array $context = []): void {}
+        };
+        StaticLoggerBridge::set($logger);
+        try {
+            $flags = self::registry(['App\\Missing\\FeatureFlagDeclarations', FeatureFlagsTestDuplicate::class])->all();
+        } finally {
+            StaticLoggerBridge::reset();
+        }
+
+        self::assertSame(['search.semantic'], array_keys($flags), 'the classes that load are still read');
+        self::assertSame([[
+            'A class with feature flag declarations could not be loaded; its flags are ignored',
+            ['class' => 'App\\Missing\\FeatureFlagDeclarations', '_channel' => 'feature'],
+        ]], $logger->warnings);
+    }
+
     #[Test]
     public function the_default_flags_answer_the_declared_default_and_off_for_an_unknown_flag(): void
     {
@@ -64,6 +95,19 @@ final class FeatureFlagsTest extends TestCase
             DefaultFeatureFlags::of($registry)->forSubject(null, null)->isEnabled('rollout.half'),
             DefaultFeatureFlags::of($registry)->forSubject(null, '')->isEnabled('rollout.half'),
         );
+    }
+
+    /** A pinned '' site skipped the `default` site's bucket and answered the static default. */
+    #[Test]
+    public function an_empty_site_is_the_default_site(): void
+    {
+        $registry = FeatureFlagRegistry::of([new FeatureFlag('rollout.site', false, '', 50, self::class)]);
+        // A flag the `default` site is in, so a '' that skipped the rollout
+        // (the static default, off) answers differently.
+        self::assertTrue(FeatureFlag::rollsOutTo('rollout.site', 50, 'default'));
+
+        self::assertTrue(DefaultFeatureFlags::of($registry)->forSubject('', null)->isEnabled('rollout.site'));
+        self::assertTrue(DefaultFeatureFlags::of($registry)->forSubject('', '')->isEnabled('rollout.site'));
     }
 
     #[Test]
@@ -101,19 +145,19 @@ final class FeatureFlagsTest extends TestCase
         self::assertFalse($flags->forSubject('t', 'u')->isEnabled('c'));
     }
 
-    private static function registry(): FeatureFlagRegistry
+    /** @param list<string>|null $classes what discovery names; the two declaring classes when null */
+    private static function registry(?array $classes = null): FeatureFlagRegistry
     {
         $registry = new FeatureFlagRegistry();
-        (new \ReflectionProperty($registry, 'classDiscovery'))->setValue($registry, new class () extends ClassDiscovery {
-            public function __construct()
+        (new \ReflectionProperty($registry, 'classDiscovery'))->setValue($registry, new class ($classes ?? [FeatureFlagsTestDeclarations::class, FeatureFlagsTestDuplicate::class]) extends ClassDiscovery {
+            /** @param list<string> $classes */
+            public function __construct(private readonly array $classes)
             {
             }
 
             public function findClassesWithAttribute(string $attributeClass): array
             {
-                return $attributeClass === AsFeatureFlag::class
-                    ? [FeatureFlagsTestDeclarations::class, FeatureFlagsTestDuplicate::class]
-                    : [];
+                return $attributeClass === AsFeatureFlag::class ? $this->classes : [];
             }
         });
 

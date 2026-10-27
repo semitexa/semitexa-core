@@ -27,8 +27,15 @@ final readonly class DeadLetter
     public static function fromStored(string $id, string $queue, string $stored): self
     {
         $data = json_decode($stored, true);
-        if (!is_array($data) || isset($data['raw'])) {
-            return new self($id, $queue, '', 0, is_array($data) ? (string) ($data['error'] ?? '') : 'unreadable', self::time($data['failed_at'] ?? null), $stored, false);
+        if (!is_array($data)) {
+            return new self($id, $queue, '', 0, 'unreadable', null, $stored, false);
+        }
+        if (isset($data['raw'])) {
+            // What QueueWorker wrote for a message it could not decode: the
+            // raw text, why, and when. A non-string error is no reason to print.
+            $error = $data['error'] ?? '';
+
+            return new self($id, $queue, '', 0, is_string($error) ? $error : '', self::time($data['failed_at'] ?? null), $stored, false);
         }
 
         $target = $data['listenerClass'] ?? $data['handler'] ?? $data['handlerClass'] ?? '';
