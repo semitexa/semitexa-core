@@ -38,6 +38,22 @@ final class HttpTransportException extends \RuntimeException
 
         return ($parts['scheme'] ?? 'http') . '://' . $parts['host']
             . (isset($parts['port']) ? ':' . $parts['port'] : '')
-            . ($parts['path'] ?? '');
+            . self::maskedPath($parts['path'] ?? '');
+    }
+
+    /**
+     * The path, a segment that looks like a credential masked: a Telegram
+     * bot token (/bot123:ABC…), a Slack webhook secret. The message is
+     * logged, and the token went with it.
+     */
+    private static function maskedPath(string $path): string
+    {
+        return implode('/', array_map(
+            static fn (string $segment): string => preg_match('/^bot\d+:/i', $segment) === 1
+                || (strlen($segment) >= 20 && preg_match('/^[A-Za-z0-9_\-:.]+$/', $segment) === 1 && preg_match('/\d/', $segment) === 1 && preg_match('/[A-Za-z]/', $segment) === 1)
+                ? '…'
+                : $segment,
+            explode('/', $path),
+        ));
     }
 }

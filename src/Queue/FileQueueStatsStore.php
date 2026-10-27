@@ -89,8 +89,11 @@ final class FileQueueStatsStore implements QueueStatsStoreInterface
         return $this->directory . '/' . self::name($queue) . '.' . $day . '.json';
     }
 
+    /** One file per queue: `a.b` and `a_b` both became `a_b`, and shared one. */
     private static function name(string $queue): string
     {
-        return (string) preg_replace('/[^A-Za-z0-9_-]/', '_', $queue);
+        $safe = (string) preg_replace('/[^A-Za-z0-9_-]/', '_', $queue);
+
+        return $safe === $queue ? $safe : $safe . '-' . substr(hash('sha256', $queue), 0, 8);
     }
 }

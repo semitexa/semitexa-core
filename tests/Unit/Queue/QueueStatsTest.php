@@ -26,6 +26,18 @@ final class QueueStatsTest extends TestCase
         @rmdir($this->dir);
     }
 
+    /** `a.b` and `a_b` both became `a_b`, and shared one file. */
+    #[Test]
+    public function two_queues_whose_names_clean_up_alike_keep_their_own_counts(): void
+    {
+        $store = new FileQueueStatsStore($this->dir);
+        $store->add('a.b', 100, ['processed' => 1]);
+        $store->add('a_b', 100, ['processed' => 5]);
+
+        self::assertSame(1, $store->sum('a.b', 100, 100)['processed'] ?? null);
+        self::assertSame(5, $store->sum('a_b', 100, 100)['processed'] ?? null);
+    }
+
     #[Test]
     public function every_finished_job_is_written_at_once_into_its_minute(): void
     {

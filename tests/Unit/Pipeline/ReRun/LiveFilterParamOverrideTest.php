@@ -26,6 +26,18 @@ final class LiveFilterParamOverrideTest extends TestCase
     // field is IGNORED — in the SAME command.
     // -----------------------------------------------------------------------
 
+    /** One valid signed link, then a view-change with values its signature never covered. */
+    #[Test]
+    public function a_signed_payload_takes_no_override(): void
+    {
+        $dto = new SignedLiveFilterFixtureDto();
+
+        $result = LiveFilterParamOverride::apply($dto, ['page' => '3']);
+
+        self::assertSame([], $result['applied']);
+        self::assertSame(['page'], $result['ignored']);
+    }
+
     #[Test]
     public function a_marked_field_is_applied_and_an_unmarked_identity_field_is_ignored(): void
     {
@@ -234,4 +246,11 @@ final class LiveFilterFixtureDto
     {
         return $this->page;
     }
+}
+
+#[\Semitexa\Core\Attribute\RequiresSignedUrl]
+final class SignedLiveFilterFixtureDto
+{
+    #[LiveFilterParam]
+    protected ?int $page = null;
 }
