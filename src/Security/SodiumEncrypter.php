@@ -31,15 +31,15 @@ final class SodiumEncrypter implements EncrypterInterface
         return $encrypter;
     }
 
-    public function encrypt(string $plaintext): string
+    public function encrypt(string $plaintext, string $context = ''): string
     {
         $nonce = random_bytes(SODIUM_CRYPTO_SECRETBOX_NONCEBYTES);
-        $cipher = sodium_crypto_secretbox($plaintext, $nonce, AppSecret::derive($this->secrets()[0], self::PURPOSE));
+        $cipher = sodium_crypto_secretbox($plaintext, $nonce, self::key($this->secrets()[0], $context));
 
         return self::PREFIX . self::base64UrlEncode($nonce . $cipher);
     }
 
-    public function decrypt(string $token): string
+    public function decrypt(string $token, string $context = ''): string
     {
         if (!str_starts_with($token, self::PREFIX)) {
             throw new DecryptionException('Not an encrypted value.');
@@ -53,13 +53,23 @@ final class SodiumEncrypter implements EncrypterInterface
         $nonce = substr($raw, 0, SODIUM_CRYPTO_SECRETBOX_NONCEBYTES);
         $cipher = substr($raw, SODIUM_CRYPTO_SECRETBOX_NONCEBYTES);
         foreach ($this->secrets() as $secret) {
-            $plain = sodium_crypto_secretbox_open($cipher, $nonce, AppSecret::derive($secret, self::PURPOSE));
+            $plain = sodium_crypto_secretbox_open($cipher, $nonce, self::key($secret, $context));
             if ($plain !== false) {
                 return $plain;
             }
         }
 
         throw new DecryptionException('The value was changed, or encrypted with another secret.');
+    }
+
+    /**
+     * A key of its own per context: secretbox has no associated data, so the
+     * context goes into the key, and a token opens under its own context only.
+     * No context is the key every token had before contexts existed.
+     */
+    private static function key(string $secret, string $context): string
+    {
+        return AppSecret::derive($secret, $context === '' ? self::PURPOSE : self::PURPOSE . ':' . $context);
     }
 
     /** @return non-empty-list<string> */
