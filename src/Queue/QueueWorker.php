@@ -354,7 +354,7 @@ class QueueWorker
             $delay = $message->retryDelay;
             $this->attemptEndedAt = microtime(true);
             $kind = $message instanceof QueuedHandlerMessage ? 'handler' : 'listener';
-            $this->log("ℹ️  Retrying {$kind} ({$message->attempts}/{$message->maxRetries}) in {$delay}s...", 'warning');
+            $this->log("ℹ️  Retrying {$kind} {$message->messageId} ({$message->attempts}/{$message->maxRetries}) in {$delay}s...", 'warning');
 
             $transport = null;
             if ($this->currentTransport && $this->currentQueue) {
@@ -434,7 +434,7 @@ class QueueWorker
             $data['error'] = $error;
             $data['failed_at'] = date(DATE_ATOM);
             $transport->publish($dlqName, json_encode($data, JSON_THROW_ON_ERROR | JSON_INVALID_UTF8_SUBSTITUTE));
-            $this->log("📥 Message moved to DLQ: {$dlqName}", 'warning');
+            $this->log("📥 Message {$message->messageId} moved to DLQ: {$dlqName}", 'warning');
         } catch (\Throwable $dlqError) {
             // Logged and returned, the transport acknowledged the message and
             // it was gone: NATS down past one reconnect, or a payload the
