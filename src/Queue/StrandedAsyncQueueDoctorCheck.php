@@ -30,6 +30,8 @@ final class StrandedAsyncQueueDoctorCheck implements DoctorCheckInterface
         }
 
         $stranded = [];
+        $unreadable = [];
+        $counted = [];
         foreach ($handlers->getHandlerClassNames() as $class) {
             $meta = $handlers->getHandlerByClass($class);
             if ($meta === null || $meta['execution'] !== HandlerExecution::Async->value) {
@@ -40,17 +42,34 @@ final class StrandedAsyncQueueDoctorCheck implements DoctorCheckInterface
             if (QueueConfig::isProcessLocal($transport) || isset($read[$transport . ' ' . $queue]) || !QueueTransportRegistry::has($transport)) {
                 continue;
             }
+            // One queue, several handlers: counted once, every handler named.
+            $key = $transport . ' ' . $queue;
+            if (isset($counted[$key])) {
+                $counted[$key]['handlers'][] = $class;
+                continue;
+            }
             try {
                 $inspector = QueueTransportRegistry::create($transport);
                 $waiting = $inspector instanceof QueueInspectorInterface ? $inspector->depth($queue) : 0;
-            } catch (\Throwable) {
+            } catch (\Throwable $e) {
+                // Not counted is not empty.
+                $unreadable[] = "'{$queue}' ({$transport}): {$e->getMessage()}";
                 continue;
             }
-            if ($waiting > 0) {
-                $stranded[] = "{$waiting} on '{$queue}' ({$transport}), queued for {$class}";
+            $counted[$key] = ['waiting' => $waiting, 'queue' => $queue, 'transport' => $transport, 'handlers' => [$class]];
+        }
+        foreach ($counted as $entry) {
+            if ($entry['waiting'] > 0) {
+                $stranded[] = "{$entry['waiting']} on '{$entry['queue']}' ({$entry['transport']}), queued for " . implode(', ', $entry['handlers']);
             }
         }
 
+        if ($unreadable !== []) {
+            return DoctorResult::warn(
+                'Could not count the queues Async handlers used before the upgrade: ' . implode('; ', $unreadable) . ($stranded !== [] ? '. Waiting: ' . implode('; ', $stranded) : '') . '.',
+                'Run the doctor again once the transport answers.',
+            );
+        }
         if ($stranded === []) {
             return DoctorResult::pass('No messages wait on a queue only an Async handler used.');
         }
