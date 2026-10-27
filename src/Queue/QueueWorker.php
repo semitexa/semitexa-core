@@ -330,8 +330,12 @@ class QueueWorker
 
         try {
             // The resource a typed handler returns is its result, as on the sync path.
-            $result = $handler->handle($request, $response);
-            $this->deliverAsyncResult($message->sessionId, is_object($result) ? $result : $response, $handlerClass);
+            // Run inside what the queuing request contributed (QueuedOrigin):
+            // the reply renders here, for that request's visitor.
+            QueuedOrigin::run($message->origin, function () use ($handler, $request, $response, $message, $handlerClass): void {
+                $result = $handler->handle($request, $response);
+                $this->deliverAsyncResult($message->sessionId, is_object($result) ? $result : $response, $handlerClass);
+            });
             $this->log("✅ Queued handler executed: {$handlerClass}", 'success');
             $this->updateStats('processed');
         } catch (\Throwable $e) {

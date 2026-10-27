@@ -39,6 +39,7 @@ class QueueDispatcher
             sessionId: $sessionId,
             maxRetries: $handlerMeta['maxRetries'] ?? 0,
             retryDelay: $handlerMeta['retryDelay'] ?? 0,
+            origin: QueuedOrigin::capture(),
         );
 
         $transport = QueueTransportRegistry::create($transportName);

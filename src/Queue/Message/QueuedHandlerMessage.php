@@ -31,6 +31,13 @@ class QueuedHandlerMessage implements \JsonSerializable
          * followed from attempt to attempt to the letter, in logs or queue:failed.
          */
         public string $messageId = '',
+        /**
+         * What the queuing request contributes to the job's reply
+         * ({@see \Semitexa\Core\Queue\QueuedOrigin}).
+         *
+         * @var array<array-key, mixed>
+         */
+        public array $origin = [],
     ) {
         $this->queuedAt = $queuedAt ?: date(DATE_ATOM);
         $this->publishedAt = $publishedAt ?: self::nowMs();
@@ -53,6 +60,7 @@ class QueuedHandlerMessage implements \JsonSerializable
             'retryDelay' => $this->retryDelay,
             'publishedAt' => $this->publishedAt,
             'messageId' => $this->messageId,
+            'origin' => $this->origin,
         ];
     }
 
@@ -97,6 +105,7 @@ class QueuedHandlerMessage implements \JsonSerializable
             retryDelay: $data['retryDelay'] ?? 0,
             publishedAt: self::publishedAtOf($data),
             messageId: is_string($data['messageId'] ?? null) ? $data['messageId'] : '',
+            origin: is_array($data['origin'] ?? null) ? $data['origin'] : [],
         );
     }
 
