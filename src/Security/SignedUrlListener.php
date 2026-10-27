@@ -24,7 +24,8 @@ final class SignedUrlListener implements PipelineListenerInterface
 
     public function handle(RequestPipelineContext $context): void
     {
-        if ($context->reRun || !self::requiresSignature($context->requestDto)) {
+        $required = $context->reRun ? null : self::requiredSignature($context->requestDto);
+        if ($required === null) {
             return;
         }
 
@@ -33,6 +34,9 @@ final class SignedUrlListener implements PipelineListenerInterface
         // so a signed link replayed with `{"user":43}` would have run as user
         // 43 under a valid signature.
         $request = $context->request;
+        if (!in_array(strtoupper($request->getMethod()), array_map('strtoupper', $required->methods), true)) {
+            throw new InvalidSignatureException(SignatureCheck::Invalid);
+        }
         if ($request->post !== [] || $request->files !== [] || trim((string) $request->content) !== '') {
             throw new InvalidSignatureException(SignatureCheck::Invalid);
         }
@@ -44,14 +48,15 @@ final class SignedUrlListener implements PipelineListenerInterface
     }
 
     /** On the payload or a class it extends (should payload inheritance ever be allowed). */
-    private static function requiresSignature(object $payload): bool
+    private static function requiredSignature(object $payload): ?RequiresSignedUrl
     {
         for ($class = new \ReflectionClass($payload); $class !== false; $class = $class->getParentClass()) {
-            if ($class->getAttributes(RequiresSignedUrl::class) !== []) {
-                return true;
+            $attribute = $class->getAttributes(RequiresSignedUrl::class)[0] ?? null;
+            if ($attribute !== null) {
+                return $attribute->newInstance();
             }
         }
 
-        return false;
+        return null;
     }
 }
