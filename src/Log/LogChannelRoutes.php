@@ -88,7 +88,8 @@ final class LogChannelRoutes
      * The fixed list and the file Swoole actually writes: with
      * SWOOLE_LOG_FILE=var/log/server.log a channel could route into it, and
      * its rotation renamed the server's log from under it. An absolute path
-     * inside the project is compared in the project-relative spelling.
+     * inside the project is compared in the project-relative spelling; one
+     * outside it reserves nothing.
      *
      * @return list<string>
      */
@@ -96,7 +97,12 @@ final class LogChannelRoutes
     {
         $swoole = (string) Environment::getEnvValue('SWOOLE_LOG_FILE', '');
         $root = rtrim(ProjectRoot::get(), '/') . '/';
-        if (str_starts_with($swoole, $root)) {
+        if (str_starts_with($swoole, '/')) {
+            // Outside the project it is another file than any channel's,
+            // which the logger writes under the project root.
+            if (!str_starts_with($swoole, $root)) {
+                return self::RESERVED;
+            }
             $swoole = substr($swoole, strlen($root));
         }
 

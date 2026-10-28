@@ -37,7 +37,7 @@ final class LintTemplatesMixedEscapingTest extends TestCase
     {
         $dir = sys_get_temp_dir() . '/lint-escaping-' . bin2hex(random_bytes(4));
         mkdir($dir);
-        file_put_contents($dir . '/home.html.twig', "{% include ['partials/note.txt.twig', 'partials/card.html.twig'] %}\n{{ include([\"a.html.twig\", \"b.js.twig\"]) }}");
+        file_put_contents($dir . '/home.html.twig', "{% include ['partials/note.txt.twig', 'partials/card.html.twig'] %}\n{{ include([\"a.html.twig\", \"b.js.twig\"]) }}\n{# {% include 'commented.txt.twig' %} #}\n{#\n{{ include('also.txt.twig') }}\n#}");
         try {
             $found = LintTemplatesCommand::mixedEscapingIncludes($dir);
         } finally {
@@ -45,7 +45,7 @@ final class LintTemplatesMixedEscapingTest extends TestCase
             rmdir($dir);
         }
 
-        self::assertSame(['partials/note.txt.twig', 'b.js.twig'], array_column($found, 1));
+        self::assertSame(['partials/note.txt.twig', 'b.js.twig'], array_column($found, 1), 'an include inside a comment is not one');
     }
 
     /** A file it could not read came back as an empty template, and --strict reported it clean. */

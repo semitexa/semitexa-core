@@ -216,6 +216,8 @@ class LintTemplatesCommand extends BaseCommand
                 $unreadable[] = $path;
                 continue;
             }
+            // A comment runs nothing: `{# {% include 'note.txt.twig' %} #}` includes nothing.
+            $source = (string) preg_replace('/\{#.*?#\}/s', '', $source);
             preg_match_all('/(?:\{%-?\s*(?:include|embed|import|from)\s+|\b(?:include|source)\(\s*)(\[[^\]]*\]|[\'"][^\'"]+\.twig[\'"])/', $source, $arguments);
             preg_match_all('/[\'"]([^\'"]+\.twig)[\'"]/', implode(' ', $arguments[1]), $matches);
             foreach (array_unique($matches[1]) as $included) {

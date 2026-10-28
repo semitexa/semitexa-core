@@ -51,6 +51,13 @@ final class LogChannelRoutesTest extends TestCase
             $rejected = [];
             LogChannelRoutes::fromEnv('audit=var/log/./server.log', 'var/log/app.log', $rejected);
             self::assertSame(['audit=var/log/./server.log'], $rejected, 'an absolute path inside the project is the same file');
+
+            // review: /var/log/server.log is not the project's var/log/server.log.
+            putenv('SWOOLE_LOG_FILE=/var/log/server.log');
+            $rejected = [];
+            $routes = LogChannelRoutes::fromEnv('audit=var/log/server.log', 'var/log/app.log', $rejected);
+            self::assertSame([], $rejected, 'a Swoole log outside the project reserves nothing');
+            self::assertEquals(['audit' => new LogRoute('var/log/server.log', false)], $routes);
         } finally {
             putenv($previous === false ? 'SWOOLE_LOG_FILE' : 'SWOOLE_LOG_FILE=' . $previous);
         }
