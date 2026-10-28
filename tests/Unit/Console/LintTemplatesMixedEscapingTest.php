@@ -82,6 +82,41 @@ final class LintTemplatesMixedEscapingTest extends TestCase
         self::assertSame(['real.txt.twig', 'tilde.txt.twig'], array_column($found, 1));
     }
 
+    /** A regex that gave up fell back to a scan that saw nothing, and --strict reported the template clean. */
+    #[Test]
+    public function a_template_the_regex_engine_gives_up_on_is_reported_unchecked(): void
+    {
+        $module = sys_get_temp_dir() . '/lint-escaping-' . bin2hex(random_bytes(4));
+        $dir = $module . '/Application/View/templates';
+        mkdir($dir, 0775, true);
+        file_put_contents($dir . '/home.html.twig', "{# note #}{% set s = '" . str_repeat('x', 1024) . "' %}don't {% include 'a.txt.twig' %}");
+        $jit = ini_get('pcre.jit');
+        $limit = ini_get('pcre.backtrack_limit');
+        // JIT has no backtrack limit; without it the limit is what makes PCRE give up.
+        ini_set('pcre.jit', '0');
+        ini_set('pcre.backtrack_limit', '10');
+        $unreadable = [];
+        $unanalysed = [];
+        $errors = [];
+        $warnings = [];
+        try {
+            $found = LintTemplatesCommand::mixedEscapingIncludes($dir, $unreadable, $unanalysed);
+            (function () use ($module, &$errors, &$warnings): void {
+                $this->scanModuleDir('Probe', $module, $errors, $warnings);
+            })->call(new LintTemplatesCommand());
+        } finally {
+            ini_set('pcre.backtrack_limit', (string) $limit);
+            ini_set('pcre.jit', (string) $jit);
+            exec('rm -rf ' . escapeshellarg($module));
+        }
+
+        self::assertSame([], $found);
+        self::assertSame([], $unreadable);
+        self::assertSame([$dir . '/home.html.twig'], $unanalysed);
+        self::assertSame([['module' => 'Probe', 'path' => $dir . '/home.html.twig', 'message' => 'Too large for the regex engine (pcre.backtrack_limit), so what it includes was not checked. Split it, or raise the limit.']], $errors, 'an error fails the lint without --strict');
+        self::assertSame([], $warnings);
+    }
+
     /** A file it could not read came back as an empty template, and --strict reported it clean. */
     #[Test]
     public function an_html_template_that_cannot_be_read_is_reported_unread(): void

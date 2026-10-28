@@ -154,7 +154,8 @@ class LintTemplatesCommand extends BaseCommand
         }
 
         $unreadable = [];
-        foreach (self::mixedEscapingIncludes($templatesDir, $unreadable) as [$file, $included, $strategy]) {
+        $unanalysed = [];
+        foreach (self::mixedEscapingIncludes($templatesDir, $unreadable, $unanalysed) as [$file, $included, $strategy]) {
             $warnings[] = [
                 'module'  => $module,
                 'path'    => $this->relativePath($file, $projectRoot),
@@ -168,6 +169,13 @@ class LintTemplatesCommand extends BaseCommand
                 'module'  => $module,
                 'path'    => $this->relativePath($file, $projectRoot),
                 'message' => 'Cannot be read, so what it includes was not checked. Make it readable.',
+            ];
+        }
+        foreach ($unanalysed as $file) {
+            $errors[] = [
+                'module'  => $module,
+                'path'    => $this->relativePath($file, $projectRoot),
+                'message' => 'Too large for the regex engine (pcre.backtrack_limit), so what it includes was not checked. Split it, or raise the limit.',
             ];
         }
 
@@ -199,9 +207,10 @@ class LintTemplatesCommand extends BaseCommand
      * (`include ['a.txt.twig', 'b.html.twig']`, which renders the first that exists).
      *
      * @param list<string> $unreadable filled with the HTML templates that could not be read
+     * @param list<string> $unanalysed filled with those the regex engine gave up on (backtrack limit)
      * @return list<array{string, string, string}> [file, included name, its strategy]
      */
-    public static function mixedEscapingIncludes(string $dir, array &$unreadable = []): array
+    public static function mixedEscapingIncludes(string $dir, array &$unreadable = [], array &$unanalysed = []): array
     {
         $found = [];
         $files = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($dir, \FilesystemIterator::SKIP_DOTS));
@@ -216,7 +225,12 @@ class LintTemplatesCommand extends BaseCommand
                 $unreadable[] = $path;
                 continue;
             }
-            foreach (self::includedNames($source) as $included) {
+            $names = self::includedNames($source);
+            if ($names === null) {
+                $unanalysed[] = $path;
+                continue;
+            }
+            foreach ($names as $included) {
                 $strategy = self::escapingOf($included);
                 if ($strategy !== 'html') {
                     $found[] = [$path, $included, $strategy];
@@ -233,15 +247,14 @@ class LintTemplatesCommand extends BaseCommand
      * nothing, so `{{ '{#' }}` hides no include after it and
      * `{{ "{% include 'a.txt.twig' %}" }}` is none.
      *
-     * @return list<string>
+     * @return list<string>|null null when the regex engine gave up: no scan of
+     *                           what is left can tell a template clean
      */
-    private static function includedNames(string $source): array
+    private static function includedNames(string $source): ?array
     {
         $string = '\'(?:[^\'\\\\]|\\\\.)*\'|"(?:[^"\\\\]|\\\\.)*"';
-        // A regex that gives up (backtrack limit) scans the whole file: a false
-        // warning, never a template reported clean.
         if (preg_match_all('/\{[{%](?:' . $string . '|[^\'"])*?[}%]\}|\{#.*?#\}/s', $source, $regions) === false) {
-            $regions = [[$source]];
+            return null;
         }
         $names = [];
         foreach ($regions[0] as $region) {
@@ -250,11 +263,14 @@ class LintTemplatesCommand extends BaseCommand
             }
             // Each string becomes "<n>", so only the tag's own words are matched.
             $literals = [];
-            $masked = (string) preg_replace_callback('/' . $string . '/s', static function (array $m) use (&$literals): string {
+            $masked = preg_replace_callback('/' . $string . '/s', static function (array $m) use (&$literals): string {
                 $literals[] = substr($m[0], 1, -1);
 
                 return '"' . (count($literals) - 1) . '"';
             }, $region);
+            if ($masked === null) {
+                return null;
+            }
             preg_match_all('/(?:\{%[-~]?\s*(?:include|embed|import|from)\s+|\b(?:include|source)\(\s*)(\[[^\]]*\]|"\d+")/', $masked, $arguments);
             preg_match_all('/"(\d+)"/', implode(' ', $arguments[1]), $indexes);
             foreach ($indexes[1] as $index) {
