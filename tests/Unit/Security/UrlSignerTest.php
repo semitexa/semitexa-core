@@ -71,6 +71,17 @@ final class UrlSignerTest extends TestCase
         self::assertSame(SignatureCheck::Invalid, $signer->check('/files/a%252Fb', $query));
     }
 
+    /** `%2f` and `%2F` are one encoded slash; the case of the hex digits made a link invalid. */
+    #[Test]
+    public function an_encoded_slash_verifies_in_either_case(): void
+    {
+        $signer = UrlSigner::withSecrets('secret-a');
+        $query = (string) parse_url($signer->sign('/files/a%2Fb'), PHP_URL_QUERY);
+
+        self::assertSame(SignatureCheck::Valid, $signer->check('/files/a%2fb', $query));
+        self::assertSame(SignatureCheck::Invalid, $signer->check('/files/a/b', $query));
+    }
+
     /** PHP_INT_MAX overflowed into `expires=9.22E+18`, expired from the start. */
     #[Test]
     public function a_ttl_past_ten_years_is_refused(): void
@@ -116,7 +127,7 @@ final class UrlSignerTest extends TestCase
             $query = http_build_query(['expires' => $expires]);
             $mac = $signature->invoke($signer, 'secret-a', '/x', ['expires' => $expires]);
 
-            self::assertSame(SignatureCheck::Expired, $signer->check('/x', $query . '&signature=' . $mac, 0), json_encode($expires));
+            self::assertSame(SignatureCheck::Expired, $signer->check('/x', $query . '&signature=' . $mac, 0), (string) json_encode($expires));
         }
     }
 

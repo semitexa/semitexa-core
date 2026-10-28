@@ -149,8 +149,13 @@ final class UrlSigner
         // form the server hands over — except an encoded slash, which the
         // router keeps apart from a real one: `/files/a%2Fb` must not verify
         // as `/files/a/b`, another route. An encoded % stays encoded too, or
-        // `/files/a%252Fb` (a literal "%2F") signed the same as `a%2Fb`.
-        $canonicalPath = rawurldecode((string) preg_replace('/%(25|2F)/i', '%25$1', $path));
+        // `/files/a%252Fb` (a literal "%2F") signed the same as `a%2Fb`. The
+        // hex digits are upper-cased: `%2f` is the same slash as `%2F`.
+        $canonicalPath = rawurldecode((string) preg_replace_callback(
+            '/%(25|2F)/i',
+            static fn (array $m): string => '%25' . strtoupper($m[1]),
+            $path,
+        ));
         $mac = hash_hmac('sha256', $canonicalPath . '?' . self::canonicalQuery($query), AppSecret::derive($secret, self::PURPOSE), true);
 
         return rtrim(strtr(base64_encode($mac), '+/', '-_'), '=');

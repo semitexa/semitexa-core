@@ -14,6 +14,7 @@ use Semitexa\Core\Queue\QueueInspectorInterface;
 use Semitexa\Core\Queue\QueueTransportFactoryInterface;
 use Semitexa\Core\Queue\QueueTransportInterface;
 use Semitexa\Core\Queue\QueueTransportRegistry;
+use Semitexa\Core\Tests\Support\StaticState;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Tester\CommandTester;
 
@@ -25,9 +26,17 @@ final class QueueRetryCommandTest extends TestCase
 {
     private const TRANSPORT = 'queue-retry-command-test';
 
+    /** @var array{class: class-string, values: array<string, mixed>} */
+    private array $registry;
+
+    protected function setUp(): void
+    {
+        $this->registry = StaticState::snapshot(QueueTransportRegistry::class);
+    }
+
     protected function tearDown(): void
     {
-        QueueTransportRegistry::reset();
+        StaticState::restore($this->registry);
     }
 
     #[Test]

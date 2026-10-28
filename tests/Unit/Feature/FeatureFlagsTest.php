@@ -14,6 +14,7 @@ use Semitexa\Core\Feature\FeatureFlagRegistry;
 use Semitexa\Core\Feature\InMemoryFeatureFlags;
 use Semitexa\Core\Log\LoggerInterface;
 use Semitexa\Core\Log\StaticLoggerBridge;
+use Semitexa\Core\Tests\Support\StaticState;
 
 #[AsFeatureFlag('checkout.new-flow', description: 'One-page checkout')]
 #[AsFeatureFlag('search.semantic', default: true)]
@@ -61,11 +62,12 @@ final class FeatureFlagsTest extends TestCase
             public function notice(string $message, array $context = []): void {}
             public function debug(string $message, array $context = []): void {}
         };
+        $previous = StaticState::snapshot(StaticLoggerBridge::class);
         StaticLoggerBridge::set($logger);
         try {
             $flags = self::registry(['App\\Missing\\FeatureFlagDeclarations', FeatureFlagsTestDuplicate::class])->all();
         } finally {
-            StaticLoggerBridge::reset();
+            StaticState::restore($previous);
         }
 
         self::assertSame(['search.semantic'], array_keys($flags), 'the classes that load are still read');
