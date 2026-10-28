@@ -71,14 +71,18 @@ final class UrlSignerTest extends TestCase
         self::assertSame(SignatureCheck::Invalid, $signer->check('/files/a%252Fb', $query));
     }
 
-    /** `%2f` and `%2F` are one encoded slash; the case of the hex digits made a link invalid. */
+    /**
+     * Routing tells `a%2Fb` from `a%2fb`: a signature for one that verified the
+     * other let a link open a route it was not made for. The other case is refused.
+     */
     #[Test]
-    public function an_encoded_slash_verifies_in_either_case(): void
+    public function an_encoded_slash_verifies_only_in_the_case_it_was_signed(): void
     {
         $signer = UrlSigner::withSecrets('secret-a');
         $query = (string) parse_url($signer->sign('/files/a%2Fb'), PHP_URL_QUERY);
 
-        self::assertSame(SignatureCheck::Valid, $signer->check('/files/a%2fb', $query));
+        self::assertSame(SignatureCheck::Valid, $signer->check('/files/a%2Fb', $query));
+        self::assertSame(SignatureCheck::Invalid, $signer->check('/files/a%2fb', $query));
         self::assertSame(SignatureCheck::Invalid, $signer->check('/files/a/b', $query));
     }
 
