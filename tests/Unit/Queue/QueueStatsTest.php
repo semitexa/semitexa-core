@@ -61,6 +61,23 @@ final class QueueStatsTest extends TestCase
         self::assertSame(['processed' => 1], $store->sum('mail', 100, 100), 'the next job starts the day again');
     }
 
+    /** sum() read a broken day as empty, so queue:stats showed zeros and exited 0. */
+    #[Test]
+    public function an_unreadable_day_fails_the_sum_and_a_missing_one_is_empty(): void
+    {
+        mkdir($this->dir);
+        file_put_contents($this->dir . '/mail.0.json', '{"100":{"processed":7}');
+        $store = new FileQueueStatsStore($this->dir);
+
+        self::assertSame([], $store->sum('mail', 1440, 1500), 'a day not written yet');
+        try {
+            $store->sum('mail', 100, 100);
+            self::fail('sum() returned');
+        } catch (\RuntimeException $e) {
+            self::assertSame("{$this->dir}/mail.0.json could not be read", $e->getMessage());
+        }
+    }
+
     #[Test]
     public function every_finished_job_is_written_at_once_into_its_minute(): void
     {

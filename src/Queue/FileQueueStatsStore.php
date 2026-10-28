@@ -67,7 +67,14 @@ final class FileQueueStatsStore implements QueueStatsStoreInterface
     {
         $total = [];
         for ($day = intdiv($fromMinute, 1440); $day <= intdiv($toMinute, 1440); $day++) {
-            foreach (self::read($this->file($queue, $day)) ?? [] as $minute => $fields) {
+            $file = $this->file($queue, $day);
+            $data = self::read($file);
+            if ($data === null) {
+                // Read as empty, a broken day showed zeros and queue:stats
+                // exited 0; QueueStatsReport turns this into counters_error.
+                throw new \RuntimeException("{$file} could not be read");
+            }
+            foreach ($data as $minute => $fields) {
                 if ((int) $minute < $fromMinute || (int) $minute > $toMinute || !is_array($fields)) {
                     continue;
                 }
