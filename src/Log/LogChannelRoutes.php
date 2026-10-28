@@ -78,7 +78,7 @@ final class LogChannelRoutes
         if (preg_match('#^var/log/(?!.*\.\.)[A-Za-z0-9._/-]+\.log$#', $path) !== 1
             || in_array($path, self::reserved(), true)
             || $path === self::normalize($logFile)
-            || self::isTheSwooleLog($path)) {
+            || self::isAProtectedFile($path, $logFile)) {
             return null;
         }
 
@@ -86,18 +86,27 @@ final class LogChannelRoutes
     }
 
     /**
-     * reserved() compares spellings; this compares files. A link made
-     * SWOOLE_LOG_FILE=/elsewhere/server.log the project's var/log/server.log.
+     * reserved() compares spellings; this compares files. Through a linked
+     * directory (var/log/old -> var/log, or SWOOLE_LOG_FILE=/elsewhere/server.log
+     * with /elsewhere -> var/log) a route named a protected file, and the
+     * channel's rotation renamed it.
      */
-    private static function isTheSwooleLog(string $path): bool
+    private static function isAProtectedFile(string $path, string $logFile): bool
     {
-        $swoole = (string) Environment::getEnvValue('SWOOLE_LOG_FILE', '');
-        if ($swoole === '') {
-            return false;
-        }
         $root = rtrim(ProjectRoot::get(), '/') . '/';
+        $protected = [...self::RESERVED, $logFile];
+        $swoole = (string) Environment::getEnvValue('SWOOLE_LOG_FILE', '');
+        if ($swoole !== '') {
+            $protected[] = $swoole;
+        }
+        $route = self::resolved($root . $path);
+        foreach ($protected as $file) {
+            if (self::resolved(str_starts_with($file, '/') ? $file : $root . $file) === $route) {
+                return true;
+            }
+        }
 
-        return self::resolved(str_starts_with($swoole, '/') ? $swoole : $root . $swoole) === self::resolved($root . $path);
+        return false;
     }
 
     /** The path with its longest existing part resolved through links; the file need not exist yet. */

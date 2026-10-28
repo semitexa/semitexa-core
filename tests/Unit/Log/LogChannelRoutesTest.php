@@ -83,4 +83,29 @@ final class LogChannelRoutesTest extends TestCase
             putenv($previous === false ? 'SWOOLE_LOG_FILE' : 'SWOOLE_LOG_FILE=' . $previous);
         }
     }
+
+    /** Only the Swoole log was resolved: a linked directory reached error.log, LOG_FILE and the default swoole.log. */
+    #[Test]
+    public function every_protected_file_reached_through_a_link_is_refused(): void
+    {
+        $previous = getenv('SWOOLE_LOG_FILE');
+        $logDir = ProjectRoot::get() . '/var/log';
+        $name = 'link-' . bin2hex(random_bytes(4));
+        is_dir($logDir) || mkdir($logDir, 0775, true);
+        symlink($logDir, $logDir . '/' . $name);
+        try {
+            putenv('SWOOLE_LOG_FILE');
+            $rejected = [];
+            $routes = LogChannelRoutes::fromEnv(
+                "a=var/log/{$name}/error.log,b=var/log/{$name}/app.log,c=var/log/{$name}/swoole.log,d=var/log/{$name}/audit.log",
+                'var/log/app.log',
+                $rejected,
+            );
+            self::assertSame(["a=var/log/{$name}/error.log", "b=var/log/{$name}/app.log", "c=var/log/{$name}/swoole.log"], $rejected);
+            self::assertEquals(['d' => new LogRoute("var/log/{$name}/audit.log", false)], $routes);
+        } finally {
+            unlink($logDir . '/' . $name);
+            putenv($previous === false ? 'SWOOLE_LOG_FILE' : 'SWOOLE_LOG_FILE=' . $previous);
+        }
+    }
 }

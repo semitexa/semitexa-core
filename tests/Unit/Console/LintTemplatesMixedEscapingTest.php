@@ -65,6 +65,23 @@ final class LintTemplatesMixedEscapingTest extends TestCase
         self::assertSame(['partials/note.txt.twig', 'c.js.twig'], array_column($found, 1));
     }
 
+    /** Text a template prints is not a tag: an include spelled inside a string or in plain text ran nothing, but failed --strict. */
+    #[Test]
+    public function an_include_inside_a_string_or_plain_text_is_not_one(): void
+    {
+        $dir = sys_get_temp_dir() . '/lint-escaping-' . bin2hex(random_bytes(4));
+        mkdir($dir);
+        file_put_contents($dir . '/home.html.twig', "{{ \"{# {% include 'note.txt.twig' %} #}\" }}\n<p>Call include('prose.txt.twig') here.</p>\n{{- source('real.txt.twig') }}\n{%~ include 'tilde.txt.twig' %}");
+        try {
+            $found = LintTemplatesCommand::mixedEscapingIncludes($dir);
+        } finally {
+            unlink($dir . '/home.html.twig');
+            rmdir($dir);
+        }
+
+        self::assertSame(['real.txt.twig', 'tilde.txt.twig'], array_column($found, 1));
+    }
+
     /** A file it could not read came back as an empty template, and --strict reported it clean. */
     #[Test]
     public function an_html_template_that_cannot_be_read_is_reported_unread(): void

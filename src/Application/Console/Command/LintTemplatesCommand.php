@@ -216,18 +216,7 @@ class LintTemplatesCommand extends BaseCommand
                 $unreadable[] = $path;
                 continue;
             }
-            // A comment runs nothing: `{# {% include 'note.txt.twig' %} #}` includes nothing.
-            // Tags and expressions are matched first, their strings whole, so the `{#`
-            // in `{{ '{#' }}` opens no comment and hides no include after it.
-            // A regex that gives up (backtrack limit) keeps the comments, never drops the template.
-            $source = preg_replace_callback(
-                '/\{[{%](?:\'(?:[^\'\\\\]|\\\\.)*\'|"(?:[^"\\\\]|\\\\.)*"|[^\'"])*?[}%]\}|\{#.*?#\}/s',
-                static fn (array $m): string => str_starts_with($m[0], '{#') ? '' : $m[0],
-                $source,
-            ) ?? $source;
-            preg_match_all('/(?:\{%-?\s*(?:include|embed|import|from)\s+|\b(?:include|source)\(\s*)(\[[^\]]*\]|[\'"][^\'"]+\.twig[\'"])/', $source, $arguments);
-            preg_match_all('/[\'"]([^\'"]+\.twig)[\'"]/', implode(' ', $arguments[1]), $matches);
-            foreach (array_unique($matches[1]) as $included) {
+            foreach (self::includedNames($source) as $included) {
                 $strategy = self::escapingOf($included);
                 if ($strategy !== 'html') {
                     $found[] = [$path, $included, $strategy];
@@ -236,6 +225,46 @@ class LintTemplatesCommand extends BaseCommand
         }
 
         return $found;
+    }
+
+    /**
+     * The literal names a template includes, embeds or imports. Only tags and
+     * expressions run: a comment, plain text and the inside of a string include
+     * nothing, so `{{ '{#' }}` hides no include after it and
+     * `{{ "{% include 'a.txt.twig' %}" }}` is none.
+     *
+     * @return list<string>
+     */
+    private static function includedNames(string $source): array
+    {
+        $string = '\'(?:[^\'\\\\]|\\\\.)*\'|"(?:[^"\\\\]|\\\\.)*"';
+        // A regex that gives up (backtrack limit) scans the whole file: a false
+        // warning, never a template reported clean.
+        if (preg_match_all('/\{[{%](?:' . $string . '|[^\'"])*?[}%]\}|\{#.*?#\}/s', $source, $regions) === false) {
+            $regions = [[$source]];
+        }
+        $names = [];
+        foreach ($regions[0] as $region) {
+            if (str_starts_with($region, '{#')) {
+                continue;
+            }
+            // Each string becomes "<n>", so only the tag's own words are matched.
+            $literals = [];
+            $masked = (string) preg_replace_callback('/' . $string . '/s', static function (array $m) use (&$literals): string {
+                $literals[] = substr($m[0], 1, -1);
+
+                return '"' . (count($literals) - 1) . '"';
+            }, $region);
+            preg_match_all('/(?:\{%[-~]?\s*(?:include|embed|import|from)\s+|\b(?:include|source)\(\s*)(\[[^\]]*\]|"\d+")/', $masked, $arguments);
+            preg_match_all('/"(\d+)"/', implode(' ', $arguments[1]), $indexes);
+            foreach ($indexes[1] as $index) {
+                if (str_ends_with($literals[(int) $index], '.twig')) {
+                    $names[] = $literals[(int) $index];
+                }
+            }
+        }
+
+        return array_values(array_unique($names));
     }
 
     /** The strategy ModuleTemplateCatalog's 'autoescape' => 'name' gives a template of this name. */
