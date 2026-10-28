@@ -402,25 +402,38 @@ class QueueWorker
      */
     private function deadLetterRaw(string $payload, string $error): void
     {
+        $dlqName = ($this->currentQueue ?: 'default') . '.failed';
+        $letter = static fn (bool $full): string => (string) json_encode([
+            ...($full ? ['raw' => $payload] : []),
+            'raw_base64' => base64_encode($payload),
+            'error' => $error,
+            'failed_at' => date(DATE_ATOM),
+        ], JSON_INVALID_UTF8_SUBSTITUTE);
         try {
             $transport = QueueTransportRegistry::create($this->currentTransport ?: QueueConfig::defaultTransport());
-            $dlqName = ($this->currentQueue ?: 'default') . '.failed';
-            $transport->publish($dlqName, (string) json_encode([
-                'raw' => $payload,
-                'raw_base64' => base64_encode($payload),
-                'error' => $error,
-                'failed_at' => date(DATE_ATOM),
-            ], JSON_INVALID_UTF8_SUBSTITUTE));
+            try {
+                $transport->publish($dlqName, $letter(true));
+            } catch (\Throwable) {
+                // The readable copy beside the bytes more than doubles the
+                // letter: one past the broker's max_payload goes as the bytes
+                // alone, or it would be refused on every delivery.
+                $transport->publish($dlqName, $letter(false));
+            }
             $this->log("📥 Unreadable message moved to DLQ: {$dlqName}", 'warning');
         } catch (\Throwable $dlqError) {
-            // The worker still returns, so the transport counts the payload as
-            // handled: this line is all that is left of it.
+            // Thrown, as the structured path throws: logged and returned, the
+            // transport counted the payload as handled and it was gone. The
+            // transport hands it back to be delivered again.
             $this->log(sprintf(
-                '❌ Unreadable message may be lost: the dead letter could not be written (%d bytes, sha1 %s): %s',
+                '❌ Unreadable message left on the queue: the dead letter could not be written (%d bytes, sha1 %s): %s',
                 strlen($payload),
                 sha1($payload),
                 $dlqError->getMessage(),
             ), 'error');
+            $this->messageLeftOnQueue = true;
+            $this->messageProblem = 'the dead letter could not be written: ' . $dlqError->getMessage();
+
+            throw new DeadLetterUnwritableException('The dead letter could not be written: ' . $dlqError->getMessage(), 0, $dlqError);
         }
     }
 
