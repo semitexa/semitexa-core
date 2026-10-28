@@ -44,6 +44,19 @@ final class DeadLetterTest extends TestCase
         $letter->retryPayload();
     }
 
+    /** One too large with both copies is written with the bytes alone: read as a message, queue:retry queued the letter itself. */
+    #[Test]
+    public function an_unreadable_payload_kept_as_its_bytes_alone_can_only_be_forgotten(): void
+    {
+        $letter = DeadLetter::fromStored('10', 'mail', '{"raw_base64":"e29vcHM=","error":"not a JSON object","failed_at":"2026-10-28T05:00:00+00:00"}');
+
+        self::assertFalse($letter->retryable);
+        self::assertSame('not a JSON object', $letter->error);
+        self::assertSame('', $letter->target);
+        $this->expectException(\LogicException::class);
+        $letter->retryPayload();
+    }
+
     /** A stored error that was not a string printed as "Array", with a warning. */
     #[Test]
     public function an_unreadable_payload_keeps_only_a_string_error_and_a_non_object_is_unreadable(): void
