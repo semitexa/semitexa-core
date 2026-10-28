@@ -14,6 +14,7 @@ use Semitexa\Core\Queue\QueueStatsStoreInterface;
 use Semitexa\Core\Queue\QueueTransportFactoryInterface;
 use Semitexa\Core\Queue\QueueTransportInterface;
 use Semitexa\Core\Queue\QueueTransportRegistry;
+use Semitexa\Core\Tests\Support\StaticState;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Tester\CommandTester;
 
@@ -26,8 +27,19 @@ final class QueueStatsCommandTest extends TestCase
 {
     private const TRANSPORT = 'queue-stats-command-test';
 
+    /** @var list<array{class: class-string, values: array<string, mixed>}> */
+    private array $staticState;
+    private string|false $previousTransport;
+
     protected function setUp(): void
     {
+        // Put back as found: a blind reset dropped registrations and the
+        // environment value that later tests in the process relied on.
+        $this->staticState = [
+            StaticState::snapshot(QueueTransportRegistry::class),
+            StaticState::snapshot(QueueStatsReport::class),
+        ];
+        $this->previousTransport = getenv('EVENTS_TRANSPORT');
         putenv('EVENTS_TRANSPORT=' . self::TRANSPORT);
         QueueTransportRegistry::register(self::TRANSPORT, new class implements QueueTransportFactoryInterface {
             public function create(): QueueTransportInterface
@@ -44,9 +56,8 @@ final class QueueStatsCommandTest extends TestCase
 
     protected function tearDown(): void
     {
-        putenv('EVENTS_TRANSPORT');
-        QueueStatsReport::forgetStore();
-        QueueTransportRegistry::reset();
+        putenv($this->previousTransport === false ? 'EVENTS_TRANSPORT' : 'EVENTS_TRANSPORT=' . $this->previousTransport);
+        array_map([StaticState::class, 'restore'], $this->staticState);
     }
 
     #[Test]

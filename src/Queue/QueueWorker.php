@@ -413,10 +413,13 @@ class QueueWorker
             $transport = QueueTransportRegistry::create($this->currentTransport ?: QueueConfig::defaultTransport());
             try {
                 $transport->publish($dlqName, $letter(true));
-            } catch (\Throwable) {
+            } catch (\Throwable $first) {
                 // The readable copy beside the bytes more than doubles the
                 // letter: one past the broker's max_payload goes as the bytes
-                // alone, or it would be refused on every delivery.
+                // alone, or it would be refused on every delivery. Said first:
+                // any refusal lands here, and once the second publish succeeds
+                // nothing else records why the readable copy is missing.
+                $this->log("⚠️ Dead letter refused with its readable copy, sending the bytes alone: {$first->getMessage()}", 'warning');
                 $transport->publish($dlqName, $letter(false));
             }
             $this->log("📥 Unreadable message moved to DLQ: {$dlqName}", 'warning');

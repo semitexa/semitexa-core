@@ -7,6 +7,8 @@ namespace Semitexa\Core\Tests\Unit\Log;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Semitexa\Core\Log\LogChannelRoutes;
+use Semitexa\Core\Log\LogRoute;
+use Semitexa\Core\Support\ProjectRoot;
 
 final class LogChannelRoutesTest extends TestCase
 {
@@ -31,5 +33,26 @@ final class LogChannelRoutesTest extends TestCase
         self::assertArrayNotHasKey('audit', $routes);
         self::assertArrayNotHasKey('sql', $routes);
         self::assertCount(2, $rejected);
+    }
+
+    /** Only the default path was reserved: a moved Swoole log took channel records and their rotation. */
+    #[Test]
+    public function the_configured_swoole_log_is_refused_wherever_it_is_put(): void
+    {
+        $previous = getenv('SWOOLE_LOG_FILE');
+        try {
+            putenv('SWOOLE_LOG_FILE=var/log/server.log');
+            $rejected = [];
+            $routes = LogChannelRoutes::fromEnv('audit=var/log/server.log,sql=var/log/sql.log', 'var/log/app.log', $rejected);
+            self::assertSame(['audit=var/log/server.log'], $rejected);
+            self::assertEquals(['sql' => new LogRoute('var/log/sql.log', false)], $routes);
+
+            putenv('SWOOLE_LOG_FILE=' . ProjectRoot::get() . '/var/log/server.log');
+            $rejected = [];
+            LogChannelRoutes::fromEnv('audit=var/log/./server.log', 'var/log/app.log', $rejected);
+            self::assertSame(['audit=var/log/./server.log'], $rejected, 'an absolute path inside the project is the same file');
+        } finally {
+            putenv($previous === false ? 'SWOOLE_LOG_FILE' : 'SWOOLE_LOG_FILE=' . $previous);
+        }
     }
 }

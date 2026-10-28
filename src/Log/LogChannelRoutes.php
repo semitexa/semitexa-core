@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Log;
 
+use Semitexa\Core\Environment;
+use Semitexa\Core\Support\ProjectRoot;
+
 /**
  * LOG_CHANNELS: per-channel destinations, `channel=route` pairs separated by
  * commas. A route is `file` (LOG_FILE), `stderr`, `both`, `off`, or a file of
@@ -18,7 +21,7 @@ namespace Semitexa\Core\Log;
  */
 final class LogChannelRoutes
 {
-    /** Framework-owned logs a channel must not write into. */
+    /** Framework-owned logs a channel must not write into; see reserved() for the server's own. */
     private const RESERVED = ['var/log/swoole.log', 'var/log/error.log'];
 
     /**
@@ -73,11 +76,30 @@ final class LogChannelRoutes
     {
         $path = self::normalize($route);
         if (preg_match('#^var/log/(?!.*\.\.)[A-Za-z0-9._/-]+\.log$#', $path) !== 1
-            || in_array($path, self::RESERVED, true)
+            || in_array($path, self::reserved(), true)
             || $path === self::normalize($logFile)) {
             return null;
         }
 
         return new LogRoute($path, false);
+    }
+
+    /**
+     * The fixed list and the file Swoole actually writes: with
+     * SWOOLE_LOG_FILE=var/log/server.log a channel could route into it, and
+     * its rotation renamed the server's log from under it. An absolute path
+     * inside the project is compared in the project-relative spelling.
+     *
+     * @return list<string>
+     */
+    private static function reserved(): array
+    {
+        $swoole = (string) Environment::getEnvValue('SWOOLE_LOG_FILE', '');
+        $root = rtrim(ProjectRoot::get(), '/') . '/';
+        if (str_starts_with($swoole, $root)) {
+            $swoole = substr($swoole, strlen($root));
+        }
+
+        return [...self::RESERVED, self::normalize($swoole)];
     }
 }

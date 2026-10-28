@@ -30,4 +30,49 @@ final class LintTemplatesMixedEscapingTest extends TestCase
         sort($pairs);
         self::assertSame(['home.html.twig -> @x/partials/note.txt.twig', 'home.html.twig -> data.json.twig'], $pairs, 'a text template including text is fine, an HTML one including HTML too');
     }
+
+    /** Twig renders the first name of a list that exists, so a text template in it reached the page unseen. */
+    #[Test]
+    public function a_name_inside_an_include_list_is_reported(): void
+    {
+        $dir = sys_get_temp_dir() . '/lint-escaping-' . bin2hex(random_bytes(4));
+        mkdir($dir);
+        file_put_contents($dir . '/home.html.twig', "{% include ['partials/note.txt.twig', 'partials/card.html.twig'] %}\n{{ include([\"a.html.twig\", \"b.js.twig\"]) }}");
+        try {
+            $found = LintTemplatesCommand::mixedEscapingIncludes($dir);
+        } finally {
+            unlink($dir . '/home.html.twig');
+            rmdir($dir);
+        }
+
+        self::assertSame(['partials/note.txt.twig', 'b.js.twig'], array_column($found, 1));
+    }
+
+    /** A file it could not read came back as an empty template, and --strict reported it clean. */
+    #[Test]
+    public function an_html_template_that_cannot_be_read_is_reported_unread(): void
+    {
+        $module = sys_get_temp_dir() . '/lint-escaping-' . bin2hex(random_bytes(4));
+        $dir = $module . '/Application/View/templates';
+        mkdir($dir, 0775, true);
+        // A dangling link: listed by the directory, unreadable even to root.
+        symlink($dir . '/gone.txt', $dir . '/broken.html.twig');
+        $unreadable = [];
+        $errors = [];
+        $warnings = [];
+        try {
+            $found = LintTemplatesCommand::mixedEscapingIncludes($dir, $unreadable);
+            (function () use ($module, &$errors, &$warnings): void {
+                $this->scanModuleDir('Probe', $module, $errors, $warnings);
+            })->call(new LintTemplatesCommand());
+        } finally {
+            unlink($dir . '/broken.html.twig');
+            exec('rm -rf ' . escapeshellarg($module));
+        }
+
+        self::assertSame([], $found);
+        self::assertSame([$dir . '/broken.html.twig'], $unreadable);
+        self::assertSame([['module' => 'Probe', 'path' => $dir . '/broken.html.twig', 'message' => 'Cannot be read, so what it includes was not checked. Make it readable.']], $errors, 'an error fails the lint without --strict');
+        self::assertSame([], $warnings);
+    }
 }

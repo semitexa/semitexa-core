@@ -153,6 +153,25 @@ final class RequestFactoryFilesTest extends TestCase
         }
     }
 
+    /** items[0][avatar] arrives as a list of groups, which the list-of-files shape took and emptied. */
+    #[Test]
+    public function an_indexed_group_keeps_its_files_under_the_name_the_form_gave_them(): void
+    {
+        $entry = fn (string $name): array => ['name' => $name, 'type' => 'text/plain', 'tmp_name' => $this->writeTmp('x'), 'error' => UPLOAD_ERR_OK, 'size' => 1];
+        $files = RequestFactory::normalizeFiles([
+            'items' => [['avatar' => $entry('a.png')], ['avatar' => $entry('b.png')]],
+        ]);
+
+        self::assertSame(['items[0][avatar]', 'items[1][avatar]'], array_keys($files));
+        self::assertSame('b.png', $files['items[1][avatar]'] instanceof UploadedFile ? $files['items[1][avatar]']->clientFilename : null);
+        self::assertSame('items[0][avatar]', $files['items[0][avatar]'] instanceof UploadedFile ? $files['items[0][avatar]']->field : null);
+        foreach ($files as $file) {
+            if ($file instanceof UploadedFile) {
+                @unlink($file->tmpPath);
+            }
+        }
+    }
+
     /** doc[name] beside doc[avatar] read as the parallel-list shape: doc[avatar] was gone. */
     #[Test]
     public function a_nested_file_field_called_name_is_a_field_like_any_other(): void

@@ -53,8 +53,9 @@ final class FakeEventDispatcher implements EventDispatcherInterface
     }
 
     /**
-     * @param class-string $eventClass
-     * @param (\Closure(object): bool)|null $matches
+     * @template T of object
+     * @param class-string<T> $eventClass
+     * @param (\Closure(T): bool)|null $matches
      */
     public function assertDispatched(string $eventClass, ?\Closure $matches = null): void
     {

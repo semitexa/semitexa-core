@@ -31,11 +31,26 @@ final class LiveFilterParamOverrideTest extends TestCase
     public function a_signed_payload_takes_no_override(): void
     {
         $dto = new SignedLiveFilterFixtureDto();
+        $dto->setPage(1);
 
         $result = LiveFilterParamOverride::apply($dto, ['page' => '3']);
 
+        self::assertSame(1, $dto->getPage(), 'the value the signature covered');
         self::assertSame([], $result['applied']);
         self::assertSame(['page'], $result['ignored']);
+    }
+
+    /** A payload with parts is built as a generated subclass; the attribute is on its parent. */
+    #[Test]
+    public function a_subclass_of_a_signed_payload_takes_no_override(): void
+    {
+        $dto = new GeneratedSignedLiveFilterFixtureDto();
+        $dto->setPage(1);
+
+        $result = LiveFilterParamOverride::apply($dto, ['page' => '3']);
+
+        self::assertSame(1, $dto->getPage(), 'the value the signature covered');
+        self::assertSame(['applied' => [], 'ignored' => ['page']], $result);
     }
 
     #[Test]
@@ -249,8 +264,23 @@ final class LiveFilterFixtureDto
 }
 
 #[\Semitexa\Core\Attribute\RequiresSignedUrl]
-final class SignedLiveFilterFixtureDto
+class SignedLiveFilterFixtureDto
 {
     #[LiveFilterParam]
     protected ?int $page = null;
+
+    public function setPage(?int $v): void
+    {
+        $this->page = $v;
+    }
+
+    public function getPage(): ?int
+    {
+        return $this->page;
+    }
+}
+
+/** What PayloadFactory builds for a payload with parts: a subclass, no attribute of its own. */
+final class GeneratedSignedLiveFilterFixtureDto extends SignedLiveFilterFixtureDto
+{
 }

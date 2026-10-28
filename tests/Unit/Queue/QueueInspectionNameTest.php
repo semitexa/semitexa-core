@@ -21,6 +21,7 @@ final class QueueInspectionNameTest extends TestCase
         yield 'blank token' => ['orders..failed'];
         yield 'space' => ['my queue'];
         yield 'empty' => [''];
+        yield 'trailing newline' => ["orders\n"];
     }
 
     #[Test]
@@ -30,6 +31,7 @@ final class QueueInspectionNameTest extends TestCase
         $inspection = (new \ReflectionClass(QueueInspection::class))->newInstanceWithoutConstructor();
 
         $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage("Not a queue name: '{$queue}' (letters, digits, '-', '_', dot-separated).");
         $inspection->targets(null, $queue);
     }
 }

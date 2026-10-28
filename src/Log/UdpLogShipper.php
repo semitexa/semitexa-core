@@ -11,12 +11,23 @@ namespace Semitexa\Core\Log;
  * UDP because the send never waits: a datagram is handed to the kernel and
  * the worker moves on, where a syslog socket or a TCP connection to a slow
  * collector held the worker (and, during a drain, past its grace). The price
- * is UDP's: a line the network or a busy collector drops is gone, and nothing
- * says so beyond a counter in the next line that gets through. The traffic
- * is not encrypted: keep the collector on a private network. A value under a
- * key that names a secret (password, token, cookie, authorization, api key…)
- * leaves as "[redacted]", whatever it holds: the context a line carries went
- * out as written. An IPv4
+ * is UDP's: a line the network or a busy collector drops is gone. Every
+ * datagram carries `remote_seq`, one up per line this shipper was given, so
+ * the collector sees a loss as a gap; `remote_dropped` in the next line that
+ * gets through counts only the lines this process knew it could not send
+ * (socket refused, not open, backing off), since a datagram the kernel
+ * accepted can still be lost on the way.
+ *
+ * The traffic is not encrypted: keep the collector on a private network.
+ * A value under a key that names a secret (password, token, cookie,
+ * authorization, api key…) leaves as "[redacted]", whatever it holds, and
+ * so does a secret inside text — the message, an exception's text, a URL:
+ * a `Bearer` credential, a URL's user:password@, and `name=value` or
+ * `name: value` for a secret name. An object is read as it would be encoded,
+ * so a DTO's public `password` is redacted too. The local file keeps the
+ * line as written; this copy leaves the machine. The text patterns catch the
+ * shapes secrets take in log lines, not every secret: one in free prose with
+ * no name beside it still goes out. An IPv4
  * address only: a host name would be looked up on the first send, a wait
  * outside a coroutine nothing can cut short, and the coroutine runtime opens
  * every udp:// socket as IPv4.
@@ -31,18 +42,40 @@ final class UdpLogShipper
     /** When opening the socket failed: tried again a minute later, not per line. */
     private float $failedAt = 0.0;
     private int $dropped = 0;
+    private int $seq = 0;
+
+    /** Contained anywhere in a secret's name. */
+    private const SECRET_WORDS = 'password|passwd|passphrase|secret|authorization|cookie|api[_-]?key|credential|private[_-]?key|signature';
 
     /**
      * Keys that name a secret. `token` only at the end (csrf_token, api-token,
      * not prompt_tokens, a count); `pass` only whole (not passenger, passport).
      */
-    private const SECRET_KEY = '/password|passwd|passphrase|^pass$|secret|token$|authorization|cookie|api[_-]?key|credential|private[_-]?key|signature|^dsn$/i';
+    private const SECRET_KEY = '/' . self::SECRET_WORDS . '|token$|^pass$|^dsn$/i';
+
+    /** The same names inside text, as a whole word with its quotes, before `=` or `:`. */
+    private const SECRET_NAME = '(?<![\w.-])(?<q>["\']?)(?:[\w.-]*(?:' . self::SECRET_WORDS . ')[\w.-]*|[\w.-]*token|pass|dsn)\k<q>';
+
+    /** A quoted value, either quote, escapes included. */
+    private const QUOTED = '"(?:[^"\\\\]|\\\\.)*"|\'[^\']*\'';
+
+    /**
+     * Secrets in text, each with what replaces it. A `name: value` takes the
+     * rest of the line: that is a header (`Cookie: a=1; b=2`), one value a line.
+     */
+    private const SECRET_TEXT = [
+        '#\b([a-z][a-z0-9+.-]*://)[^\s/?\#@:]*:[^\s/?\#@]*@#i' => '$1[redacted]@',
+        '/\b(Bearer)[ \t]+[A-Za-z0-9._~+\/-]+=*/i' => '$1 [redacted]',
+        '/(' . self::SECRET_NAME . '[ \t]*=[ \t]*)(?:' . self::QUOTED . '|[^\s"\'&;,]+)/i' => '$1[redacted]',
+        '/(' . self::SECRET_NAME . '[ \t]*:[ \t]*)(?:' . self::QUOTED . '|[^\r\n]+)/i' => '$1[redacted]',
+    ];
 
     private function __construct(private readonly string $address) {}
 
     /**
-     * The entry with every value under a secret-naming key replaced, at any
-     * depth; null when it holds none, so the common line is not encoded twice.
+     * The entry with every value under a secret-naming key replaced, and every
+     * secret inside a string, at any depth; null when it holds none, so the
+     * common line is not encoded twice.
      *
      * @param array<string, mixed> $entry
      * @return array<string, mixed>|null
@@ -57,8 +90,27 @@ final class UdpLogShipper
                 if (is_string($key) && $value !== null && $value !== '' && $value !== [] && preg_match(self::SECRET_KEY, $key) === 1) {
                     $values[$key] = '[redacted]';
                     $changed = true;
+                    continue;
+                }
+                if (is_object($value)) {
+                    // As json_encode would write it; kept as it was when that
+                    // holds nothing to redact, or cannot be encoded at all.
+                    $was = $changed;
+                    $changed = false;
+                    try {
+                        $plain = json_decode((string) json_encode($value, JSON_INVALID_UTF8_SUBSTITUTE | JSON_PARTIAL_OUTPUT_ON_ERROR), true);
+                        $plain = is_array($plain) ? $walk($plain) : (is_string($plain) ? self::scrubbed($plain, $changed) : $plain);
+                    } catch (\Throwable) {
+                        $plain = null;
+                    }
+                    if ($changed) {
+                        $values[$key] = $plain;
+                    }
+                    $changed = $changed || $was;
                 } elseif (is_array($value)) {
                     $values[$key] = $walk($value);
+                } elseif (is_string($value)) {
+                    $values[$key] = self::scrubbed($value, $changed);
                 }
             }
 
@@ -67,6 +119,17 @@ final class UdpLogShipper
         $result = $walk($entry);
 
         return $changed ? $result : null;
+    }
+
+    private static function scrubbed(string $text, bool &$changed): string
+    {
+        $scrubbed = (string) preg_replace(array_keys(self::SECRET_TEXT), array_values(self::SECRET_TEXT), $text);
+        if ($scrubbed === $text) {
+            return $text;
+        }
+        $changed = true;
+
+        return $scrubbed;
     }
 
     /**
@@ -98,7 +161,12 @@ final class UdpLogShipper
      */
     public function ship(string $line, array $entry): void
     {
+        // Every line takes a number, sent or not: a gap at the collector is
+        // the one loss this side cannot see, a datagram the kernel accepted.
+        $seq = ++$this->seq;
         if ($this->failedAt > 0.0 && microtime(true) - $this->failedAt < 60.0) {
+            $this->dropped++;
+
             return;
         }
         if (strlen($line) > self::MAX_DATAGRAM) {
@@ -113,18 +181,14 @@ final class UdpLogShipper
             $stub['truncated'] = sprintf('the entry was %d bytes, over what one datagram carries', strlen($line));
             $line = (string) json_encode($stub, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE | JSON_PARTIAL_OUTPUT_ON_ERROR);
         }
-        if ($line === '' || !str_ends_with($line, '}')) {
-            return;
-        }
-        if ($this->dropped > 0) {
-            // Said in the next line that gets through, not in a line of its own.
-            $line = substr($line, 0, -1) . ',"remote_dropped":' . $this->dropped . '}';
-        }
-
-        $socket = $this->socket();
+        $socket = $line === '' || !str_ends_with($line, '}') ? null : $this->socket();
         if ($socket === null) {
+            $this->dropped++;
+
             return;
         }
+        // Said in the next line that gets through, not in a line of its own.
+        $line = substr($line, 0, -1) . ',"remote_seq":' . $seq . ($this->dropped > 0 ? ',"remote_dropped":' . $this->dropped : '') . '}';
         $sent = @fwrite($socket, $line);
         $this->dropped = $sent === strlen($line) ? 0 : $this->dropped + 1;
     }

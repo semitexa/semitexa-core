@@ -165,8 +165,9 @@ class RequestFactory
                 }
                 if ($list !== []) {
                     $out[$field] = $list;
+                    continue;
                 }
-                continue;
+                // No file entries in it: a list of groups, items[0][avatar], which Shape 4 names.
             }
 
             // Shape 3b: $_FILES-style array of arrays — `name`, `type`, `tmp_name`, … all parallel lists.

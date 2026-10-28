@@ -66,8 +66,12 @@ final class LiveFilterParamOverride
 
         // A signed link's parameters are what its signature covers: a re-run
         // took the visitor's values for them, unchecked, from one valid link.
-        if ((new \ReflectionClass($dto))->getAttributes(RequiresSignedUrl::class) !== []) {
-            return ['applied' => [], 'ignored' => array_map('strval', array_keys($params))];
+        // Looked up the hierarchy, as SignedUrlListener does: a payload with
+        // parts is a generated subclass, and the attribute sits on its parent.
+        for ($class = new \ReflectionClass($dto); $class !== false; $class = $class->getParentClass()) {
+            if ($class->getAttributes(RequiresSignedUrl::class) !== []) {
+                return ['applied' => [], 'ignored' => array_map('strval', array_keys($params))];
+            }
         }
 
         $allowList = self::allowedProperties($dto);

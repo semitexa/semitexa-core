@@ -27,17 +27,22 @@ use Semitexa\Core\Tests\Support\StaticState;
  */
 final class QueuedOriginTest extends TestCase
 {
-    /** @var array{class: class-string, values: array<string, mixed>} */
+    /** @var list<array{class: class-string, values: array<string, mixed>}> */
     private array $state;
 
     protected function setUp(): void
     {
-        $this->state = StaticState::snapshot(QueuedOrigin::class);
+        $this->state = array_map([StaticState::class, 'snapshot'], [
+            QueuedOrigin::class,
+            QueueTransportRegistry::class,
+            OriginSpyTransport::class,
+            OriginSeeingHandler::class,
+        ]);
     }
 
     protected function tearDown(): void
     {
-        StaticState::restore($this->state);
+        array_map([StaticState::class, 'restore'], $this->state);
     }
 
     #[Test]
@@ -76,7 +81,6 @@ final class QueuedOriginTest extends TestCase
     #[Test]
     public function enqueue_writes_it_and_the_worker_runs_the_handler_inside_it(): void
     {
-        $registry = StaticState::snapshot(QueueTransportRegistry::class);
         QueueTransportRegistry::reset();
         QueueTransportRegistry::register('origin-spy', new class implements QueueTransportFactoryInterface {
             public function create(): QueueTransportInterface
@@ -84,17 +88,16 @@ final class QueuedOriginTest extends TestCase
                 return new OriginSpyTransport();
             }
         });
-        OriginSpyTransport::$published = [];
-        try {
-            QueuedOrigin::exporter('test.binding', static fn (): array => ['sb' => 'digest', 'tn' => 'acme']);
-            QueueDispatcher::enqueue(['class' => OriginSeeingHandler::class, 'transport' => 'origin-spy', 'queue' => 'q'], new \stdClass(), new \stdClass());
-            $this->runInWorker(OriginSpyTransport::$published[0] ?? '');
-        } finally {
-            StaticState::restore($registry);
-        }
+        OriginSpyTransport::reset();
+        QueuedOrigin::exporter('test.binding', static fn (): array => ['sb' => 'digest', 'tn' => 'acme']);
+        QueueDispatcher::enqueue(['class' => OriginSeeingHandler::class, 'transport' => 'origin-spy', 'queue' => 'q'], new \stdClass(), new \stdClass());
+        $this->runInWorker(OriginSpyTransport::$published[0] ?? '');
+
         self::assertCount(1, OriginSpyTransport::$published);
         $payload = OriginSpyTransport::$published[0];
-        self::assertSame(['test.binding' => ['sb' => 'digest', 'tn' => 'acme']], json_decode($payload, true)['origin'] ?? null);
+        $message = json_decode($payload, true);
+        self::assertIsArray($message);
+        self::assertSame(['test.binding' => ['sb' => 'digest', 'tn' => 'acme']], $message['origin'] ?? null);
 
         self::assertSame(['sb' => 'digest', 'tn' => 'acme'], OriginSeeingHandler::$seen, $this->workerOutput);
         self::assertNull(QueuedOrigin::get('test.binding'), 'and not after it');
@@ -165,6 +168,11 @@ final class OriginSpyTransport implements QueueTransportInterface
 {
     /** @var list<string> */
     public static array $published = [];
+
+    public static function reset(): void
+    {
+        self::$published = [];
+    }
 
     public function publish(string $queueName, string $payload): void
     {

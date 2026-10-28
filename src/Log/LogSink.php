@@ -15,7 +15,16 @@ enum LogSink: string
 
     public static function fromEnv(?string $value): self
     {
-        return self::tryFrom(strtolower(trim((string) $value))) ?? self::File;
+        $name = strtolower(trim((string) $value));
+        $sink = self::tryFrom($name);
+        if ($sink === null && $name !== '') {
+            // Said, like a rejected LOG_CHANNELS pair: `stdout`, the likely guess
+            // in a container, sent everything to var/log/app.log and nothing
+            // to the collector, with no word why.
+            FallbackErrorLogger::log("LOG_SINK: ignored '{$name}' (it takes file, stderr or both); logging to the file.");
+        }
+
+        return $sink ?? self::File;
     }
 
     public function writesFile(): bool

@@ -58,8 +58,15 @@ final class CurrentFeatureFlags
     public static function subject(): ?array
     {
         $subject = CoroutineLocal::get(self::SUBJECT_KEY);
+        if (!is_array($subject)) {
+            return null;
+        }
+        // Rebuilt rather than returned as stored: any array under the key passed
+        // is_array(), and a caller reading [0] and [1] trusts both to be ids.
+        $tenantId = $subject[0] ?? null;
+        $userId = $subject[1] ?? null;
 
-        return is_array($subject) ? $subject : null;
+        return (is_string($tenantId) || $tenantId === null) && (is_string($userId) || $userId === null) ? [$tenantId, $userId] : null;
     }
 
     /** The flags set for this request, or null outside one. */

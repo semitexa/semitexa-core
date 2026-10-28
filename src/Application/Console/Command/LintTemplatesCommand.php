@@ -153,11 +153,21 @@ class LintTemplatesCommand extends BaseCommand
             return;
         }
 
-        foreach (self::mixedEscapingIncludes($templatesDir) as [$file, $included, $strategy]) {
+        $unreadable = [];
+        foreach (self::mixedEscapingIncludes($templatesDir, $unreadable) as [$file, $included, $strategy]) {
             $warnings[] = [
                 'module'  => $module,
                 'path'    => $this->relativePath($file, $projectRoot),
                 'message' => "Includes '{$included}', which is escaped as {$strategy}: inside this HTML template its variables print unescaped by HTML rules. Render it apart, or give the HTML a template of its own.",
+            ];
+        }
+        // An error, not a warning: what such a file includes went unchecked, and a lint
+        // that skips a file must not report it clean, with or without --strict.
+        foreach ($unreadable as $file) {
+            $errors[] = [
+                'module'  => $module,
+                'path'    => $this->relativePath($file, $projectRoot),
+                'message' => 'Cannot be read, so what it includes was not checked. Make it readable.',
             ];
         }
 
@@ -185,21 +195,29 @@ class LintTemplatesCommand extends BaseCommand
      * HTML templates that include, embed or import a template escaped by
      * another strategy: escaping follows each template's own extension
      * ('autoescape' => 'name'), so a .txt.twig inside a page prints its
-     * variables raw into HTML. Literal names only.
+     * variables raw into HTML. Literal names only, given alone or in a list
+     * (`include ['a.txt.twig', 'b.html.twig']`, which renders the first that exists).
      *
+     * @param list<string> $unreadable filled with the HTML templates that could not be read
      * @return list<array{string, string, string}> [file, included name, its strategy]
      */
-    public static function mixedEscapingIncludes(string $dir): array
+    public static function mixedEscapingIncludes(string $dir, array &$unreadable = []): array
     {
         $found = [];
         $files = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($dir, \FilesystemIterator::SKIP_DOTS));
+        /** @var \SplFileInfo $file */
         foreach ($files as $file) {
             $path = $file->getPathname();
             if (!str_ends_with($path, '.twig') || self::escapingOf($path) !== 'html') {
                 continue;
             }
-            $source = (string) @file_get_contents($path);
-            preg_match_all('/(?:\{%-?\s*(?:include|embed|import|from)\s+|\b(?:include|source)\(\s*)[\'"]([^\'"]+\.twig)[\'"]/', $source, $matches);
+            $source = @file_get_contents($path);
+            if ($source === false) {
+                $unreadable[] = $path;
+                continue;
+            }
+            preg_match_all('/(?:\{%-?\s*(?:include|embed|import|from)\s+|\b(?:include|source)\(\s*)(\[[^\]]*\]|[\'"][^\'"]+\.twig[\'"])/', $source, $arguments);
+            preg_match_all('/[\'"]([^\'"]+\.twig)[\'"]/', implode(' ', $arguments[1]), $matches);
             foreach (array_unique($matches[1]) as $included) {
                 $strategy = self::escapingOf($included);
                 if ($strategy !== 'html') {

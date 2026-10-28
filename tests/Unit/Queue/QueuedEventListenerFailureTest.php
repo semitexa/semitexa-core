@@ -246,9 +246,15 @@ final class QueuedEventListenerFailureTest extends TestCase
     public function an_unreadable_payload_too_large_with_its_readable_copy_goes_as_its_bytes(): void
     {
         QueuedListenerSpyTransport::$publishFailsOnce = new \RuntimeException('maximum payload exceeded');
+        $output = new BufferedOutput();
+        $worker = $this->worker('payments');
+        $worker->setOutput($output);
 
-        $this->worker('payments')->processPayload('not a message');
+        $worker->processPayload('not a message');
 
+        // Any refusal takes this path, a broker timeout as well as the size
+        // limit: the first one is said before the second publish hides it.
+        self::assertStringContainsString('Dead letter refused with its readable copy, sending the bytes alone: maximum payload exceeded', $output->fetch());
         self::assertCount(1, QueuedListenerSpyTransport::$published);
         $letter = json_decode(QueuedListenerSpyTransport::$published[0][1], true);
         self::assertSame(['raw_base64', 'error', 'failed_at'], array_keys($letter));

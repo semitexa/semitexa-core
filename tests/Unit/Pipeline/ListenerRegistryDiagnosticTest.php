@@ -85,7 +85,9 @@ final class ListenerRegistryDiagnosticTest extends TestCase
     {
         foreach ([AsyncListenerWithRetries::class => 1, QueuedListenerWithAQueue::class => 0] as $class => $expected) {
             $diagnostics = BootDiagnostics::begin();
-            (new EventListenerRegistry($this->discoveryReturning($class), new ModuleRegistry()))->ensureBuilt();
+            $registry = new EventListenerRegistry($this->discoveryReturning($class), new ModuleRegistry());
+            // Registered first: a listener discovery skipped has no warning either.
+            self::assertSame([$class], array_column($registry->getListeners(ListenerProbeEvent::class), 'class'));
             self::assertCount($expected, array_filter(
                 $diagnostics->getWarnings(),
                 static fn ($w): bool => $w->component === 'EventListenerRegistry',

@@ -29,13 +29,20 @@ final class QueueStatsRecorder
 
     /**
      * From QUEUE_STATS_STORE; null when it is off or cannot be opened (a
-     * worker runs without counters rather than not at all).
+     * worker runs without counters rather than not at all). Opening reads
+     * configuration only, so a failure here is not transient — Redis being
+     * away surfaces in record() — and the worker caching the null is right.
      */
     public static function fromEnvironment(): ?self
     {
         try {
             $store = QueueStatsStores::fromEnvironment();
-        } catch (\Throwable) {
+        } catch (\Throwable $e) {
+            // Said once: the worker counts nothing until it restarts, and
+            // queue:stats shows the missing jobs as zeros with no error.
+            FallbackErrorLogger::log('Queue statistics store could not be opened; this worker counts no jobs until it restarts', [
+                'error' => $e->getMessage(),
+            ]);
             return null;
         }
 

@@ -33,7 +33,8 @@ final class QueueInspection
     {
         // A NATS wildcard or a blank token would read other queues' dead
         // letters under its own name: `--queue='*'` listed every queue's.
-        if ($queue !== null && preg_match('/^[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)*$/', $queue) !== 1) {
+        // D: a bare `$` also matches before a final newline, so "orders\n" passed.
+        if ($queue !== null && preg_match('/^[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)*$/D', $queue) !== 1) {
             throw new \InvalidArgumentException("Not a queue name: '{$queue}' (letters, digits, '-', '_', dot-separated).");
         }
         $known = $this->allQueues();

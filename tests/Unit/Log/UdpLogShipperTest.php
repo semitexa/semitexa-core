@@ -100,9 +100,14 @@ final class UdpLogShipperTest extends TestCase
         return $logger;
     }
 
-    /** Lines a closed port refused are counted into the next line that gets through. */
+    /**
+     * Four lines to a closed port and the next one through said `remote_dropped: 1`:
+     * a datagram the kernel accepts can still be lost, so only a number on every
+     * line lets the collector see the loss. It does not depend on the port
+     * answering "unreachable", which not every kernel delivers.
+     */
     #[Test]
-    public function the_next_line_through_says_how_many_were_lost(): void
+    public function every_line_is_numbered_so_the_collector_sees_a_gap(): void
     {
         $closed = stream_socket_server('udp://127.0.0.1:0', $errno, $error, STREAM_SERVER_BIND);
         self::assertIsResource($closed);
@@ -113,8 +118,6 @@ final class UdpLogShipperTest extends TestCase
         for ($i = 0; $i < 4; $i++) {
             $shipper->ship('{"message":"lost ' . $i . '"}', []);
         }
-        $dropped = (new \ReflectionProperty(UdpLogShipper::class, 'dropped'))->getValue($shipper);
-        self::assertGreaterThan(0, $dropped, 'the port answered "unreachable" to some of them');
 
         // The collector comes back on that port.
         $back = stream_socket_server($address, $errno, $error, STREAM_SERVER_BIND);
@@ -125,7 +128,28 @@ final class UdpLogShipperTest extends TestCase
 
         $line = json_decode($this->receive(), true);
         self::assertSame('through', $line['message'] ?? null);
-        self::assertSame($dropped, $line['remote_dropped'] ?? null);
+        self::assertSame(5, $line['remote_seq'] ?? null, 'the first line it sees is the fifth: four are missing');
+    }
+
+    /** Lines skipped while the socket could not be opened were lost with no count at all. */
+    #[Test]
+    public function lines_not_sent_while_backing_off_are_counted_into_the_next(): void
+    {
+        $shipper = UdpLogShipper::fromEnv($this->address);
+        self::assertNotNull($shipper);
+        $failedAt = new \ReflectionProperty(UdpLogShipper::class, 'failedAt');
+        $failedAt->setValue($shipper, microtime(true));
+        for ($i = 0; $i < 3; $i++) {
+            $shipper->ship('{"message":"while away ' . $i . '"}', []);
+        }
+        self::assertSame('', $this->receive(), 'nothing is sent while backing off');
+
+        $failedAt->setValue($shipper, 0.0);
+        $shipper->ship('{"message":"back"}', []);
+        $shipper->ship('{"message":"after"}', []);
+
+        self::assertSame(['message' => 'back', 'remote_seq' => 4, 'remote_dropped' => 3], json_decode($this->receive(), true));
+        self::assertSame(['message' => 'after', 'remote_seq' => 5], json_decode($this->receive(), true), 'said once');
     }
 
     private function receive(): string
@@ -173,5 +197,51 @@ final class UdpLogShipperTest extends TestCase
         self::assertSame('[redacted]', $redacted['context']['dsn']);
         self::assertSame('Ann Lee', $redacted['context']['passenger'], 'not every word starting with pass');
         self::assertNull(UdpLogShipper::redacted(['message' => 'ok', 'context' => ['user' => 'ann']]), 'nothing to redact, nothing re-encoded');
+    }
+
+    /** Only keys were read: a secret inside a string, or a DTO's property, went out over plain UDP. */
+    #[Test]
+    public function secrets_inside_text_and_objects_do_not_leave_the_machine(): void
+    {
+        $dto = new class {
+            public string $password = 'hunter2';
+            public string $email = 'ann@example.com';
+        };
+        $entry = ['message' => 'Redis auth failed: redis://:s3cret@10.0.0.4:6379', 'context' => [
+            'error' => 'mysql://app:pw@db/app unreachable',
+            'curl' => "> GET / HTTP/1.1\nAuthorization: Basic YW5uOmh1bnRlcjI=\nCookie: sid=1; theme=dark\nAccept: */*",
+            'cli' => 'curl -H "Bearer abc123.def"',
+            'url' => '/dl?file=a.pdf&signature=f00d&token=beef',
+            'body' => '{"user":"ann","password":"two words"}',
+            'dto' => $dto,
+            'site' => 'https://example.com:8080/a?b=c@d',
+            'note' => 'prompt_tokens=812, passenger=Ann',
+        ]];
+
+        $redacted = UdpLogShipper::redacted($entry);
+
+        self::assertNotNull($redacted);
+        self::assertSame('Redis auth failed: redis://[redacted]@10.0.0.4:6379', $redacted['message']);
+        self::assertSame('mysql://[redacted]@db/app unreachable', $redacted['context']['error']);
+        self::assertSame("> GET / HTTP/1.1\nAuthorization: [redacted]\nCookie: [redacted]\nAccept: */*", $redacted['context']['curl']);
+        self::assertSame('curl -H "Bearer [redacted]"', $redacted['context']['cli']);
+        self::assertSame('/dl?file=a.pdf&signature=[redacted]&token=[redacted]', $redacted['context']['url']);
+        self::assertSame('{"user":"ann","password":[redacted]}', $redacted['context']['body']);
+        self::assertSame(['password' => '[redacted]', 'email' => 'ann@example.com'], $redacted['context']['dto'], 'read as it would be encoded');
+        self::assertSame('https://example.com:8080/a?b=c@d', $redacted['context']['site'], 'a port is not a password');
+        self::assertSame('prompt_tokens=812, passenger=Ann', $redacted['context']['note']);
+        self::assertNull(UdpLogShipper::redacted(['message' => 'ok', 'context' => ['at' => '2026-10-28T10:00:00+00:00', 'e' => new \RuntimeException('x')]]), 'an object with nothing to redact stays as it was');
+    }
+
+    /** A line over the datagram size went as a stub built from the message as written. */
+    #[Test]
+    public function the_stub_for_a_large_entry_carries_the_redacted_message(): void
+    {
+        $logger = $this->logger();
+
+        $logger->error('auth failed for redis://:s3cret@10.0.0.4', ['dump' => str_repeat('x', UdpLogShipper::MAX_DATAGRAM + 10)]);
+        $logger->flush();
+
+        self::assertSame('auth failed for redis://[redacted]@10.0.0.4', json_decode($this->receive(), true)['message'] ?? null);
     }
 }

@@ -25,15 +25,19 @@ final class CurlHttpClientTlsTest extends TestCase
 {
     private string $dir;
 
+    /** The process's own CA bundle setting, put back for the tests that run after this one. */
+    private string|false $sslCertFile;
+
     protected function setUp(): void
     {
+        $this->sslCertFile = getenv('SSL_CERT_FILE');
         $this->dir = sys_get_temp_dir() . '/semitexa-tls-' . bin2hex(random_bytes(6));
         mkdir($this->dir);
     }
 
     protected function tearDown(): void
     {
-        putenv('SSL_CERT_FILE');
+        putenv($this->sslCertFile === false ? 'SSL_CERT_FILE' : 'SSL_CERT_FILE=' . $this->sslCertFile);
         exec('rm -rf ' . escapeshellarg($this->dir));
     }
 
