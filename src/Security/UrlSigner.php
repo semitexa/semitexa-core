@@ -110,15 +110,17 @@ final class UrlSigner
     /** @param array<array-key, mixed> $query */
     private function signature(string $secret, string $path, array $query): string
     {
-        // Decoded, so `/files/a%20b` and `/files/a b` are one path whichever
-        // form the server hands over — except an encoded slash, which the
-        // router keeps apart from a real one: `/files/a%2Fb` must not verify
-        // as `/files/a/b`, another route. An encoded % stays encoded too, or
-        // `/files/a%252Fb` (a literal "%2F") signed the same as `a%2Fb`. The
-        // case of their hex digits is kept: routing tells `a%2Fb` from `a%2fb`,
-        // and one signature for both let a link open a route it was not made
-        // for. A link asked for in the other case is refused, not widened.
-        $canonicalPath = rawurldecode((string) preg_replace('/%(25|2F)/i', '%25$1', $path));
+        // The path as the router matches it: raw, never decoded. Routing tells
+        // `/files/%61dmin` from `/files/admin`, `a%2Fb` from `a/b` and from
+        // `a%2fb`, so a signature for one that verified another let a link
+        // open a route it was not made for. Only what a client must escape is
+        // encoded (as a browser sends it, upper hex), so `/files/a b` signs as
+        // the `/files/a%20b` it arrives as; every escape already there is kept.
+        $canonicalPath = (string) preg_replace_callback(
+            "~[^A-Za-z0-9\\-._\\~!$&'()*+,;=:@/%]~",
+            static fn (array $byte): string => sprintf('%%%02X', ord($byte[0])),
+            $path,
+        );
         $mac = hash_hmac('sha256', $canonicalPath . '?' . self::canonicalQuery($query), AppSecret::derive($secret, self::PURPOSE), true);
 
         return rtrim(strtr(base64_encode($mac), '+/', '-_'), '=');
