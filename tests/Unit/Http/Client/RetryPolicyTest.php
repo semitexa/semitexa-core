@@ -29,7 +29,7 @@ final class RetryPolicyTest extends TestCase
     public function the_statuses_worth_another_try(): void
     {
         $policy = RetryPolicy::idempotent();
-        foreach ([429, 500, 502, 503, 504] as $status) {
+        foreach ([429, 500, 502, 503, 504, 529] as $status) {
             self::assertTrue($policy->retriesStatus($status), (string) $status);
         }
         foreach ([200, 400, 401, 404, 409, 501] as $status) {
@@ -52,10 +52,17 @@ final class RetryPolicyTest extends TestCase
     public function retry_after_is_honoured_up_to_the_cap(): void
     {
         $policy = RetryPolicy::idempotent(3, 200, 5000);
-        $never = static fn (int $min, int $max): int => throw new \LogicException('no jitter with Retry-After');
+        $least = static fn (int $min, int $max): int => $min;
+        $most = static fn (int $min, int $max): int => $max;
 
-        self::assertSame(2000, $policy->delayMs(1, RetryPolicy::retryAfterMs('2', 0), $never));
-        self::assertSame(5000, $policy->delayMs(1, RetryPolicy::retryAfterMs('120', 0), $never), 'capped');
+        self::assertSame(2000, $policy->delayMs(1, RetryPolicy::retryAfterMs('2', 0), $least));
+        self::assertTrue($policy->honours(RetryPolicy::retryAfterMs('2', 0)));
+        // Cut to the cap, "wait 30 s" became 5 s and the provider was asked
+        // again: a wait past the cap is not retried, the 429 is returned.
+        self::assertFalse($policy->honours(RetryPolicy::retryAfterMs('30', 0)));
+        self::assertTrue($policy->honours(null));
+        // "0" waited nothing: never less than the policy's own backoff.
+        self::assertSame(400, $policy->delayMs(2, RetryPolicy::retryAfterMs('0', 0), $most));
         self::assertSame(3000, RetryPolicy::retryAfterMs(gmdate('D, d M Y H:i:s', 1_000_003) . ' GMT', 1_000_000));
         self::assertNull(RetryPolicy::retryAfterMs('soon', 0));
         self::assertNull(RetryPolicy::retryAfterMs(null, 0));
@@ -69,6 +76,7 @@ final class RetryPolicyTest extends TestCase
         $never = static fn (int $min, int $max): int => 0;
         self::assertSame(RetryPolicy::MAX_RETRY_AFTER_MS, RetryPolicy::retryAfterMs('99999999999999999999999', 0));
         self::assertSame(30_000, RetryPolicy::linear(3)->delayMs(1, RetryPolicy::retryAfterMs('999999', 0), $never), 'the policy cap, under the global one');
+        self::assertFalse(RetryPolicy::linear(3)->honours(RetryPolicy::retryAfterMs('999999', 0)), 'and it is not waited for at all');
         self::assertNull(RetryPolicy::retryAfterMs('+10 years', 0), 'only an HTTP date, not anything strtotime() takes');
         self::assertSame(30_000, RetryPolicy::linear(1000, 500)->delayMs(999, null, $never), 'linear is capped too');
     }

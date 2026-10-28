@@ -13,6 +13,7 @@ use Semitexa\Core\Event\EventDispatcher;
 use Semitexa\Core\Queue\Message\QueuedEventListenerMessage;
 use Semitexa\Core\Queue\QueueTransportFactoryInterface;
 use Semitexa\Core\Queue\QueueTransportInterface;
+use Semitexa\Core\Queue\DeadLetterUnwritableException;
 use Semitexa\Core\Queue\QueueTransportRegistry;
 use Semitexa\Core\Queue\QueueWorker;
 use Semitexa\Core\Tests\Support\StaticState;
@@ -45,6 +46,7 @@ final class QueuedEventListenerFailureTest extends TestCase
         QueueTransportRegistry::reset();
         QueuedListenerSpyTransport::$published = [];
         QueuedListenerSpyTransport::$publishFails = null;
+        QueuedListenerSpyTransport::$publishFailsOnce = null;
         QueueTransportRegistry::register(self::TRANSPORT, new QueuedListenerSpyTransportFactory());
         QueuedListenerFixture::$received = [];
         QueuedListenerFixture::$failWith = null;
@@ -214,24 +216,49 @@ final class QueuedEventListenerFailureTest extends TestCase
     }
 
     /**
-     * When the dead letter cannot be written the worker still returns, and every
-     * transport then counts the payload as handled: the log line is all that is
-     * left of it, so it says the message may be lost and names it by size and hash.
+     * When the dead letter cannot be written the worker returned, and every
+     * transport then counted the payload as handled: it was gone. It throws now,
+     * as the structured path does, and the transport hands the payload back.
      */
     #[Test]
-    public function an_unreadable_payload_whose_dead_letter_fails_is_logged_as_possibly_lost_with_its_size_and_hash(): void
+    public function an_unreadable_payload_whose_dead_letter_fails_is_left_on_the_queue(): void
     {
         QueuedListenerSpyTransport::$publishFails = new \RuntimeException('broker down');
         $output = new BufferedOutput();
         $worker = $this->worker('payments');
         $worker->setOutput($output);
 
-        $worker->processPayload('not a message');
+        try {
+            $worker->processPayload('not a message');
+            self::fail('the payload was taken as handled');
+        } catch (DeadLetterUnwritableException $e) {
+            self::assertSame('The dead letter could not be written: broker down', $e->getMessage());
+        }
 
         self::assertStringContainsString(
-            sprintf('Unreadable message may be lost: the dead letter could not be written (13 bytes, sha1 %s): broker down', sha1('not a message')),
+            sprintf('Unreadable message left on the queue: the dead letter could not be written (13 bytes, sha1 %s): broker down', sha1('not a message')),
             $output->fetch(),
         );
+    }
+
+    /** The readable copy more than doubles the letter: one too large for the broker goes as the bytes alone. */
+    #[Test]
+    public function an_unreadable_payload_too_large_with_its_readable_copy_goes_as_its_bytes(): void
+    {
+        QueuedListenerSpyTransport::$publishFailsOnce = new \RuntimeException('maximum payload exceeded');
+        $output = new BufferedOutput();
+        $worker = $this->worker('payments');
+        $worker->setOutput($output);
+
+        $worker->processPayload('not a message');
+
+        // Any refusal takes this path, a broker timeout as well as the size
+        // limit: the first one is said before the second publish hides it.
+        self::assertStringContainsString('Dead letter refused with its readable copy, sending the bytes alone: maximum payload exceeded', $output->fetch());
+        self::assertCount(1, QueuedListenerSpyTransport::$published);
+        $letter = json_decode(QueuedListenerSpyTransport::$published[0][1], true);
+        self::assertSame(['raw_base64', 'error', 'failed_at'], array_keys($letter));
+        self::assertSame('not a message', base64_decode((string) $letter['raw_base64'], true));
     }
 
     private function message(int $maxRetries): string
@@ -322,10 +349,18 @@ final class QueuedListenerSpyTransport implements QueueTransportInterface
 
     public static ?\Throwable $publishFails = null;
 
+    /** Thrown by the next publish only. */
+    public static ?\Throwable $publishFailsOnce = null;
+
     public function publish(string $queueName, string $payload): void
     {
         if (self::$publishFails !== null) {
             throw self::$publishFails;
+        }
+        if (self::$publishFailsOnce !== null) {
+            $once = self::$publishFailsOnce;
+            self::$publishFailsOnce = null;
+            throw $once;
         }
         self::$published[] = [$queueName, $payload];
     }

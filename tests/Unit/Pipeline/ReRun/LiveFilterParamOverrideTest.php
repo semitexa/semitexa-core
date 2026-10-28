@@ -26,6 +26,33 @@ final class LiveFilterParamOverrideTest extends TestCase
     // field is IGNORED — in the SAME command.
     // -----------------------------------------------------------------------
 
+    /** One valid signed link, then a view-change with values its signature never covered. */
+    #[Test]
+    public function a_signed_payload_takes_no_override(): void
+    {
+        $dto = new SignedLiveFilterFixtureDto();
+        $dto->setPage(1);
+
+        $result = LiveFilterParamOverride::apply($dto, ['page' => '3']);
+
+        self::assertSame(1, $dto->getPage(), 'the value the signature covered');
+        self::assertSame([], $result['applied']);
+        self::assertSame(['page'], $result['ignored']);
+    }
+
+    /** A payload with parts is built as a generated subclass; the attribute is on its parent. */
+    #[Test]
+    public function a_subclass_of_a_signed_payload_takes_no_override(): void
+    {
+        $dto = new GeneratedSignedLiveFilterFixtureDto();
+        $dto->setPage(1);
+
+        $result = LiveFilterParamOverride::apply($dto, ['page' => '3']);
+
+        self::assertSame(1, $dto->getPage(), 'the value the signature covered');
+        self::assertSame(['applied' => [], 'ignored' => ['page']], $result);
+    }
+
     #[Test]
     public function a_marked_field_is_applied_and_an_unmarked_identity_field_is_ignored(): void
     {
@@ -234,4 +261,26 @@ final class LiveFilterFixtureDto
     {
         return $this->page;
     }
+}
+
+#[\Semitexa\Core\Attribute\RequiresSignedUrl]
+class SignedLiveFilterFixtureDto
+{
+    #[LiveFilterParam]
+    protected ?int $page = null;
+
+    public function setPage(?int $v): void
+    {
+        $this->page = $v;
+    }
+
+    public function getPage(): ?int
+    {
+        return $this->page;
+    }
+}
+
+/** What PayloadFactory builds for a payload with parts: a subclass, no attribute of its own. */
+final class GeneratedSignedLiveFilterFixtureDto extends SignedLiveFilterFixtureDto
+{
 }

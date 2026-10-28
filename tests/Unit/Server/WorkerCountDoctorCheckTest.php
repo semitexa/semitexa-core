@@ -51,6 +51,16 @@ final class WorkerCountDoctorCheckTest extends TestCase
         }
     }
 
+    /** Only `prod` was a server: `production` and `staging` passed with one worker. */
+    #[Test]
+    public function one_worker_in_any_server_environment_warns(): void
+    {
+        foreach (['production', 'staging'] as $env) {
+            self::assertSame('warn', WorkerCountDoctorCheck::verdict('1', '10000', $env)->status->value, $env);
+        }
+        self::assertSame('pass', WorkerCountDoctorCheck::verdict('1', '10000', 'test')->status->value);
+    }
+
     #[Test]
     public function one_worker_in_development_passes_and_still_says_what_it_would_mean_in_production(): void
     {

@@ -30,7 +30,9 @@ final readonly class DeadLetter
         if (!is_array($data)) {
             return new self($id, $queue, '', 0, 'unreadable', null, $stored, false);
         }
-        if (isset($data['raw'])) {
+        // Either copy marks it: a letter too large with both is written with
+        // the bytes alone, and read as a message it was queued again as one.
+        if (isset($data['raw']) || isset($data['raw_base64'])) {
             // What QueueWorker wrote for a message it could not decode: the
             // raw text, why, and when. A non-string error is no reason to print.
             $error = $data['error'] ?? '';

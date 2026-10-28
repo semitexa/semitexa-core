@@ -20,6 +20,8 @@ final class AsyncJsonLoggerTest extends TestCase
     /** @var array{class: class-string, values: array<string, mixed>} */
     private array $projectRootState;
 
+    private ?string $previousLogSink = null;
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -30,6 +32,7 @@ final class AsyncJsonLoggerTest extends TestCase
         $this->previousLogFile = getenv('LOG_FILE') !== false ? (string) getenv('LOG_FILE') : null;
         $this->previousLogLevel = getenv('LOG_LEVEL') !== false ? (string) getenv('LOG_LEVEL') : null;
         $this->previousLogMaxBytes = getenv('LOG_MAX_BYTES') !== false ? (string) getenv('LOG_MAX_BYTES') : null;
+        $this->previousLogSink = getenv('LOG_SINK') !== false ? (string) getenv('LOG_SINK') : null;
     }
 
     protected function tearDown(): void
@@ -41,9 +44,32 @@ final class AsyncJsonLoggerTest extends TestCase
         // process. putenv() is process-wide; a test that unsets what it did not
         // set poisons whatever runs after it.
         $this->restoreEnv('LOG_MAX_BYTES', $this->previousLogMaxBytes);
+        $this->restoreEnv('LOG_SINK', $this->previousLogSink);
         StaticState::restore($this->projectRootState);
 
         parent::tearDown();
+    }
+
+    /**
+     * One write per batch: past the 4 KiB a pipe takes whole, another
+     * worker's write could land mid-line in the container's log.
+     */
+    #[Test]
+    public function stderr_is_written_in_pipe_sized_runs_of_whole_lines(): void
+    {
+        $chunks = new \ReflectionMethod(AsyncJsonLogger::class, 'pipeSizedChunks');
+        $line = str_repeat('x', 999) . "\n";
+        $batch = str_repeat($line, 10) . str_repeat('y', 5000) . "\n" . $line;
+
+        /** @var list<string> $written */
+        $written = $chunks->invoke(null, $batch);
+
+        self::assertSame($batch, implode('', $written), 'nothing lost or reordered');
+        foreach ($written as $chunk) {
+            self::assertStringEndsWith("\n", $chunk, 'never a line cut in two');
+            self::assertTrue(strlen($chunk) <= 4096 || substr_count($chunk, "\n") === 1, 'a run fits a pipe write, or is one long line alone');
+        }
+        self::assertSame([str_repeat('a', 10) . "\n"], $chunks->invoke(null, str_repeat('a', 10) . "\n"), 'a short batch is one write');
     }
 
     #[Test]
@@ -171,6 +197,97 @@ final class AsyncJsonLoggerTest extends TestCase
             foreach (glob($absolutePath . '*') ?: [] as $leftover) {
                 @unlink($leftover);
             }
+        }
+    }
+
+    #[Test]
+    public function the_stderr_sink_writes_json_lines_where_a_container_collects_them(): void
+    {
+        ProjectRoot::reset();
+        $relativePath = 'var/tmp/async-json-logger-test-' . bin2hex(random_bytes(6)) . '.log';
+        $file = ProjectRoot::get() . '/' . $relativePath;
+        $stderr = sys_get_temp_dir() . '/async-json-logger-stderr-' . bin2hex(random_bytes(6));
+
+        try {
+            foreach (['stderr' => [false, true], 'both' => [true, true], 'file' => [true, false], 'nonsense' => [true, false]] as $sink => [$toFile, $toStderr]) {
+                @unlink($file);
+                @unlink($stderr);
+                putenv('LOG_FILE=' . $relativePath);
+                putenv('LOG_LEVEL=debug');
+                putenv('LOG_SINK=' . $sink);
+                $logger = new AsyncJsonLogger();
+                $this->injectEnvironment($logger);
+                (new \ReflectionProperty($logger, 'stderrTarget'))->setValue($logger, $stderr);
+
+                $logger->warning('disk almost full', ['_channel' => 'storage', 'free' => '2%']);
+                $logger->flush();
+
+                self::assertSame($toFile, is_file($file), "LOG_SINK={$sink}: file");
+                self::assertSame($toStderr, is_file($stderr), "LOG_SINK={$sink}: stderr");
+                if ($toStderr) {
+                    $entry = json_decode(trim((string) file_get_contents($stderr)), true);
+                    self::assertSame('disk almost full', $entry['message'] ?? null);
+                    self::assertSame('storage', $entry['channel'] ?? null);
+                }
+            }
+        } finally {
+            @unlink($file);
+            @unlink($stderr);
+        }
+    }
+
+    #[Test]
+    public function log_channels_route_a_channel_to_its_own_file_to_stderr_or_nowhere(): void
+    {
+        // A channel was a field on the line: every channel went to the one sink.
+        ProjectRoot::reset();
+        $tag = bin2hex(random_bytes(6));
+        $main = "var/tmp/async-json-logger-main-{$tag}.log";
+        $audit = "var/log/async-json-logger-audit-{$tag}.log";
+        $stderr = sys_get_temp_dir() . "/async-json-logger-stderr-{$tag}";
+        $previous = getenv('LOG_CHANNELS');
+        try {
+            putenv('LOG_FILE=' . $main);
+            putenv('LOG_LEVEL=debug');
+            putenv('LOG_SINK=file');
+            putenv("LOG_CHANNELS=audit={$audit}, security=stderr, sql=off, broken=../../etc/x.log, swoole=var/log/swoole.log");
+            $logger = new AsyncJsonLogger();
+            $this->injectEnvironment($logger);
+            (new \ReflectionProperty($logger, 'stderrTarget'))->setValue($logger, $stderr);
+
+            $logger->info('signed in', ['_channel' => 'audit']);
+            $logger->warning('token reused', ['_channel' => 'security']);
+            $logger->debug('select 1', ['_channel' => 'sql']);
+            $logger->info('no channel');
+            $logger->info('unsafe route ignored', ['_channel' => 'broken']);
+            $logger->info('framework log refused', ['_channel' => 'swoole']);
+            $logger->flush();
+
+            $messages = static fn (string $path): array => is_file($path)
+                ? array_map(static fn (string $l): string => json_decode($l, true)['message'], array_filter(explode("\n", (string) file_get_contents($path))))
+                : [];
+            self::assertSame(['signed in'], $messages(ProjectRoot::get() . '/' . $audit));
+            self::assertSame(['token reused'], $messages($stderr));
+            self::assertSame(['no channel', 'unsafe route ignored', 'framework log refused'], array_values($messages(ProjectRoot::get() . '/' . $main)), 'sql is off; the rest follows LOG_SINK');
+
+            // A batch (as under Swoole's defer): a file two routes write keeps the logged order.
+            @unlink(ProjectRoot::get() . '/' . $main);
+            putenv('LOG_CHANNELS=security=both');
+            $batched = new AsyncJsonLogger();
+            $this->injectEnvironment($batched);
+            (new \ReflectionProperty($batched, 'stderrTarget'))->setValue($batched, $stderr);
+            (new \ReflectionProperty($batched, 'buffer'))->setValue($batched, [
+                ['timestamp' => 't', 'level' => 'info', 'message' => 'A', 'context' => []],
+                ['timestamp' => 't', 'level' => 'info', 'message' => 'S', 'context' => [], 'channel' => 'security'],
+                ['timestamp' => 't', 'level' => 'info', 'message' => 'B', 'context' => []],
+            ]);
+            $batched->flush();
+            self::assertSame(['A', 'S', 'B'], array_values($messages(ProjectRoot::get() . '/' . $main)));
+        } finally {
+            $previous === false ? putenv('LOG_CHANNELS') : putenv('LOG_CHANNELS=' . $previous);
+            @unlink(ProjectRoot::get() . '/' . $main);
+            @unlink(ProjectRoot::get() . '/' . $audit);
+            @unlink($stderr);
         }
     }
 

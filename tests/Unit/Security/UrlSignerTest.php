@@ -102,6 +102,14 @@ final class UrlSignerTest extends TestCase
         self::assertSame(SignatureCheck::Invalid, $signer->check('/files/a/b', $query));
     }
 
+    /** PHP_INT_MAX overflowed into `expires=9.22E+18`, expired from the start. */
+    #[Test]
+    public function a_ttl_past_ten_years_is_refused(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        UrlSigner::withSecrets('secret-a')->sign('/a', PHP_INT_MAX);
+    }
+
     #[Test]
     public function a_zero_ttl_or_a_url_that_does_not_parse_is_refused(): void
     {

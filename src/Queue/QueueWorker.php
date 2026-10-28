@@ -28,6 +28,7 @@ class QueueWorker
      */
     private ?string $messageStatus = null;
     private ?string $messageProblem = null;
+    private bool $messageLeftOnQueue = false;
 
     /**
      * Whether {@see $messageProblem} came from an error-level line.
@@ -105,6 +106,7 @@ class QueueWorker
         $this->currentQueue = $queueName ?: QueueConfig::defaultQueueName('default');
 
         $transport = QueueTransportRegistry::create($this->currentTransport);
+        QueueStopSignals::install($transport, fn (string $message) => $this->log($message));
 
         $this->log("👷  Queue worker started (transport={$this->currentTransport}, queue={$this->currentQueue})");
 
@@ -126,6 +128,7 @@ class QueueWorker
         $this->attemptEndedAt = null;
         $this->messageStatus = null;
         $this->messageProblem = null;
+        $this->messageLeftOnQueue = false;
         $this->messageProblemIsError = false;
         $this->messageRetried = false;
 
@@ -172,7 +175,7 @@ class QueueWorker
             // aggregate stats — the message has not finished — but the journal
             // describes THIS execution, and calling it a success would hide a
             // handler that threw.
-            $failed = $this->messageStatus === 'failed' || $this->messageRetried;
+            $failed = $this->messageStatus === 'failed' || $this->messageRetried || $this->messageLeftOnQueue;
             $tracer?->end('job', array_filter([
                 'status' => $failed ? 'failed' : 'success',
                 'error' => $failed ? self::truncate((string) $this->messageProblem) : null,
@@ -243,6 +246,9 @@ class QueueWorker
                 return;
             }
         } catch (\Throwable $e) {
+            if ($e instanceof DeadLetterUnwritableException) {
+                throw $e;
+            }
             // The event could not be rebuilt or the listener not built: the
             // listener's own policy, as for a throw inside it — not acknowledged
             // and dropped, which lost the event on every delivery.
@@ -314,6 +320,9 @@ class QueueWorker
                 return;
             }
         } catch (\Throwable $e) {
+            if ($e instanceof DeadLetterUnwritableException) {
+                throw $e;
+            }
             $this->log("❌ Error processing payload: {$e->getMessage()}", 'error');
             $this->retryOrDeadLetter($message, "could not prepare the handler: {$e->getMessage()}");
             return;
@@ -321,8 +330,12 @@ class QueueWorker
 
         try {
             // The resource a typed handler returns is its result, as on the sync path.
-            $result = $handler->handle($request, $response);
-            $this->deliverAsyncResult($message->sessionId, is_object($result) ? $result : $response, $handlerClass);
+            // Run inside what the queuing request contributed (QueuedOrigin):
+            // the reply renders here, for that request's visitor.
+            QueuedOrigin::run($message->origin, function () use ($handler, $request, $response, $message, $handlerClass): void {
+                $result = $handler->handle($request, $response);
+                $this->deliverAsyncResult($message->sessionId, is_object($result) ? $result : $response, $handlerClass);
+            });
             $this->log("✅ Queued handler executed: {$handlerClass}", 'success');
             $this->updateStats('processed');
         } catch (\Throwable $e) {
@@ -345,7 +358,7 @@ class QueueWorker
             $delay = $message->retryDelay;
             $this->attemptEndedAt = microtime(true);
             $kind = $message instanceof QueuedHandlerMessage ? 'handler' : 'listener';
-            $this->log("ℹ️  Retrying {$kind} ({$message->attempts}/{$message->maxRetries}) in {$delay}s...", 'warning');
+            $this->log("ℹ️  Retrying {$kind} {$message->messageId} ({$message->attempts}/{$message->maxRetries}) in {$delay}s...", 'warning');
 
             $transport = null;
             if ($this->currentTransport && $this->currentQueue) {
@@ -389,25 +402,41 @@ class QueueWorker
      */
     private function deadLetterRaw(string $payload, string $error): void
     {
+        $dlqName = ($this->currentQueue ?: 'default') . '.failed';
+        $letter = static fn (bool $full): string => (string) json_encode([
+            ...($full ? ['raw' => $payload] : []),
+            'raw_base64' => base64_encode($payload),
+            'error' => $error,
+            'failed_at' => date(DATE_ATOM),
+        ], JSON_INVALID_UTF8_SUBSTITUTE);
         try {
             $transport = QueueTransportRegistry::create($this->currentTransport ?: QueueConfig::defaultTransport());
-            $dlqName = ($this->currentQueue ?: 'default') . '.failed';
-            $transport->publish($dlqName, (string) json_encode([
-                'raw' => $payload,
-                'raw_base64' => base64_encode($payload),
-                'error' => $error,
-                'failed_at' => date(DATE_ATOM),
-            ], JSON_INVALID_UTF8_SUBSTITUTE));
+            try {
+                $transport->publish($dlqName, $letter(true));
+            } catch (\Throwable $first) {
+                // The readable copy beside the bytes more than doubles the
+                // letter: one past the broker's max_payload goes as the bytes
+                // alone, or it would be refused on every delivery. Said first:
+                // any refusal lands here, and once the second publish succeeds
+                // nothing else records why the readable copy is missing.
+                $this->log("⚠️ Dead letter refused with its readable copy, sending the bytes alone: {$first->getMessage()}", 'warning');
+                $transport->publish($dlqName, $letter(false));
+            }
             $this->log("📥 Unreadable message moved to DLQ: {$dlqName}", 'warning');
         } catch (\Throwable $dlqError) {
-            // The worker still returns, so the transport counts the payload as
-            // handled: this line is all that is left of it.
+            // Thrown, as the structured path throws: logged and returned, the
+            // transport counted the payload as handled and it was gone. The
+            // transport hands it back to be delivered again.
             $this->log(sprintf(
-                '❌ Unreadable message may be lost: the dead letter could not be written (%d bytes, sha1 %s): %s',
+                '❌ Unreadable message left on the queue: the dead letter could not be written (%d bytes, sha1 %s): %s',
                 strlen($payload),
                 sha1($payload),
                 $dlqError->getMessage(),
             ), 'error');
+            $this->messageLeftOnQueue = true;
+            $this->messageProblem = 'the dead letter could not be written: ' . $dlqError->getMessage();
+
+            throw new DeadLetterUnwritableException('The dead letter could not be written: ' . $dlqError->getMessage(), 0, $dlqError);
         }
     }
 
@@ -424,10 +453,21 @@ class QueueWorker
             $data = $message->jsonSerialize();
             $data['error'] = $error;
             $data['failed_at'] = date(DATE_ATOM);
-            $transport->publish($dlqName, json_encode($data));
-            $this->log("📥 Message moved to DLQ: {$dlqName}", 'warning');
+            $transport->publish($dlqName, json_encode($data, JSON_THROW_ON_ERROR | JSON_INVALID_UTF8_SUBSTITUTE));
+            $this->log("📥 Message {$message->messageId} moved to DLQ: {$dlqName}", 'warning');
         } catch (\Throwable $dlqError) {
-            $this->log("❌ Failed to move message to DLQ: {$dlqError->getMessage()}", 'error');
+            // Logged and returned, the transport acknowledged the message and
+            // it was gone: NATS down past one reconnect, or a payload the
+            // dead letter's added fields push past max_payload. Thrown, the
+            // transport hands it back to be delivered again.
+            $this->log("❌ Failed to move message to DLQ, leaving it on the queue: {$dlqError->getMessage()}", 'error');
+
+            // For the journal: this attempt failed. Not for the stats: the
+            // message is not finished, it comes back.
+            $this->messageLeftOnQueue = true;
+            $this->messageProblem = 'the dead letter could not be written: ' . $dlqError->getMessage();
+
+            throw new DeadLetterUnwritableException('The dead letter could not be written: ' . $dlqError->getMessage(), 0, $dlqError);
         }
     }
 
@@ -459,12 +499,7 @@ class QueueWorker
         }
         if (!$this->statsResolved) {
             $this->statsResolved = true;
-            try {
-                $store = QueueStatsStores::fromEnvironment();
-                $this->stats = $store === null ? null : new QueueStatsRecorder($store);
-            } catch (\Throwable) {
-                $this->stats = null;
-            }
+            $this->stats = QueueStatsRecorder::fromEnvironment();
         }
         $this->stats?->record(
             (string) $this->currentQueue,

@@ -11,6 +11,8 @@ use Semitexa\Core\Http\UploadedFile;
  */
 class RequestFactory
 {
+    private const MAX_FILE_NAME_DEPTH = 16;
+
     /**
      * Create Request (Swoole-only)
      */
@@ -115,9 +117,11 @@ class RequestFactory
      * @param mixed $files
      * @return array<string, UploadedFile|list<UploadedFile>>
      */
-    public static function normalizeFiles(mixed $files): array
+    public static function normalizeFiles(mixed $files, int $depth = 0): array
     {
-        if (!is_array($files)) {
+        // Nested names are followed this deep; a form never needs more, and a
+        // hostile `a[x][x]…` costs memory with the square of its depth.
+        if (!is_array($files) || $depth > self::MAX_FILE_NAME_DEPTH) {
             return [];
         }
 
@@ -161,21 +165,53 @@ class RequestFactory
                 }
                 if ($list !== []) {
                     $out[$field] = $list;
+                    continue;
                 }
-                continue;
+                // No file entries in it: a list of groups, items[0][avatar], which Shape 4 names.
             }
 
             // Shape 3b: $_FILES-style array of arrays — `name`, `type`, `tmp_name`, … all parallel lists.
-            if (isset($entry['name']) && is_array($entry['name'])) {
+            // Lists of strings, not any array: a nested group with a file field
+            // called `name` (doc[name] beside doc[avatar]) was read as this
+            // shape, and became a list of empty uploads with doc[avatar] gone.
+            if (isset($entry['name'], $entry['tmp_name']) && self::isStringList($entry['name']) && self::isStringList($entry['tmp_name'])) {
                 /** @var array<string, mixed> $entry */
                 $list = self::explodeParallelFileEntry($field, $entry);
                 if ($list !== []) {
                     $out[$field] = $list;
                 }
+                continue;
+            }
+
+            // Shape 4: a nested field name. Swoole hands `doc[avatar]` over as
+            // ['doc' => ['avatar' => entry]], and it used to be dropped: the
+            // upload vanished without a word. Each file is kept under the
+            // name the form gave it, `doc[avatar]`, `deep[x][y]`.
+            foreach ($entry as $subField => $subEntry) {
+                if (!is_string($subField) && !is_int($subField)) {
+                    continue;
+                }
+                foreach (self::normalizeFiles([$field . '[' . $subField . ']' => $subEntry], $depth + 1) as $name => $file) {
+                    $out[$name] = $file;
+                }
             }
         }
 
         return $out;
+    }
+
+    private static function isStringList(mixed $value): bool
+    {
+        if (!is_array($value) || $value === []) {
+            return false;
+        }
+        foreach ($value as $item) {
+            if (!is_string($item)) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /**

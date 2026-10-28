@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Semitexa\Core\Pipeline\ReRun;
 
 use Semitexa\Core\Attribute\LiveFilterParam;
+use Semitexa\Core\Attribute\RequiresSignedUrl;
 
 /**
  * Intended Grid Model — the FILTER-ONLY param override,
@@ -61,6 +62,16 @@ final class LiveFilterParamOverride
     {
         if ($params === []) {
             return ['applied' => [], 'ignored' => []];
+        }
+
+        // A signed link's parameters are what its signature covers: a re-run
+        // took the visitor's values for them, unchecked, from one valid link.
+        // Looked up the hierarchy, as SignedUrlListener does: a payload with
+        // parts is a generated subclass, and the attribute sits on its parent.
+        for ($class = new \ReflectionClass($dto); $class !== false; $class = $class->getParentClass()) {
+            if ($class->getAttributes(RequiresSignedUrl::class) !== []) {
+                return ['applied' => [], 'ignored' => array_map('strval', array_keys($params))];
+            }
         }
 
         $allowList = self::allowedProperties($dto);

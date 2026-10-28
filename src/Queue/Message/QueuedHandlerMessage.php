@@ -26,9 +26,22 @@ class QueuedHandlerMessage implements \JsonSerializable
          * time a job waited is start minus this, not minus the first attempt.
          */
         public int $publishedAt = 0,
+        /**
+         * The same on every retry and in its dead letter: one job could not be
+         * followed from attempt to attempt to the letter, in logs or queue:failed.
+         */
+        public string $messageId = '',
+        /**
+         * What the queuing request contributes to the job's reply
+         * ({@see \Semitexa\Core\Queue\QueuedOrigin}).
+         *
+         * @var array<array-key, mixed>
+         */
+        public array $origin = [],
     ) {
         $this->queuedAt = $queuedAt ?: date(DATE_ATOM);
         $this->publishedAt = $publishedAt ?: self::nowMs();
+        $this->messageId = $messageId !== '' ? $messageId : 'm-' . bin2hex(random_bytes(8));
     }
 
     public function jsonSerialize(): array
@@ -46,6 +59,8 @@ class QueuedHandlerMessage implements \JsonSerializable
             'maxRetries' => $this->maxRetries,
             'retryDelay' => $this->retryDelay,
             'publishedAt' => $this->publishedAt,
+            'messageId' => $this->messageId,
+            'origin' => $this->origin,
         ];
     }
 
@@ -89,6 +104,8 @@ class QueuedHandlerMessage implements \JsonSerializable
             maxRetries: $data['maxRetries'] ?? 0,
             retryDelay: $data['retryDelay'] ?? 0,
             publishedAt: self::publishedAtOf($data),
+            messageId: is_string($data['messageId'] ?? null) ? $data['messageId'] : '',
+            origin: is_array($data['origin'] ?? null) ? $data['origin'] : [],
         );
     }
 

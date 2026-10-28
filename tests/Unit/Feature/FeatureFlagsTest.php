@@ -18,9 +18,14 @@ use Semitexa\Core\Tests\Support\StaticState;
 
 #[AsFeatureFlag('checkout.new-flow', description: 'One-page checkout')]
 #[AsFeatureFlag('search.semantic', default: true)]
-#[AsFeatureFlag('Bad Name')]
 #[AsFeatureFlag('rollout.half', percent: 50)]
 final class FeatureFlagsTestDeclarations
+{
+}
+
+/** Its own class: the generated attribute reference takes its example from the first declaration it finds. */
+#[AsFeatureFlag('Bad Name')]
+final class FeatureFlagsTestRefusedName
 {
 }
 
@@ -147,11 +152,11 @@ final class FeatureFlagsTest extends TestCase
         self::assertFalse($flags->forSubject('t', 'u')->isEnabled('c'));
     }
 
-    /** @param list<string>|null $classes what discovery names; the two declaring classes when null */
+    /** @param list<string>|null $classes what discovery names; the declaring classes when null */
     private static function registry(?array $classes = null): FeatureFlagRegistry
     {
         $registry = new FeatureFlagRegistry();
-        (new \ReflectionProperty($registry, 'classDiscovery'))->setValue($registry, new class ($classes ?? [FeatureFlagsTestDeclarations::class, FeatureFlagsTestDuplicate::class]) extends ClassDiscovery {
+        (new \ReflectionProperty($registry, 'classDiscovery'))->setValue($registry, new class ($classes ?? [FeatureFlagsTestDeclarations::class, FeatureFlagsTestRefusedName::class, FeatureFlagsTestDuplicate::class]) extends ClassDiscovery {
             /** @param list<string> $classes */
             public function __construct(private readonly array $classes)
             {

@@ -135,7 +135,7 @@ class SwooleBootstrap
         // reports on is the worker's own last few seconds and must not be shared.
         $drainReporter = new WorkerExitDrainReporter();
         $servedConnections = new ServedConnections();
-        $drain = new WorkerExitDrain(WorkerExitDrainPolicy::forMaxWaitTime(ServerConfigurator::MAX_WAIT_SECONDS), $drainReporter, $servedConnections);
+        $drain = new WorkerExitDrain(WorkerExitDrainPolicy::forMaxWaitTime(ServerConfigurator::maxWaitSeconds()), $drainReporter, $servedConnections);
 
         $corsHandler = new CorsHandler($env);
         // Read once at boot, not per request: it is a deployment setting, and

@@ -16,8 +16,9 @@ namespace Semitexa\Core\Http\Client;
  *   tolerate a repeat.
  *
  * Retried: a transport failure worth retrying (HttpTransportKind::isRetryable)
- * and statuses 429, 500, 502, 503, 504. A Retry-After header, in seconds or as
- * a date, is honoured up to the cap.
+ * and statuses 429, 500, 502, 503, 504 and 529 (overloaded). A Retry-After header, in seconds or as
+ * a date, is honoured: a wait longer than the cap is not retried at all (the
+ * response is returned), and none is shorter than the policy's own backoff.
  */
 final readonly class RetryPolicy
 {
@@ -25,7 +26,8 @@ final readonly class RetryPolicy
 
     /** No Retry-After, however large, makes a call wait longer than this. */
     public const MAX_RETRY_AFTER_MS = 60_000;
-    private const RETRYABLE_STATUSES = [429, 500, 502, 503, 504];
+    /** 529: "overloaded", as Anthropic's API answers a busy moment. */
+    private const RETRYABLE_STATUSES = [429, 500, 502, 503, 504, 529];
 
     public function __construct(
         public int $maxAttempts = 1,
@@ -72,10 +74,29 @@ final readonly class RetryPolicy
      */
     public function delayMs(int $attempt, ?int $retryAfterMs, \Closure $random): int
     {
+        $backoff = $this->backoffMs($attempt, $random);
         if ($retryAfterMs !== null) {
-            return min(max(0, $retryAfterMs), $this->capMs, self::MAX_RETRY_AFTER_MS);
+            // Cut to the cap, a "wait 30 s" became 5 s and the provider was
+            // asked again three times; "0" waited nothing at all.
+            return max($backoff, min(max(0, $retryAfterMs), $this->capMs, self::MAX_RETRY_AFTER_MS));
         }
 
+        return $backoff;
+    }
+
+    /**
+     * Whether a server that asked for this wait is asked again: not when the
+     * wait is longer than the policy will sleep. Its answer is returned
+     * instead, so the caller sees the 429 and its Retry-After.
+     */
+    public function honours(?int $retryAfterMs): bool
+    {
+        return $retryAfterMs === null || $retryAfterMs <= min($this->capMs, self::MAX_RETRY_AFTER_MS);
+    }
+
+    /** @param \Closure(int, int): int $random */
+    private function backoffMs(int $attempt, \Closure $random): int
+    {
         if ($this->linear) {
             return min($this->capMs, $this->baseMs * $attempt);
         }

@@ -4,8 +4,12 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Http\Client;
 
+use Semitexa\Core\Attribute\InjectAsReadonly;
 use Semitexa\Core\Attribute\SatisfiesServiceContract;
 use Semitexa\Core\Http\Exception\HttpTransportException;
+use Semitexa\Core\Pipeline\RecordingAwareTracerInterface;
+use Semitexa\Core\Pipeline\RequestTracerInterface;
+use Semitexa\Core\Pipeline\SafeRequestTracer;
 
 /**
  * HttpClientInterface over ext-curl. Under the Swoole server curl is hooked
@@ -31,6 +35,15 @@ final class CurlHttpClient implements HttpClientInterface
 
     /** Headers a request keeps when a redirect leaves its origin. */
     private const CROSS_ORIGIN_SAFE_HEADERS = ['accept', 'accept-language', 'user-agent'];
+
+    /**
+     * The dev tracer, when one is bound: each call is a `http.client` span, so
+     * a trace shows which outbound request a page's milliseconds went to — an
+     * LLM answer, an S3 read, a webhook. Built with `new`, the client traces
+     * nothing.
+     */
+    #[InjectAsReadonly(optional: true)]
+    protected RequestTracerInterface $tracer;
 
     /** @var (\Closure(int): void)|null */
     private ?\Closure $sleep = null;
@@ -60,10 +73,30 @@ final class CurlHttpClient implements HttpClientInterface
             throw new \LogicException('pinnedResolve with followRedirects: a redirect would reach a host nobody checked.');
         }
 
-        $started = hrtime(true);
-        $response = $this->sendFollowing($request, $options);
+        // Per call: SafeRequestTracer keeps a span stack of its own, and it is
+        // what makes an observer that throws, or one recording nothing, cost
+        // the call nothing.
+        $tracer = isset($this->tracer)
+            && !($this->tracer instanceof RecordingAwareTracerInterface && !$this->tracer->isRecording())
+            ? SafeRequestTracer::wrap($this->tracer)
+            : null;
+        $tracer?->begin('http.client', ['method' => $request->method, 'url' => self::spanUrl($request->url)]);
 
-        return $response->withAttempts($response->attempts, (hrtime(true) - $started) / 1_000_000);
+        $started = hrtime(true);
+        try {
+            $response = $this->sendFollowing($request, $options);
+        } catch (HttpTransportException $e) {
+            $tracer?->end('http.client', ['error' => $e->kind->value, 'attempts' => $e->attempts]);
+            throw $e;
+        } catch (\Throwable $e) {
+            $tracer?->end('http.client', ['error' => $e::class]);
+            throw $e;
+        }
+        $response = $response->withAttempts($response->attempts, (hrtime(true) - $started) / 1_000_000);
+        $tracer?->end('http.client', ['status' => $response->status, 'attempts' => $response->attempts]
+            + ($options->onChunk !== null ? ['streamed' => true] : ['bytes' => strlen($response->body)]));
+
+        return $response;
     }
 
     private function sendFollowing(HttpRequest $request, HttpCallOptions $options): HttpResponse
@@ -100,8 +133,11 @@ final class CurlHttpClient implements HttpClientInterface
             }
 
             if (!$forwarded && $policy->retriesStatus($response->status) && $policy->appliesTo($request->method) && $attempt < $policy->maxAttempts) {
-                $this->pause($policy->delayMs($attempt, RetryPolicy::retryAfterMs($response->header('Retry-After'), time()), $this->random()));
-                continue;
+                $retryAfter = RetryPolicy::retryAfterMs($response->header('Retry-After'), time());
+                if ($policy->honours($retryAfter)) {
+                    $this->pause($policy->delayMs($attempt, $retryAfter, $this->random()));
+                    continue;
+                }
             }
 
             return $response->withAttempts($attempt, 0.0);
@@ -119,6 +155,9 @@ final class CurlHttpClient implements HttpClientInterface
         $body = '';
         $received = 0;
         $tooLarge = false;
+        /** @var resource|false|null $held false: no temp stream could be opened, the body stays a string */
+        $held = null;
+        $heldShort = false;
         $max = $options->maxResponseBytes;
         $truncate = $options->truncateOversized;
         $onChunk = $options->onChunk;
@@ -144,6 +183,9 @@ final class CurlHttpClient implements HttpClientInterface
             CURLOPT_TIMEOUT_MS => max(1, (int) ceil($options->timeout * 1000)),
             CURLOPT_CONNECTTIMEOUT_MS => max(1, (int) ceil($options->connectTimeout * 1000)),
             CURLOPT_FOLLOWLOCATION => false,
+            // libcurl's defaults, said: the coroutine hook does not share them.
+            CURLOPT_SSL_VERIFYPEER => true,
+            CURLOPT_SSL_VERIFYHOST => 2,
             CURLOPT_HEADERFUNCTION => static function ($handle, string $line) use (&$rawHeaders, &$status): int {
                 $rawHeaders .= $line;
                 if (preg_match('#^HTTP/\S+\s+(\d{3})#', $line, $m) === 1) {
@@ -152,7 +194,7 @@ final class CurlHttpClient implements HttpClientInterface
 
                 return strlen($line);
             },
-            CURLOPT_WRITEFUNCTION => static function ($handle, string $chunk) use (&$body, &$received, &$tooLarge, &$forwarded, &$status, $max, $truncate, $onChunk): int {
+            CURLOPT_WRITEFUNCTION => static function ($handle, string $chunk) use (&$body, &$held, &$heldShort, &$received, &$tooLarge, &$forwarded, &$status, $max, $truncate, $onChunk): int {
                 $length = strlen($chunk);
                 $room = $max - $received;
                 $received += $length;
@@ -170,9 +212,24 @@ final class CurlHttpClient implements HttpClientInterface
                 }
                 // Only a successful response is a stream; an error body is kept
                 // for the caller to read, and is what a retry may discard.
-                if ($onChunk !== null && $status >= 200 && $status < 300) {
+                if ($onChunk !== null && $held === null && $status >= 200 && $status < 300) {
                     $forwarded = true;
                     $onChunk($chunk);
+                } elseif ($onChunk !== null && $held !== false && ($status === 0 || $held !== null)) {
+                    // The hook tells the status only after the body (below):
+                    // a stream is held on a temp stream, which spills to disk
+                    // past 2 MiB, not in a string the size of the object. Once
+                    // holding, it holds the rest too: the order is kept.
+                    $held ??= fopen('php://temp', 'w+b');
+                    if ($held === false) {
+                        $body .= $chunk;
+                    } elseif (@fwrite($held, $chunk) !== strlen($chunk)) {
+                        // The temp disk is full: stop here, or the part that
+                        // fitted would be handed on as the whole body.
+                        $heldShort = true;
+
+                        return 0;
+                    }
                 } else {
                     $body .= $chunk;
                 }
@@ -200,13 +257,40 @@ final class CurlHttpClient implements HttpClientInterface
         }
 
         $handle = curl_init();
-        curl_setopt_array($handle, $curlOptions);
-        $ok = curl_exec($handle);
-        $httpCode = (int) curl_getinfo($handle, CURLINFO_HTTP_CODE);
-        $errno = curl_errno($handle);
-        $error = curl_error($handle);
-        unset($handle);
+        try {
+            curl_setopt_array($handle, $curlOptions);
+            self::verifyTlsUnderTheHook($handle, $request->url);
+            $ok = curl_exec($handle);
+            $httpCode = (int) curl_getinfo($handle, CURLINFO_HTTP_CODE);
+            $errno = curl_errno($handle);
+            $error = curl_error($handle);
+        } catch (\Throwable $e) {
+            // The caller's onChunk threw mid-transfer: the held stream too.
+            if (is_resource($held)) {
+                fclose($held);
+            }
+            throw $e;
+        } finally {
+            // The hook's handle (Swoole\Curl\Handler) with a WRITEFUNCTION is
+            // freed only by curl_close(): unset alone kept every response body
+            // and its socket for the life of the worker (ten 1 MB GETs: +10
+            // open sockets, +11.5 MB), and so did an onChunk that threw. A
+            // native handle needs no close, and PHP 8.5 deprecates closing
+            // one. By exact class: the hook's handle extends \CurlHandle, so
+            // instanceof cannot tell them apart.
+            if ($handle::class !== \CurlHandle::class) {
+                curl_close($handle);
+            }
+            unset($handle);
+        }
 
+        if (is_resource($held) && ($tooLarge || $heldShort || $ok === false || $errno !== 0)) {
+            fclose($held);
+            $held = null;
+        }
+        if ($heldShort) {
+            throw new HttpTransportException(HttpTransportKind::Protocol, $request->method, $request->url, 'the body could not be held on a temp stream (disk full?)');
+        }
         if ($tooLarge) {
             throw new HttpTransportException(HttpTransportKind::TooLarge, $request->method, $request->url, "the body passed {$max} bytes");
         }
@@ -215,8 +299,29 @@ final class CurlHttpClient implements HttpClientInterface
         }
 
         [$block, $headers] = self::finalHeaders($rawHeaders);
+        if (is_resource($held)) {
+            // A held stream goes on in pieces once the status is known; an
+            // error, or a body still to be inflated, is read back whole.
+            $heldCode = $httpCode !== 0 ? $httpCode : $status;
+            $encoding = strtolower($headers['content-encoding'][0] ?? 'identity');
+            try {
+                rewind($held);
+                if ($onChunk !== null && $heldCode >= 200 && $heldCode < 300 && (!$options->decodeContent || $encoding === 'identity')) {
+                    $forwarded = true;
+                    while (($piece = fread($held, 65536)) !== false && $piece !== '') {
+                        $onChunk($piece);
+                    }
+                } else {
+                    $body = (string) stream_get_contents($held) . $body;
+                }
+            } finally {
+                // Also when the callback throws: a caller that stops a stream
+                // that way left the temp file open.
+                fclose($held);
+            }
+        }
         if ($options->decodeContent) {
-            $body = self::decoded($body, $headers['content-encoding'][0] ?? null, $max, $request);
+            $body = self::decoded($body, $headers['content-encoding'][0] ?? null, $max, $request, $truncate);
         }
         $code = $httpCode !== 0 ? $httpCode : $status;
 
@@ -238,6 +343,29 @@ final class CurlHttpClient implements HttpClientInterface
      * another origin keeps only harmless headers: Authorization, cookies and
      * API keys stay with the origin they were meant for.
      */
+    /**
+     * The URL a trace keeps: scheme, host, port and the first path segment —
+     * enough to tell an LLM call from an S3 read — and nothing after it. A
+     * webhook or bot URL carries its secret in the path (`/bot<token>/…`,
+     * `/services/T/B/<secret>`), and a trace is written to disk, rendered and
+     * exported. A first segment that looks like a credential is masked too.
+     */
+    private static function spanUrl(string $url): string
+    {
+        $origin = HttpTransportException::safeUrl((string) preg_replace('#^([a-z][a-z0-9+.-]*://[^/?\#]*).*$#i', '$1', $url));
+        $path = (string) parse_url($url, PHP_URL_PATH);
+        $segments = array_values(array_filter(explode('/', $path), static fn (string $s): bool => $s !== ''));
+        if ($segments === []) {
+            return $origin;
+        }
+        $first = $segments[0];
+        if (preg_match('/^bot\d+:/i', $first) === 1 || strlen($first) > 24) {
+            $first = '…';
+        }
+
+        return $origin . '/' . $first . (count($segments) > 1 ? '/…' : '');
+    }
+
     private static function redirected(HttpRequest $request, int $status, string $location, HttpCallOptions $options): HttpRequest
     {
         $next = self::resolveUrl($request->url, $location);
@@ -330,16 +458,22 @@ final class CurlHttpClient implements HttpClientInterface
     }
 
     /** A body the server encoded although we asked for identity, inflated no further than the cap. */
-    private static function decoded(string $body, ?string $encoding, int $max, HttpRequest $request): string
+    private static function decoded(string $body, ?string $encoding, int $max, HttpRequest $request, bool $truncate = false): string
     {
         $encoding = strtolower(trim((string) $encoding));
         if ($body === '' || $encoding === '' || $encoding === 'identity') {
             return $body;
         }
+        if ($truncate && in_array($encoding, ['gzip', 'x-gzip', 'deflate'], true)) {
+            return self::inflatedUpTo($body, $encoding, $max, $request);
+        }
 
+        // One past the cap tells "over" from "exactly at"; PHP_INT_MAX + 1 is
+        // a float, which gzdecode() refuses (a TypeError, not a limit).
+        $limit = $max < PHP_INT_MAX ? $max + 1 : PHP_INT_MAX;
         $inflated = match ($encoding) {
-            'gzip', 'x-gzip' => @gzdecode($body, $max + 1),
-            'deflate' => @gzuncompress($body, $max + 1) ?: @gzinflate($body, $max + 1),
+            'gzip', 'x-gzip' => @gzdecode($body, $limit),
+            'deflate' => @gzuncompress($body, $limit) ?: @gzinflate($body, $limit),
             default => throw new HttpTransportException(HttpTransportKind::Protocol, $request->method, $request->url, "an unsupported content encoding: {$encoding}"),
         };
         if (!is_string($inflated)) {
@@ -353,11 +487,83 @@ final class CurlHttpClient implements HttpClientInterface
         return $inflated;
     }
 
+    /**
+     * truncateOversized on a compressed body: what inflates within the cap,
+     * the rest dropped. gzdecode() with a limit only fails past it, so an
+     * oversized gzip answer threw too_large even when truncation was asked
+     * for. Inflated a piece at a time, so nothing past the cap is ever held;
+     * a body the write callback already cut short inflates as far as it goes.
+     */
+    private static function inflatedUpTo(string $body, string $encoding, int $max, HttpRequest $request): string
+    {
+        $modes = $encoding === 'deflate' ? [ZLIB_ENCODING_DEFLATE, ZLIB_ENCODING_RAW] : [ZLIB_ENCODING_GZIP];
+        foreach ($modes as $mode) {
+            $context = @inflate_init($mode);
+            if ($context === false) {
+                continue;
+            }
+            $out = '';
+            $failed = false;
+            // Small pieces: 1 KiB of a bomb inflates to about 1 MiB, 64 KiB to 64.
+            foreach (str_split($body, 1024) as $piece) {
+                $inflated = @inflate_add($context, $piece, ZLIB_SYNC_FLUSH);
+                if ($inflated === false) {
+                    $failed = $out === '';
+                    break;
+                }
+                $out .= $inflated;
+                if (strlen($out) >= $max) {
+                    return substr($out, 0, $max);
+                }
+            }
+            if (!$failed) {
+                return $out;
+            }
+        }
+
+        throw new HttpTransportException(HttpTransportKind::Protocol, $request->method, $request->url, "the {$encoding} body does not inflate");
+    }
+
+    /**
+     * Inside the server curl is Swoole's hook, a PHP handler over its
+     * coroutine client, which checks no certificate unless told to and drops
+     * CURLOPT_SSL_VERIFYHOST: every HTTPS call took a self-signed, expired or
+     * wrong-host certificate, so anyone on the path read the API keys. Peer
+     * verification is told, and the host name, which the hook would never
+     * pass on, is set on the client directly.
+     */
+    private static function verifyTlsUnderTheHook(mixed $handle, string $url): void
+    {
+        if (!is_object($handle) || $handle::class !== 'Swoole\\Curl\\Handler') {
+            return;
+        }
+        $host = parse_url($url, PHP_URL_HOST);
+        if (!is_string($host) || $host === '') {
+            return;
+        }
+        $host = trim($host, '[]');
+        // Swoole checks the name with X509_check_host, which no IP address in
+        // a certificate ever matches: for an IP the chain is still checked,
+        // and libcurl's IP-SAN check is not there to stand in for it.
+        $name = filter_var($host, FILTER_VALIDATE_IP) === false ? $host : null;
+        \Closure::bind(static function (object $hooked) use ($name): void {
+            // @phpstan-ignore property.notFound (Swoole's handler, not in the stubs)
+            $hooked->clientOptions['ssl_verify_peer'] = true;
+            if ($name !== null) {
+                // @phpstan-ignore property.notFound
+                $hooked->clientOptions['ssl_host_name'] = $name;
+            }
+        }, null, $handle::class)($handle);
+    }
+
     private static function kindOf(int $errno): HttpTransportKind
     {
         return match ($errno) {
             6 => HttpTransportKind::Dns,                          // COULDNT_RESOLVE_HOST
-            28 => HttpTransportKind::Timeout,                     // OPERATION_TIMEDOUT
+            // The Swoole hook reports the system's errno, not curl's: 110
+            // ETIMEDOUT for a timeout (a "connect" failure until 2026-10-21),
+            // 111 ECONNREFUSED. No curl code is that high.
+            28, 110 => HttpTransportKind::Timeout,                // OPERATION_TIMEDOUT, ETIMEDOUT
             35, 51, 53, 54, 58, 59, 60, 64, 66, 77, 80, 82, 83, 90, 91 => HttpTransportKind::Tls,
             63 => HttpTransportKind::TooLarge,                    // FILESIZE_EXCEEDED
             1, 3 => HttpTransportKind::Protocol,                  // UNSUPPORTED_PROTOCOL, URL_MALFORMAT

@@ -153,6 +153,32 @@ class LintTemplatesCommand extends BaseCommand
             return;
         }
 
+        $unreadable = [];
+        $unanalysed = [];
+        foreach (self::mixedEscapingIncludes($templatesDir, $unreadable, $unanalysed) as [$file, $included, $strategy]) {
+            $warnings[] = [
+                'module'  => $module,
+                'path'    => $this->relativePath($file, $projectRoot),
+                'message' => "Includes '{$included}', which is escaped as {$strategy}: inside this HTML template its variables print unescaped by HTML rules. Render it apart, or give the HTML a template of its own.",
+            ];
+        }
+        // An error, not a warning: what such a file includes went unchecked, and a lint
+        // that skips a file must not report it clean, with or without --strict.
+        foreach ($unreadable as $file) {
+            $errors[] = [
+                'module'  => $module,
+                'path'    => $this->relativePath($file, $projectRoot),
+                'message' => 'Cannot be read, so what it includes was not checked. Make it readable.',
+            ];
+        }
+        foreach ($unanalysed as $file) {
+            $errors[] = [
+                'module'  => $module,
+                'path'    => $this->relativePath($file, $projectRoot),
+                'message' => 'Too large for the regex engine (pcre.backtrack_limit), so what it includes was not checked. Split it, or raise the limit.',
+            ];
+        }
+
         foreach (glob($templatesDir . '/*', GLOB_ONLYDIR) ?: [] as $subdir) {
             $name = basename($subdir);
             if (in_array($name, self::CANONICAL_SUBDIRS, true)) {
@@ -171,6 +197,103 @@ class LintTemplatesCommand extends BaseCommand
                 'message' => "Non-canonical subdirectory '{$name}'.{$hint}",
             ];
         }
+    }
+
+    /**
+     * HTML templates that include, embed or import a template escaped by
+     * another strategy: escaping follows each template's own extension
+     * ('autoescape' => 'name'), so a .txt.twig inside a page prints its
+     * variables raw into HTML. Literal names only, given alone or in a list
+     * (`include ['a.txt.twig', 'b.html.twig']`, which renders the first that exists).
+     *
+     * @param list<string> $unreadable filled with the HTML templates that could not be read
+     * @param list<string> $unanalysed filled with those the regex engine gave up on (backtrack limit)
+     * @return list<array{string, string, string}> [file, included name, its strategy]
+     */
+    public static function mixedEscapingIncludes(string $dir, array &$unreadable = [], array &$unanalysed = []): array
+    {
+        $found = [];
+        $files = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($dir, \FilesystemIterator::SKIP_DOTS));
+        /** @var \SplFileInfo $file */
+        foreach ($files as $file) {
+            $path = $file->getPathname();
+            if (!str_ends_with($path, '.twig') || self::escapingOf($path) !== 'html') {
+                continue;
+            }
+            $source = @file_get_contents($path);
+            if ($source === false) {
+                $unreadable[] = $path;
+                continue;
+            }
+            $names = self::includedNames($source);
+            if ($names === null) {
+                $unanalysed[] = $path;
+                continue;
+            }
+            foreach ($names as $included) {
+                $strategy = self::escapingOf($included);
+                if ($strategy !== 'html') {
+                    $found[] = [$path, $included, $strategy];
+                }
+            }
+        }
+
+        return $found;
+    }
+
+    /**
+     * The literal names a template includes, embeds or imports. Only tags and
+     * expressions run: a comment, plain text and the inside of a string include
+     * nothing, so `{{ '{#' }}` hides no include after it and
+     * `{{ "{% include 'a.txt.twig' %}" }}` is none.
+     *
+     * @return list<string>|null null when the regex engine gave up: no scan of
+     *                           what is left can tell a template clean
+     */
+    private static function includedNames(string $source): ?array
+    {
+        $string = '\'(?:[^\'\\\\]|\\\\.)*\'|"(?:[^"\\\\]|\\\\.)*"';
+        if (preg_match_all('/\{[{%](?:' . $string . '|[^\'"])*?[}%]\}|\{#.*?#\}/s', $source, $regions) === false) {
+            return null;
+        }
+        $names = [];
+        foreach ($regions[0] as $region) {
+            if (str_starts_with($region, '{#')) {
+                continue;
+            }
+            // Each string becomes "<n>", so only the tag's own words are matched.
+            $literals = [];
+            $masked = preg_replace_callback('/' . $string . '/s', static function (array $m) use (&$literals): string {
+                $literals[] = substr($m[0], 1, -1);
+
+                return '"' . (count($literals) - 1) . '"';
+            }, $region);
+            if ($masked === null) {
+                return null;
+            }
+            preg_match_all('/(?:\{%[-~]?\s*(?:include|embed|import|from)\s+|\b(?:include|source)\(\s*)(\[[^\]]*\]|"\d+")/', $masked, $arguments);
+            preg_match_all('/"(\d+)"/', implode(' ', $arguments[1]), $indexes);
+            foreach ($indexes[1] as $index) {
+                if (str_ends_with($literals[(int) $index], '.twig')) {
+                    $names[] = $literals[(int) $index];
+                }
+            }
+        }
+
+        return array_values(array_unique($names));
+    }
+
+    /** The strategy ModuleTemplateCatalog's 'autoescape' => 'name' gives a template of this name. */
+    private static function escapingOf(string $name): string
+    {
+        $name = preg_replace('/\.twig\z/', '', $name) ?? $name;
+
+        return match (strtolower(pathinfo($name, PATHINFO_EXTENSION))) {
+            'txt' => 'plain text (not at all)',
+            'js', 'json' => 'JavaScript',
+            'css' => 'CSS',
+            default => 'html',
+        };
     }
 
     private function relativePath(string $path, string $root): string

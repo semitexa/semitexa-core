@@ -29,6 +29,13 @@ enum HandlerExecution: string
      */
     case Queued = 'queued';
 
+    /** Whether normalize() knows the word; anything else is read as Sync. */
+    public static function isKnown(HandlerExecution|string|null $value): bool
+    {
+        return $value === null || $value instanceof self
+            || in_array(strtolower($value), ['', 'sync', 'async', 'asynchronous', 'queue', 'queued'], true);
+    }
+
     public static function normalize(HandlerExecution|string|null $value): self
     {
         if ($value instanceof self) {

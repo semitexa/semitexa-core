@@ -13,8 +13,17 @@ use Attribute;
  *
  * It does not replace access attributes: a signed link to a page that needs
  * a signed-in user still needs one.
+ *
+ * The signature does not cover the method: a link handed out for a GET was
+ * also good for a POST or DELETE to the same route. Only $methods are let
+ * through (GET and HEAD unless the route says otherwise).
  */
 #[Attribute(Attribute::TARGET_CLASS)]
 final readonly class RequiresSignedUrl
 {
+    /** @param list<string> $methods */
+    public function __construct(
+        public array $methods = ['GET', 'HEAD'],
+    ) {
+    }
 }

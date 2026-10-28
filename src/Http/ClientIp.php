@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Http;
 
+use Semitexa\Core\Log\StaticLoggerBridge;
 use Semitexa\Core\Request;
 
 /**
@@ -18,10 +19,17 @@ use Semitexa\Core\Request;
  */
 final class ClientIp
 {
+    /** Said once per worker: the condition is the deployment's, not a request's. */
+    private static bool $warnedUntrustedProxy = false;
+
     public static function of(Request $request): string
     {
         $peer = trim($request->getServer('remote_addr'));
         if (!TrustedProxies::trusts($peer)) {
+            if (!self::$warnedUntrustedProxy && $request->getHeader('x-forwarded-for') !== null && self::isPrivate($peer)) {
+                self::warnUntrustedProxy($peer);
+            }
+
             return $peer;
         }
 
@@ -40,6 +48,35 @@ final class ClientIp
         }
 
         return $peer;
+    }
+
+    /**
+     * A proxy on a private address that is not trusted: every client then
+     * counts as that address, so one visitor's failed sign-ins lock out
+     * every visitor. doctor cannot see it (SESSION_COOKIE_SECURE=always
+     * passes its check without TRUSTED_PROXIES), so it is said here.
+     */
+    private static function warnUntrustedProxy(string $peer): void
+    {
+        self::$warnedUntrustedProxy = true;
+        StaticLoggerBridge::warning('http', 'X-Forwarded-For arrived from a peer TRUSTED_PROXIES does not list; every client behind it counts as that one address (rate limits, sign-in limits)', [
+            'peer' => $peer,
+            'fix' => 'set TRUSTED_PROXIES to the proxy address or CIDR',
+        ]);
+    }
+
+    private static function isPrivate(string $address): bool
+    {
+        // An IPv4 client on a dual-stack listener (SWOOLE_HOST=::) is
+        // ::ffff:a.b.c.d, which PHP counts as reserved whatever a.b.c.d is:
+        // any outside client sending the header was reported as a proxy.
+        $address = strtolower($address);
+        if (str_starts_with($address, '::ffff:') && filter_var(substr($address, 7), FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) !== false) {
+            $address = substr($address, 7);
+        }
+
+        return @inet_pton($address) !== false
+            && filter_var($address, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE) === false;
     }
 
     /** `1.2.3.4:5678`, `[2001:db8::1]` and `[2001:db8::1]:443` are written by real proxies. */

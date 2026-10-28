@@ -61,13 +61,15 @@ final class InProcessAsyncHandler
             // Now: the request's context is whole only until the response is out.
             // A Queued one runs with none, wherever it runs: as a worker would.
             $context = $async ? RequestContextSnapshot::capture($container) : RequestContextSnapshot::none($container);
+            // What a worker would get from the message (QueuedOrigin).
+            $origin = $async ? [] : QueuedOrigin::capture();
         } catch (\Throwable $e) {
             self::logFailure($handlerClass, $label, $e);
             return false;
         }
 
-        $run = static function () use ($handle, $resolve, $handlerClass, $label, $payloadCopy, $resourceCopy, $sessionId, $context): void {
-            $context->run(static function () use ($handle, $resolve, $handlerClass, $label, $payloadCopy, $resourceCopy, $sessionId): void {
+        $run = static function () use ($handle, $resolve, $handlerClass, $label, $payloadCopy, $resourceCopy, $sessionId, $context, $origin): void {
+            $context->run(static fn () => QueuedOrigin::run($origin, static function () use ($handle, $resolve, $handlerClass, $label, $payloadCopy, $resourceCopy, $sessionId): void {
                 try {
                     $result = ($handle ?? self::handleOf($resolve, $handlerClass))($payloadCopy, $resourceCopy);
                 } catch (\Throwable $e) {
@@ -75,7 +77,7 @@ final class InProcessAsyncHandler
                     return;
                 }
                 AsyncResultDeliverer::deliver($sessionId, is_object($result) ? $result : $resourceCopy, $handlerClass);
-            });
+            }));
         };
 
         // After the response, in order, in flight while it runs; inline

@@ -17,6 +17,9 @@
         "symfony/console": "^7.3",
         "symfony/process": "^7.3"
     },
+    "suggest": {
+        "ext-curl": "Outbound HTTP (HttpClientInterface, CurlHttpClient): without it the first outbound request throws. The Semitexa image has it."
+    },
     "require-dev": {
         "semitexa/tenancy": "*",
         "phpunit/phpunit": "^10.0",

@@ -10,7 +10,8 @@ use Semitexa\Core\Http\Response\ResourceResponse;
 
 #[AsPublicPayload(
     path: self::PATH,
-    methods: ['GET'],
+    // POST and DELETE too: the route takes them, the signed link must not.
+    methods: ['GET', 'POST', 'DELETE'],
     responseWith: ResourceResponse::class,
 )]
 #[RequiresSignedUrl]

@@ -65,4 +65,22 @@ final class SodiumEncrypterTest extends TestCase
             }
         }
     }
+
+    /** A token handed out for one purpose could be passed off as another's. */
+    #[Test]
+    public function a_token_opens_only_under_the_context_it_was_made_with(): void
+    {
+        $encrypter = SodiumEncrypter::withSecrets('context-test-secret-context-test-1');
+        $cart = $encrypter->encrypt('42', 'cookie:cart');
+
+        self::assertSame('42', $encrypter->decrypt($cart, 'cookie:cart'));
+        foreach (['', 'link:invite'] as $other) {
+            try {
+                $encrypter->decrypt($cart, $other);
+                self::fail("opened under '{$other}'");
+            } catch (\Semitexa\Core\Security\DecryptionException) {
+            }
+        }
+        self::assertSame('plain', $encrypter->decrypt($encrypter->encrypt('plain')), 'no context is the key tokens always had');
+    }
 }

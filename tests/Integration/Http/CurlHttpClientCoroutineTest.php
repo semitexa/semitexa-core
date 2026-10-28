@@ -62,6 +62,9 @@ final class CurlHttpClientCoroutineTest extends TestCase
                             $response->header('Content-Encoding', 'gzip');
                             $response->end($bomb);
                         })(),
+                        '/mb' => (static function () use ($response): void {
+                            $response->end(str_repeat('m', 1_000_000));
+                        })(),
                         '/huge' => (static function () use ($response): void {
                             for ($i = 0; $i < 20; $i++) {
                                 $response->write(str_repeat('x', 1_000_000));
@@ -158,6 +161,12 @@ final class CurlHttpClientCoroutineTest extends TestCase
                 }
                 $results['bombPeakMb'] = (memory_get_peak_usage() - $base0) / 1e6;
 
+                // truncateOversized on a compressed body threw too_large too.
+                memory_reset_peak_usage();
+                $base0 = memory_get_usage();
+                $results['bombCut'] = $client->get($base . '/bomb', [], new HttpCallOptions(maxResponseBytes: 1_000_000, truncateOversized: true));
+                $results['bombCutPeakMb'] = (memory_get_peak_usage() - $base0) / 1e6;
+
                 memory_reset_peak_usage();
                 $base0 = memory_get_usage();
                 try {
@@ -183,6 +192,67 @@ final class CurlHttpClientCoroutineTest extends TestCase
                     },
                 ));
                 $results['streamChunks'] = $chunks;
+
+                // Under the hook the status comes after the body, so a stream
+                // was held whole in a string until then: a 20 MB object, 20 MB
+                // of memory (S3Driver::readStream).
+                $streamed = 0;
+                memory_reset_peak_usage();
+                $base1 = memory_get_usage();
+                $results['hugeStream'] = $client->get($base . '/huge', [], new HttpCallOptions(
+                    maxResponseBytes: PHP_INT_MAX,
+                    onChunk: static function (string $chunk) use (&$streamed): void {
+                        $streamed += strlen($chunk);
+                    },
+                ));
+                $results['hugeStreamBytes'] = $streamed;
+                $results['hugeStreamPeakMb'] = (memory_get_peak_usage() - $base1) / 1e6;
+
+                // The hook's handle extends \CurlHandle and was never closed:
+                // each request kept its body and its socket for the life of
+                // the worker.
+                $client->get($base . '/mb');
+                gc_collect_cycles();
+                $mem0 = memory_get_usage();
+                for ($i = 0; $i < 10; $i++) {
+                    $client->get($base . '/mb');
+                }
+                gc_collect_cycles();
+                $results['leakMb'] = (memory_get_usage() - $mem0) / 1e6;
+
+                // A caller that stops a stream by throwing from onChunk.
+                $mem0 = memory_get_usage();
+                $thrown = 0;
+                for ($i = 0; $i < 10; $i++) {
+                    try {
+                        $client->get($base . '/mb', [], new HttpCallOptions(onChunk: static function (string $chunk): void {
+                            throw new \RuntimeException('enough');
+                        }));
+                    } catch (\RuntimeException) {
+                        $thrown++;
+                    }
+                }
+                gc_collect_cycles();
+                $results['throwLeakMb'] = (memory_get_usage() - $mem0) / 1e6;
+
+                // Each call is a http.client span in a dev trace.
+                $traced = new CurlHttpClient();
+                $spans = new class implements \Semitexa\Core\Pipeline\RequestTracerInterface {
+                    /** @var list<array{string, string, array<string, mixed>}> */
+                    public array $calls = [];
+                    public function begin(string $name, array $context = []): void { $this->calls[] = ['begin', $name, $context]; }
+                    public function end(string $name, array $context = []): void { $this->calls[] = ['end', $name, $context]; }
+                    public function mark(string $name, array $context = []): void {}
+                };
+                (new \ReflectionProperty(CurlHttpClient::class, 'tracer'))->setValue($traced, $spans);
+                $traced->get($base . '/mb?secret=1');
+                $traced->get($base . '/bot123456:AAH-secret/sendMessage');
+                try {
+                    $traced->get('http://127.0.0.1:1/');
+                } catch (HttpTransportException) {
+                }
+                $results['spans'] = $spans->calls;
+                $results['thrown'] = $thrown;
 
                 $server->shutdown();
             });
@@ -220,6 +290,9 @@ final class CurlHttpClientCoroutineTest extends TestCase
         // review: the cap was checked after the body (and its inflation) was in memory.
         self::assertSame(HttpTransportKind::TooLarge, $results['bomb']->kind);
         self::assertLessThan(10.0, $results['bombPeakMb'], 'a gzip bomb stops at the cap, not in memory');
+        self::assertSame([200, 1_000_000], [$results['bombCut']->status, strlen($results['bombCut']->body)], 'truncation keeps what inflates within the cap');
+        self::assertSame(str_repeat("\0", 1_000_000), $results['bombCut']->body);
+        self::assertLessThan(10.0, $results['bombCutPeakMb'], 'and inflates no further than it');
         self::assertSame(HttpTransportKind::TooLarge, $results['huge']->kind);
         self::assertLessThan(10.0, $results['hugePeakMb'], '20 MB against a 2 MB cap stays bounded');
 
@@ -235,6 +308,21 @@ final class CurlHttpClientCoroutineTest extends TestCase
         // review: a stream handed the caller the 503 body, then the retried one.
         self::assertSame('data: 1', $results['streamChunks']);
         self::assertSame(2, $results['stream']->attempts);
+        self::assertSame([200, 20_000_000, ''], [$results['hugeStream']->status, $results['hugeStreamBytes'], $results['hugeStream']->body]);
+        self::assertLessThan(10.0, $results['hugeStreamPeakMb'], 'a 20 MB stream is held on a temp stream, not in memory');
+        self::assertLessThan(2.0, $results['leakMb'], 'ten 1 MB responses are not kept by their handles');
+        self::assertSame(10, $results['thrown']);
+        self::assertLessThan(2.0, $results['throwLeakMb'], 'nor by a stream its caller stopped by throwing');
+
+        [$begin, $end, $botBegin, , $failBegin, $failEnd] = $results['spans'];
+        self::assertSame(['begin', 'http.client'], [$begin[0], $begin[1]]);
+        self::assertSame('GET', $begin[2]['method']);
+        self::assertStringEndsWith('/mb', $begin[2]['url'], 'no query string in a trace: it can carry a key');
+        self::assertStringEndsWith('/…', $botBegin[2]['url'], 'a path secret (a bot token, a webhook key) stays out of the trace');
+        self::assertStringNotContainsString('AAH-secret', $botBegin[2]['url']);
+        self::assertStringNotContainsString('sendMessage', $botBegin[2]['url']);
+        self::assertSame(['end', 'http.client', 200, 1_000_000], [$end[0], $end[1], $end[2]['status'], $end[2]['bytes']]);
+        self::assertSame(['begin', 'end', 'connect'], [$failBegin[0], $failEnd[0], $failEnd[2]['error']], 'a failed call closes its span too');
         self::assertSame(HttpTransportKind::Connect, $results['refused']->kind);
         self::assertSame(2, $results['refused']->attempts);
     }

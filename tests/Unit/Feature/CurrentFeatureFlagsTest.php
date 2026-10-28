@@ -26,6 +26,7 @@ final class CurrentFeatureFlagsTest extends TestCase
     {
         CoroutineLocal::resetCliStore();
         self::assertFalse(CurrentFeatureFlags::isEnabled('checkout.new-flow'), 'outside a request');
+        self::assertNull(CurrentFeatureFlags::current());
 
         $listener = new CurrentFeatureFlagsListener();
         (new \ReflectionProperty($listener, 'flags'))->setValue($listener, new InMemoryFeatureFlags(['checkout.new-flow' => true]));
@@ -36,6 +37,7 @@ final class CurrentFeatureFlagsTest extends TestCase
         ));
 
         self::assertTrue(CurrentFeatureFlags::isEnabled('checkout.new-flow'));
+        self::assertNotNull(CurrentFeatureFlags::current());
         self::assertFalse(CurrentFeatureFlags::isEnabled('other'));
     }
 }

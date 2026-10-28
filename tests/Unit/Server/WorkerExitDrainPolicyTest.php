@@ -133,4 +133,32 @@ final class WorkerExitDrainPolicyTest extends TestCase
 
         self::assertFalse($serves);
     }
+
+    /** 3 s cancelled every request longer than 2 s at each recycle: 13 HTTP 500s on one route in a 50 h soak. */
+    #[Test]
+    public function a_leaving_worker_waits_ten_seconds_unless_swoole_max_wait_time_says_otherwise(): void
+    {
+        $previous = getenv('SWOOLE_MAX_WAIT_TIME');
+        // Unset in the process falls back to the project's env files, which may
+        // set it; for the default they are held empty, then put back.
+        $envFiles = new \ReflectionProperty(\Semitexa\Core\Support\EnvFileCache::class, 'values');
+        $parsed = $envFiles->getValue();
+        try {
+            putenv('SWOOLE_MAX_WAIT_TIME');
+            $envFiles->setValue(null, []);
+            self::assertSame(10, \Semitexa\Core\Server\ServerConfigurator::maxWaitSeconds());
+            self::assertSame(9.0, WorkerExitDrainPolicy::forMaxWaitTime(\Semitexa\Core\Server\ServerConfigurator::maxWaitSeconds())->graceSeconds);
+            $envFiles->setValue(null, ['SWOOLE_MAX_WAIT_TIME' => '30']);
+            self::assertSame(30, \Semitexa\Core\Server\ServerConfigurator::maxWaitSeconds(), 'unset in the process, the env files decide');
+            putenv('SWOOLE_MAX_WAIT_TIME=30');
+            self::assertSame(30, \Semitexa\Core\Server\ServerConfigurator::maxWaitSeconds());
+            putenv('SWOOLE_MAX_WAIT_TIME=1');
+            self::assertSame(2, \Semitexa\Core\Server\ServerConfigurator::maxWaitSeconds(), 'at least a second of grace');
+            putenv('SWOOLE_MAX_WAIT_TIME=ten');
+            self::assertSame(10, \Semitexa\Core\Server\ServerConfigurator::maxWaitSeconds());
+        } finally {
+            putenv($previous === false ? 'SWOOLE_MAX_WAIT_TIME' : 'SWOOLE_MAX_WAIT_TIME=' . $previous);
+            $envFiles->setValue(null, $parsed);
+        }
+    }
 }

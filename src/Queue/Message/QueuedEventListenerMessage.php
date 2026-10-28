@@ -23,9 +23,12 @@ class QueuedEventListenerMessage implements \JsonSerializable
         public int $retryDelay = 0,
         /** When it entered the queue, in ms (again on each retry): see QueuedHandlerMessage. */
         public int $publishedAt = 0,
+        /** The same on every retry and in its dead letter: see QueuedHandlerMessage. */
+        public string $messageId = '',
     ) {
         $this->queuedAt = $queuedAt ?: date(DATE_ATOM);
         $this->publishedAt = $publishedAt ?: self::nowMs();
+        $this->messageId = $messageId !== '' ? $messageId : 'm-' . bin2hex(random_bytes(8));
     }
 
     public function jsonSerialize(): array
@@ -40,6 +43,7 @@ class QueuedEventListenerMessage implements \JsonSerializable
             'maxRetries' => $this->maxRetries,
             'retryDelay' => $this->retryDelay,
             'publishedAt' => $this->publishedAt,
+            'messageId' => $this->messageId,
         ];
     }
 
@@ -63,6 +67,7 @@ class QueuedEventListenerMessage implements \JsonSerializable
             maxRetries: (int) ($data['maxRetries'] ?? 0),
             retryDelay: (int) ($data['retryDelay'] ?? 0),
             publishedAt: self::publishedAtOf($data),
+            messageId: is_string($data['messageId'] ?? null) ? $data['messageId'] : '',
         );
     }
 

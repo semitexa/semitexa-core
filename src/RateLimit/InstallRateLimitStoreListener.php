@@ -14,8 +14,8 @@ use Swoole\Timer;
 
 /**
  * Gives this worker's RateLimitStorage the shared store RATE_LIMIT_STORE asks
- * for (RateLimitStoreChoice), and has worker 0 sweep the shared table once a
- * minute: one sweeper is enough for a table every worker writes.
+ * for (RateLimitStoreChoice), and has worker 0 sweep the shared table every
+ * five seconds: one sweeper is enough for a table every worker writes.
  */
 #[AsServerLifecycleListener(
     phase: ServerLifecyclePhase::WorkerStartAfterServerBindings->value,
@@ -24,7 +24,8 @@ use Swoole\Timer;
 )]
 final class InstallRateLimitStoreListener implements ServerLifecycleListenerInterface
 {
-    private const SWEEP_EVERY_MS = 60_000;
+    /** Often enough for one-second windows: a minute let their rows pile up 60 deep. */
+    private const SWEEP_EVERY_MS = 5_000;
 
     public function handle(ServerLifecycleContext $context): void
     {

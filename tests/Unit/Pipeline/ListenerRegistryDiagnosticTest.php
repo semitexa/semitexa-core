@@ -66,6 +66,35 @@ final class ListenerRegistryDiagnosticTest extends TestCase
         self::assertStringContainsString('BrokenEventListener', reset($warnings)->message);
     }
 
+    /** A queue or retries on a listener that runs in process were never used, and nothing said so. */
+    #[Test]
+    public function event_registry_reports_a_listener_in_process_that_names_a_queue(): void
+    {
+        $diagnostics = BootDiagnostics::begin();
+        (new EventListenerRegistry($this->discoveryReturning(SyncListenerNamingAQueue::class), new ModuleRegistry()))->ensureBuilt();
+
+        $messages = array_map(static fn ($w): string => $w->message, array_filter(
+            $diagnostics->getWarnings(),
+            static fn ($w): bool => $w->component === 'EventListenerRegistry',
+        ));
+        self::assertSame(['Listener ' . SyncListenerNamingAQueue::class . ' is Sync but names a transport, queue or retries, which apply only to Queued: it runs in process. For a worker, set execution: EventExecution::Queued.'], array_values($messages));
+    }
+
+    #[Test]
+    public function an_async_listener_with_retries_is_reported_and_a_queued_one_with_a_queue_is_not(): void
+    {
+        foreach ([AsyncListenerWithRetries::class => 1, QueuedListenerWithAQueue::class => 0] as $class => $expected) {
+            $diagnostics = BootDiagnostics::begin();
+            $registry = new EventListenerRegistry($this->discoveryReturning($class), new ModuleRegistry());
+            // Registered first: a listener discovery skipped has no warning either.
+            self::assertSame([$class], array_column($registry->getListeners(ListenerProbeEvent::class), 'class'));
+            self::assertCount($expected, array_filter(
+                $diagnostics->getWarnings(),
+                static fn ($w): bool => $w->component === 'EventListenerRegistry',
+            ), $class);
+        }
+    }
+
     private function discoveryReturning(string $class): ClassDiscovery
     {
         return new class ($class) extends ClassDiscovery {
@@ -82,5 +111,33 @@ final class ListenerRegistryDiagnosticTest extends TestCase
                 return [$this->class];
             }
         };
+    }
+}
+
+final class ListenerProbeEvent
+{
+}
+
+#[\Semitexa\Core\Attribute\AsEventListener(event: ListenerProbeEvent::class, execution: 'sync', queue: 'audit')]
+final class SyncListenerNamingAQueue
+{
+    public function handle(ListenerProbeEvent $event): void
+    {
+    }
+}
+
+#[\Semitexa\Core\Attribute\AsEventListener(event: ListenerProbeEvent::class, execution: 'async', maxRetries: 3)]
+final class AsyncListenerWithRetries
+{
+    public function handle(ListenerProbeEvent $event): void
+    {
+    }
+}
+
+#[\Semitexa\Core\Attribute\AsEventListener(event: ListenerProbeEvent::class, execution: 'queued', queue: 'audit', maxRetries: 3)]
+final class QueuedListenerWithAQueue
+{
+    public function handle(ListenerProbeEvent $event): void
+    {
     }
 }
