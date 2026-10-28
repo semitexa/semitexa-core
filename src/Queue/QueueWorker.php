@@ -42,6 +42,22 @@ class QueueWorker
     /** Set when the attempt failed but the message was requeued rather than dropped. */
     private bool $messageRetried = false;
 
+    /** Per-queue counters queue:stats reads; null when QUEUE_STATS_STORE=off. Built on first use. */
+    private ?QueueStatsRecorder $stats = null;
+    private bool $statsResolved = false;
+
+    /** When the attempt's own work ended: before a retry's delay, which is not run time. */
+    private ?float $attemptEndedAt = null;
+
+    /** For tests: record into this instead of the configured store. */
+    public function withStats(?QueueStatsRecorder $stats): self
+    {
+        $this->stats = $stats;
+        $this->statsResolved = true;
+
+        return $this;
+    }
+
     public function setOutput(?\Symfony\Component\Console\Output\OutputInterface $output): void
     {
         $this->output = $output;
@@ -105,6 +121,9 @@ class QueueWorker
         // the Observatory journal (kind=queue), named by the listener or
         // handler it dispatches to. Journal-only — no trace buffer opens.
         $tracer = $this->resolveTracer();
+        $startedAt = microtime(true);
+        $publishedAt = null;
+        $this->attemptEndedAt = null;
         $this->messageStatus = null;
         $this->messageProblem = null;
         $this->messageProblemIsError = false;
@@ -129,8 +148,11 @@ class QueueWorker
                 return;
             }
 
+            $publishedAt = is_numeric($data['publishedAt'] ?? null) ? (int) $data['publishedAt'] : null;
             $type = $data['type'] ?? 'handler';
-            $target = $data['listenerClass'] ?? $data['handlerClass'] ?? $type;
+            // A handler message carries its class as `handler`; reading only
+            // `handlerClass` named every queued handler job "handler".
+            $target = $data['listenerClass'] ?? $data['handler'] ?? $data['handlerClass'] ?? $type;
             $tracer?->begin('job', [
                 'kind' => 'queue',
                 'route' => is_string($target) ? $target : 'queue-message',
@@ -156,6 +178,7 @@ class QueueWorker
                 'error' => $failed ? self::truncate((string) $this->messageProblem) : null,
                 'retry' => $this->messageRetried ? true : null,
             ], static fn ($v) => $v !== null && $v !== ''));
+            $this->recordStats($startedAt, $publishedAt);
             // Per-message lifecycle reset — same contract as Application::handleRequest.
             // Without this, a long-running queue worker carries authorization-decision
             // state from one job to the next (real production leak in CLI mode).
@@ -310,7 +333,9 @@ class QueueWorker
 
     /**
      * A failed message gets `maxRetries` more attempts on the queue being
-     * consumed, `retryDelay` seconds apart, then goes to `<queue>.failed`.
+     * consumed, `retryDelay` seconds apart, then goes to `<queue>.failed`. A
+     * {@see DelayedQueueTransportInterface} holds the retry back itself;
+     * otherwise the worker waits before publishing it.
      */
     private function retryOrDeadLetter(QueuedHandlerMessage|QueuedEventListenerMessage $message, string $error): void
     {
@@ -318,11 +343,26 @@ class QueueWorker
             $this->messageRetried = true;
             $message->attempts++;
             $delay = $message->retryDelay;
+            $this->attemptEndedAt = microtime(true);
             $kind = $message instanceof QueuedHandlerMessage ? 'handler' : 'listener';
             $this->log("ℹ️  Retrying {$kind} ({$message->attempts}/{$message->maxRetries}) in {$delay}s...", 'warning');
 
+            $transport = null;
+            if ($this->currentTransport && $this->currentQueue) {
+                $transport = QueueTransportRegistry::create($this->currentTransport);
+                if ($delay > 0 && $transport instanceof DelayedQueueTransportInterface) {
+                    // The transport holds it back; the loop goes on to the
+                    // next job. Its wait is counted from when it is due.
+                    $message->publishedAt = $message::nowMs() + $delay * 1000;
+                    $transport->publishDelayed($this->currentQueue, $message->toJson(), $delay);
+
+                    return;
+                }
+            }
+
             if ($delay > 0) {
-                // A CLI worker may run without Swoole: then there is no coroutine to yield.
+                // A transport that cannot delay: wait here, as before. A CLI
+                // worker may run without Swoole: then there is no coroutine to yield.
                 if (class_exists(\Swoole\Coroutine::class, false) && \Swoole\Coroutine::getCid() > 0) {
                     \Swoole\Coroutine::sleep($delay);
                 } else {
@@ -330,8 +370,8 @@ class QueueWorker
                 }
             }
 
-            if ($this->currentTransport && $this->currentQueue) {
-                $transport = QueueTransportRegistry::create($this->currentTransport);
+            if ($transport !== null) {
+                $message->publishedAt = $message::nowMs();
                 $transport->publish($this->currentQueue, $message->toJson());
             }
 
@@ -409,6 +449,30 @@ class QueueWorker
     private static function truncate(string $text, int $limit = 200): string
     {
         return preg_match('/^.{0,' . $limit . '}/us', $text, $m) === 1 ? $m[0] : substr($text, 0, $limit);
+    }
+
+    /** One finished attempt into the per-queue counters (queue:stats). */
+    private function recordStats(float $startedAt, ?int $publishedAt): void
+    {
+        if (!$this->messageRetried && $this->messageStatus === null) {
+            return;
+        }
+        if (!$this->statsResolved) {
+            $this->statsResolved = true;
+            try {
+                $store = QueueStatsStores::fromEnvironment();
+                $this->stats = $store === null ? null : new QueueStatsRecorder($store);
+            } catch (\Throwable) {
+                $this->stats = null;
+            }
+        }
+        $this->stats?->record(
+            (string) $this->currentQueue,
+            $this->messageStatus === 'failed' ? 'dead_lettered' : 'processed',
+            $this->messageRetried,
+            $publishedAt === null ? null : max(0, (int) round($startedAt * 1000) - $publishedAt),
+            (int) round((($this->attemptEndedAt ?? microtime(true)) - $startedAt) * 1000),
+        );
     }
 
     private function updateStats(string $type): void

@@ -31,6 +31,28 @@ final class QueueWorkerProcesses implements WorkerProcessSourceInterface
 
     public function workerProcesses(): array
     {
+        $processes = [];
+        foreach ($this->queues() as [$transport, $queue]) {
+            // One odd name must not take every other queue's worker with it.
+            try {
+                $processes[] = new WorkerProcess(['queue:work', $transport, $queue], reads: [$transport, $queue]);
+            } catch (\InvalidArgumentException $e) {
+                StaticLoggerBridge::warning('core', "Queue '{$queue}' on '{$transport}' gets no worker: " . $e->getMessage(), []);
+            }
+        }
+
+        return $processes;
+    }
+
+    /**
+     * Every (transport, queue) a worker reads: the default queue, and the
+     * queue of each queued listener and handler. A process-local transport is
+     * left out: no worker reads it, and nothing outlives the process.
+     *
+     * @return list<array{0: string, 1: string}>
+     */
+    public function queues(): array
+    {
         $defaultTransport = QueueConfig::defaultTransport();
 
         /** @var array<string, array{string, string}> $queues */
@@ -56,20 +78,8 @@ final class QueueWorkerProcesses implements WorkerProcessSourceInterface
         }
 
         ksort($queues);
-        $processes = [];
-        foreach ($queues as [$transport, $queue]) {
-            if (QueueConfig::isProcessLocal($transport)) {
-                continue;
-            }
-            // One odd name must not take every other queue's worker with it.
-            try {
-                $processes[] = new WorkerProcess(['queue:work', $transport, $queue], reads: [$transport, $queue]);
-            } catch (\InvalidArgumentException $e) {
-                StaticLoggerBridge::warning('core', "Queue '{$queue}' on '{$transport}' gets no worker: " . $e->getMessage(), []);
-            }
-        }
 
-        return $processes;
+        return array_values(array_filter($queues, static fn (array $pair): bool => !QueueConfig::isProcessLocal($pair[0])));
     }
 
     private static function name(mixed $value): ?string

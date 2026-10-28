@@ -67,6 +67,7 @@ final class PipelineExecutor
 
     public function execute(RequestPipelineContext $context): void
     {
+        $context->reRun = $this->reRun;
         // The root the inner spans nest under lives here, not at the call site,
         // so every entry point that runs a pipeline produces the same tree.
         $this->span('pipeline', ['route' => $context->route->name], function () use ($context): void {

@@ -89,7 +89,7 @@ final class ExceptionMapper implements ExceptionResponseMapperInterface
             $response = $this->errorRouteDispatcher->dispatchThrowable($e, $request, ['name' => $metadata->name]);
             if ($response !== null) {
                 if ($e instanceof RateLimitException) {
-                    $response = $response->withHeaders(['Retry-After' => (string) $e->getRetryAfter()]);
+                    $response = $response->withHeaders($e->headers());
                 }
 
                 return $response;
@@ -105,7 +105,7 @@ final class ExceptionMapper implements ExceptionResponseMapperInterface
         };
 
         if ($e instanceof RateLimitException) {
-            $response = $response->withHeaders(['Retry-After' => (string) $e->getRetryAfter()]);
+            $response = $response->withHeaders($e->headers());
         }
 
         return $response;
