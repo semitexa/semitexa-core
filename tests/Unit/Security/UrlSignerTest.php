@@ -43,8 +43,24 @@ final class UrlSignerTest extends TestCase
         $link = $signer->sign('/files/a%20b?b=2&a=1&tags%5B%5D=x&tags%5B%5D=y');
         parse_str((string) parse_url($link, PHP_URL_QUERY), $query);
 
-        // As Swoole hands a request over: decoded path, parameters rebuilt.
+        // Parameters rebuilt, as Swoole hands them over; a path given with the
+        // space a client escapes is the path it arrives as.
+        self::assertSame(SignatureCheck::Valid, $signer->check('/files/a%20b', http_build_query(array_reverse($query, true))));
         self::assertSame(SignatureCheck::Valid, $signer->check('/files/a b', http_build_query(array_reverse($query, true))));
+    }
+
+    /** Routing tells `/files/%61dmin` from `/files/admin`: one signature opened both. */
+    #[Test]
+    public function an_encoded_letter_is_not_the_letter(): void
+    {
+        $signer = UrlSigner::withSecrets('secret-a');
+        $query = (string) parse_url($signer->sign('/files/%61dmin'), PHP_URL_QUERY);
+
+        self::assertSame(SignatureCheck::Valid, $signer->check('/files/%61dmin', $query));
+        self::assertSame(SignatureCheck::Invalid, $signer->check('/files/admin', $query));
+
+        $query = (string) parse_url($signer->sign('/files/café'), PHP_URL_QUERY);
+        self::assertSame(SignatureCheck::Valid, $signer->check('/files/caf%C3%A9', $query), 'as a browser sends it');
     }
 
     #[Test]
