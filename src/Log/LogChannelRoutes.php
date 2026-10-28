@@ -77,11 +77,39 @@ final class LogChannelRoutes
         $path = self::normalize($route);
         if (preg_match('#^var/log/(?!.*\.\.)[A-Za-z0-9._/-]+\.log$#', $path) !== 1
             || in_array($path, self::reserved(), true)
-            || $path === self::normalize($logFile)) {
+            || $path === self::normalize($logFile)
+            || self::isTheSwooleLog($path)) {
             return null;
         }
 
         return new LogRoute($path, false);
+    }
+
+    /**
+     * reserved() compares spellings; this compares files. A link made
+     * SWOOLE_LOG_FILE=/elsewhere/server.log the project's var/log/server.log.
+     */
+    private static function isTheSwooleLog(string $path): bool
+    {
+        $swoole = (string) Environment::getEnvValue('SWOOLE_LOG_FILE', '');
+        if ($swoole === '') {
+            return false;
+        }
+        $root = rtrim(ProjectRoot::get(), '/') . '/';
+
+        return self::resolved(str_starts_with($swoole, '/') ? $swoole : $root . $swoole) === self::resolved($root . $path);
+    }
+
+    /** The path with its longest existing part resolved through links; the file need not exist yet. */
+    private static function resolved(string $path): string
+    {
+        $rest = '';
+        while (($real = realpath($path)) === false && $path !== dirname($path)) {
+            $rest = '/' . basename($path) . $rest;
+            $path = dirname($path);
+        }
+
+        return ($real === false ? $path : $real) . $rest;
     }
 
     /**

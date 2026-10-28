@@ -217,7 +217,14 @@ class LintTemplatesCommand extends BaseCommand
                 continue;
             }
             // A comment runs nothing: `{# {% include 'note.txt.twig' %} #}` includes nothing.
-            $source = (string) preg_replace('/\{#.*?#\}/s', '', $source);
+            // Tags and expressions are matched first, their strings whole, so the `{#`
+            // in `{{ '{#' }}` opens no comment and hides no include after it.
+            // A regex that gives up (backtrack limit) keeps the comments, never drops the template.
+            $source = preg_replace_callback(
+                '/\{[{%](?:\'(?:[^\'\\\\]|\\\\.)*\'|"(?:[^"\\\\]|\\\\.)*"|[^\'"])*?[}%]\}|\{#.*?#\}/s',
+                static fn (array $m): string => str_starts_with($m[0], '{#') ? '' : $m[0],
+                $source,
+            ) ?? $source;
             preg_match_all('/(?:\{%-?\s*(?:include|embed|import|from)\s+|\b(?:include|source)\(\s*)(\[[^\]]*\]|[\'"][^\'"]+\.twig[\'"])/', $source, $arguments);
             preg_match_all('/[\'"]([^\'"]+\.twig)[\'"]/', implode(' ', $arguments[1]), $matches);
             foreach (array_unique($matches[1]) as $included) {

@@ -62,4 +62,25 @@ final class LogChannelRoutesTest extends TestCase
             putenv($previous === false ? 'SWOOLE_LOG_FILE' : 'SWOOLE_LOG_FILE=' . $previous);
         }
     }
+
+    /** The paths were compared as text: a link outside the project into its var/log named the same file twice. */
+    #[Test]
+    public function the_swoole_log_reached_through_a_link_is_refused(): void
+    {
+        $previous = getenv('SWOOLE_LOG_FILE');
+        $logDir = ProjectRoot::get() . '/var/log';
+        $link = sys_get_temp_dir() . '/log-link-' . bin2hex(random_bytes(4));
+        is_dir($logDir) || mkdir($logDir, 0775, true);
+        symlink($logDir, $link);
+        try {
+            putenv('SWOOLE_LOG_FILE=' . $link . '/server.log');
+            $rejected = [];
+            $routes = LogChannelRoutes::fromEnv('audit=var/log/server.log,sql=var/log/sql.log', 'var/log/app.log', $rejected);
+            self::assertSame(['audit=var/log/server.log'], $rejected, 'the file does not exist yet, its directory is the same');
+            self::assertEquals(['sql' => new LogRoute('var/log/sql.log', false)], $routes);
+        } finally {
+            unlink($link);
+            putenv($previous === false ? 'SWOOLE_LOG_FILE' : 'SWOOLE_LOG_FILE=' . $previous);
+        }
+    }
 }

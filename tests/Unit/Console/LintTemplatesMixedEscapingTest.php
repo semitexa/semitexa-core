@@ -48,6 +48,23 @@ final class LintTemplatesMixedEscapingTest extends TestCase
         self::assertSame(['partials/note.txt.twig', 'b.js.twig'], array_column($found, 1), 'an include inside a comment is not one');
     }
 
+    /** Comment delimiters printed as strings opened no comment, but the lint stripped the include between them. */
+    #[Test]
+    public function a_comment_delimiter_inside_a_string_hides_no_include(): void
+    {
+        $dir = sys_get_temp_dir() . '/lint-escaping-' . bin2hex(random_bytes(4));
+        mkdir($dir);
+        file_put_contents($dir . '/home.html.twig', "{{ '{#' }}\n{% include 'partials/note.txt.twig' %}\n{{ \"#}\" }}\n{% set s = 'a %} b' %}{{ include('c.js.twig') }}\n{# {{ '#}' }} #}");
+        try {
+            $found = LintTemplatesCommand::mixedEscapingIncludes($dir);
+        } finally {
+            unlink($dir . '/home.html.twig');
+            rmdir($dir);
+        }
+
+        self::assertSame(['partials/note.txt.twig', 'c.js.twig'], array_column($found, 1));
+    }
+
     /** A file it could not read came back as an empty template, and --strict reported it clean. */
     #[Test]
     public function an_html_template_that_cannot_be_read_is_reported_unread(): void
