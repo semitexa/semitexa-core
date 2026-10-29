@@ -39,7 +39,7 @@ final class DeprecatedApiRuleTest extends RuleTestCase
         self::assertSame([
             '19 ' . self::CLOCK . '::noDate() is @api and @deprecated without a date. Start the tag with the date it was deprecated: `@deprecated <YYYY.MM.DD> Use ApiClock::now() instead.`.',
             '25 ' . self::CLOCK . '::noReplacement() is @api and @deprecated without saying what to use instead. Name it after the date: `@deprecated 2026.10.29 Use ... instead.`',
-            '31 ' . self::CLOCK . '::future() is @deprecated from 2999.01.01, a date still to come. Write the date it was deprecated: the 90 days count from it.',
+            '31 ' . self::CLOCK . '::future() is @deprecated from 2999.01.01, a date still to come. Write the date it was deprecated.',
             '37 ' . self::CLOCK . '::attributeDisagrees() says @deprecated 2026.10.29.1052 but #[\Deprecated(since: \'2026.10.01\')]. Give both the same date.',
             '43 ' . self::CLOCK . '::attributeOnly() is @api and #[\Deprecated], with no @deprecated tag. Write `@deprecated <YYYY.MM.DD> <what to use instead>` in its docblock.',
             '66 ' . self::CLOCK . '::OLD is @api and @deprecated without a date. Start the tag with the date it was deprecated: `@deprecated <YYYY.MM.DD> <what to use instead>`.',

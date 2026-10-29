@@ -27,8 +27,9 @@ use PHPStan\Rules\RuleErrorBuilder;
  *
  *     @deprecated 2026.11.02 Use Clock::now() instead.
  *
- * The date (`YYYY.MM.DD`, or a release version `YYYY.MM.DD.HHMM`) starts the
- * 90 days it must keep working; it cannot lie in the future. A native
+ * The date (`YYYY.MM.DD`, or a release version `YYYY.MM.DD.HHMM`) is when it
+ * was deprecated; the 90 days it must keep working count from the first
+ * release that ships it, dated that day or later. It cannot lie in the future. A native
  * `#[\Deprecated]` next to it gives the same `since`. Code outside `@api` may
  * deprecate however it likes: nothing is promised for it.
  *
@@ -37,7 +38,7 @@ use PHPStan\Rules\RuleErrorBuilder;
 final class DeprecatedApiRule implements Rule
 {
     /** Printed with every report of this rule: why it exists, and what taught us. */
-    private const RATIONALE = 'Why: a deprecated @api part may be removed 90 days after it was deprecated, and users count those days from the date written here; without a date nothing can be counted, and without a replacement nobody can move off it. Policy since 2026-10-29 (the stability contract); no incident on record.';
+    private const RATIONALE = 'Why: a deprecated @api part may be removed 90 days after it was deprecated, counted from the release that shipped the date written here; without a date nothing can be counted, and without a replacement nobody can move off it. Policy since 2026-10-29 (the stability contract); no incident on record.';
 
     private const SINCE = '/^\d{4}\.\d{2}\.\d{2}(\.\d{4})?$/';
 
@@ -94,7 +95,7 @@ final class DeprecatedApiRule implements Rule
         if (preg_match(self::SINCE, $since) !== 1) {
             $errors[] = $this->error($node, sprintf('%s is @api and @deprecated without a date. Start the tag with the date it was deprecated: `@deprecated <YYYY.MM.DD> %s`.', $name, $tag !== '' ? $tag : '<what to use instead>'));
         } elseif (substr($since, 0, 10) > gmdate('Y.m.d')) {
-            $errors[] = $this->error($node, sprintf('%s is @deprecated from %s, a date still to come. Write the date it was deprecated: the 90 days count from it.', $name, $since));
+            $errors[] = $this->error($node, sprintf('%s is @deprecated from %s, a date still to come. Write the date it was deprecated.', $name, $since));
         } elseif ($attributeSince !== '' && $attributeSince !== null && $attributeSince !== $since) {
             $errors[] = $this->error($node, sprintf('%s says @deprecated %s but #[\Deprecated(since: \'%s\')]. Give both the same date.', $name, $since, $attributeSince));
         }
