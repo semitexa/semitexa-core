@@ -115,7 +115,11 @@ class QueuedHandlerMessage implements \JsonSerializable
         return (int) floor(microtime(true) * 1000);
     }
 
-    /** A message queued before publishedAt existed: its queuedAt, to the second. */
+    /**
+     * A message queued before publishedAt existed: its queuedAt, to the second.
+     *
+     * @param array<mixed> $data
+     */
     private static function publishedAtOf(array $data): int
     {
         if (is_numeric($data['publishedAt'] ?? null)) {

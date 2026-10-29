@@ -22,10 +22,17 @@ final class StrandedAsyncQueueDoctorCheck implements DoctorCheckInterface
     {
         $container = ContainerFactory::get();
         $discovery = $container->get(AttributeDiscovery::class);
+        $inspection = $container->get(QueueInspection::class);
+        if (!$discovery instanceof AttributeDiscovery || !$inspection instanceof QueueInspection) {
+            return DoctorResult::warn(
+                'Could not check the queues Async handlers used before the upgrade: the container has no attribute discovery or queue inspection.',
+                'Run the doctor from a booted project.',
+            );
+        }
         $discovery->initialize();
         $handlers = $discovery->getHandlerRegistry();
         $read = [];
-        foreach ($container->get(QueueInspection::class)->targets() as $target) {
+        foreach ($inspection->targets() as $target) {
             $read[$target['transport'] . ' ' . $target['queue']] = true;
         }
 
