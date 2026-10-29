@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Queue;
 
+use Psr\Container\NotFoundExceptionInterface;
 use Semitexa\Core\Attribute\AsDoctorCheck;
 use Semitexa\Core\Container\ContainerFactory;
 use Semitexa\Core\Contract\DoctorCheckInterface;
@@ -21,8 +22,13 @@ final class StrandedAsyncQueueDoctorCheck implements DoctorCheckInterface
     public function run(): DoctorResult
     {
         $container = ContainerFactory::get();
-        $discovery = $container->get(AttributeDiscovery::class);
-        $inspection = $container->get(QueueInspection::class);
+        // Not registered throws; registered as something else is checked below.
+        try {
+            $discovery = $container->get(AttributeDiscovery::class);
+            $inspection = $container->get(QueueInspection::class);
+        } catch (NotFoundExceptionInterface) {
+            $discovery = $inspection = null;
+        }
         if (!$discovery instanceof AttributeDiscovery || !$inspection instanceof QueueInspection) {
             return DoctorResult::warn(
                 'Could not check the queues Async handlers used before the upgrade: the container has no attribute discovery or queue inspection.',

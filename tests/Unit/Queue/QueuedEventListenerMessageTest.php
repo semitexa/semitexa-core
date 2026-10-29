@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Tests\Unit\Queue;
 
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Semitexa\Core\Queue\Message\QueuedEventListenerMessage;
@@ -62,12 +63,31 @@ final class QueuedEventListenerMessageTest extends TestCase
         QueuedEventListenerMessage::fromJson('"App\\\\Listener"');
     }
 
+    /** @return iterable<string, array{mixed}> */
+    public static function notAnObject(): iterable
+    {
+        yield 'a string' => ['x'];
+        yield 'null' => [null];
+        // A list hydrates no property: the listener ran on an event of defaults.
+        yield 'a list' => [[['id' => 7]]];
+    }
+
     #[Test]
-    public function an_event_payload_that_is_not_an_object_says_so(): void
+    #[DataProvider('notAnObject')]
+    public function an_event_payload_that_is_not_an_object_says_so(mixed $payload): void
     {
         $this->expectException(\InvalidArgumentException::class);
         $this->expectExceptionMessage('Queued event message has an eventPayload that is not an object.');
 
-        QueuedEventListenerMessage::fromJson((string) json_encode(['listenerClass' => 'App\\Listener', 'eventClass' => 'App\\Event', 'eventPayload' => 'x']));
+        QueuedEventListenerMessage::fromJson((string) json_encode(['listenerClass' => 'App\\Listener', 'eventClass' => 'App\\Event', 'eventPayload' => $payload]));
+    }
+
+    /** json_encode([]) writes an empty object as [], and an event without fields is one. */
+    #[Test]
+    public function an_empty_event_payload_is_an_empty_object(): void
+    {
+        $message = QueuedEventListenerMessage::fromJson((string) json_encode(['listenerClass' => 'App\\Listener', 'eventClass' => 'App\\Event', 'eventPayload' => []]));
+
+        self::assertSame([], $message->eventPayload);
     }
 }

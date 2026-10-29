@@ -69,8 +69,11 @@ class QueuedEventListenerMessage implements \JsonSerializable
                 throw new \InvalidArgumentException(sprintf('Queued event message has no %s.', $key));
             }
         }
-        $eventPayload = $data['eventPayload'] ?? [];
-        if (!is_array($eventPayload)) {
+        // json_decode gives a JSON list and a JSON object the same PHP type, and
+        // a list hydrates no property: the listener ran on an event of defaults.
+        // An empty one is an empty object written by json_encode([]).
+        $eventPayload = array_key_exists('eventPayload', $data) ? $data['eventPayload'] : [];
+        if (!is_array($eventPayload) || ($eventPayload !== [] && array_is_list($eventPayload))) {
             throw new \InvalidArgumentException('Queued event message has an eventPayload that is not an object.');
         }
 
