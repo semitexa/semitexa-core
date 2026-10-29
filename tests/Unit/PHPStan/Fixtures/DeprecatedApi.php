@@ -64,6 +64,31 @@ final class ApiClock
 
     /** @deprecated */
     public const OLD = 1;
+
+    /** @deprecated 2026.02.30 Use ApiClock::now() instead. */
+    public function noSuchDay(): int
+    {
+        return 0;
+    }
+
+    /** @deprecated 2026.10.29.2575 Use ApiClock::now() instead. */
+    public function noSuchTime(): int
+    {
+        return 0;
+    }
+
+    /** @deprecated 2026.10.29.1300 Use ApiClock::now() instead. */
+    public function laterThatDay(): int
+    {
+        return 0;
+    }
+
+    /** @deprecated 2026.10.29 Use ApiClock::now() instead. */
+    #[\Deprecated('Use ApiClock::now() instead.')]
+    public function attributeWithoutSince(): int
+    {
+        return 0;
+    }
 }
 
 final class Internal

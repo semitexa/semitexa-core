@@ -23,7 +23,8 @@ final class DeprecatedApiRuleTest extends RuleTestCase
 
     protected function getRule(): Rule
     {
-        return new DeprecatedApiRule();
+        // Noon of the day the fixture was written: "later that day" is still to come.
+        return new DeprecatedApiRule(now: '2026.10.29.1200');
     }
 
     public function testEachBrokenDeprecationIsReportedOnceWithWhatToWrite(): void
@@ -43,7 +44,11 @@ final class DeprecatedApiRuleTest extends RuleTestCase
             '37 ' . self::CLOCK . '::attributeDisagrees() says @deprecated 2026.10.29.1052 but #[\Deprecated(since: \'2026.10.01\')]. Give both the same date.',
             '43 ' . self::CLOCK . '::attributeOnly() is @api and #[\Deprecated], with no @deprecated tag. Write `@deprecated <YYYY.MM.DD> <what to use instead>` in its docblock.',
             '66 ' . self::CLOCK . '::OLD is @api and @deprecated without a date. Start the tag with the date it was deprecated: `@deprecated <YYYY.MM.DD> <what to use instead>`.',
-            '81 ' . self::INTERNAL . '::markedOnItsOwn() is @api and @deprecated without a date. Start the tag with the date it was deprecated: `@deprecated <YYYY.MM.DD> soon`.',
+            '69 ' . self::CLOCK . '::noSuchDay() is @deprecated from 2026.02.30, which is no date on the calendar. Write the date it was deprecated.',
+            '75 ' . self::CLOCK . '::noSuchTime() is @deprecated from 2026.10.29.2575, which is no date on the calendar. Write the date it was deprecated.',
+            '81 ' . self::CLOCK . '::laterThatDay() is @deprecated from 2026.10.29.1300, a date still to come. Write the date it was deprecated.',
+            '87 ' . self::CLOCK . '::attributeWithoutSince() is @deprecated 2026.10.29 but its #[\Deprecated] gives no since. Write #[\Deprecated(since: \'2026.10.29\')].',
+            '106 ' . self::INTERNAL . '::markedOnItsOwn() is @api and @deprecated without a date. Start the tag with the date it was deprecated: `@deprecated <YYYY.MM.DD> soon`.',
         ], $reported, 'current(), bothAgree() (a tag over two lines), OldClock and everything outside @api pass');
     }
 }

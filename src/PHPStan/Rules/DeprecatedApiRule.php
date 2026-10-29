@@ -42,6 +42,11 @@ final class DeprecatedApiRule implements Rule
 
     private const SINCE = '/^\d{4}\.\d{2}\.\d{2}(\.\d{4})?$/';
 
+    /** @param ?string $now UTC `YYYY.MM.DD.HHMM` to compare against; the clock when null (a test fixes it) */
+    public function __construct(private readonly ?string $now = null)
+    {
+    }
+
     public function getNodeType(): string
     {
         return InClassNode::class;
@@ -92,14 +97,19 @@ final class DeprecatedApiRule implements Rule
         $since = strtok($tag, " \t\n") ?: '';
         $instead = trim(substr($tag, strlen($since)));
         $errors = [];
-        if (preg_match(self::SINCE, $since) !== 1) {
+        $dated = preg_match(self::SINCE, $since) === 1;
+        if (!$dated) {
             $errors[] = $this->error($node, sprintf('%s is @api and @deprecated without a date. Start the tag with the date it was deprecated: `@deprecated <YYYY.MM.DD> %s`.', $name, $tag !== '' ? $tag : '<what to use instead>'));
-        } elseif (substr($since, 0, 10) > gmdate('Y.m.d')) {
+        } elseif (!self::isRealMoment($since)) {
+            $errors[] = $this->error($node, sprintf('%s is @deprecated from %s, which is no date on the calendar. Write the date it was deprecated.', $name, $since));
+        } elseif ((strlen($since) === 10 ? $since . '.0000' : $since) > ($this->now ?? gmdate('Y.m.d.Hi'))) {
             $errors[] = $this->error($node, sprintf('%s is @deprecated from %s, a date still to come. Write the date it was deprecated.', $name, $since));
-        } elseif ($attributeSince !== '' && $attributeSince !== null && $attributeSince !== $since) {
+        } elseif ($attributeSince === '') {
+            $errors[] = $this->error($node, sprintf('%s is @deprecated %s but its #[\Deprecated] gives no since. Write #[\Deprecated(since: \'%s\')].', $name, $since, $since));
+        } elseif ($attributeSince !== null && $attributeSince !== $since) {
             $errors[] = $this->error($node, sprintf('%s says @deprecated %s but #[\Deprecated(since: \'%s\')]. Give both the same date.', $name, $since, $attributeSince));
         }
-        if (preg_match(self::SINCE, $since) === 1 && $instead === '') {
+        if ($dated && $instead === '') {
             $errors[] = $this->error($node, sprintf('%s is @api and @deprecated without saying what to use instead. Name it after the date: `@deprecated %s Use ... instead.`', $name, $since));
         }
 
@@ -112,6 +122,15 @@ final class DeprecatedApiRule implements Rule
             ->line($node->getStartLine())
             ->tip(self::RATIONALE)->identifier('semitexa.deprecatedApi')
             ->build();
+    }
+
+    /** 2026.02.30 or 2026.10.29.2575 has the shape of a date and is none. */
+    private static function isRealMoment(string $since): bool
+    {
+        $format = strlen($since) === 10 ? '!Y.m.d' : '!Y.m.d.Hi';
+        $parsed = \DateTimeImmutable::createFromFormat($format, $since, new \DateTimeZone('UTC'));
+
+        return $parsed !== false && $parsed->format(substr($format, 1)) === $since;
     }
 
     private static function hasTag(?Doc $doc, string $tag): bool
