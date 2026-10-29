@@ -66,3 +66,6 @@ rules:
 
     # --- House rules.
     - Semitexa\Core\PHPStan\Rules\DisallowErrorLogRule
+
+    # --- The stability contract (docs: get-started/stability).
+    - Semitexa\Core\PHPStan\Rules\DeprecatedApiRule
