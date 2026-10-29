@@ -54,21 +54,46 @@ class QueuedEventListenerMessage implements \JsonSerializable
 
     /**
      * @throws JsonException
+     * @throws \InvalidArgumentException a message that cannot be an event message, saying why
      */
     public static function fromJson(string $payload): self
     {
         $data = json_decode($payload, true, 512, JSON_THROW_ON_ERROR);
+        if (!is_array($data)) {
+            throw new \InvalidArgumentException('Queued event message is not a JSON object.');
+        }
+        // Without its listener or event class it cannot be run: say which key
+        // is missing instead of a TypeError from the constructor.
+        foreach (['listenerClass', 'eventClass'] as $key) {
+            if (!is_string($data[$key] ?? null) || $data[$key] === '') {
+                throw new \InvalidArgumentException(sprintf('Queued event message has no %s.', $key));
+            }
+        }
+        // json_decode gives a JSON list and a JSON object the same PHP type, and
+        // a list hydrates no property: the listener ran on an event of defaults.
+        // An empty one is an empty object written by json_encode([]).
+        $eventPayload = array_key_exists('eventPayload', $data) ? $data['eventPayload'] : [];
+        if (!is_array($eventPayload) || ($eventPayload !== [] && array_is_list($eventPayload))) {
+            throw new \InvalidArgumentException('Queued event message has an eventPayload that is not an object.');
+        }
+
         return new self(
             listenerClass: $data['listenerClass'],
             eventClass: $data['eventClass'],
-            eventPayload: $data['eventPayload'] ?? [],
-            queuedAt: $data['queuedAt'] ?? date(DATE_ATOM),
-            attempts: (int) ($data['attempts'] ?? 0),
-            maxRetries: (int) ($data['maxRetries'] ?? 0),
-            retryDelay: (int) ($data['retryDelay'] ?? 0),
+            eventPayload: $eventPayload,
+            queuedAt: is_string($data['queuedAt'] ?? null) ? $data['queuedAt'] : date(DATE_ATOM),
+            attempts: self::intOf($data['attempts'] ?? 0),
+            maxRetries: self::intOf($data['maxRetries'] ?? 0),
+            retryDelay: self::intOf($data['retryDelay'] ?? 0),
             publishedAt: self::publishedAtOf($data),
             messageId: is_string($data['messageId'] ?? null) ? $data['messageId'] : '',
         );
+    }
+
+    /** A count from JSON: a number or a numeric string; anything else is none. */
+    private static function intOf(mixed $value): int
+    {
+        return is_numeric($value) ? (int) $value : 0;
     }
 
     /** Now, in milliseconds: when a message enters a queue. */
@@ -77,7 +102,11 @@ class QueuedEventListenerMessage implements \JsonSerializable
         return (int) floor(microtime(true) * 1000);
     }
 
-    /** A message queued before publishedAt existed: its queuedAt, to the second. */
+    /**
+     * A message queued before publishedAt existed: its queuedAt, to the second.
+     *
+     * @param array<mixed> $data
+     */
     private static function publishedAtOf(array $data): int
     {
         if (is_numeric($data['publishedAt'] ?? null)) {
