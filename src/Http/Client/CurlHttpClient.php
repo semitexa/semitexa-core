@@ -259,7 +259,7 @@ final class CurlHttpClient implements HttpClientInterface
         $handle = curl_init();
         try {
             curl_setopt_array($handle, $curlOptions);
-            self::verifyTlsUnderTheHook($handle, $request->url);
+            self::configureTheHook($handle, $request->url);
             $ok = curl_exec($handle);
             $httpCode = (int) curl_getinfo($handle, CURLINFO_HTTP_CODE);
             $errno = curl_errno($handle);
@@ -526,33 +526,41 @@ final class CurlHttpClient implements HttpClientInterface
 
     /**
      * Inside the server curl is Swoole's hook, a PHP handler over its
-     * coroutine client, which checks no certificate unless told to and drops
+     * coroutine client, which the client is told two things directly.
+     *
+     * TLS: it checks no certificate unless told to and drops
      * CURLOPT_SSL_VERIFYHOST: every HTTPS call took a self-signed, expired or
      * wrong-host certificate, so anyone on the path read the API keys. Peer
      * verification is told, and the host name, which the hook would never
      * pass on, is set on the client directly.
+     *
+     * Decoding: since Swoole 6.2.4 its client inflates a gzip body before
+     * WRITEFUNCTION sees it, unbounded and with Content-Encoding still saying
+     * gzip, so the cap stopped nothing and the inflate here failed on bytes
+     * already inflated. Off, the callback gets the bytes as sent and they are
+     * inflated within the cap, as on 6.2.3.
      */
-    private static function verifyTlsUnderTheHook(mixed $handle, string $url): void
+    private static function configureTheHook(mixed $handle, string $url): void
     {
         if (!is_object($handle) || $handle::class !== 'Swoole\\Curl\\Handler') {
             return;
         }
         $host = parse_url($url, PHP_URL_HOST);
-        if (!is_string($host) || $host === '') {
-            return;
-        }
-        $host = trim($host, '[]');
+        $host = is_string($host) ? trim($host, '[]') : '';
         // Swoole checks the name with X509_check_host, which no IP address in
         // a certificate ever matches: for an IP the chain is still checked,
         // and libcurl's IP-SAN check is not there to stand in for it.
-        $name = filter_var($host, FILTER_VALIDATE_IP) === false ? $host : null;
+        $name = $host !== '' && filter_var($host, FILTER_VALIDATE_IP) === false ? $host : null;
         \Closure::bind(static function (object $hooked) use ($name): void {
             // @phpstan-ignore property.notFound (Swoole's handler, not in the stubs)
-            $hooked->clientOptions['ssl_verify_peer'] = true;
+            $options = is_array($hooked->clientOptions) ? $hooked->clientOptions : [];
+            $options['body_decompression'] = false;
+            $options['ssl_verify_peer'] = true;
             if ($name !== null) {
-                // @phpstan-ignore property.notFound
-                $hooked->clientOptions['ssl_host_name'] = $name;
+                $options['ssl_host_name'] = $name;
             }
+            // @phpstan-ignore property.notFound
+            $hooked->clientOptions = $options;
         }, null, $handle::class)($handle);
     }
 
