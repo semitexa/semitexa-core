@@ -44,9 +44,11 @@ final class FileQueueStatsStore implements QueueStatsStoreInterface
                 @rename($file, $file . '.unreadable');
                 throw new \RuntimeException("{$file} could not be read; moved aside to {$file}.unreadable");
             }
+            $counts = is_array($data[$minute] ?? null) ? $data[$minute] : [];
             foreach ($deltas as $field => $amount) {
-                $data[$minute][$field] = (int) ($data[$minute][$field] ?? 0) + $amount;
+                $counts[$field] = (is_numeric($counts[$field] ?? null) ? (int) $counts[$field] : 0) + $amount;
             }
+            $data[$minute] = $counts;
             $temp = $file . '.' . getmypid() . '.tmp';
             if (@file_put_contents($temp, (string) json_encode($data)) === false) {
                 @unlink($temp);
@@ -79,7 +81,7 @@ final class FileQueueStatsStore implements QueueStatsStoreInterface
                     continue;
                 }
                 foreach ($fields as $field => $value) {
-                    $total[(string) $field] = ($total[(string) $field] ?? 0) + (int) $value;
+                    $total[(string) $field] = ($total[(string) $field] ?? 0) + (is_numeric($value) ? (int) $value : 0);
                 }
             }
         }

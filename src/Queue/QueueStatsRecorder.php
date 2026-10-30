@@ -86,6 +86,11 @@ final class QueueStatsRecorder
 
     private function now(): float
     {
-        return $this->clock !== null ? (float) ($this->clock)() : microtime(true);
+        if ($this->clock === null) {
+            return microtime(true);
+        }
+        $now = ($this->clock)();
+
+        return is_numeric($now) ? (float) $now : microtime(true);
     }
 }
