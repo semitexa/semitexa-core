@@ -10,6 +10,8 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 
 /**
  * Base command with helper methods
+ *
+ * @api
  */
 abstract class BaseCommand extends Command
 {

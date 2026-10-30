@@ -21,28 +21,33 @@ class ResourceResponse implements ResourceInterface, LayoutRenderableInterface
     ) {
     }
 
+    /** @api */
     public function setContent(string $content): self
     {
         $this->content = $content;
         return $this;
     }
 
+    /** @api */
     public function getContent(): string
     {
         return $this->content;
     }
 
+    /** @api */
     public function setStatusCode(int $statusCode): self
     {
         $this->statusCode = $statusCode;
         return $this;
     }
 
+    /** @api */
     public function getStatusCode(): int
     {
         return $this->statusCode;
     }
 
+    /** @api */
     public function setHeader(string $name, string $value): self
     {
         $this->headers[$name] = $value;
@@ -59,6 +64,8 @@ class ResourceResponse implements ResourceInterface, LayoutRenderableInterface
      * whatever a page had already declared.
      *
      * @return array<string, string>
+     *
+     * @api
      */
     public function getHeaders(): array
     {
@@ -95,6 +102,7 @@ class ResourceResponse implements ResourceInterface, LayoutRenderableInterface
     // Redirect support
     private ?string $redirectUrl = null;
 
+    /** @api */
     public function setRedirect(string $url, int $statusCode = HttpStatus::Found->value): self
     {
         $this->redirectUrl = $url;
@@ -102,6 +110,7 @@ class ResourceResponse implements ResourceInterface, LayoutRenderableInterface
         return $this;
     }
 
+    /** @api */
     public function getRedirectUrl(): ?string
     {
         return $this->redirectUrl;
@@ -115,12 +124,14 @@ class ResourceResponse implements ResourceInterface, LayoutRenderableInterface
     private ?\Semitexa\Core\Http\Response\ResponseFormat $renderFormat = null;
     private ?string $rendererClass = null;
 
+    /** @api */
     public function setRenderHandle(string $handle): self
     {
         $this->renderHandle = $handle;
         return $this;
     }
 
+    /** @api */
     public function getRenderHandle(): ?string
     {
         return $this->renderHandle;
@@ -160,6 +171,8 @@ class ResourceResponse implements ResourceInterface, LayoutRenderableInterface
      */
     /**
      * @param array<string, mixed> $context
+     *
+     * @api
      */
     public function setContext(array $context): self
     {
@@ -171,6 +184,8 @@ class ResourceResponse implements ResourceInterface, LayoutRenderableInterface
      */
     /**
      * @return array<string, mixed>
+     *
+     * @api
      */
     public function getContext(): array
     {

@@ -16,6 +16,8 @@ use Semitexa\Core\Support\DoctorResult;
  * A check must never throw for an unhealthy environment — that is what
  * DoctorResult::fail() is for. An escaped throwable is reported as a failed
  * check with the exception message.
+ *
+ * @api
  */
 interface DoctorCheckInterface
 {
