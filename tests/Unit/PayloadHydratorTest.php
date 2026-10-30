@@ -58,6 +58,79 @@ final class PayloadHydratorTest extends TestCase
         self::assertSame('hello', PayloadHydrator::hydrate($dto, $this->jsonRequest(['v' => 'hello'], strict: false))->v);
     }
 
+    /**
+     * Every badly typed field at once: it stopped at the first, so a form with
+     * three wrong fields took three round trips to learn about all of them.
+     */
+    #[Test]
+    public function every_badly_typed_field_is_reported_at_once(): void
+    {
+        $dto = new class {
+            public int $n = -1;
+            public float $f = -1.0;
+            public string $name = '';
+
+            public function setN(int $value): void
+            {
+                $this->n = $value;
+            }
+
+            public function setF(float $value): void
+            {
+                $this->f = $value;
+            }
+
+            public function setName(string $value): void
+            {
+                $this->name = $value;
+            }
+        };
+
+        try {
+            PayloadHydrator::hydrate($dto, $this->jsonRequest(['n' => 'hello', 'name' => 'ok', 'f' => 'nope'], strict: true));
+            self::fail('accepted two badly typed fields');
+        } catch (TypeMismatchException $e) {
+            self::assertSame('n', $e->field, 'the first one is the exception itself, as before');
+            self::assertSame([
+                'n' => ["Field 'n': expected int, received string."],
+                'f' => ["Field 'f': expected float, received string."],
+            ], $e->errors());
+        }
+        self::assertSame('ok', $dto->name, 'the well-typed fields between them are still set');
+    }
+
+    /**
+     * A setter that PHP itself refuses (an object type a lenient cast hands a
+     * string) used to end the request as one generic body error, losing the
+     * field mismatches already collected before it.
+     */
+    #[Test]
+    public function a_later_setter_type_error_does_not_hide_the_mismatches_found(): void
+    {
+        $dto = new class {
+            public int $count = -1;
+
+            public function setCount(int $value): void
+            {
+                $this->count = $value;
+            }
+
+            public function setDate(\DateTimeImmutable $value): void
+            {
+            }
+        };
+
+        try {
+            PayloadHydrator::hydrate($dto, $this->jsonRequest(['count' => 'many', 'date' => 'tomorrow'], strict: false));
+            self::fail('accepted a badly typed count');
+        } catch (TypeMismatchException $e) {
+            self::assertSame(['count' => ["Field 'count': expected int, received string."]], $e->errors());
+        }
+
+        $this->expectException(\TypeError::class);
+        PayloadHydrator::hydrate($dto, $this->jsonRequest(['date' => 'tomorrow'], strict: false));
+    }
+
     #[Test]
     public function strict_request_rejects_incompatible_value(): void
     {
