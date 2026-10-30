@@ -38,7 +38,7 @@ final class QueueStatsCommand extends BaseCommand
 
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
-        $window = self::minutes((string) $input->getOption('window'));
+        $window = self::minutes(self::optionText($input->getOption('window')));
         if ($window === null) {
             $output->writeln('<error>--window is minutes (15) or hours (2h).</error>');
 

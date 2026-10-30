@@ -15,6 +15,12 @@ abstract class BaseCommand extends Command
 {
     private const AUTOLOAD_REBUILT_FLAG = 'SEMITEXA_AUTOLOAD_REBUILT';
 
+    /** An option or argument as text: '' when it is absent or not a single value. */
+    protected static function optionText(mixed $value): string
+    {
+        return is_scalar($value) ? (string) $value : '';
+    }
+
     protected function getProjectRoot(): string
     {
         return ProjectRoot::get();

@@ -42,8 +42,8 @@ final class QueueRetryCommand extends BaseCommand
 
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
-        $queue = (string) $input->getOption('queue');
-        $id = (string) $input->getArgument('id');
+        $queue = self::optionText($input->getOption('queue'));
+        $id = self::optionText($input->getArgument('id'));
         $all = (bool) $input->getOption('all');
         if ($queue === '' || ($id === '') === !$all) {
             $output->writeln('<error>Give --queue and either an id or --all.</error>');
@@ -51,7 +51,7 @@ final class QueueRetryCommand extends BaseCommand
             return Command::FAILURE;
         }
 
-        $transport = (string) $input->getOption('transport');
+        $transport = self::optionText($input->getOption('transport'));
         [$target] = $this->inspection->targets($transport !== '' ? $transport : null, $queue);
         $inspector = $target['inspector'];
         if ($inspector === null) {

@@ -34,7 +34,7 @@ final class QueueFailedCommand extends BaseCommand
 
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
-        $limit = max(1, (int) $input->getOption('limit'));
+        $limit = max(1, (int) self::optionText($input->getOption('limit')));
         $withPayload = (bool) $input->getOption('payload');
         $report = [];
         $unsupported = 0;
