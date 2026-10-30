@@ -63,7 +63,10 @@ final class ApiSurfaceTest extends TestCase
                 final class Marked
                 {
                     /** @api */
-                    public const A = 1;
+                    public const A = 1, B = [1, 2];
+
+                    /** @api */
+                    public function list(): void {}
 
                     public function notMarked(): void {}
 
@@ -89,7 +92,7 @@ final class ApiSurfaceTest extends TestCase
                 }
                 PHP);
 
-            self::assertSame(['Probe\Marked', 'Probe\Marked::$label', 'Probe\Marked::A', 'Probe\Marked::marked()', 'Probe\Plain::old()'], self::marked($dir));
+            self::assertSame(['Probe\Marked', 'Probe\Marked::$label', 'Probe\Marked::A', 'Probe\Marked::B', 'Probe\Marked::list()', 'Probe\Marked::marked()', 'Probe\Plain::old()'], self::marked($dir));
 
             symlink($dir . '/nowhere.php', $dir . '/Broken.php');
             $failed = null;
@@ -132,7 +135,8 @@ final class ApiSurfaceTest extends TestCase
     /** @return list<string> */
     private static function markedIn(string $source): array
     {
-        $tokens = array_values(\PhpToken::tokenize($source));
+        // TOKEN_PARSE: a member named list or default is an identifier, not T_LIST / T_DEFAULT.
+        $tokens = array_values(\PhpToken::tokenize($source, TOKEN_PARSE));
         $count = count($tokens);
         $found = [];
         $namespace = '';
@@ -181,14 +185,16 @@ final class ApiSurfaceTest extends TestCase
             if ($class !== null && $depth === $classDepth + 1) {
                 $member = match (true) {
                     $t->is(T_FUNCTION) => ($n = self::next($tokens, $i, T_STRING)) !== null ? $n . '()' : null,
-                    $t->is(T_CONST) => self::constName($tokens, $i),
+                    $t->is(T_CONST) => self::constNames($tokens, $i),
                     $t->is(T_VARIABLE) => $t->text,
                     $t->is(T_CASE) => self::next($tokens, $i, T_STRING),
                     default => false,
                 };
                 if ($member !== false) {
                     if ($member !== null && self::isApi($doc)) {
-                        $found[] = $class . '::' . $member;
+                        foreach ((array) $member as $one) {
+                            $found[] = $class . '::' . $one;
+                        }
                     }
                     $doc = null;
                     // Past the declaration's own name, so `$x` in a body is not a member.
@@ -247,19 +253,31 @@ final class ApiSurfaceTest extends TestCase
     }
 
     /**
-     * The name of `const [type] NAME = ...`: the last identifier before `=`.
+     * Every name of `const [type] A = 1, B = 2;`: each identifier just before an `=`
+     * at the declaration's own level (not inside a value's brackets).
      *
      * @param list<\PhpToken> $tokens
+     * @return list<string>
      */
-    private static function constName(array $tokens, int $at): ?string
+    private static function constNames(array $tokens, int $at): array
     {
-        $name = null;
-        for ($j = $at + 1, $count = count($tokens); $j < $count && $tokens[$j]->text !== '='; $j++) {
-            if ($tokens[$j]->is(T_STRING)) {
-                $name = $tokens[$j]->text;
+        $names = [];
+        $last = null;
+        $nesting = 0;
+        for ($j = $at + 1, $count = count($tokens); $j < $count && !($nesting === 0 && $tokens[$j]->text === ';'); $j++) {
+            $text = $tokens[$j]->text;
+            if (in_array($text, ['(', '[', '{'], true)) {
+                $nesting++;
+            } elseif (in_array($text, [')', ']', '}'], true)) {
+                $nesting--;
+            } elseif ($nesting === 0 && $text === '=' && $last !== null) {
+                $names[] = $last;
+            }
+            if (!$tokens[$j]->is([T_WHITESPACE, T_COMMENT])) {
+                $last = $tokens[$j]->is(T_STRING) ? $text : null;
             }
         }
 
-        return $name;
+        return $names;
     }
 }
