@@ -114,6 +114,25 @@ final class ApiClock
 
     /** @deprecated whenever */
     public int $state = 0;
+
+    /** @deprecated 2026.10.29 Use ApiClock::now() instead. */
+    #[\Deprecated('Use ApiClock::now() instead.', since: Dates::OLD)]
+    public function otherClassConstantDisagrees(): int
+    {
+        return 0;
+    }
+}
+
+/**
+ * Not marked: the line below only mentions /** @api in its prose.
+ */
+final class MentionsApi
+{
+    /** @deprecated whenever */
+    public function anything(): int
+    {
+        return 0;
+    }
 }
 
 /** @api */
@@ -143,8 +162,22 @@ final class Documented
 {
 }
 
+final class Dates
+{
+    public const OLD = '2026.10.01';
+}
+
 final class Internal
 {
+    public function __construct(
+        /**
+         * @api
+         * @deprecated soon
+         */
+        public string $legacy = '',
+    ) {
+    }
+
     /** @deprecated whenever */
     public function anything(): int
     {

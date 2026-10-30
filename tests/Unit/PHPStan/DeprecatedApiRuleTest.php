@@ -22,6 +22,14 @@ final class DeprecatedApiRuleTest extends RuleTestCase
     private const INTERNAL = 'Semitexa\Core\Tests\Unit\PHPStan\Fixtures\DeprecatedApi\Internal';
     private const ONE_LINE = 'Semitexa\Core\Tests\Unit\PHPStan\Fixtures\DeprecatedApi\OneLineApi';
 
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        // Loaded, so the constants an attribute names resolve as they do in real code.
+        require_once self::FIXTURE;
+    }
+
     protected function getRule(): Rule
     {
         // Noon of the day the fixture was written: "later that day" is still to come.
@@ -51,9 +59,11 @@ final class DeprecatedApiRuleTest extends RuleTestCase
             '87 ' . self::CLOCK . '::attributeWithoutSince() is @deprecated 2026.10.29 but its #[\Deprecated] gives no since. Write #[\Deprecated(since: \'2026.10.29\')].',
             '103 ' . self::CLOCK . '::constantDisagrees() says @deprecated 2026.10.28 but #[\Deprecated(since: \'2026.10.29\')]. Give both the same date.',
             '109 ' . self::CLOCK . '::lowerCaseAttribute() is @api and #[\Deprecated], with no @deprecated tag. Write `@deprecated <YYYY.MM.DD> <what to use instead>` in its docblock.',
-            '123 ' . self::ONE_LINE . '::old() is @api and @deprecated without a date. Start the tag with the date it was deprecated: `@deprecated <YYYY.MM.DD> soon`.',
-            '132 ' . self::ONE_LINE . '::$count is @api and @deprecated without a date. Start the tag with the date it was deprecated: `@deprecated <YYYY.MM.DD> soon`.',
-            '158 ' . self::INTERNAL . '::markedOnItsOwn() is @api and @deprecated without a date. Start the tag with the date it was deprecated: `@deprecated <YYYY.MM.DD> soon`.',
-        ], $reported, 'current(), bothAgree() (a tag over two lines), sinceFromAConstant(), $state (an @api class\'s property is not implied), OldClock, Documented (a tag shown inside its prose) and everything outside @api pass');
+            '119 ' . self::CLOCK . '::otherClassConstantDisagrees() says @deprecated 2026.10.29 but #[\Deprecated(since: \'2026.10.01\')]. Give both the same date.',
+            '142 ' . self::ONE_LINE . '::old() is @api and @deprecated without a date. Start the tag with the date it was deprecated: `@deprecated <YYYY.MM.DD> soon`.',
+            '151 ' . self::ONE_LINE . '::$count is @api and @deprecated without a date. Start the tag with the date it was deprecated: `@deprecated <YYYY.MM.DD> soon`.',
+            '177 ' . self::INTERNAL . '::$legacy is @api and @deprecated without a date. Start the tag with the date it was deprecated: `@deprecated <YYYY.MM.DD> soon`.',
+            '191 ' . self::INTERNAL . '::markedOnItsOwn() is @api and @deprecated without a date. Start the tag with the date it was deprecated: `@deprecated <YYYY.MM.DD> soon`.',
+        ], $reported, 'current(), bothAgree() (a tag over two lines), sinceFromAConstant(), $state (an @api class\'s property is not implied), OldClock, Documented (a tag shown inside its prose), MentionsApi (/** @api inside prose) and everything outside @api pass');
     }
 }

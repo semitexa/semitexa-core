@@ -7,9 +7,8 @@ namespace Semitexa\Core\PHPStan\Rules;
 use PhpParser\Comment\Doc;
 use PhpParser\Node;
 use PhpParser\Node\AttributeGroup;
-use PhpParser\Node\Expr\ClassConstFetch;
-use PhpParser\Node\Identifier;
-use PhpParser\Node\Name;
+use PhpParser\Node\Expr\Variable;
+use PhpParser\Node\Param;
 use PhpParser\Node\Scalar\String_;
 use PhpParser\Node\Stmt\ClassConst;
 use PhpParser\Node\Stmt\ClassLike;
@@ -64,9 +63,15 @@ final class DeprecatedApiRule implements Rule
 
         $errors = [];
         if ($classIsApi) {
-            $errors = [...$errors, ...$this->check($class, $className, $class->getDocComment(), $class->attrGroups, $class)];
+            $errors = [...$errors, ...$this->check($class, $className, $class->getDocComment(), $class->attrGroups, $scope)];
         }
         foreach ($class->stmts as $stmt) {
+            // A promoted property is a property, marked @api on its own, whatever the constructor is.
+            foreach ($stmt instanceof ClassMethod ? $stmt->params : [] as $param) {
+                if ($param->isPromoted() && $param->var instanceof Variable && is_string($param->var->name) && self::hasTag($param->getDocComment(), 'api')) {
+                    $errors = [...$errors, ...$this->check($param, $className . '::$' . $param->var->name, $param->getDocComment(), $param->attrGroups, $scope)];
+                }
+            }
             if (!$stmt instanceof ClassMethod && !$stmt instanceof ClassConst && !$stmt instanceof Property) {
                 continue;
             }
@@ -82,7 +87,7 @@ final class DeprecatedApiRule implements Rule
                 $stmt instanceof ClassConst => $className . '::' . implode(', ', array_map(static fn ($c): string => $c->name->toString(), $stmt->consts)),
                 default => $className . '::' . implode(', ', array_map(static fn ($p): string => '$' . $p->name->toString(), $stmt->props)),
             };
-            $errors = [...$errors, ...$this->check($stmt, $name, $doc, $stmt->attrGroups, $class)];
+            $errors = [...$errors, ...$this->check($stmt, $name, $doc, $stmt->attrGroups, $scope)];
         }
 
         return $errors;
@@ -92,10 +97,10 @@ final class DeprecatedApiRule implements Rule
      * @param array<AttributeGroup> $attrGroups
      * @return list<IdentifierRuleError>
      */
-    private function check(ClassLike|ClassMethod|ClassConst|Property $node, string $name, ?Doc $doc, array $attrGroups, ClassLike $class): array
+    private function check(ClassLike|ClassMethod|ClassConst|Property|Param $node, string $name, ?Doc $doc, array $attrGroups, Scope $scope): array
     {
         $tag = self::tag($doc, 'deprecated');
-        $attributeSince = self::attributeSince($attrGroups, $class);
+        $attributeSince = self::attributeSince($attrGroups, $scope);
         if ($tag === null && $attributeSince === null) {
             return [];
         }
@@ -146,7 +151,7 @@ final class DeprecatedApiRule implements Rule
      * A tag opens a docblock line: `* @tag` or `/** @tag`. Further in, it is an
      * example inside the prose, as in this class's own docblock.
      */
-    private const TAG_START = '(?:^[ \t]*\*[ \t]?|\/\*\*[ \t]*)@';
+    private const TAG_START = '^[ \t]*(?:\*[ \t]?|\/\*\*[ \t]*)@';
 
     private static function hasTag(?Doc $doc, string $tag): bool
     {
@@ -165,12 +170,12 @@ final class DeprecatedApiRule implements Rule
 
     /**
      * The `since` of a native #[\Deprecated]: null without the attribute, '' when it gives
-     * none, false when it gives one this rule cannot read (an expression other than a
-     * string or a class constant), which is then not compared.
+     * none, false when it gives one that is not a single constant string, which is then
+     * not compared.
      *
      * @param array<AttributeGroup> $attrGroups
      */
-    private static function attributeSince(array $attrGroups, ClassLike $class): string|false|null
+    private static function attributeSince(array $attrGroups, Scope $scope): string|false|null
     {
         foreach ($attrGroups as $group) {
             foreach ($group->attrs as $attr) {
@@ -180,7 +185,7 @@ final class DeprecatedApiRule implements Rule
                 }
                 foreach ($attr->args as $i => $arg) {
                     if (($arg->name?->toString() ?? ($i === 1 ? 'since' : '')) === 'since') {
-                        return self::stringOf($arg->value, $class);
+                        return self::stringOf($arg->value, $scope);
                     }
                 }
 
@@ -191,24 +196,14 @@ final class DeprecatedApiRule implements Rule
         return null;
     }
 
-    /** A string literal, or a constant of this class (self::DATE, static::DATE) holding one. */
-    private static function stringOf(Node\Expr $value, ClassLike $class): string|false
+    /** A string literal, or any constant expression PHPStan resolves to exactly one string. */
+    private static function stringOf(Node\Expr $value, Scope $scope): string|false
     {
         if ($value instanceof String_) {
             return $value->value;
         }
-        if (!$value instanceof ClassConstFetch || !$value->class instanceof Name || !$value->name instanceof Identifier
-            || !in_array(strtolower($value->class->toString()), ['self', 'static'], true)) {
-            return false;
-        }
-        foreach ($class->getConstants() as $declaration) {
-            foreach ($declaration->consts as $const) {
-                if ($const->name->toString() === $value->name->toString()) {
-                    return $const->value instanceof String_ ? $const->value->value : false;
-                }
-            }
-        }
+        $strings = $scope->getType($value)->getConstantStrings();
 
-        return false;
+        return count($strings) === 1 ? $strings[0]->getValue() : false;
     }
 }
