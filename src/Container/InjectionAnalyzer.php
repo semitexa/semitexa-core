@@ -420,7 +420,7 @@ final class InjectionAnalyzer
             $value = preg_replace('/^([+-]?)0+(?=\d)/', '$1', $value) ?? $value;
         }
         $parsed = filter_var($value, $filter, FILTER_NULL_ON_FAILURE);
-        if ($parsed !== null) {
+        if (is_int($parsed) || is_float($parsed) || is_bool($parsed) || is_string($parsed)) {
             return $parsed;
         }
         BootDiagnostics::current()->invalidUsage(

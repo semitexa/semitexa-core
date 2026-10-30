@@ -188,9 +188,6 @@ class RequestFactory
             // upload vanished without a word. Each file is kept under the
             // name the form gave it, `doc[avatar]`, `deep[x][y]`.
             foreach ($entry as $subField => $subEntry) {
-                if (!is_string($subField) && !is_int($subField)) {
-                    continue;
-                }
                 foreach (self::normalizeFiles([$field . '[' . $subField . ']' => $subEntry], $depth + 1) as $name => $file) {
                     $out[$name] = $file;
                 }

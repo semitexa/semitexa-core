@@ -63,6 +63,8 @@ final class InMemoryRateLimitStore implements RateLimitStoreInterface
 
     private function now(): int
     {
-        return $this->clock !== null ? (int) ($this->clock)() : time();
+        $now = $this->clock !== null ? ($this->clock)() : null;
+
+        return is_numeric($now) ? (int) $now : time();
     }
 }

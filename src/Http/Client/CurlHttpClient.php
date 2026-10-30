@@ -124,6 +124,7 @@ final class CurlHttpClient implements HttpClientInterface
             } catch (HttpTransportException $e) {
                 // A stream that already handed bytes on cannot be replayed: the
                 // caller would get the first attempt's half and then the second.
+                // @phpstan-ignore booleanNot.alwaysTrue (once() sets it by reference before it throws)
                 if (!$forwarded && $e->isRetryable() && $policy->appliesTo($request->method) && $attempt < $policy->maxAttempts) {
                     $this->pause($policy->delayMs($attempt, null, $this->random()));
                     continue;

@@ -46,7 +46,7 @@ final class RedisRateLimitStore implements RateLimitStoreInterface
             return null;
         }
 
-        return is_array($result) && count($result) === 2 ? [(int) $result[0], (int) $result[1]] : null;
+        return is_array($result) && count($result) === 2 && is_numeric($result[0]) && is_numeric($result[1]) ? [(int) $result[0], (int) $result[1]] : null;
     }
 
     public function undo(string $currentKey): void

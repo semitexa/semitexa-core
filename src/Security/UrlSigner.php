@@ -164,15 +164,23 @@ final class UrlSigner
     /** @param array<array-key, mixed> $query */
     private static function canonicalQuery(array $query): string
     {
-        $sort = static function (array &$value) use (&$sort): void {
+        /**
+         * Keys sorted at every level, as the signature is made over them.
+         *
+         * @param array<array-key, mixed> $value
+         * @return array<array-key, mixed>
+         */
+        $sort = static function (array $value) use (&$sort): array {
             ksort($value, SORT_STRING);
-            foreach ($value as &$item) {
+            foreach ($value as $key => $item) {
                 if (is_array($item)) {
-                    $sort($item);
+                    $value[$key] = $sort($item);
                 }
             }
+
+            return $value;
         };
-        $sort($query);
+        $query = $sort($query);
 
         return http_build_query($query, '', '&', PHP_QUERY_RFC3986);
     }
