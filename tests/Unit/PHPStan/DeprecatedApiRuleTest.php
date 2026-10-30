@@ -21,6 +21,7 @@ final class DeprecatedApiRuleTest extends RuleTestCase
     private const CLOCK = 'Semitexa\Core\Tests\Unit\PHPStan\Fixtures\DeprecatedApi\ApiClock';
     private const INTERNAL = 'Semitexa\Core\Tests\Unit\PHPStan\Fixtures\DeprecatedApi\Internal';
     private const ONE_LINE = 'Semitexa\Core\Tests\Unit\PHPStan\Fixtures\DeprecatedApi\OneLineApi';
+    private const SPACED = 'Semitexa\Core\Tests\Unit\PHPStan\Fixtures\DeprecatedApi\Spaced';
 
     protected function setUp(): void
     {
@@ -64,6 +65,8 @@ final class DeprecatedApiRuleTest extends RuleTestCase
             '151 ' . self::ONE_LINE . '::$count is @api and @deprecated without a date. Start the tag with the date it was deprecated: `@deprecated <YYYY.MM.DD> soon`.',
             '177 ' . self::INTERNAL . '::$legacy is @api and @deprecated without a date. Start the tag with the date it was deprecated: `@deprecated <YYYY.MM.DD> soon`.',
             '191 ' . self::INTERNAL . '::markedOnItsOwn() is @api and @deprecated without a date. Start the tag with the date it was deprecated: `@deprecated <YYYY.MM.DD> soon`.',
+            // Tags after a run of spaces, the next one ending the text.
+            '212 ' . self::SPACED . '::old() is @api and @deprecated without a date. Start the tag with the date it was deprecated: `@deprecated <YYYY.MM.DD> soon`.',
         ], $reported, 'current(), bothAgree() (a tag over two lines), sinceFromAConstant(), $state (an @api class\'s property is not implied), OldClock, Documented (a tag shown inside its prose), MentionsApi (/** @api inside prose) and everything outside @api pass');
     }
 }

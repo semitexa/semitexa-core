@@ -148,10 +148,11 @@ final class DeprecatedApiRule implements Rule
     }
 
     /**
-     * A tag opens a docblock line: `* @tag` or `/** @tag`. Further in, it is an
-     * example inside the prose, as in this class's own docblock.
+     * A tag opens a docblock line: `* @tag` or `/** @tag`, up to four spaces in.
+     * Further in, it is an example inside the prose (a code block in Markdown),
+     * as in this class's own docblock.
      */
-    private const TAG_START = '^[ \t]*(?:\*[ \t]?|\/\*\*[ \t]*)@';
+    private const TAG_START = '^[ \t]*(?:\*[ \t]{0,4}|\/\*\*[ \t]{0,4})@';
 
     private static function hasTag(?Doc $doc, string $tag): bool
     {
@@ -161,7 +162,7 @@ final class DeprecatedApiRule implements Rule
     /** The text after @<tag>, continuation lines included up to the next tag; null without the tag. */
     private static function tag(?Doc $doc, string $tag): ?string
     {
-        if ($doc === null || preg_match('/' . self::TAG_START . $tag . '\b(.*?)(?=^[ \t]*\*[ \t]?@|\*\/)/ms', $doc->getText(), $m) !== 1) {
+        if ($doc === null || preg_match('/' . self::TAG_START . $tag . '\b(.*?)(?=^[ \t]*\*[ \t]{0,4}@|\*\/)/ms', $doc->getText(), $m) !== 1) {
             return null;
         }
 

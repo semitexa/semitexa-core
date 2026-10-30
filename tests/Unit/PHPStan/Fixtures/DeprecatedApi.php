@@ -201,3 +201,16 @@ final class Internal
 final class OldClock
 {
 }
+
+final class Spaced
+{
+    /**
+     *  @api
+     *  @deprecated  soon
+     *  @see Internal
+     */
+    public function old(): int
+    {
+        return 0;
+    }
+}
