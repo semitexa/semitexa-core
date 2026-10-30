@@ -60,7 +60,7 @@ final class InstallRateLimitStoreListener implements ServerLifecycleListenerInte
         }
         $storage->use($table);
 
-        if ($context->workerId === 0 && ($context->server?->taskworker ?? false) !== true && class_exists(Timer::class, false)) {
+        if ($context->workerId === 0 && ($context->server->taskworker ?? false) !== true && class_exists(Timer::class, false)) {
             WorkerTimerRegistry::register(Timer::tick(self::SWEEP_EVERY_MS, static function () use ($table): void {
                 $table->sweep();
             }));

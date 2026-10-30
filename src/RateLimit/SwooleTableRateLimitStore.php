@@ -133,7 +133,9 @@ final class SwooleTableRateLimitStore implements RateLimitStoreInterface
 
     private function now(): int
     {
-        return $this->clock !== null ? (int) ($this->clock)() : time();
+        $now = $this->clock !== null ? ($this->clock)() : null;
+
+        return is_numeric($now) ? (int) $now : time();
     }
 
     /** Delete counters of windows before the previous one: nothing reads them again. */
@@ -142,12 +144,15 @@ final class SwooleTableRateLimitStore implements RateLimitStoreInterface
         $now ??= time();
         $stale = [];
         foreach ($this->table as $key => $row) {
-            $parts = explode(':', (string) $key, 3);
+            if (!is_string($key)) {
+                continue;
+            }
+            $parts = explode(':', $key, 3);
             if (count($parts) !== 3 || !ctype_digit($parts[0]) || !ctype_digit($parts[1]) || (int) $parts[0] < 1) {
                 continue;
             }
             if ((int) $parts[1] < intdiv($now, (int) $parts[0]) - 1) {
-                $stale[] = (string) $key;
+                $stale[] = $key;
             }
         }
         foreach ($stale as $key) {

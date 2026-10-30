@@ -116,6 +116,7 @@ final class UdpLogShipper
 
             return $values;
         };
+        /** @var array<string, mixed> $result the entry's own keys, walked */
         $result = $walk($entry);
 
         return $changed ? $result : null;
