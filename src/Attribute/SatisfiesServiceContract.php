@@ -15,6 +15,8 @@ use Attribute;
  *
  * For factory contracts, use `factoryKey` to specify the backed enum case
  * that selects this implementation.
+ *
+ * @api
  */
 #[Attribute(Attribute::TARGET_CLASS | Attribute::IS_REPEATABLE)]
 final class SatisfiesServiceContract

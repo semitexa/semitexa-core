@@ -8,6 +8,8 @@ use Attribute;
 
 /**
  * Optional marker on event classes. Reserved for future attributes (e.g. log to journal, log success/failure).
+ *
+ * @api
  */
 #[Attribute(Attribute::TARGET_CLASS)]
 class AsEvent

@@ -24,6 +24,8 @@ namespace Semitexa\Core\Contract;
  * Returning the empty array signals "no cross-field issues" — that is the
  * preferred way to say "valid"; throwing ValidationException from validate()
  * works too and ends up in the same 422 envelope.
+ *
+ * @api
  */
 interface ValidatablePayloadInterface
 {

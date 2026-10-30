@@ -6,6 +6,7 @@ namespace Semitexa\Core\Attribute;
 
 use Attribute;
 
+/** @api */
 #[Attribute(Attribute::TARGET_CLASS)]
 final class AsServerLifecycleListener
 {

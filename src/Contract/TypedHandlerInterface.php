@@ -21,6 +21,8 @@ namespace Semitexa\Core\Contract;
  * concrete class, parameter 1 implements ResourceInterface, extra parameters are
  * optional, and the return type is not Response. Invocation uses the cached
  * ReflectionMethod at request time.
+ *
+ * @api
  */
 interface TypedHandlerInterface
 {

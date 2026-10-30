@@ -11,6 +11,8 @@ use Attribute;
  * by `worker:processes` and run by the scaffold's worker container. The class
  * must implement WorkerProcessSourceInterface and be a service (#[AsService]):
  * it is built through the container, so it can read the package's config.
+ *
+ * @api
  */
 #[Attribute(Attribute::TARGET_CLASS)]
 final class AsWorkerProcessSource

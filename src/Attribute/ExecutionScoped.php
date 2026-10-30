@@ -12,6 +12,8 @@ use Attribute;
  *
  * Implied by #[AsPayloadHandler], #[AsEventListener], #[AsPipelineListener].
  * Use this attribute for non-handler/listener classes that need per-execution state.
+ *
+ * @api
  */
 #[Attribute(Attribute::TARGET_CLASS)]
 final class ExecutionScoped {}

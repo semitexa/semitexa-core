@@ -18,6 +18,8 @@ use Semitexa\Core\Auth\PayloadAccessType;
  * "Publicly reachable" is NOT the same as "public access": a webhook receiver
  * is reachable from the public internet but is authenticated by a signature
  * — declare it #[AsServicePayload], not #[AsPublicPayload].
+ *
+ * @api
  */
 #[Attribute(Attribute::TARGET_CLASS)]
 final class AsPublicPayload extends AbstractPayloadRoute

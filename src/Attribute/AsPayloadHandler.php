@@ -11,6 +11,8 @@ use Semitexa\Core\Queue\HandlerExecution;
  * Marks a class as an HTTP payload (request) handler.
  * Match by (payload, resource): this handler runs for the given Payload and builds the given Resource.
  *
+ *
+ * @api
  */
 #[Attribute(Attribute::TARGET_CLASS)]
 class AsPayloadHandler
