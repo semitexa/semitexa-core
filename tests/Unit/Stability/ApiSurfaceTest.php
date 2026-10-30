@@ -79,7 +79,7 @@ final class ApiSurfaceTest extends TestCase
                     }
 
                     /** @api */
-                    public ?string $label = null;
+                    public ?string $label = null, $note = [1, 2];
                 }
 
                 final class Plain
@@ -92,7 +92,7 @@ final class ApiSurfaceTest extends TestCase
                 }
                 PHP);
 
-            self::assertSame(['Probe\Marked', 'Probe\Marked::$label', 'Probe\Marked::A', 'Probe\Marked::B', 'Probe\Marked::list()', 'Probe\Marked::marked()', 'Probe\Plain::old()'], self::marked($dir));
+            self::assertSame(['Probe\Marked', 'Probe\Marked::$label', 'Probe\Marked::$note', 'Probe\Marked::A', 'Probe\Marked::B', 'Probe\Marked::list()', 'Probe\Marked::marked()', 'Probe\Plain::old()'], self::marked($dir));
 
             symlink($dir . '/nowhere.php', $dir . '/Broken.php');
             $failed = null;
@@ -144,6 +144,7 @@ final class ApiSurfaceTest extends TestCase
         $depth = 0;
         $class = null;
         $classDepth = -1;
+        $parens = 0;
         for ($i = 0; $i < $count; $i++) {
             $t = $tokens[$i];
             if ($t->is([T_WHITESPACE, T_COMMENT])) {
@@ -186,7 +187,9 @@ final class ApiSurfaceTest extends TestCase
                 $member = match (true) {
                     $t->is(T_FUNCTION) => ($n = self::next($tokens, $i, T_STRING)) !== null ? $n . '()' : null,
                     $t->is(T_CONST) => self::constNames($tokens, $i),
-                    $t->is(T_VARIABLE) => $t->text,
+                    // In a parameter list a promoted property is one name; a property
+                    // declaration may name several, all under one docblock.
+                    $t->is(T_VARIABLE) => $parens > 0 ? $t->text : self::propertyNames($tokens, $i),
                     $t->is(T_CASE) => self::next($tokens, $i, T_STRING),
                     default => false,
                 };
@@ -202,6 +205,11 @@ final class ApiSurfaceTest extends TestCase
                         continue;
                     }
                 }
+            }
+            if ($t->text === '(') {
+                $parens++;
+            } elseif ($t->text === ')') {
+                $parens--;
             }
             if ($t->text === '{' || $t->is([T_CURLY_OPEN, T_DOLLAR_OPEN_CURLY_BRACES])) {
                 $depth++;
@@ -250,6 +258,31 @@ final class ApiSurfaceTest extends TestCase
         }
 
         return null;
+    }
+
+    /**
+     * Every name of `public string $a, $b = 1;`, from the first: each variable at
+     * the declaration's own level (a default value holds none).
+     *
+     * @param list<\PhpToken> $tokens
+     * @return list<string>
+     */
+    private static function propertyNames(array $tokens, int &$at): array
+    {
+        $names = [];
+        $nesting = 0;
+        for ($count = count($tokens); $at < $count && !($nesting === 0 && $tokens[$at]->text === ';'); $at++) {
+            $text = $tokens[$at]->text;
+            if (in_array($text, ['(', '[', '{'], true)) {
+                $nesting++;
+            } elseif (in_array($text, [')', ']', '}'], true)) {
+                $nesting--;
+            } elseif ($nesting === 0 && $tokens[$at]->is(T_VARIABLE)) {
+                $names[] = $text;
+            }
+        }
+
+        return $names;
     }
 
     /**
