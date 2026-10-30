@@ -9,6 +9,8 @@ use Semitexa\Core\Http\HttpStatus;
 /**
  * Base class for domain exceptions that map to HTTP status codes.
  * Handlers throw these instead of returning Response objects.
+ *
+ * @api
  */
 abstract class DomainException extends \RuntimeException
 {

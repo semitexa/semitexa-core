@@ -70,6 +70,8 @@ class JsonResourceResponse extends ResourceResponse
     /**
      * Validate the request's includes (if any), render the Resource DTO graph,
      * and set the JSON content. Returns $this for fluency.
+     *
+     * @api
      */
     public function withResource(ResourceObjectInterface $resource, RenderContext $context): self
     {
@@ -130,6 +132,8 @@ class JsonResourceResponse extends ResourceResponse
      *                                                      validation; required so empty
      *                                                      collections can still validate.
      * @param array<string, list<array{value: string, label: string}>>|null $filterOptions
+     *
+     * @api
      */
     public function withResources(
         array $resources,
