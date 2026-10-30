@@ -7,10 +7,14 @@ namespace Semitexa\Core\PHPStan\Rules;
 use PhpParser\Comment\Doc;
 use PhpParser\Node;
 use PhpParser\Node\AttributeGroup;
+use PhpParser\Node\Expr\ClassConstFetch;
+use PhpParser\Node\Identifier;
+use PhpParser\Node\Name;
 use PhpParser\Node\Scalar\String_;
 use PhpParser\Node\Stmt\ClassConst;
 use PhpParser\Node\Stmt\ClassLike;
 use PhpParser\Node\Stmt\ClassMethod;
+use PhpParser\Node\Stmt\Property;
 use PHPStan\Analyser\Scope;
 use PHPStan\Node\InClassNode;
 use PHPStan\Rules\IdentifierRuleError;
@@ -60,20 +64,25 @@ final class DeprecatedApiRule implements Rule
 
         $errors = [];
         if ($classIsApi) {
-            $errors = [...$errors, ...$this->check($class, $className, $class->getDocComment(), $class->attrGroups)];
+            $errors = [...$errors, ...$this->check($class, $className, $class->getDocComment(), $class->attrGroups, $class)];
         }
         foreach ($class->stmts as $stmt) {
-            if (!$stmt instanceof ClassMethod && !$stmt instanceof ClassConst) {
+            if (!$stmt instanceof ClassMethod && !$stmt instanceof ClassConst && !$stmt instanceof Property) {
                 continue;
             }
             $doc = $stmt->getDocComment();
-            if (!self::hasTag($doc, 'api') && !($classIsApi && $stmt->isPublic())) {
+            // A property is in the surface only when marked itself: the convention names an
+            // @api class's public methods and constants, not its state.
+            $implied = $classIsApi && $stmt->isPublic() && !$stmt instanceof Property;
+            if (!self::hasTag($doc, 'api') && !$implied) {
                 continue;
             }
-            $name = $stmt instanceof ClassMethod
-                ? $className . '::' . $stmt->name->toString() . '()'
-                : $className . '::' . implode(', ', array_map(static fn ($c): string => $c->name->toString(), $stmt->consts));
-            $errors = [...$errors, ...$this->check($stmt, $name, $doc, $stmt->attrGroups)];
+            $name = match (true) {
+                $stmt instanceof ClassMethod => $className . '::' . $stmt->name->toString() . '()',
+                $stmt instanceof ClassConst => $className . '::' . implode(', ', array_map(static fn ($c): string => $c->name->toString(), $stmt->consts)),
+                default => $className . '::' . implode(', ', array_map(static fn ($p): string => '$' . $p->name->toString(), $stmt->props)),
+            };
+            $errors = [...$errors, ...$this->check($stmt, $name, $doc, $stmt->attrGroups, $class)];
         }
 
         return $errors;
@@ -83,10 +92,10 @@ final class DeprecatedApiRule implements Rule
      * @param array<AttributeGroup> $attrGroups
      * @return list<IdentifierRuleError>
      */
-    private function check(ClassLike|ClassMethod|ClassConst $node, string $name, ?Doc $doc, array $attrGroups): array
+    private function check(ClassLike|ClassMethod|ClassConst|Property $node, string $name, ?Doc $doc, array $attrGroups, ClassLike $class): array
     {
         $tag = self::tag($doc, 'deprecated');
-        $attributeSince = self::attributeSince($attrGroups);
+        $attributeSince = self::attributeSince($attrGroups, $class);
         if ($tag === null && $attributeSince === null) {
             return [];
         }
@@ -106,7 +115,7 @@ final class DeprecatedApiRule implements Rule
             $errors[] = $this->error($node, sprintf('%s is @deprecated from %s, a date still to come. Write the date it was deprecated.', $name, $since));
         } elseif ($attributeSince === '') {
             $errors[] = $this->error($node, sprintf('%s is @deprecated %s but its #[\Deprecated] gives no since. Write #[\Deprecated(since: \'%s\')].', $name, $since, $since));
-        } elseif ($attributeSince !== null && $attributeSince !== $since) {
+        } elseif (is_string($attributeSince) && $attributeSince !== $since) {
             $errors[] = $this->error($node, sprintf('%s says @deprecated %s but #[\Deprecated(since: \'%s\')]. Give both the same date.', $name, $since, $attributeSince));
         }
         if ($dated && $instead === '') {
@@ -133,15 +142,21 @@ final class DeprecatedApiRule implements Rule
         return $parsed !== false && $parsed->format(substr($format, 1)) === $since;
     }
 
+    /**
+     * A tag opens a docblock line: `* @tag` or `/** @tag`. Further in, it is an
+     * example inside the prose, as in this class's own docblock.
+     */
+    private const TAG_START = '(?:^[ \t]*\*[ \t]?|\/\*\*[ \t]*)@';
+
     private static function hasTag(?Doc $doc, string $tag): bool
     {
-        return $doc !== null && preg_match('/^\s*\*?\s*@' . $tag . '\b/m', $doc->getText()) === 1;
+        return $doc !== null && preg_match('/' . self::TAG_START . $tag . '\b/m', $doc->getText()) === 1;
     }
 
     /** The text after @<tag>, continuation lines included up to the next tag; null without the tag. */
     private static function tag(?Doc $doc, string $tag): ?string
     {
-        if ($doc === null || preg_match('/@' . $tag . '\b(.*?)(?=^\s*\*\s*@|\*\/)/ms', $doc->getText(), $m) !== 1) {
+        if ($doc === null || preg_match('/' . self::TAG_START . $tag . '\b(.*?)(?=^[ \t]*\*[ \t]?@|\*\/)/ms', $doc->getText(), $m) !== 1) {
             return null;
         }
 
@@ -149,20 +164,23 @@ final class DeprecatedApiRule implements Rule
     }
 
     /**
-     * The `since` of a native #[\Deprecated]: '' when it gives none, null without the attribute.
+     * The `since` of a native #[\Deprecated]: null without the attribute, '' when it gives
+     * none, false when it gives one this rule cannot read (an expression other than a
+     * string or a class constant), which is then not compared.
      *
      * @param array<AttributeGroup> $attrGroups
      */
-    private static function attributeSince(array $attrGroups): ?string
+    private static function attributeSince(array $attrGroups, ClassLike $class): string|false|null
     {
         foreach ($attrGroups as $group) {
             foreach ($group->attrs as $attr) {
-                if (ltrim($attr->name->toString(), '\\') !== 'Deprecated') {
+                // PHP class names are case-insensitive: #[\deprecated] is the same attribute.
+                if (strcasecmp(ltrim($attr->name->toString(), '\\'), 'Deprecated') !== 0) {
                     continue;
                 }
                 foreach ($attr->args as $i => $arg) {
-                    if (($arg->name?->toString() ?? ($i === 1 ? 'since' : '')) === 'since' && $arg->value instanceof String_) {
-                        return $arg->value->value;
+                    if (($arg->name?->toString() ?? ($i === 1 ? 'since' : '')) === 'since') {
+                        return self::stringOf($arg->value, $class);
                     }
                 }
 
@@ -171,5 +189,26 @@ final class DeprecatedApiRule implements Rule
         }
 
         return null;
+    }
+
+    /** A string literal, or a constant of this class (self::DATE, static::DATE) holding one. */
+    private static function stringOf(Node\Expr $value, ClassLike $class): string|false
+    {
+        if ($value instanceof String_) {
+            return $value->value;
+        }
+        if (!$value instanceof ClassConstFetch || !$value->class instanceof Name || !$value->name instanceof Identifier
+            || !in_array(strtolower($value->class->toString()), ['self', 'static'], true)) {
+            return false;
+        }
+        foreach ($class->getConstants() as $declaration) {
+            foreach ($declaration->consts as $const) {
+                if ($const->name->toString() === $value->name->toString()) {
+                    return $const->value instanceof String_ ? $const->value->value : false;
+                }
+            }
+        }
+
+        return false;
     }
 }

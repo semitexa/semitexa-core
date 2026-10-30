@@ -89,6 +89,58 @@ final class ApiClock
     {
         return 0;
     }
+
+    private const DATE = '2026.10.29';
+
+    /** @deprecated 2026.10.29 Use ApiClock::now() instead. */
+    #[\Deprecated('Use ApiClock::now() instead.', since: self::DATE)]
+    public function sinceFromAConstant(): int
+    {
+        return 0;
+    }
+
+    /** @deprecated 2026.10.28 Use ApiClock::now() instead. */
+    #[\Deprecated('Use ApiClock::now() instead.', since: self::DATE)]
+    public function constantDisagrees(): int
+    {
+        return 0;
+    }
+
+    #[\deprecated]
+    public function lowerCaseAttribute(): int
+    {
+        return 0;
+    }
+
+    /** @deprecated whenever */
+    public int $state = 0;
+}
+
+/** @api */
+final class OneLineApi
+{
+    /** @deprecated soon */
+    public function old(): int
+    {
+        return 0;
+    }
+
+    /**
+     * @api
+     * @deprecated soon
+     */
+    public int $count = 0;
+}
+
+/**
+ * @api
+ *
+ * Write a deprecation like this:
+ *
+ *     @deprecated 2026.11.02 Use Clock::now() instead.
+ */
+final class Documented
+{
 }
 
 final class Internal
