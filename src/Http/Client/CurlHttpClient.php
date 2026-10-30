@@ -560,7 +560,6 @@ final class CurlHttpClient implements HttpClientInterface
             if ($name !== null) {
                 $options['ssl_host_name'] = $name;
             }
-            // @phpstan-ignore property.notFound
             $hooked->clientOptions = $options;
         }, null, $handle::class)($handle);
     }

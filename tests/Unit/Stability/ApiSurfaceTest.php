@@ -82,6 +82,22 @@ final class ApiSurfaceTest extends TestCase
                     public ?string $label = null, $note = [1, 2];
                 }
 
+                /**
+                 *  @api
+                 */
+                final class Spaced
+                {
+                }
+
+                /**
+                 * Mark it so:
+                 *
+                 *     @api
+                 */
+                final class Prose
+                {
+                }
+
                 final class Plain
                 {
                     /** @api */
@@ -92,7 +108,7 @@ final class ApiSurfaceTest extends TestCase
                 }
                 PHP);
 
-            self::assertSame(['Probe\Marked', 'Probe\Marked::$label', 'Probe\Marked::$note', 'Probe\Marked::A', 'Probe\Marked::B', 'Probe\Marked::list()', 'Probe\Marked::marked()', 'Probe\Plain::old()'], self::marked($dir));
+            self::assertSame(['Probe\Marked', 'Probe\Marked::$label', 'Probe\Marked::$note', 'Probe\Marked::A', 'Probe\Marked::B', 'Probe\Marked::list()', 'Probe\Marked::marked()', 'Probe\Plain::old()', 'Probe\Spaced'], self::marked($dir));
 
             symlink($dir . '/nowhere.php', $dir . '/Broken.php');
             $failed = null;
@@ -230,7 +246,7 @@ final class ApiSurfaceTest extends TestCase
 
     private static function isApi(?string $doc): bool
     {
-        return $doc !== null && preg_match('/^[ \t]*(?:\*[ \t]?|\/\*\*[ \t]*)@api\b/m', $doc) === 1;
+        return $doc !== null && preg_match('/^[ \t]*(?:\*[ \t]{0,4}|\/\*\*[ \t]{0,4})@api\b/m', $doc) === 1;
     }
 
     /**
