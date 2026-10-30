@@ -99,6 +99,38 @@ final class PayloadHydratorTest extends TestCase
         self::assertSame('ok', $dto->name, 'the well-typed fields between them are still set');
     }
 
+    /**
+     * A setter that PHP itself refuses (an object type a lenient cast hands a
+     * string) used to end the request as one generic body error, losing the
+     * field mismatches already collected before it.
+     */
+    #[Test]
+    public function a_later_setter_type_error_does_not_hide_the_mismatches_found(): void
+    {
+        $dto = new class {
+            public int $count = -1;
+
+            public function setCount(int $value): void
+            {
+                $this->count = $value;
+            }
+
+            public function setDate(\DateTimeImmutable $value): void
+            {
+            }
+        };
+
+        try {
+            PayloadHydrator::hydrate($dto, $this->jsonRequest(['count' => 'many', 'date' => 'tomorrow'], strict: false));
+            self::fail('accepted a badly typed count');
+        } catch (TypeMismatchException $e) {
+            self::assertSame(['count' => ["Field 'count': expected int, received string."]], $e->errors());
+        }
+
+        $this->expectException(\TypeError::class);
+        PayloadHydrator::hydrate($dto, $this->jsonRequest(['date' => 'tomorrow'], strict: false));
+    }
+
     #[Test]
     public function strict_request_rejects_incompatible_value(): void
     {

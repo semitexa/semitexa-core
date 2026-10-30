@@ -39,6 +39,7 @@ class PayloadHydrator
 
         $reflection = new ReflectionClass($dto);
         $mismatches = [];
+        $setterError = null;
 
         foreach ($data as $key => $value) {
             // A JSON list, `{"0":…}` or a form field named `0` arrives with an
@@ -73,11 +74,20 @@ class PayloadHydrator
                 $mismatches[] = $e;
                 continue;
             }
-            $method->invoke($dto, $typedValue);
+            try {
+                $method->invoke($dto, $typedValue);
+            } catch (\TypeError $e) {
+                // A setter PHP refuses must not hide the fields already found
+                // badly typed, before or after it: it is thrown only without them.
+                $setterError ??= $e;
+            }
         }
 
         if ($mismatches !== []) {
             throw TypeMismatchException::all($mismatches);
+        }
+        if ($setterError !== null) {
+            throw $setterError;
         }
 
         return $dto;
