@@ -12,6 +12,8 @@ use Attribute;
  * the contract in the DI container. When multiple modules provide an implementation
  * for the same interface, the one from the module that "extends" the other wins
  * (child module has higher priority).
+ *
+ * @api
  */
 #[Attribute(Attribute::TARGET_CLASS)]
 final class SatisfiesRepositoryContract

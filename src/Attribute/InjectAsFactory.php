@@ -17,6 +17,8 @@ use Attribute;
  * receives the container's generic factory instead; its type names no contract,
  * so it must say which one: #[InjectAsFactory(of: StorageInterface::class)].
  * Only allowed on protected properties.
+ *
+ * @api
  */
 #[Attribute(Attribute::TARGET_PROPERTY)]
 final class InjectAsFactory

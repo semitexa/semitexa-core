@@ -14,6 +14,8 @@ use Attribute;
  * - If `env` is null: uses `default` directly (compile-time constant).
  * - Property must be `protected` and have a scalar type (int, float, string, bool) or a backed enum.
  * - Arrays are forbidden. Use a typed DTO or collection object instead.
+ *
+ * @api
  */
 #[Attribute(Attribute::TARGET_PROPERTY)]
 final class Config

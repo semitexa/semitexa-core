@@ -13,6 +13,8 @@ use Attribute;
  * Use for plain service classes that are not service contract implementations,
  * payload handlers, or pipeline listeners, but still need to be injectable
  * via #[InjectAsReadonly].
+ *
+ * @api
  */
 #[Attribute(Attribute::TARGET_CLASS)]
 final class AsService

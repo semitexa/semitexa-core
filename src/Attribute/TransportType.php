@@ -12,6 +12,8 @@ namespace Semitexa\Core\Attribute;
  *
  * Downstream systems (e.g. sitemap generation, API schema) use this to make
  * explicit decisions instead of guessing from path names or content-types.
+ *
+ * @api
  */
 enum TransportType: string
 {
