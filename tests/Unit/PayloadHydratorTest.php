@@ -58,6 +58,47 @@ final class PayloadHydratorTest extends TestCase
         self::assertSame('hello', PayloadHydrator::hydrate($dto, $this->jsonRequest(['v' => 'hello'], strict: false))->v);
     }
 
+    /**
+     * Every badly typed field at once: it stopped at the first, so a form with
+     * three wrong fields took three round trips to learn about all of them.
+     */
+    #[Test]
+    public function every_badly_typed_field_is_reported_at_once(): void
+    {
+        $dto = new class {
+            public int $n = -1;
+            public float $f = -1.0;
+            public string $name = '';
+
+            public function setN(int $value): void
+            {
+                $this->n = $value;
+            }
+
+            public function setF(float $value): void
+            {
+                $this->f = $value;
+            }
+
+            public function setName(string $value): void
+            {
+                $this->name = $value;
+            }
+        };
+
+        try {
+            PayloadHydrator::hydrate($dto, $this->jsonRequest(['n' => 'hello', 'name' => 'ok', 'f' => 'nope'], strict: true));
+            self::fail('accepted two badly typed fields');
+        } catch (TypeMismatchException $e) {
+            self::assertSame('n', $e->field, 'the first one is the exception itself, as before');
+            self::assertSame([
+                'n' => ["Field 'n': expected int, received string."],
+                'f' => ["Field 'f': expected float, received string."],
+            ], $e->errors());
+        }
+        self::assertSame('ok', $dto->name, 'the well-typed fields between them are still set');
+    }
+
     #[Test]
     public function strict_request_rejects_incompatible_value(): void
     {

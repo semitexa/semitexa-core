@@ -38,6 +38,7 @@ class PayloadHydrator
         $data = array_merge($data, $pathParams);
 
         $reflection = new ReflectionClass($dto);
+        $mismatches = [];
 
         foreach ($data as $key => $value) {
             // A JSON list, `{"0":…}` or a form field named `0` arrives with an
@@ -64,8 +65,19 @@ class PayloadHydrator
 
             $param = $method->getParameters()[0];
             $type = $param->getType();
-            $typedValue = self::castValue($value, $type, $key, $strict);
+            try {
+                $typedValue = self::castValue($value, $type, $key, $strict);
+            } catch (TypeMismatchException $e) {
+                // Kept, and the next field read: every badly typed field is
+                // reported in one answer, not one per round trip.
+                $mismatches[] = $e;
+                continue;
+            }
             $method->invoke($dto, $typedValue);
+        }
+
+        if ($mismatches !== []) {
+            throw TypeMismatchException::all($mismatches);
         }
 
         return $dto;

@@ -136,7 +136,7 @@ final class PayloadAdmission
             // Re-typed, not rethrown: raised HERE it means a malformed request rather than a domain rule.
             return [$reqDto, new PayloadValidationException($e->getErrors())];
         } catch (\Semitexa\Core\Http\Exception\TypeMismatchException $e) {
-            return [$reqDto, new PayloadValidationException([$e->field => [$e->getMessage()]])];
+            return [$reqDto, new PayloadValidationException($e->errors())];
         } catch (\Throwable $e) {
             // Security: suppress exception messages in production (VULN-007)
             // Only expose details in debug mode for development
