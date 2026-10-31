@@ -9,27 +9,36 @@ use PHPUnit\Framework\TestCase;
 use Semitexa\Core\RateLimit\RedisRateLimitStore;
 use Semitexa\Core\Redis\RedisConnectionPool;
 use Swoole\Coroutine;
+use Semitexa\Core\Environment;
 
 /**
  * The Redis counters on a real Redis: one script counts, expires and reads the
- * previous window, and a refused hit is taken back. Skipped without Redis.
+ * previous window, and a refused hit is taken back. Skipped when REDIS_HOST
+ * is not set; failed when it is set and nothing answers.
  */
 final class RedisRateLimitStoreTest extends TestCase
 {
     #[Test]
     public function a_window_counts_reads_the_previous_one_and_expires(): void
     {
-        $host = getenv('REDIS_HOST') ?: 'redis';
-        $probe = @fsockopen($host, (int) (getenv('REDIS_PORT') ?: 6379), $errno, $errstr, 1.0);
+        // Not configured is a skip; configured and silent fails: a skip there
+        // left a stack that could not reach its Redis green over these checks.
+        // Read as the application reads it (RedisSharedPool::fromEnvironment):
+        // a REDIS_HOST only in .env is configured, not unset.
+        $host = Environment::getEnvValue('REDIS_HOST');
+        if ($host === null || $host === '') {
+            self::markTestSkipped('REDIS_HOST not configured — the test requires real Redis');
+        }
+        $probe = @fsockopen($host, (int) Environment::getEnvValue('REDIS_PORT', '6379'), $errno, $errstr, 1.0);
         if ($probe === false) {
-            self::markTestSkipped("No Redis at {$host}");
+            self::fail("REDIS_HOST={$host} is configured, but nothing answers on its port: {$errstr}");
         }
         fclose($probe);
 
         $key = 'test:' . bin2hex(random_bytes(6));
         $results = [];
         Coroutine\run(static function () use ($host, $key, &$results): void {
-            $pool = new RedisConnectionPool(1, ['host' => $host, 'port' => (int) (getenv('REDIS_PORT') ?: 6379)]);
+            $pool = new RedisConnectionPool(1, self::redisConfig($host));
             $store = new RedisRateLimitStore($pool);
 
             $results['first'] = $store->hit("60:2:{$key}", "60:1:{$key}", 120);
@@ -50,5 +59,22 @@ final class RedisRateLimitStoreTest extends TestCase
         self::assertSame([1, 1], $results['next'], 'the undone hit is gone from the previous window');
         self::assertGreaterThan(60, $results['ttl']);
         self::assertSame(0, $results['undoMissing'], 'taking back an expired counter does not create a negative one');
+    }
+
+    /**
+     * The connection as the application makes it (RedisSharedPool::fromEnvironment):
+     * scheme, host, port and password, so a protected or non-default Redis
+     * configured in .env is reached the same way.
+     *
+     * @return array{scheme: string, host: string, port: int, password: string}
+     */
+    private static function redisConfig(string $host): array
+    {
+        return [
+            'scheme' => Environment::getEnvValue('REDIS_SCHEME', 'tcp') ?? 'tcp',
+            'host' => $host,
+            'port' => (int) Environment::getEnvValue('REDIS_PORT', '6379'),
+            'password' => Environment::getEnvValue('REDIS_PASSWORD') ?? '',
+        ];
     }
 }

@@ -132,10 +132,6 @@ final class StandingCoroutinesTest extends TestCase
     #[Test]
     public function a_coroutine_that_returns_drops_its_own_declaration(): void
     {
-        if (!extension_loaded('swoole')) {
-            self::markTestSkipped('Swoole extension is required.');
-        }
-
         $insideWhileRunning = [];
 
         \Swoole\Coroutine\run(static function () use (&$insideWhileRunning): void {

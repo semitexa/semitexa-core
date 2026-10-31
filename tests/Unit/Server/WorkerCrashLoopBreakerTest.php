@@ -25,12 +25,6 @@ final class WorkerCrashLoopBreakerTest extends TestCase
 {
     private const NOW = 1_780_000_000;
 
-    protected function setUp(): void
-    {
-        if (!class_exists(Table::class)) {
-            self::markTestSkipped('Swoole extension is required.');
-        }
-    }
 
     #[Test]
     public function a_worker_that_has_never_crashed_counts_zero(): void

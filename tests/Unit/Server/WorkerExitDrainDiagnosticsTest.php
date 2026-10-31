@@ -26,12 +26,6 @@ use Swoole\Coroutine;
  */
 final class WorkerExitDrainDiagnosticsTest extends TestCase
 {
-    protected function setUp(): void
-    {
-        if (!class_exists(Coroutine::class)) {
-            self::markTestSkipped('Swoole extension is required.');
-        }
-    }
 
     private static function describe(int $cid): string
     {
