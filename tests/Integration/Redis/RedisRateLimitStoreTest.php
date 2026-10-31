@@ -38,7 +38,7 @@ final class RedisRateLimitStoreTest extends TestCase
         $key = 'test:' . bin2hex(random_bytes(6));
         $results = [];
         Coroutine\run(static function () use ($host, $key, &$results): void {
-            $pool = new RedisConnectionPool(1, ['host' => $host, 'port' => (int) Environment::getEnvValue('REDIS_PORT', '6379')]);
+            $pool = new RedisConnectionPool(1, self::redisConfig($host));
             $store = new RedisRateLimitStore($pool);
 
             $results['first'] = $store->hit("60:2:{$key}", "60:1:{$key}", 120);
@@ -59,5 +59,22 @@ final class RedisRateLimitStoreTest extends TestCase
         self::assertSame([1, 1], $results['next'], 'the undone hit is gone from the previous window');
         self::assertGreaterThan(60, $results['ttl']);
         self::assertSame(0, $results['undoMissing'], 'taking back an expired counter does not create a negative one');
+    }
+
+    /**
+     * The connection as the application makes it (RedisSharedPool::fromEnvironment):
+     * scheme, host, port and password, so a protected or non-default Redis
+     * configured in .env is reached the same way.
+     *
+     * @return array{scheme: string, host: string, port: int, password: string}
+     */
+    private static function redisConfig(string $host): array
+    {
+        return [
+            'scheme' => Environment::getEnvValue('REDIS_SCHEME', 'tcp') ?? 'tcp',
+            'host' => $host,
+            'port' => (int) Environment::getEnvValue('REDIS_PORT', '6379'),
+            'password' => Environment::getEnvValue('REDIS_PASSWORD') ?? '',
+        ];
     }
 }

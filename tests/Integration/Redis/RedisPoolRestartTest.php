@@ -31,14 +31,15 @@ final class RedisPoolRestartTest extends TestCase
         $failure = null;
         Coroutine\run(function () use ($host, &$results, &$open, &$failure): void {
             try {
-                $pool = new RedisConnectionPool(3, ['host' => $host, 'port' => (int) Environment::getEnvValue('REDIS_PORT', '6379')]);
-                // Connect all three pooled clients.
+                $pool = new RedisConnectionPool(3, self::redisConfig($host));
+                // Connect all three pooled clients, and note who they are.
+                $ids = [];
                 $wg = new Coroutine\WaitGroup();
                 for ($i = 0; $i < 3; $i++) {
                     $wg->add();
-                    Coroutine::create(function () use ($pool, $wg): void {
-                        $pool->withConnection(static function ($redis): void {
-                            $redis->ping();
+                    Coroutine::create(function () use ($pool, $wg, &$ids): void {
+                        $pool->withConnection(static function ($redis) use (&$ids): void {
+                            $ids[] = (string) $redis->executeRaw(['CLIENT', 'ID']);
                             Coroutine::sleep(0.05);
                         });
                         $wg->done();
@@ -47,8 +48,12 @@ final class RedisPoolRestartTest extends TestCase
                 $wg->wait();
 
                 // The restart, as the pooled sockets see it; a restart takes
-                // longer than the idle-PING threshold.
-                (new Client(['host' => $host]))->executeRaw(['CLIENT', 'KILL', 'TYPE', 'normal', 'SKIPME', 'yes']);
+                // longer than the idle-PING threshold. Only this pool's three
+                // connections: a Redis the app also uses keeps its own clients.
+                $admin = new Client(self::redisConfig($host));
+                foreach (array_unique($ids) as $id) {
+                    $admin->executeRaw(['CLIENT', 'KILL', 'ID', $id]);
+                }
                 Coroutine::sleep(1.1);
 
                 for ($i = 0; $i < 3; $i++) {
@@ -74,7 +79,7 @@ final class RedisPoolRestartTest extends TestCase
         $runs = 0;
         $failure = null;
         Coroutine\run(function () use ($host, &$runs, &$failure): void {
-            $pool = new RedisConnectionPool(1, ['host' => $host, 'port' => (int) Environment::getEnvValue('REDIS_PORT', '6379')]);
+            $pool = new RedisConnectionPool(1, self::redisConfig($host));
             $pool->withConnection(static fn ($redis): mixed => $redis->ping());
             try {
                 // A lost response after the command ran looks exactly like this:
@@ -113,5 +118,22 @@ final class RedisPoolRestartTest extends TestCase
         fclose($probe);
 
         return $host;
+    }
+
+    /**
+     * The connection as the application makes it (RedisSharedPool::fromEnvironment):
+     * scheme, host, port and password, so a protected or non-default Redis
+     * configured in .env is reached the same way.
+     *
+     * @return array{scheme: string, host: string, port: int, password: string}
+     */
+    private static function redisConfig(string $host): array
+    {
+        return [
+            'scheme' => Environment::getEnvValue('REDIS_SCHEME', 'tcp') ?? 'tcp',
+            'host' => $host,
+            'port' => (int) Environment::getEnvValue('REDIS_PORT', '6379'),
+            'password' => Environment::getEnvValue('REDIS_PASSWORD') ?? '',
+        ];
     }
 }
