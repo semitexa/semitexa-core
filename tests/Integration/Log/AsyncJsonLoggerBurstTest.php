@@ -52,9 +52,6 @@ final class AsyncJsonLoggerBurstTest extends TestCase
     #[Test]
     public function a_burst_of_coroutines_logging_at_once_is_written_without_lock_contention(): void
     {
-        if (!function_exists('Swoole\Coroutine\run') || !function_exists('proc_open')) {
-            self::markTestSkipped('Needs the Swoole extension and proc_open.');
-        }
         $relativePath = 'var/tmp/async-json-logger-burst-' . bin2hex(random_bytes(6));
         $absolutePath = ProjectRoot::get() . '/' . $relativePath . '.log';
         $script = ProjectRoot::get() . '/' . $relativePath . '.php';

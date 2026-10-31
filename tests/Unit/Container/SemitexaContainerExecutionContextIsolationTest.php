@@ -105,10 +105,6 @@ final class SemitexaContainerExecutionContextIsolationTest extends TestCase
     #[Test]
     public function concurrent_swoole_coroutines_observe_their_own_execution_context_across_a_yield(): void
     {
-        if (!extension_loaded('swoole') || !function_exists('Co\\run') || !class_exists(Channel::class)) {
-            self::markTestSkipped('Swoole coroutine runtime is required for this test.');
-        }
-
         $container = $this->buildContainerWithExecutionScopedTarget();
 
         $observedA = null;
@@ -167,10 +163,6 @@ final class SemitexaContainerExecutionContextIsolationTest extends TestCase
     #[Test]
     public function child_coroutine_does_not_inherit_parent_execution_context_by_default(): void
     {
-        if (!extension_loaded('swoole') || !function_exists('Co\\run') || !class_exists(Channel::class)) {
-            self::markTestSkipped('Swoole coroutine runtime is required for this test.');
-        }
-
         $container = $this->buildContainerWithExecutionScopedTarget();
         $childSawContext = null;
 
@@ -197,10 +189,6 @@ final class SemitexaContainerExecutionContextIsolationTest extends TestCase
     #[Test]
     public function run_with_execution_context_can_replay_parent_snapshot_in_child_coroutine(): void
     {
-        if (!extension_loaded('swoole') || !function_exists('Co\\run') || !class_exists(Channel::class)) {
-            self::markTestSkipped('Swoole coroutine runtime is required for this test.');
-        }
-
         $container = $this->buildContainerWithExecutionScopedTarget();
         $childObserved = null;
 

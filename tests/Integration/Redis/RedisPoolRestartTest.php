@@ -97,10 +97,15 @@ final class RedisPoolRestartTest extends TestCase
     // verify:accept-test-change the Redis reachability guard moved, unchanged, into this helper shared by both tests; every assertion stayed and one test was added
     private static function reachableRedisHost(): string
     {
-        $host = getenv('REDIS_HOST') ?: 'redis';
+        // Not configured is a skip; configured and silent fails: a skip there
+        // left a stack that could not reach its Redis green over these checks.
+        $host = getenv('REDIS_HOST');
+        if ($host === false || $host === '') {
+            self::markTestSkipped('REDIS_HOST not configured — the test requires real Redis');
+        }
         $probe = @fsockopen($host, (int) (getenv('REDIS_PORT') ?: 6379), $errno, $errstr, 1.0);
         if ($probe === false) {
-            self::markTestSkipped("No Redis at {$host}");
+            self::fail("REDIS_HOST={$host} is configured, but nothing answers on its port: {$errstr}");
         }
         fclose($probe);
 

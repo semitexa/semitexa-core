@@ -12,17 +12,23 @@ use Swoole\Coroutine;
 
 /**
  * The Redis counters on a real Redis: one script counts, expires and reads the
- * previous window, and a refused hit is taken back. Skipped without Redis.
+ * previous window, and a refused hit is taken back. Skipped when REDIS_HOST
+ * is not set; failed when it is set and nothing answers.
  */
 final class RedisRateLimitStoreTest extends TestCase
 {
     #[Test]
     public function a_window_counts_reads_the_previous_one_and_expires(): void
     {
-        $host = getenv('REDIS_HOST') ?: 'redis';
+        // Not configured is a skip; configured and silent fails: a skip there
+        // left a stack that could not reach its Redis green over these checks.
+        $host = getenv('REDIS_HOST');
+        if ($host === false || $host === '') {
+            self::markTestSkipped('REDIS_HOST not configured — the test requires real Redis');
+        }
         $probe = @fsockopen($host, (int) (getenv('REDIS_PORT') ?: 6379), $errno, $errstr, 1.0);
         if ($probe === false) {
-            self::markTestSkipped("No Redis at {$host}");
+            self::fail("REDIS_HOST={$host} is configured, but nothing answers on its port: {$errstr}");
         }
         fclose($probe);
 

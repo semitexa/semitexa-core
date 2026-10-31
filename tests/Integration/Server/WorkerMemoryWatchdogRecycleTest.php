@@ -75,12 +75,6 @@ final class WorkerMemoryWatchdogRecycleTest extends TestCase
     /** @var resource|null */
     private $process = null;
 
-    protected function setUp(): void
-    {
-        if (!class_exists(Coroutine::class) || !function_exists('proc_open') || !function_exists('posix_kill')) {
-            self::markTestSkipped('Needs the Swoole extension, proc_open and posix_kill.');
-        }
-    }
 
     protected function tearDown(): void
     {
