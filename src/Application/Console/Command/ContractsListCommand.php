@@ -26,6 +26,9 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 #[AsCommand(name: 'contracts:list', description: 'List service contracts (interfaces) and their active implementation. Use when debugging which class is bound to an interface.')]
 #[AsAiSkill(
     allowed: true,
+    // Acts for the whole install, not one tenant: an operator's tool. It was
+    // hidden from tenants only because core is not a module (30.10).
+    operatorOnly: true,
     summary: 'List registered service contracts and their active implementations.',
     useWhen: 'User asks to inspect DI bindings, debug interface resolution, or see which class implements an interface.',
     avoidWhen: 'User asks to modify contracts or change DI configuration.',
