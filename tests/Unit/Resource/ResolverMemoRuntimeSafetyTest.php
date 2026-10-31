@@ -24,6 +24,7 @@ use Semitexa\Core\Tests\Unit\Resource\Fixtures\ProfileResource;
 use Semitexa\Core\Tests\Unit\Resource\Fixtures\RecordingAddressesResolver;
 use Semitexa\Core\Tests\Unit\Resource\Fixtures\RecordingPreferencesResolver;
 use Semitexa\Core\Tests\Unit\Resource\Fixtures\RecordingProfileResolver;
+use Semitexa\Core\Tests\Support\PhpSource;
 
 /**
  * Runtime-safety guards. The expansion-scoped resolver memo
@@ -79,7 +80,7 @@ final class ResolverMemoRuntimeSafetyTest extends TestCase
     {
         $abs = realpath(__DIR__ . '/../../../src/Resource/Memo/ResolverMemoStore.php');
         self::assertNotFalse($abs);
-        $stripped = $this->stripComments((string) file_get_contents($abs));
+        $stripped = PhpSource::withoutComments((string) file_get_contents($abs));
 
         foreach (self::FORBIDDEN_RUNTIME_TOKENS as $needle) {
             self::assertStringNotContainsString(
@@ -94,7 +95,7 @@ final class ResolverMemoRuntimeSafetyTest extends TestCase
     public function memo_store_is_not_a_container_managed_service(): void
     {
         $abs = realpath(__DIR__ . '/../../../src/Resource/Memo/ResolverMemoStore.php');
-        $stripped = $this->stripComments((string) file_get_contents((string) $abs));
+        $stripped = PhpSource::withoutComments((string) file_get_contents((string) $abs));
 
         // The memo is request-/expansion-scoped. Wiring it through
         // the container would create a worker-lived singleton and
@@ -171,7 +172,7 @@ final class ResolverMemoRuntimeSafetyTest extends TestCase
             if (!$entry->isFile() || $entry->getExtension() !== 'php') {
                 continue;
             }
-            $stripped = $this->stripComments((string) file_get_contents($entry->getPathname()));
+            $stripped = PhpSource::withoutComments((string) file_get_contents($entry->getPathname()));
             if (str_contains($stripped, '->resolveBatch(')) {
                 $callers[] = $entry->getPathname();
             }
@@ -188,7 +189,7 @@ final class ResolverMemoRuntimeSafetyTest extends TestCase
     #[Test]
     public function pipeline_still_contains_at_most_two_resolve_batch_call_sites(): void
     {
-        $stripped = $this->stripComments((string) file_get_contents(
+        $stripped = PhpSource::withoutComments((string) file_get_contents(
             (string) realpath(__DIR__ . '/../../../src/Resource/ResourceExpansionPipeline.php'),
         ));
         $occurrences = substr_count($stripped, '->resolveBatch(');
@@ -206,7 +207,7 @@ final class ResolverMemoRuntimeSafetyTest extends TestCase
     {
         $abs = realpath(__DIR__ . '/../../../src/Resource/ResourceExpansionPipeline.php');
         self::assertNotFalse($abs);
-        $stripped = $this->stripComments((string) file_get_contents($abs));
+        $stripped = PhpSource::withoutComments((string) file_get_contents($abs));
 
         // Property declarations match `<visibility> ResolverMemoStore $name`
         // or `<visibility> readonly ResolverMemoStore $name`. A
@@ -230,7 +231,7 @@ final class ResolverMemoRuntimeSafetyTest extends TestCase
     {
         $abs = realpath(__DIR__ . '/../../../src/Resource/ResourceExpansionPipeline.php');
         self::assertNotFalse($abs);
-        $stripped = $this->stripComments((string) file_get_contents($abs));
+        $stripped = PhpSource::withoutComments((string) file_get_contents($abs));
 
         self::assertSame(
             1,
@@ -254,7 +255,7 @@ final class ResolverMemoRuntimeSafetyTest extends TestCase
             if (!$entry->isFile() || $entry->getExtension() !== 'php') {
                 continue;
             }
-            $stripped = $this->stripComments((string) file_get_contents($entry->getPathname()));
+            $stripped = PhpSource::withoutComments((string) file_get_contents($entry->getPathname()));
             if (str_contains($stripped, 'new ResolverMemoStore(')) {
                 $instantiators[] = basename($entry->getPathname());
             }
@@ -295,7 +296,7 @@ final class ResolverMemoRuntimeSafetyTest extends TestCase
         // A trivial-but-load-bearing guard: someone refactoring the
         // pipeline cannot quietly drop the memo path.
         $abs = realpath(__DIR__ . '/../../../src/Resource/ResourceExpansionPipeline.php');
-        $stripped = $this->stripComments((string) file_get_contents((string) $abs));
+        $stripped = PhpSource::withoutComments((string) file_get_contents((string) $abs));
 
         self::assertStringContainsString(
             'use Semitexa\\Core\\Resource\\Memo\\ResolverMemoStore;',
@@ -357,18 +358,5 @@ final class ResolverMemoRuntimeSafetyTest extends TestCase
     private function context(IncludeSet $includes): RenderContext
     {
         return new RenderContext(profile: RenderProfile::Json, includes: $includes);
-    }
-
-    private function stripComments(string $raw): string
-    {
-        $tokens   = \PhpToken::tokenize($raw);
-        $stripped = '';
-        foreach ($tokens as $token) {
-            if ($token->is([T_COMMENT, T_DOC_COMMENT])) {
-                continue;
-            }
-            $stripped .= $token->text;
-        }
-        return $stripped;
     }
 }

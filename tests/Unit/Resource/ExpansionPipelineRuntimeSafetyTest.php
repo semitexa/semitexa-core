@@ -6,6 +6,7 @@ namespace Semitexa\Core\Tests\Unit\Resource;
 
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
+use Semitexa\Core\Tests\Support\PhpSource;
 
 /**
  * Runtime-safety guards.
@@ -128,14 +129,7 @@ final class ExpansionPipelineRuntimeSafetyTest extends TestCase
         $raw = file_get_contents($absolute);
         self::assertNotFalse($raw);
 
-        $tokens   = \PhpToken::tokenize($raw);
-        $stripped = '';
-        foreach ($tokens as $token) {
-            if ($token->is([T_COMMENT, T_DOC_COMMENT])) {
-                continue;
-            }
-            $stripped .= $token->text;
-        }
+        $stripped = PhpSource::withoutComments($raw);
 
         foreach ($forbiddenTokens as $forbidden) {
             self::assertStringNotContainsString(
