@@ -55,8 +55,12 @@ jobs:
       # PHP that composer loads and executes as part of resolution — including
       # the one this package ships and any a dependency brings with it. An audit
       # that runs the code it is auditing is not an audit.
+      #
+      # --ignore-platform-req=ext-swoole: core requires Swoole, and this
+      # runner's PHP has none. Resolving which versions get installed needs no
+      # extension, and the audit reads only the lock it produces.
       - name: Resolve runtime dependencies
-        run: composer update --no-dev --no-scripts --no-plugins --no-interaction --no-progress --prefer-dist
+        run: composer update --no-dev --no-scripts --no-plugins --no-interaction --no-progress --prefer-dist --ignore-platform-req=ext-swoole
 
       - name: Audit
         run: composer audit --no-interaction
