@@ -9,6 +9,7 @@ use PHPUnit\Framework\TestCase;
 use Predis\Client;
 use Semitexa\Core\Redis\RedisConnectionPool;
 use Swoole\Coroutine;
+use Semitexa\Core\Environment;
 
 /**
  * After Redis restarts, every connection waiting in the pool is dead.
@@ -30,7 +31,7 @@ final class RedisPoolRestartTest extends TestCase
         $failure = null;
         Coroutine\run(function () use ($host, &$results, &$open, &$failure): void {
             try {
-                $pool = new RedisConnectionPool(3, ['host' => $host, 'port' => (int) (getenv('REDIS_PORT') ?: 6379)]);
+                $pool = new RedisConnectionPool(3, ['host' => $host, 'port' => (int) Environment::getEnvValue('REDIS_PORT', '6379')]);
                 // Connect all three pooled clients.
                 $wg = new Coroutine\WaitGroup();
                 for ($i = 0; $i < 3; $i++) {
@@ -73,7 +74,7 @@ final class RedisPoolRestartTest extends TestCase
         $runs = 0;
         $failure = null;
         Coroutine\run(function () use ($host, &$runs, &$failure): void {
-            $pool = new RedisConnectionPool(1, ['host' => $host, 'port' => (int) (getenv('REDIS_PORT') ?: 6379)]);
+            $pool = new RedisConnectionPool(1, ['host' => $host, 'port' => (int) Environment::getEnvValue('REDIS_PORT', '6379')]);
             $pool->withConnection(static fn ($redis): mixed => $redis->ping());
             try {
                 // A lost response after the command ran looks exactly like this:
@@ -99,11 +100,13 @@ final class RedisPoolRestartTest extends TestCase
     {
         // Not configured is a skip; configured and silent fails: a skip there
         // left a stack that could not reach its Redis green over these checks.
-        $host = getenv('REDIS_HOST');
-        if ($host === false || $host === '') {
+        // Read as the application reads it (RedisSharedPool::fromEnvironment):
+        // a REDIS_HOST only in .env is configured, not unset.
+        $host = Environment::getEnvValue('REDIS_HOST');
+        if ($host === null || $host === '') {
             self::markTestSkipped('REDIS_HOST not configured — the test requires real Redis');
         }
-        $probe = @fsockopen($host, (int) (getenv('REDIS_PORT') ?: 6379), $errno, $errstr, 1.0);
+        $probe = @fsockopen($host, (int) Environment::getEnvValue('REDIS_PORT', '6379'), $errno, $errstr, 1.0);
         if ($probe === false) {
             self::fail("REDIS_HOST={$host} is configured, but nothing answers on its port: {$errstr}");
         }
