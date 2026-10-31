@@ -85,10 +85,33 @@ final class CurlHttpClientTlsTest extends TestCase
             Coroutine::set(['hook_flags' => SWOOLE_HOOK_ALL]);
         }
 
+        if (self::swooleHooksNativeCurl()) {
+            // Swoole built with native curl hooks libcurl itself, which verifies
+            // against the CA store it was compiled with and ignores SSL_CERT_FILE,
+            // so the test CA cannot be made trusted: what it accepts cannot be
+            // shown here, only that it refuses (the stack smoke's setup-php build,
+            // 30.10). The emulation the image runs, which verified nothing, is
+            // the case pinned in full below.
+            self::assertSame(
+                ['untrusted' => 'refused', 'other-host' => 'refused', 'ip-untrusted' => 'refused'],
+                array_diff_key($outcomes, ['good' => true, 'ip' => true]),
+            );
+
+            return;
+        }
         self::assertSame(
             ['untrusted' => 'refused', 'other-host' => 'refused', 'good' => 'accepted 200', 'ip' => 'accepted 200', 'ip-untrusted' => 'refused'],
             $outcomes,
         );
+    }
+
+    /** Whether this Swoole hooks libcurl (curl-native) rather than emulating curl. */
+    private static function swooleHooksNativeCurl(): bool
+    {
+        ob_start();
+        (new \ReflectionExtension('swoole'))->info();
+
+        return preg_match('/^curl-native\s*=>\s*enabled/mi', (string) ob_get_clean()) === 1;
     }
 
     private function writePair(string $name, string $cert, string $key): void
