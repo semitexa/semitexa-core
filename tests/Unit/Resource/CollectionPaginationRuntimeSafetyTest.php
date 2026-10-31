@@ -6,6 +6,7 @@ namespace Semitexa\Core\Tests\Unit\Resource;
 
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
+use Semitexa\Core\Tests\Support\PhpSource;
 
 /**
  * Runtime-safety guards. Pagination must not weaken the
@@ -70,7 +71,7 @@ final class CollectionPaginationRuntimeSafetyTest extends TestCase
             if (!$entry->isFile() || $entry->getExtension() !== 'php') {
                 continue;
             }
-            $stripped = $this->stripComments((string) file_get_contents($entry->getPathname()));
+            $stripped = PhpSource::withoutComments((string) file_get_contents($entry->getPathname()));
             if (str_contains($stripped, '->resolveBatch(')) {
                 $callers[] = $entry->getPathname();
             }
@@ -96,7 +97,7 @@ final class CollectionPaginationRuntimeSafetyTest extends TestCase
         foreach ($sources as $relPath) {
             $abs = realpath($relPath);
             self::assertNotFalse($abs);
-            $stripped = $this->stripComments((string) file_get_contents($abs));
+            $stripped = PhpSource::withoutComments((string) file_get_contents($abs));
             self::assertSame(
                 1,
                 substr_count($stripped, '->expandMany('),
@@ -113,7 +114,7 @@ final class CollectionPaginationRuntimeSafetyTest extends TestCase
     #[Test]
     public function include_validator_still_does_not_instantiate_resolvers(): void
     {
-        $stripped = $this->stripComments((string) file_get_contents(
+        $stripped = PhpSource::withoutComments((string) file_get_contents(
             (string) realpath(__DIR__ . '/../../../src/Resource/IncludeValidator.php'),
         ));
         self::assertStringNotContainsString('->resolveBatch(', $stripped);
@@ -127,7 +128,7 @@ final class CollectionPaginationRuntimeSafetyTest extends TestCase
     {
         $absolute = realpath($relativePath);
         self::assertNotFalse($absolute, "Source file not found: {$relativePath}");
-        $stripped = $this->stripComments((string) file_get_contents($absolute));
+        $stripped = PhpSource::withoutComments((string) file_get_contents($absolute));
 
         foreach ($forbiddenTokens as $forbidden) {
             self::assertStringNotContainsString(
@@ -136,18 +137,5 @@ final class CollectionPaginationRuntimeSafetyTest extends TestCase
                 basename($absolute) . ' must not reference `' . $forbidden . '`.',
             );
         }
-    }
-
-    private function stripComments(string $raw): string
-    {
-        $tokens   = \PhpToken::tokenize($raw);
-        $stripped = '';
-        foreach ($tokens as $token) {
-            if ($token->is([T_COMMENT, T_DOC_COMMENT])) {
-                continue;
-            }
-            $stripped .= $token->text;
-        }
-        return $stripped;
     }
 }

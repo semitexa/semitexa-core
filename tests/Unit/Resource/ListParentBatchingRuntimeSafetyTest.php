@@ -22,6 +22,7 @@ use Semitexa\Core\Tests\Unit\Resource\Fixtures\CustomerWithBothResolvedResource;
 use Semitexa\Core\Tests\Unit\Resource\Fixtures\ProfileResource;
 use Semitexa\Core\Tests\Unit\Resource\Fixtures\RecordingAddressesResolver;
 use Semitexa\Core\Tests\Unit\Resource\Fixtures\RecordingProfileResolver;
+use Semitexa\Core\Tests\Support\PhpSource;
 
 /**
  * Runtime-safety guards. The list-parent batching change must
@@ -55,7 +56,7 @@ final class ListParentBatchingRuntimeSafetyTest extends TestCase
             if (!$entry->isFile() || $entry->getExtension() !== 'php') {
                 continue;
             }
-            $stripped = $this->stripComments((string) file_get_contents($entry->getPathname()));
+            $stripped = PhpSource::withoutComments((string) file_get_contents($entry->getPathname()));
             if (str_contains($stripped, '->resolveBatch(')) {
                 $callers[] = $entry->getPathname();
             }
@@ -80,7 +81,7 @@ final class ListParentBatchingRuntimeSafetyTest extends TestCase
         // a third call site would indicate someone has reintroduced
         // a per-parent loop or an unbounded recursion, which is the
         // regression both phases guard against.
-        $stripped = $this->stripComments((string) file_get_contents(
+        $stripped = PhpSource::withoutComments((string) file_get_contents(
             (string) realpath(__DIR__ . '/../../../src/Resource/ResourceExpansionPipeline.php'),
         ));
 
@@ -161,7 +162,7 @@ final class ListParentBatchingRuntimeSafetyTest extends TestCase
             'GraphqlResourceRenderer',
         ];
 
-        $stripped = $this->stripComments((string) file_get_contents(
+        $stripped = PhpSource::withoutComments((string) file_get_contents(
             (string) realpath(__DIR__ . '/../../../src/Resource/ResourceExpansionPipeline.php'),
         ));
 
@@ -177,7 +178,7 @@ final class ListParentBatchingRuntimeSafetyTest extends TestCase
     #[Test]
     public function include_validator_still_does_not_instantiate_resolvers(): void
     {
-        $stripped = $this->stripComments((string) file_get_contents(
+        $stripped = PhpSource::withoutComments((string) file_get_contents(
             (string) realpath(__DIR__ . '/../../../src/Resource/IncludeValidator.php'),
         ));
 
@@ -190,7 +191,7 @@ final class ListParentBatchingRuntimeSafetyTest extends TestCase
     #[Test]
     public function resolved_resource_graph_is_still_pure_data(): void
     {
-        $stripped = $this->stripComments((string) file_get_contents(
+        $stripped = PhpSource::withoutComments((string) file_get_contents(
             (string) realpath(__DIR__ . '/../../../src/Resource/ResolvedResourceGraph.php'),
         ));
 
@@ -252,18 +253,5 @@ final class ListParentBatchingRuntimeSafetyTest extends TestCase
     private function context(IncludeSet $includes): RenderContext
     {
         return new RenderContext(profile: RenderProfile::Json, includes: $includes);
-    }
-
-    private function stripComments(string $raw): string
-    {
-        $tokens   = \PhpToken::tokenize($raw);
-        $stripped = '';
-        foreach ($tokens as $token) {
-            if ($token->is([T_COMMENT, T_DOC_COMMENT])) {
-                continue;
-            }
-            $stripped .= $token->text;
-        }
-        return $stripped;
     }
 }

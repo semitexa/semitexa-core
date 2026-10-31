@@ -6,6 +6,7 @@ namespace Semitexa\Core\Tests\Unit\Resource;
 
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
+use Semitexa\Core\Tests\Support\PhpSource;
 
 /**
  * Runtime-safety guards.
@@ -38,7 +39,7 @@ final class ListResolverRuntimeSafetyTest extends TestCase
             if (!$entry->isFile() || $entry->getExtension() !== 'php') {
                 continue;
             }
-            $stripped = $this->stripComments((string) file_get_contents($entry->getPathname()));
+            $stripped = PhpSource::withoutComments((string) file_get_contents($entry->getPathname()));
             if (str_contains($stripped, '->resolveBatch(')) {
                 $callers[] = $entry->getPathname();
             }
@@ -50,18 +51,5 @@ final class ListResolverRuntimeSafetyTest extends TestCase
             basename($callers[0]),
             'Only ResourceExpansionPipeline may invoke resolveBatch().',
         );
-    }
-
-    private function stripComments(string $raw): string
-    {
-        $tokens   = \PhpToken::tokenize($raw);
-        $stripped = '';
-        foreach ($tokens as $token) {
-            if ($token->is([T_COMMENT, T_DOC_COMMENT])) {
-                continue;
-            }
-            $stripped .= $token->text;
-        }
-        return $stripped;
     }
 }

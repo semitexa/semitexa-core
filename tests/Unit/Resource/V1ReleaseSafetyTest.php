@@ -7,6 +7,7 @@ namespace Semitexa\Core\Tests\Unit\Resource;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Semitexa\Core\Resource\Metadata\ResourceMetadataCacheFile;
+use Semitexa\Core\Tests\Support\PhpSource;
 
 /**
  * Consolidated release-readiness guard. The per-phase
@@ -69,7 +70,7 @@ final class V1ReleaseSafetyTest extends TestCase
             if (!$entry->isFile() || $entry->getExtension() !== 'php') {
                 continue;
             }
-            $stripped = $this->stripComments((string) file_get_contents($entry->getPathname()));
+            $stripped = PhpSource::withoutComments((string) file_get_contents($entry->getPathname()));
             if (str_contains($stripped, '->resolveBatch(')) {
                 $callers[] = $entry->getPathname();
             }
@@ -254,19 +255,6 @@ final class V1ReleaseSafetyTest extends TestCase
     {
         $absolute = realpath($relativePath);
         self::assertNotFalse($absolute, "Source file not found: {$relativePath}");
-        return $this->stripComments((string) file_get_contents($absolute));
-    }
-
-    private function stripComments(string $raw): string
-    {
-        $tokens   = \PhpToken::tokenize($raw);
-        $stripped = '';
-        foreach ($tokens as $token) {
-            if ($token->is([T_COMMENT, T_DOC_COMMENT])) {
-                continue;
-            }
-            $stripped .= $token->text;
-        }
-        return $stripped;
+        return PhpSource::withoutComments((string) file_get_contents($absolute));
     }
 }
