@@ -33,6 +33,9 @@ use Symfony\Component\Process\Process;
 #[AsCommand(name: 'cache:clear', description: 'Clear application cache (e.g. var/cache/twig) and cycle running workers so they drop their in-memory templates.')]
 #[AsAiSkill(
     allowed: true,
+    // Acts for the whole install, not one tenant: an operator's tool. It was
+    // hidden from tenants only because core is not a module (30.10).
+    operatorOnly: true,
     summary: 'Clear application cache after template changes and cycle running workers.',
     useWhen: 'User asks to clear cache, refresh templates, or fix stale runtime state. Also the right answer when a page shows a mix of old and new output between reloads — that is per-worker compiled templates, and this drops them.',
     avoidWhen: 'User asks to restart services, rebuild containers, or reset Docker.',
