@@ -39,14 +39,17 @@ final class DeprecatedApiTraitRuleTest extends RuleTestCase
         }
         sort($reported);
 
+        $const = self::NS . 'ApiHelper::OLD_LIMIT is @api and @deprecated without a date. Start the tag with the date it was deprecated: `@deprecated <YYYY.MM.DD> soon`.';
         $old = self::NS . 'ApiHelper::old() is @api and @deprecated without a date. Start the tag with the date it was deprecated: `@deprecated <YYYY.MM.DD> soon`.';
         $count = self::NS . 'PromotesApi::$count is @api and @deprecated without a date. Start the tag with the date it was deprecated: `@deprecated <YYYY.MM.DD> soon`.';
         // Once per class using the trait, as PHPStan reports every error in a
         // trait ("in context of class …"): ApiHelper has two users, PromotesApi one.
         // verify:accept-test-change assertCount(3) is folded into this exact sorted list, which pins each report and the class it ran in, so a wrong count for any one of them fails
         self::assertSame([
-            'ApiHelper.php:11 in AlsoUsesTheHelper.php: ' . $old,
-            'ApiHelper.php:11 in UsesAll.php: ' . $old,
+            'ApiHelper.php:11 in AlsoUsesTheHelper.php: ' . $const,
+            'ApiHelper.php:11 in UsesAll.php: ' . $const,
+            'ApiHelper.php:14 in AlsoUsesTheHelper.php: ' . $old,
+            'ApiHelper.php:14 in UsesAll.php: ' . $old,
             'PromotesApi.php:14 in UsesAll.php: ' . $count,
         ], $reported, 'current() and dated() pass; Unmarked promises nothing');
     }

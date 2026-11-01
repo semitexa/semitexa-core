@@ -8,6 +8,9 @@ namespace Semitexa\Core\Tests\Unit\PHPStan\Fixtures\DeprecatedApiTraits;
 trait ApiHelper
 {
     /** @deprecated soon */
+    public const OLD_LIMIT = 10;
+
+    /** @deprecated soon */
     public function old(): void
     {
     }
