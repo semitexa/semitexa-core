@@ -64,7 +64,7 @@ class SwooleBootstrap
      */
     public static function getCurrentSwooleRequestResponse(): ?array
     {
-        if (!extension_loaded('swoole') || Coroutine::getCid() < 0) {
+        if (Coroutine::getCid() < 0) {
             return null;
         }
 
@@ -86,7 +86,7 @@ class SwooleBootstrap
      */
     public static function isRequestCoroutine(): bool
     {
-        if (!extension_loaded('swoole') || Coroutine::getCid() <= 0) {
+        if (Coroutine::getCid() <= 0) {
             return false;
         }
 
@@ -97,8 +97,6 @@ class SwooleBootstrap
 
     public static function run(): void
     {
-        self::verifyRequirements();
-
         // Hook all blocking PHP functions (PDO, streams, file I/O, sleep, etc.)
         // so they yield to other coroutines instead of blocking the worker.
         // Must be called before Server creation.
@@ -450,18 +448,6 @@ class SwooleBootstrap
             }
         } catch (\Throwable) {
             // Autoloader refresh is best-effort; never block worker startup.
-        }
-    }
-
-    private static function verifyRequirements(): void
-    {
-        if (PHP_VERSION_ID < 80400) {
-            fwrite(STDERR, "Error: Semitexa requires PHP 8.4+, got " . PHP_VERSION . "\n");
-            exit(1);
-        }
-        if (!extension_loaded('swoole')) {
-            fwrite(STDERR, "Error: Swoole extension is required.\n");
-            exit(1);
         }
     }
 

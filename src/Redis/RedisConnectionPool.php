@@ -80,7 +80,7 @@ final class RedisConnectionPool
             return;
         }
 
-        if (!$this->inSwoole() || \Swoole\Coroutine::getCid() < 0) {
+        if (\Swoole\Coroutine::getCid() < 0) {
             return;
         }
 
@@ -99,7 +99,7 @@ final class RedisConnectionPool
      */
     public function get(): ClientInterface
     {
-        if ($this->pool === null && $this->inSwoole() && \Swoole\Coroutine::getCid() >= 0) {
+        if ($this->pool === null && \Swoole\Coroutine::getCid() >= 0) {
             $this->boot();
         }
 
@@ -300,11 +300,5 @@ final class RedisConnectionPool
         }
 
         return new Client($params);
-    }
-
-    private function inSwoole(): bool
-    {
-        return extension_loaded('swoole')
-            && class_exists(\Swoole\Coroutine\Channel::class);
     }
 }

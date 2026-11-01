@@ -77,7 +77,6 @@ final class AsyncJsonLogger implements LoggerInterface
     private const SIZE_CHECK_EVERY_BYTES = 1_048_576;
     /** @var list<array<string, mixed>> */
     private array $buffer = [];
-    private bool $deferScheduled = false;
     /** A coroutine of this process is writing; see flush(). */
     private bool $writing = false;
 
@@ -201,27 +200,14 @@ final class AsyncJsonLogger implements LoggerInterface
         }
         $this->buffer[] = $entry;
 
-        // In CLI (e.g. queue worker) there is no Swoole event loop, so defer would never run — flush immediately.
-        $useDefer = php_sapi_name() !== 'cli'
-            && extension_loaded('swoole')
-            && class_exists(\Swoole\Event::class)
-            && method_exists(\Swoole\Event::class, 'defer');
-
-        if ($useDefer) {
-            if (!$this->deferScheduled) {
-                $this->deferScheduled = true;
-                \Swoole\Event::defer(function (): void {
-                    $this->flush();
-                    $this->deferScheduled = false;
-                });
-            }
-        } else {
-            $this->flush();
-        }
+        // Written at once. A Swoole\Event::defer() path stood here for a
+        // non-CLI SAPI; the server and every worker we ship run under CLI, so
+        // it never ran (removed 01.11, tk-support-only-what-we-ship).
+        $this->flush();
     }
 
     /**
-     * Write buffered entries to the log file (JSON lines). Call explicitly when not using defer.
+     * Write buffered entries to the log file (JSON lines).
      *
      * One writer per logger, and the container keeps one logger per worker: a
      * coroutine that finds a write in progress leaves its entries to that writer,
