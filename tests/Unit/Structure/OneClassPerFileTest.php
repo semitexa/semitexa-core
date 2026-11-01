@@ -18,6 +18,7 @@ final class OneClassPerFileTest extends TestCase
     public function every_class_like_in_src_sits_in_the_file_named_after_it(): void
     {
         $misplaced = [];
+        $checked = [];
         $files = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator(dirname(__DIR__, 3) . '/src', \FilesystemIterator::SKIP_DOTS));
         foreach ($files as $file) {
             if (!$file instanceof \SplFileInfo || $file->getExtension() !== 'php') {
@@ -26,12 +27,17 @@ final class OneClassPerFileTest extends TestCase
             $source = file_get_contents($file->getPathname());
             self::assertIsString($source, 'cannot read ' . $file->getPathname());
             foreach (self::declaredIn($source) as $name) {
+                $checked[$name] = $file->getFilename();
                 if ($name !== $file->getBasename('.php')) {
                     $misplaced[] = $name . ' in ' . $file->getFilename();
                 }
             }
         }
 
+        // The scan reached the very pair that broke the gate: a tree it never
+        // read, or a tokenizer that finds nothing, cannot pass.
+        self::assertSame('ThemeValue.php', $checked['ThemeValue'] ?? null);
+        self::assertSame('ThemeLayer.php', $checked['ThemeLayer'] ?? null);
         self::assertSame([], $misplaced);
     }
 
