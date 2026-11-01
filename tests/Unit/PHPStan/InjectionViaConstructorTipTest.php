@@ -32,6 +32,12 @@ final class InjectionViaConstructorTipTest extends RuleTestCase
         $files = glob(self::FIXTURES . '/*.php');
         self::assertIsArray($files);
         self::assertCount(2, $files, 'the fixtures moved: this test would check nothing');
+        foreach ($files as $file) {
+            // Autoloaded by PSR-4: a file emptied or holding another class fails here,
+            // so a fixture expected to report nothing cannot pass by being empty.
+            $name = 'Semitexa\\Core\\Tests\\Unit\\PHPStan\\Fixtures\\Tips\\' . basename($file, '.php');
+            self::assertTrue(class_exists($name) || interface_exists($name) || trait_exists($name) || enum_exists($name), "{$name} is not declared in {$file}");
+        }
         foreach ($this->gatherAnalyserErrors($files) as $error) {
             $tips[basename($error->getFilePath()) . ':' . $error->getLine()] = $error->getTip();
         }
