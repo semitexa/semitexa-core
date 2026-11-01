@@ -147,8 +147,8 @@ final class BootDiagnostics
      * context falls back to SUMMARY (safe) rather than mis-detecting.
      *
      * For HTTP/Swoole deployments, prefer BOOT_VERBOSE=1 in the env — it is the
-     * only mechanism that works identically across CLI, Swoole master, Swoole
-     * workers, and FPM.
+     * only mechanism that works identically in the CLI, the Swoole master and
+     * its workers.
      */
     private static function detectVerbosity(): int
     {
@@ -161,10 +161,6 @@ final class BootDiagnostics
             if (in_array($value, ['0', 'false', 'no', 'off', 'silent'], true)) {
                 return self::VERBOSITY_SILENT;
             }
-        }
-
-        if (PHP_SAPI !== 'cli') {
-            return self::testDefault() ?? self::VERBOSITY_SUMMARY;
         }
 
         // Prefer $_SERVER['argv'] but fall back to $GLOBALS['argv'] — Swoole

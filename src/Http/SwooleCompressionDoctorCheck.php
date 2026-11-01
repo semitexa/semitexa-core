@@ -35,10 +35,6 @@ final class SwooleCompressionDoctorCheck implements DoctorCheckInterface
 {
     public function run(): DoctorResult
     {
-        if (!extension_loaded('swoole')) {
-            return DoctorResult::skip('ext-swoole is not loaded; response compression is not this runtime\'s to answer for.');
-        }
-
         $available = [];
         foreach (['gzip' => 'SWOOLE_HAVE_ZLIB', 'brotli' => 'SWOOLE_HAVE_BROTLI', 'zstd' => 'SWOOLE_HAVE_ZSTD'] as $name => $constant) {
             if (defined($constant)) {
