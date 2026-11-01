@@ -18,30 +18,29 @@ use Semitexa\Core\PHPStan\Rules\InjectionViaConstructorRule;
  */
 final class InjectionViaConstructorTipTest extends RuleTestCase
 {
-    private const FIXTURE = __DIR__ . '/Fixtures/ConstructorInjectionTips.php';
+    /** One declaration per file under its PSR-4 path: the autoloader finds them. */
+    private const FIXTURES = __DIR__ . '/Fixtures/Tips';
 
     protected function getRule(): Rule
     {
         return new InjectionViaConstructorRule();
     }
 
-    protected function setUp(): void
-    {
-        parent::setUp();
-        require_once self::FIXTURE;
-    }
-
     public function testACommandAndAServiceGetTheirOwnReason(): void
     {
         $tips = [];
-        foreach ($this->gatherAnalyserErrors([self::FIXTURE]) as $error) {
-            $tips[$error->getLine()] = $error->getTip();
+        $files = glob(self::FIXTURES . '/*.php');
+        self::assertIsArray($files);
+        self::assertCount(2, $files, 'the fixtures moved: this test would check nothing');
+        foreach ($this->gatherAnalyserErrors($files) as $error) {
+            $tips[basename($error->getFilePath()) . ':' . $error->getLine()] = $error->getTip();
         }
+        ksort($tips);
         $rule = new \ReflectionClass(InjectionViaConstructorRule::class);
 
         self::assertSame([
-            13 => $rule->getConstant('RATIONALE'),
-            21 => $rule->getConstant('COMMAND_RATIONALE'),
+            'TipCommandWithConstructorInjection.php:13' => $rule->getConstant('COMMAND_RATIONALE'),
+            'TipServiceWithConstructorInjection.php:13' => $rule->getConstant('RATIONALE'),
         ], $tips);
     }
 }

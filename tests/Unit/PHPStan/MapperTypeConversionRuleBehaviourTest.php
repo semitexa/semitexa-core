@@ -21,26 +21,28 @@ use Semitexa\Core\PHPStan\Rules\MapperTypeConversionRule;
  */
 final class MapperTypeConversionRuleBehaviourTest extends RuleTestCase
 {
-    private const FIXTURE = __DIR__ . '/Fixtures/MapperConversions.php';
-
     protected function getRule(): Rule
     {
         return new MapperTypeConversionRule();
     }
 
     /**
-     * The fixture declares several classes in one file, so PSR-4 cannot
-     * autoload it and PHPStan's reflection would report every class in it as
-     * unknown — which makes the rule see no class at all and report nothing,
-     * i.e. a green test proving the opposite of what it claims. Loading the
-     * file puts the symbols where PHPStan's autoload source locator can find
-     * them.
+     * One declaration per file under its PSR-4 path (Fixtures/<Class>.php), so
+     * the autoloader finds every class PHPStan reflects. Once they were several
+     * classes in one file, which PSR-4 cannot load: unloaded, the rule saw no
+     * class and reported nothing, a green test proving the opposite of what it
+     * claims; the file had to be required by hand.
+     *
+     * @return list<string>
      */
-    protected function setUp(): void
+    private static function fixtures(): array
     {
-        parent::setUp();
+        $files = array_map(static fn (string $class): string => __DIR__ . '/Fixtures/' . $class . '.php', ['FlaggedMapper', 'AliasedMapper', 'ShapeOnlyMapper', 'ArticleRepository']);
+        foreach ($files as $file) {
+            self::assertFileExists($file, 'the fixtures moved: this test would check nothing');
+        }
 
-        require_once __DIR__ . '/Fixtures/MapperConversions.php';
+        return $files;
     }
 
     /**
@@ -54,22 +56,23 @@ final class MapperTypeConversionRuleBehaviourTest extends RuleTestCase
     {
         $reported = [];
 
-        foreach ($this->gatherAnalyserErrors([self::FIXTURE]) as $error) {
-            $reported[$error->getLine()] = $error->getMessage();
+        foreach ($this->gatherAnalyserErrors(self::fixtures()) as $error) {
+            $reported[basename($error->getFilePath()) . ':' . $error->getLine()] = $error->getMessage();
             self::assertSame('semitexa.mapperTypeConversion', $error->getIdentifier());
         }
+        ksort($reported);
 
-        self::assertSame([25, 30, 39], array_keys($reported));
+        self::assertSame(['AliasedMapper.php:16', 'FlaggedMapper.php:25', 'FlaggedMapper.php:30'], array_keys($reported));
 
         self::assertStringStartsWith(
             'Semitexa\Core\Tests\Unit\PHPStan\Fixtures\FlaggedMapper is a mapper and calls '
             . 'Semitexa\Orm\Application\Service\Uuid7::fromBytes()',
-            $reported[25],
+            $reported['FlaggedMapper.php:25'],
         );
         self::assertStringStartsWith(
             'Semitexa\Core\Tests\Unit\PHPStan\Fixtures\AliasedMapper is a mapper and calls '
             . 'Semitexa\Orm\Application\Service\Uuid7::fromBytes()',
-            $reported[39],
+            $reported['AliasedMapper.php:16'],
             'an aliased import is the same call and must be resolved, not matched as text',
         );
     }
@@ -86,26 +89,26 @@ final class MapperTypeConversionRuleBehaviourTest extends RuleTestCase
     public function testTheDiagnosticMatchesTheDirectionOfTheCall(): void
     {
         $byLine = [];
-        foreach ($this->gatherAnalyserErrors([self::FIXTURE]) as $error) {
-            $byLine[$error->getLine()] = $error->getMessage();
+        foreach ($this->gatherAnalyserErrors(self::fixtures()) as $error) {
+            $byLine[basename($error->getFilePath()) . ':' . $error->getLine()] = $error->getMessage();
         }
 
-        self::assertStringContainsString('Expected 16 bytes, got 36', $byLine[25]);
-        self::assertStringNotContainsString('Expected 16 bytes, got 36', $byLine[30]);
-        self::assertStringContainsString('already-converted value', $byLine[30]);
+        self::assertStringContainsString('Expected 16 bytes, got 36', $byLine['FlaggedMapper.php:25']);
+        self::assertStringNotContainsString('Expected 16 bytes, got 36', $byLine['FlaggedMapper.php:30']);
+        self::assertStringContainsString('already-converted value', $byLine['FlaggedMapper.php:30']);
     }
 
     /** The reason differs by direction as well (review of core#171). */
     public function testTheRationaleMatchesTheDirectionOfTheCall(): void
     {
         $tips = [];
-        foreach ($this->gatherAnalyserErrors([self::FIXTURE]) as $error) {
-            $tips[$error->getLine()] = $error->getTip();
+        foreach ($this->gatherAnalyserErrors(self::fixtures()) as $error) {
+            $tips[basename($error->getFilePath()) . ':' . $error->getLine()] = $error->getTip();
         }
         $rule = new \ReflectionClass(MapperTypeConversionRule::class);
 
-        self::assertSame($rule->getConstant('RATIONALE'), $tips[25]);
-        self::assertSame($rule->getConstant('TO_BYTES_RATIONALE'), $tips[30]);
+        self::assertSame($rule->getConstant('RATIONALE'), $tips['FlaggedMapper.php:25']);
+        self::assertSame($rule->getConstant('TO_BYTES_RATIONALE'), $tips['FlaggedMapper.php:30']);
     }
 
     /**
@@ -116,7 +119,7 @@ final class MapperTypeConversionRuleBehaviourTest extends RuleTestCase
      */
     public function testTheContractIsTheScopeAndNotTheDirectory(): void
     {
-        $errors = $this->gatherAnalyserErrors([self::FIXTURE]);
+        $errors = $this->gatherAnalyserErrors(self::fixtures());
 
         self::assertCount(3, $errors);
 
