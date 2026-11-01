@@ -27,32 +27,53 @@ final class RedisPoolRestartTest extends TestCase
         $host = self::reachableRedisHost();
 
         $results = [];
+        $killed = [];
         $open = null;
         $failure = null;
-        Coroutine\run(function () use ($host, &$results, &$open, &$failure): void {
+        Coroutine\run(function () use ($host, &$results, &$killed, &$open, &$failure): void {
             try {
                 $pool = new RedisConnectionPool(3, self::redisConfig($host));
-                // Connect all three pooled clients, and note who they are.
+                // Connect all three pooled clients, and note who they are. A
+                // child coroutine's exception would end only that coroutine and
+                // skip done(): kept here and rethrown, it fails the test instead.
                 $ids = [];
+                $childFailures = [];
                 $wg = new Coroutine\WaitGroup();
                 for ($i = 0; $i < 3; $i++) {
                     $wg->add();
-                    Coroutine::create(function () use ($pool, $wg, &$ids): void {
-                        $pool->withConnection(static function ($redis) use (&$ids): void {
-                            $ids[] = (string) $redis->executeRaw(['CLIENT', 'ID']);
-                            Coroutine::sleep(0.05);
-                        });
-                        $wg->done();
+                    Coroutine::create(function () use ($pool, $wg, &$ids, &$childFailures): void {
+                        try {
+                            $pool->withConnection(static function (\Predis\ClientInterface $redis) use (&$ids): void {
+                                // Through the interface the pool hands out: an
+                                // error reply throws here instead of becoming an id.
+                                $ids[] = $redis->executeCommand($redis->createCommand('CLIENT', ['ID']));
+                                Coroutine::sleep(0.05);
+                            });
+                        } catch (\Throwable $e) {
+                            $childFailures[] = $e;
+                        } finally {
+                            $wg->done();
+                        }
                     });
                 }
                 $wg->wait();
+                if ($childFailures !== []) {
+                    throw $childFailures[0];
+                }
+
+                // Only three different integers are three live connections.
+                if (count($ids) !== 3 || count(array_unique($ids)) !== 3 || array_filter($ids, 'is_int') !== $ids) {
+                    throw new \RuntimeException('Expected three distinct CLIENT IDs, got ' . var_export($ids, true));
+                }
 
                 // The restart, as the pooled sockets see it; a restart takes
                 // longer than the idle-PING threshold. Only this pool's three
                 // connections: a Redis the app also uses keeps its own clients.
                 $admin = new Client(self::redisConfig($host));
-                foreach (array_unique($ids) as $id) {
-                    $admin->executeRaw(['CLIENT', 'KILL', 'ID', $id]);
+                // executeRaw answers an error as a string instead of throwing:
+                // the integers are checked after the coroutine.
+                foreach ($ids as $id) {
+                    $killed[] = $admin->executeRaw(['CLIENT', 'KILL', 'ID', (string) $id]);
                 }
                 Coroutine::sleep(1.1);
 
@@ -67,6 +88,8 @@ final class RedisPoolRestartTest extends TestCase
         });
 
         self::assertNull($failure, $failure?->getMessage() ?? '');
+        // CLIENT KILL ID answers the number of clients it closed.
+        self::assertSame([1, 1, 1], $killed, 'each pooled connection must have been killed');
         self::assertSame(['PONG', 'PONG', 'PONG'], $results);
         self::assertFalse($open, 'Redis is up: the breaker must not have opened');
     }
