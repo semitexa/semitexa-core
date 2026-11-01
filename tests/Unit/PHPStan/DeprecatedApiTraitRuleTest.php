@@ -34,15 +34,19 @@ final class DeprecatedApiTraitRuleTest extends RuleTestCase
         self::assertCount(5, $files, 'the fixtures moved: this test would check nothing');
         foreach ($this->gatherAnalyserErrors($files) as $error) {
             self::assertSame('semitexa.deprecatedApi', $error->getIdentifier());
-            $reported[] = basename($error->getTraitFilePath() ?? $error->getFilePath()) . ':' . $error->getLine() . ' ' . $error->getMessage();
+            // The trait's own file and line, and the class it was analysed in.
+            $reported[] = sprintf('%s:%d in %s: %s', basename($error->getTraitFilePath() ?? $error->getFilePath()), $error->getLine(), basename($error->getFilePath()), $error->getMessage());
         }
+        sort($reported);
 
-        self::assertSame([
-            'ApiHelper.php:11 ' . self::NS . 'ApiHelper::old() is @api and @deprecated without a date. Start the tag with the date it was deprecated: `@deprecated <YYYY.MM.DD> soon`.',
-            'PromotesApi.php:14 ' . self::NS . 'PromotesApi::$count is @api and @deprecated without a date. Start the tag with the date it was deprecated: `@deprecated <YYYY.MM.DD> soon`.',
-        ], array_values(array_unique($reported)), 'current() and dated() pass; Unmarked promises nothing');
+        $old = self::NS . 'ApiHelper::old() is @api and @deprecated without a date. Start the tag with the date it was deprecated: `@deprecated <YYYY.MM.DD> soon`.';
+        $count = self::NS . 'PromotesApi::$count is @api and @deprecated without a date. Start the tag with the date it was deprecated: `@deprecated <YYYY.MM.DD> soon`.';
         // Once per class using the trait, as PHPStan reports every error in a
-        // trait ("in context of class …"): ApiHelper has two users.
-        self::assertCount(3, $reported);
+        // trait ("in context of class …"): ApiHelper has two users, PromotesApi one.
+        self::assertSame([
+            'ApiHelper.php:11 in AlsoUsesTheHelper.php: ' . $old,
+            'ApiHelper.php:11 in UsesAll.php: ' . $old,
+            'PromotesApi.php:14 in UsesAll.php: ' . $count,
+        ], $reported, 'current() and dated() pass; Unmarked promises nothing');
     }
 }
