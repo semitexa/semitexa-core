@@ -62,7 +62,10 @@ final class StaticStateLifetimeRuleTest extends RuleTestCase
         $reported = [];
         foreach ($this->gatherAnalyserErrors(self::fixtures()) as $error) {
             self::assertSame('semitexa.staticStateLifetime', $error->getIdentifier());
-            $reported[basename($error->getFilePath()) . ':' . $error->getLine()] = $error->getMessage();
+            $at = basename($error->getFilePath()) . ':' . $error->getLine();
+            // Two properties on one line report twice; a keyed map would keep one.
+            self::assertArrayNotHasKey($at, $reported, 'a second diagnostic on ' . $at . ' would be hidden');
+            $reported[$at] = $error->getMessage();
         }
         ksort($reported);
 
