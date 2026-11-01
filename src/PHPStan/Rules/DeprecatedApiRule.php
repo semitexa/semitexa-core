@@ -41,7 +41,7 @@ use PHPStan\Rules\RuleErrorBuilder;
 final class DeprecatedApiRule implements Rule
 {
     /** Printed with every report of this rule: why it exists, and what taught us. */
-    private const RATIONALE = 'Why: a deprecated @api part may be removed 90 days after it was deprecated, counted from the release that shipped the date written here; without a date nothing can be counted, and without a replacement nobody can move off it. Policy since 2026-10-29 (the stability contract); no incident on record.';
+    public const RATIONALE = 'Why: a deprecated @api part may be removed 90 days after it was deprecated, counted from the release that shipped the date written here; without a date nothing can be counted, and without a replacement nobody can move off it. Policy since 2026-10-29 (the stability contract); no incident on record.';
 
     private const SINCE = '/^\d{4}\.\d{2}\.\d{2}(\.\d{4})?$/';
 
@@ -57,8 +57,19 @@ final class DeprecatedApiRule implements Rule
 
     public function processNode(Node $node, Scope $scope): array
     {
-        $class = $node->getOriginalNode();
-        $className = $node->getClassReflection()->getName();
+        return $this->checkDeclaration($node->getOriginalNode(), $node->getClassReflection()->getName(), $scope);
+    }
+
+    /**
+     * The checks over one class-like declaration: the class itself when it is
+     * @api, then each member on the surface. A class's InClassNode does not
+     * hold the members its traits bring; DeprecatedApiTraitRule checks those
+     * in the trait, under the trait's name.
+     *
+     * @return list<IdentifierRuleError>
+     */
+    public function checkDeclaration(ClassLike $class, string $className, Scope $scope): array
+    {
         $classIsApi = self::hasTag($class->getDocComment(), 'api');
 
         $errors = [];
