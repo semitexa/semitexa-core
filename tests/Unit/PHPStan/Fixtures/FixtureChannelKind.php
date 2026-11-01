@@ -14,26 +14,3 @@ enum FixtureChannelKind: string
     case Mail = 'mail';
     case Sms = 'sms';
 }
-
-interface FixtureChannel
-{
-}
-
-interface FactoryFixtureChannel
-{
-    public function getDefault(): FixtureChannel;
-
-    public function get(FixtureChannelKind $key): FixtureChannel;
-
-    public function keys(): array;
-}
-
-interface FactoryWithoutGet
-{
-    public function getDefault(): FixtureChannel;
-}
-
-interface FactoryStringKeyed
-{
-    public function get(string $key): FixtureChannel;
-}

@@ -22,7 +22,8 @@ use Semitexa\Core\PHPStan\Rules\StaticStateLifetimeRule;
  */
 final class StaticStateLifetimeRuleTest extends RuleTestCase
 {
-    private const FIXTURE = __DIR__ . '/Fixtures/StaticStateLifetimes.php';
+    /** One declaration per file under its PSR-4 path: the autoloader finds them. */
+    private const FIXTURES = ['UndeclaredStaticState', 'DeclaredOrExemptStaticState', 'StaticStateScope', 'RequestScopedStaticState', 'StaticStateInTrait', 'AliasedWorkerStateAttribute', 'AliasedRegistryStaticState', 'ForeignWorkerStateAttribute'];
 
     protected function getRule(): Rule
     {
@@ -30,26 +31,41 @@ final class StaticStateLifetimeRuleTest extends RuleTestCase
     }
 
     /**
-     * Several classes in one file: PSR-4 cannot autoload them, and a rule that
-     * sees no class reports nothing — a green test proving the opposite of what
-     * it claims. Loading the file lets PHPStan's reflection find them.
+     * The fixture files, checked to exist. Once they were several classes in
+     * one file, which PSR-4 cannot autoload: a rule that sees no class reports
+     * nothing, a green test proving the opposite of what it claims, so the file
+     * was required by hand. One per file, the autoloader finds each.
+     *
+     * @return list<string>
      */
-    protected function setUp(): void
+    private static function fixtures(): array
     {
-        parent::setUp();
+        $files = array_map(static fn (string $class): string => __DIR__ . '/Fixtures/' . $class . '.php', self::FIXTURES);
+        foreach ($files as $file) {
+            self::assertFileExists($file, 'the fixtures moved: this test would check nothing');
+        }
+        foreach ($files as $file) {
+            // Autoloaded by PSR-4: a file emptied or holding another class fails here,
+            // so a fixture expected to report nothing cannot pass by being empty.
+            $name = 'Semitexa\\Core\\Tests\\Unit\\PHPStan\\Fixtures\\' . basename($file, '.php');
+            self::assertTrue(class_exists($name) || interface_exists($name) || trait_exists($name) || enum_exists($name), "{$name} is not declared in {$file}");
+        }
 
-        require_once self::FIXTURE;
+        return $files;
     }
 
     /**
-     * @return array<int, string> line => message
+     * @return array<string, string> File.php:line => message
      */
     private function reported(): array
     {
         $reported = [];
-        foreach ($this->gatherAnalyserErrors([self::FIXTURE]) as $error) {
+        foreach ($this->gatherAnalyserErrors(self::fixtures()) as $error) {
             self::assertSame('semitexa.staticStateLifetime', $error->getIdentifier());
-            $reported[$error->getLine()] = $error->getMessage();
+            $at = basename($error->getFilePath()) . ':' . $error->getLine();
+            // Two properties on one line report twice; a keyed map would keep one.
+            self::assertArrayNotHasKey($at, $reported, 'a second diagnostic on ' . $at . ' would be hidden');
+            $reported[$at] = $error->getMessage();
         }
         ksort($reported);
 
@@ -62,12 +78,12 @@ final class StaticStateLifetimeRuleTest extends RuleTestCase
         // a trait's static, and a static carrying a foreign attribute that is
         // merely named WorkerState. Nothing from the exempt or declared classes,
         // including the aliased attribute and the aliased registry call.
-        self::assertSame([20, 22, 24, 28, 85, 118], array_keys($this->reported()));
+        self::assertSame(['ForeignWorkerStateAttribute.php:16', 'StaticStateInTrait.php:16', 'UndeclaredStaticState.php:22', 'UndeclaredStaticState.php:24', 'UndeclaredStaticState.php:26', 'UndeclaredStaticState.php:30'], array_keys($this->reported()));
     }
 
     public function testTheMessageSaysWhatToDoAndWhy(): void
     {
-        $property = $this->reported()[20];
+        $property = $this->reported()['UndeclaredStaticState.php:22'];
 
         self::assertStringStartsWith(
             'Static property Semitexa\Core\Tests\Unit\PHPStan\Fixtures\UndeclaredStaticState::$decisions '
@@ -86,7 +102,7 @@ final class StaticStateLifetimeRuleTest extends RuleTestCase
      */
     public function testAStaticLocalIsToldToMoveNotToAnnotate(): void
     {
-        $local = $this->reported()[28];
+        $local = $this->reported()['UndeclaredStaticState.php:30'];
 
         self::assertStringStartsWith(
             'Static variable $cache in Semitexa\Core\Tests\Unit\PHPStan\Fixtures\UndeclaredStaticState::memo()',
