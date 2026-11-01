@@ -142,10 +142,6 @@ final class SharedDiscoveryCacheTest extends TestCase
         // without depending on how long a real scan happens to take. The producer must contain a
         // suspension point, or the first coroutine finishes before the second starts and there is
         // no race to observe.
-        if (!class_exists(Coroutine::class)) {
-            self::markTestSkipped('Swoole extension is required.');
-        }
-
         $produced = 0;
         $done = false;
         $first = new ClassDiscovery();

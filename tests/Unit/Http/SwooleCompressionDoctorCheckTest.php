@@ -80,10 +80,6 @@ final class SwooleCompressionDoctorCheckTest extends TestCase
     #[Test]
     public function the_live_check_agrees_with_what_this_build_actually_has(): void
     {
-        if (!extension_loaded('swoole')) {
-            self::markTestSkipped('ext-swoole is not loaded here');
-        }
-
         $expected = defined('SWOOLE_HAVE_COMPRESSION') && defined('SWOOLE_HAVE_ZLIB')
             ? DoctorStatus::Pass
             : DoctorStatus::Warn;
