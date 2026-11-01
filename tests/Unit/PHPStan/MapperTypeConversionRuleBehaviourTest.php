@@ -128,11 +128,11 @@ final class MapperTypeConversionRuleBehaviourTest extends RuleTestCase
     {
         $errors = $this->gatherAnalyserErrors(self::fixtures());
 
-        self::assertCount(3, $errors);
-
-        foreach ($errors as $error) {
-            self::assertStringNotContainsString('ShapeOnlyMapper', $error->getMessage());
-            self::assertStringNotContainsString('ArticleRepository', $error->getMessage());
-        }
+        // Positively: every report comes from the two flagged mappers, none
+        // from ShapeOnlyMapper.php or ArticleRepository.php.
+        $from = array_map(static fn ($error): string => basename($error->getFilePath()), $errors);
+        sort($from);
+        // verify:accept-test-change the count and the two negative message checks are folded into this exact list of reporting files, which an empty message cannot satisfy
+        self::assertSame(['AliasedMapper.php', 'FlaggedMapper.php', 'FlaggedMapper.php'], $from);
     }
 }
