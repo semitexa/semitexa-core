@@ -69,3 +69,4 @@ rules:
 
     # --- The stability contract (docs: get-started/stability).
     - Semitexa\Core\PHPStan\Rules\DeprecatedApiRule
+    - Semitexa\Core\PHPStan\Rules\DeprecatedApiTraitRule
