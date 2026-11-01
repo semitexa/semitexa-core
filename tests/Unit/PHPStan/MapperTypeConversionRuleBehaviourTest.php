@@ -100,8 +100,9 @@ final class MapperTypeConversionRuleBehaviourTest extends RuleTestCase
         }
 
         self::assertStringContainsString('Expected 16 bytes, got 36', $byLine['FlaggedMapper.php:25']);
-        self::assertStringNotContainsString('Expected 16 bytes, got 36', $byLine['FlaggedMapper.php:30']);
+        // Positive first: an empty message would pass the negative one alone.
         self::assertStringContainsString('already-converted value', $byLine['FlaggedMapper.php:30']);
+        self::assertStringNotContainsString('Expected 16 bytes, got 36', $byLine['FlaggedMapper.php:30']);
     }
 
     /** The reason differs by direction as well (review of core#171). */
