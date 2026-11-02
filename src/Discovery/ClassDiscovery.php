@@ -88,6 +88,18 @@ class ClassDiscovery
     #[WorkerState('Attribute lookups keyed by project root; derived from code only.')]
     private static array $sharedAttributeCaches = [];
 
+    /**
+     * The classes an attribute scan could not inspect, keyed by project root,
+     * then class, with the reason (tk-discovery-reports-dropped-classes). Every
+     * scan walks the whole map, so the set is the same whichever attribute was
+     * asked for; it is shared because the lookups are, and a caller served from
+     * the shared cache must still see what that answer left out.
+     *
+     * @var array<string, array<string, string>>
+     */
+    #[WorkerState('Unloadable classes keyed by project root; derived from code only.')]
+    private static array $sharedUnloadable = [];
+
     private array $allowedNamespacePrefixes = [
         'Semitexa\\' => true,
         'App\\' => true,
@@ -192,6 +204,7 @@ class ClassDiscovery
     {
         self::$sharedClassMaps = [];
         self::$sharedAttributeCaches = [];
+        self::$sharedUnloadable = [];
         // The gates go with them. A closed gate left behind by a completed production would
         // outlive the cache it guarded: the next caller finds the predicate false, finds a
         // gate, pops a closed channel (which returns at once), loops, and spins forever.
@@ -280,6 +293,24 @@ class ClassDiscovery
      *
      * @return list<string>
      */
+    /**
+     * The classes the attribute scans so far could not inspect, with why: a
+     * class whose file failed to load, whose file is gone, or whose file
+     * declares something else. An answer of findClassesWithAttribute() holds
+     * none of them, whatever attributes they carry, so a caller whose result
+     * must be complete (a schema built from #[FromTable] resources) reads this
+     * beside it instead of trusting the list alone.
+     *
+     * @return array<string, string> class => reason, sorted by class
+     */
+    public function unloadableClasses(): array
+    {
+        $dropped = self::$sharedUnloadable[ProjectRoot::get()] ?? [];
+        ksort($dropped);
+
+        return $dropped;
+    }
+
     public function findClassesWithAttributeInstanceof(string $attributeParentClass): array
     {
         return $this->findClassesWithAttributeInternal($attributeParentClass, true);
@@ -329,6 +360,13 @@ class ClassDiscovery
     {
         $reflectionFlags = $instanceof ? \ReflectionAttribute::IS_INSTANCEOF : 0;
         $classes = [];
+        $root = ProjectRoot::get();
+        // Every drop lands here as well as in the boot diagnostics, which a
+        // console command never reads (orm:sync finished green over a resource
+        // whose file did not load).
+        $drop = static function (string $className, string $reason) use ($root): void {
+            self::$sharedUnloadable[$root][$className] = $reason;
+        };
 
         $scanned = 0;
         foreach ($this->classMap as $className => $filePath) {
@@ -347,19 +385,28 @@ class ClassDiscovery
                 $exists = class_exists($className, true) || interface_exists($className, true) || trait_exists($className, true);
             } catch (\Throwable $e) {
                 BootDiagnostics::current()->skip('ClassDiscovery', "Skipping {$className} (load error): " . $e->getMessage(), $e);
+                $drop($className, 'load error: ' . $e->getMessage());
                 continue;
             }
 
             if (!$exists) {
                 $filePath = $this->classMap[$className];
+                $why = "{$filePath} does not exist";
                 if (is_file($filePath)) {
+                    $why = "{$filePath} does not declare it";
                     try {
                         (static function (string $f): void { require_once $f; })($filePath);
                     } catch (\Throwable $e) {
                         BootDiagnostics::current()->skip('ClassDiscovery', "require_once failed for {$className} ({$filePath}): " . $e->getMessage(), $e);
+                        $why = 'load error: ' . $e->getMessage();
                     }
                 }
                 if (!class_exists($className, false) && !interface_exists($className, false) && !trait_exists($className, false)) {
+                    // These two paths used to record nothing at all.
+                    if (!str_starts_with($why, 'load error')) {
+                        BootDiagnostics::current()->skip('ClassDiscovery', "Skipping {$className}: {$why}");
+                    }
+                    $drop($className, $why);
                     continue;
                 }
             }
@@ -373,6 +420,7 @@ class ClassDiscovery
                 }
             } catch (\Throwable $e) {
                 BootDiagnostics::current()->skip('ClassDiscovery', "findClassesWithAttribute({$attributeClass}, instanceof={$instanceof}) failed for {$className}: " . $e->getMessage(), $e);
+                $drop($className, 'reflection failed: ' . $e->getMessage());
             }
         }
 
