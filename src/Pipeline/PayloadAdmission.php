@@ -9,7 +9,9 @@ use Semitexa\Core\Auth\AuthBootstrapperInterface;
 use Semitexa\Core\Container\PropertyInjector;
 use Semitexa\Core\Contract\ValidatablePayloadInterface;
 use Semitexa\Core\Discovery\AttributeDiscovery;
+use Semitexa\Core\Contract\HandlesInvalidPayloadInterface;
 use Semitexa\Core\Discovery\DiscoveredRoute;
+use Semitexa\Core\Http\ContentNegotiator;
 use Semitexa\Core\Discovery\PayloadPartRegistry;
 use Semitexa\Core\Exception\PayloadValidationException;
 use Semitexa\Core\Exception\PipelineException;
@@ -87,6 +89,33 @@ final class PayloadAdmission
     }
 
     /**
+     * Whether a payload that failed validation is answered by its route's
+     * handler rather than with the JSON 422: the request prefers HTML (a
+     * browser's form post lists text/html; a wildcard or no Accept keeps
+     * JSON) and a handler of the route implements HandlesInvalidPayloadInterface.
+     */
+    public static function answersInvalid(PayloadValidationException $invalid, DiscoveredRoute $route, Request $request): bool
+    {
+        if ($invalid->payload === null) {
+            return false;
+        }
+        try {
+            if (ContentNegotiator::negotiateResponseFormat(['application/json', 'text/html'], $request, 'json') !== 'html') {
+                return false;
+            }
+        } catch (\Throwable) {
+            return false;
+        }
+        foreach ($route->handlers as $handler) {
+            if (is_string($handler['class'] ?? null) && is_a($handler['class'], HandlesInvalidPayloadInterface::class, true)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
      * Build a bare payload instance (no request data) suitable for attribute
      * resolution. Used by the pre-hydration auth gate before hydration.
      */
@@ -134,9 +163,9 @@ final class PayloadAdmission
             }
         } catch (\Semitexa\Core\Exception\ValidationException $e) {
             // Re-typed, not rethrown: raised HERE it means a malformed request rather than a domain rule.
-            return [$reqDto, new PayloadValidationException($e->getErrors())];
+            return [$reqDto, new PayloadValidationException($e->getErrors(), $reqDto)];
         } catch (\Semitexa\Core\Http\Exception\TypeMismatchException $e) {
-            return [$reqDto, new PayloadValidationException($e->errors())];
+            return [$reqDto, new PayloadValidationException($e->errors(), $reqDto)];
         } catch (\Throwable $e) {
             // Security: suppress exception messages in production (VULN-007)
             // Only expose details in debug mode for development
@@ -144,7 +173,7 @@ final class PayloadAdmission
             $message = $httpRequest instanceof Request && self::isDebugMode($httpRequest)
                 ? $e->getMessage()
                 : 'Request body could not be processed';
-            return [$reqDto, new PayloadValidationException(['_body' => [$message]])];
+            return [$reqDto, new PayloadValidationException(['_body' => [$message]], $reqDto)];
         }
 
         return [$reqDto, null];

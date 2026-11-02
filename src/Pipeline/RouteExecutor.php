@@ -12,6 +12,7 @@ use Semitexa\Core\HttpResponse;
 use Semitexa\Core\Http\Response\ResourceResponse;
 use Semitexa\Core\Discovery\AttributeDiscovery;
 use Semitexa\Core\Discovery\DiscoveredRoute;
+use Semitexa\Core\Exception\PayloadValidationException;
 use Semitexa\Core\Discovery\DefaultRouteMetadataResolver;
 use Semitexa\Core\Discovery\PayloadPartRegistry;
 use Semitexa\Core\Discovery\ResolvedRouteMetadata;
@@ -146,7 +147,12 @@ class RouteExecutor
 
             // 1a–1c. Bare payload, pre-hydration auth gate, then hydrate and
             //        validate (skipped for an OPTIONS probe). Shared with admit().
-            $reqDto = (new PayloadAdmission($this->container, $this->authBootstrapper))->gateAndHydrate($route, $request, $isOptions, $tracer);
+            try {
+                $reqDto = (new PayloadAdmission($this->container, $this->authBootstrapper))->gateAndHydrate($route, $request, $isOptions, $tracer);
+            } catch (PayloadValidationException $invalid) {
+                // An HTML form its handler can show again goes on (HandlesInvalidPayloadInterface); else the 422 below.
+                $reqDto = PayloadAdmission::answersInvalid($invalid, $route, $request) ? ($invalid->payload ?? throw $invalid) : throw $invalid;
+            }
 
             // For OPTIONS, swap the resolved route for a variant whose sole
             // handler is the generic OptionsMetadataHandler and whose response
@@ -171,6 +177,7 @@ class RouteExecutor
                 authBootstrapper: $this->authBootstrapper,
                 resolvedMetadata: $metadata,
             );
+            $context->invalidPayload = $invalid ?? null;
 
             // 4. Execute Pipeline
             // The tracer goes in: the executor opens the 'pipeline' root and a
