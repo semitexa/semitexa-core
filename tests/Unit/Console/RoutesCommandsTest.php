@@ -75,7 +75,11 @@ final class RoutesCommandsTest extends TestCase
         self::assertSame(['Shop', 'protected'], [$byName['payload']['module'], $byName['accessType']]);
         self::assertSame([RoutesFixtureAuditHandler::class, RoutesFixtureCreateHandler::class], array_column($byName['handlers'], 'class'), 'highest priority first');
         self::assertSame(['queued', 'audit', 5], [$byName['handlers'][0]['execution'], $byName['handlers'][0]['queue'], $byName['handlers'][0]['maxRetries']]);
-        self::assertSame(['class' => RoutesFixtureOrderResource::class, 'handle' => 'shop.order'], array_intersect_key((array) $byName['resource'], ['class' => 1, 'handle' => 1]));
+        self::assertSame(
+            ['class' => RoutesFixtureOrderResource::class, 'handle' => 'shop.order', 'format' => 'json', 'renderer' => 'shop.order.renderer'],
+            array_intersect_key((array) $byName['resource'], ['class' => 1, 'handle' => 1, 'format' => 1, 'renderer' => 1]),
+            'an enum format is its value',
+        );
         self::assertSame(RoutesFixtureListOrders::class, $byPath['payload']['class']);
         self::assertSame(__DIR__ . '/RoutesFixtureListOrders.php', $byPath['payload']['file']);
     }
@@ -99,7 +103,7 @@ final class RoutesCommandsTest extends TestCase
         self::assertSame(Command::SUCCESS, $tester->getStatusCode(), $display);
         self::assertMatchesRegularExpression('/Methods\s+POST/', $display);
         self::assertMatchesRegularExpression('/Access\s+protected/', $display);
-        self::assertMatchesRegularExpression('/Handle\s+shop\.order/', $display);
+        self::assertMatchesRegularExpression('/Handle\s+shop\.order\s.*Format\s+json\s.*Renderer\s+shop\.order\.renderer\s/s', $display);
         self::assertStringContainsString('Handlers (2)', $display);
         self::assertMatchesRegularExpression('/RoutesFixtureAuditHandler\s+Shop\s+queued\s+10\s+queue: audit, retries: 5.*\n.*RoutesFixtureCreateHandler\s+Shop\s+sync\s+0\s+-/s', $display);
     }

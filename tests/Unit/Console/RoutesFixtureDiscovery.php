@@ -6,6 +6,7 @@ namespace Semitexa\Core\Tests\Unit\Console;
 
 use Semitexa\Core\Auth\PayloadAccessType;
 use Semitexa\Core\Discovery\AttributeDiscovery;
+use Semitexa\Core\Http\Response\ResponseFormat;
 
 /** What discovery returns for three routes; two share a path. */
 final class RoutesFixtureDiscovery extends AttributeDiscovery
@@ -40,6 +41,8 @@ final class RoutesFixtureDiscovery extends AttributeDiscovery
 
     public function getResolvedResponseAttributes(string $class): ?array
     {
-        return $class === RoutesFixtureOrderResource::class ? ['handle' => 'shop.order'] : null;
+        return $class === RoutesFixtureOrderResource::class
+            ? ['handle' => 'shop.order', 'format' => ResponseFormat::Json, 'renderer' => 'shop.order.renderer']
+            : null;
     }
 }
