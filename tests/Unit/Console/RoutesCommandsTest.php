@@ -8,9 +8,6 @@ use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Semitexa\Core\Application\Console\Command\RoutesListCommand;
 use Semitexa\Core\Application\Console\Command\RoutesShowCommand;
-use Semitexa\Core\Auth\PayloadAccessType;
-use Semitexa\Core\Discovery\AttributeDiscovery;
-use Semitexa\Core\ModuleRegistry;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Tester\CommandTester;
 
@@ -80,7 +77,7 @@ final class RoutesCommandsTest extends TestCase
         self::assertSame(['queued', 'audit', 5], [$byName['handlers'][0]['execution'], $byName['handlers'][0]['queue'], $byName['handlers'][0]['maxRetries']]);
         self::assertSame(['class' => RoutesFixtureOrderResource::class, 'handle' => 'shop.order'], array_intersect_key((array) $byName['resource'], ['class' => 1, 'handle' => 1]));
         self::assertSame(RoutesFixtureListOrders::class, $byPath['payload']['class']);
-        self::assertSame(__FILE__, $byPath['payload']['file']);
+        self::assertSame(__DIR__ . '/RoutesFixtureListOrders.php', $byPath['payload']['file']);
     }
 
     #[Test]
@@ -90,6 +87,21 @@ final class RoutesCommandsTest extends TestCase
 
         self::assertSame(Command::FAILURE, $tester->getStatusCode());
         self::assertStringContainsString('Route not found: /nowhere', $tester->getDisplay());
+    }
+
+    /** The view without --json reads the same record: route, payload, resource and handlers by priority. */
+    #[Test]
+    public function routes_show_prints_the_route_its_resource_and_its_handlers_by_priority(): void
+    {
+        $tester = $this->runCommand(new RoutesShowCommand(), ['id' => 'orders.create']);
+        $display = $tester->getDisplay();
+
+        self::assertSame(Command::SUCCESS, $tester->getStatusCode(), $display);
+        self::assertMatchesRegularExpression('/Methods\s+POST/', $display);
+        self::assertMatchesRegularExpression('/Access\s+protected/', $display);
+        self::assertMatchesRegularExpression('/Handle\s+shop\.order/', $display);
+        self::assertStringContainsString('Handlers (2)', $display);
+        self::assertMatchesRegularExpression('/RoutesFixtureAuditHandler\s+Shop\s+queued\s+10\s+queue: audit, retries: 5.*\n.*RoutesFixtureCreateHandler\s+Shop\s+sync\s+0\s+-/s', $display);
     }
 
     /**
@@ -117,58 +129,3 @@ final class RoutesCommandsTest extends TestCase
         return $tester;
     }
 }
-
-/** What discovery returns for three routes; two share a path. */
-final class RoutesFixtureDiscovery extends AttributeDiscovery
-{
-    public function __construct()
-    {
-    }
-
-    public function getRoutes(): array
-    {
-        return [
-            ['path' => '/orders', 'methods' => ['GET'], 'name' => 'orders.list', 'class' => RoutesFixtureListOrders::class, 'accessType' => PayloadAccessType::Protected],
-            ['path' => '/orders', 'methods' => ['POST'], 'name' => 'orders.create', 'class' => RoutesFixtureCreateOrder::class, 'accessType' => PayloadAccessType::Protected],
-            ['path' => '/', 'methods' => ['GET'], 'name' => null, 'class' => 'App\\Home\\HomePayload', 'accessType' => 'public'],
-        ];
-    }
-
-    public function findRoute(string $path, string $method = 'GET'): ?array
-    {
-        if ($path === '/orders' && $method === 'POST') {
-            return [
-                'responseClass' => RoutesFixtureOrderResource::class,
-                'handlers' => [
-                    ['class' => RoutesFixtureCreateHandler::class, 'priority' => 0],
-                    ['class' => RoutesFixtureAuditHandler::class, 'priority' => 10, 'execution' => 'queued', 'queue' => 'audit', 'maxRetries' => 5],
-                ],
-            ];
-        }
-
-        return null;
-    }
-
-    public function getResolvedResponseAttributes(string $class): ?array
-    {
-        return $class === RoutesFixtureOrderResource::class ? ['handle' => 'shop.order'] : null;
-    }
-}
-
-final class RoutesFixtureModules extends ModuleRegistry
-{
-    public function __construct()
-    {
-    }
-
-    public function getModuleNameForClass(string $className): ?string
-    {
-        return str_starts_with($className, __NAMESPACE__ . '\\RoutesFixture') ? 'Shop' : null;
-    }
-}
-
-final class RoutesFixtureListOrders {}
-final class RoutesFixtureCreateOrder {}
-final class RoutesFixtureOrderResource {}
-final class RoutesFixtureCreateHandler {}
-final class RoutesFixtureAuditHandler {}
