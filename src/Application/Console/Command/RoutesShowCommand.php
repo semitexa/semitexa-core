@@ -7,6 +7,10 @@ namespace Semitexa\Core\Application\Console\Command;
 use Semitexa\Core\Console\BaseCommand;
 use Semitexa\Core\Attribute\AsCommand;
 use Semitexa\Core\Attribute\InjectAsReadonly;
+use Semitexa\Core\Application\Service\RouteDebug\ClassLocation;
+use Semitexa\Core\Application\Service\RouteDebug\RouteDebugInfo;
+use Semitexa\Core\Application\Service\RouteDebug\RouteHandlerInfo;
+use Semitexa\Core\Application\Service\RouteDebug\RouteResourceInfo;
 use Semitexa\Core\Discovery\AttributeDiscovery;
 use Semitexa\Core\ModuleRegistry;
 use Symfony\Component\Console\Command\Command;
@@ -47,15 +51,14 @@ class RoutesShowCommand extends BaseCommand
             return Command::FAILURE;
         }
 
-        $enriched = $this->buildDebugInfo($route);
-        $asJson = (bool) $input->getOption('json');
+        $info = $this->buildDebugInfo($route);
 
-        if ($asJson) {
-            $output->writeln(json_encode($enriched, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT), OutputInterface::OUTPUT_RAW);
+        if ((bool) $input->getOption('json')) {
+            $output->writeln(json_encode($info->toArray(), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR), OutputInterface::OUTPUT_RAW);
             return Command::SUCCESS;
         }
 
-        $this->renderHuman(new SymfonyStyle($input, $output), $enriched);
+        $this->renderHuman(new SymfonyStyle($input, $output), $info);
         return Command::SUCCESS;
     }
 
@@ -88,10 +91,9 @@ class RoutesShowCommand extends BaseCommand
     }
 
     /**
-     * @param  array<string, mixed> $route
-     * @return array<string, mixed>
+     * @param array<string, mixed> $route
      */
-    private function buildDebugInfo(array $route): array
+    private function buildDebugInfo(array $route): RouteDebugInfo
     {
         $payloadClass = is_string($route['class'] ?? null) ? $route['class'] : '';
         $methods = array_values(array_filter(
@@ -114,149 +116,106 @@ class RoutesShowCommand extends BaseCommand
             }
         }
 
-        $responseClass = is_string($enriched['responseClass'] ?? null) ? $enriched['responseClass'] : null;
+        $responseClass = is_string($enriched['responseClass'] ?? null) && $enriched['responseClass'] !== '' ? $enriched['responseClass'] : null;
         $handlersRaw = $enriched['handlers'] ?? [];
-        $handlers = is_array($handlersRaw) ? $handlersRaw : [];
-        $responseAttrs = $responseClass ? $this->attributeDiscovery->getResolvedResponseAttributes($responseClass) : null;
-
-        $info = [
-            'path' => $routePath,
-            'methods' => $methods,
-            'name' => is_string($route['name'] ?? null) ? $route['name'] : null,
-            'accessType' => $this->stringifyAccessType($route['accessType'] ?? null),
-            'type' => is_string($route['type'] ?? null) ? $route['type'] : null,
-            'payload' => [
-                'class' => $payloadClass,
-                'module' => $this->moduleRegistry->getModuleNameForClass($payloadClass) ?? 'project',
-                'file' => $this->resolveFile($payloadClass),
-            ],
-            'resource' => null,
-            'handlers' => [],
-            'requirements' => $route['requirements'] ?? [],
-            'defaults' => $route['defaults'] ?? [],
-            'options' => $route['options'] ?? [],
-            'tags' => $route['tags'] ?? [],
-        ];
-
-        if ($responseClass) {
-            $info['resource'] = [
-                'class' => $responseClass,
-                'module' => $this->moduleRegistry->getModuleNameForClass($responseClass) ?? 'project',
-                'file' => $this->resolveFile($responseClass),
-                'handle' => is_string($responseAttrs['handle'] ?? null) ? $responseAttrs['handle'] : null,
-                'format' => $responseAttrs['format'] ?? null,
-                'renderer' => is_string($responseAttrs['renderer'] ?? null) ? $responseAttrs['renderer'] : null,
-            ];
-        }
-
-        $normalizedHandlers = [];
-        foreach ($handlers as $handler) {
-            if (!is_array($handler)) {
-                continue;
+        $handlers = [];
+        foreach (is_array($handlersRaw) ? $handlersRaw : [] as $handler) {
+            if (is_array($handler) && is_string($handler['class'] ?? null) && $handler['class'] !== '') {
+                $handlers[] = new RouteHandlerInfo(
+                    class: $handler['class'],
+                    module: $this->moduleOf($handler['class']),
+                    execution: is_string($handler['execution'] ?? null) ? $handler['execution'] : 'sync',
+                    priority: self::intOrNull($handler['priority'] ?? null) ?? 0,
+                    transport: is_string($handler['transport'] ?? null) ? $handler['transport'] : null,
+                    queue: is_string($handler['queue'] ?? null) ? $handler['queue'] : null,
+                    maxRetries: self::intOrNull($handler['maxRetries'] ?? null),
+                    retryDelay: self::intOrNull($handler['retryDelay'] ?? null),
+                );
             }
+        }
+        usort($handlers, static fn (RouteHandlerInfo $a, RouteHandlerInfo $b): int => $b->priority <=> $a->priority);
 
-            $normalizedHandlers[] = $handler;
+        $resource = null;
+        if ($responseClass !== null) {
+            $attrs = $this->attributeDiscovery->getResolvedResponseAttributes($responseClass) ?? [];
+            $format = $attrs['format'] ?? null;
+            $resource = new RouteResourceInfo(
+                location: $this->locate($responseClass),
+                handle: is_string($attrs['handle'] ?? null) ? $attrs['handle'] : null,
+                format: match (true) {
+                    $format instanceof \BackedEnum => (string) $format->value,
+                    is_string($format) => $format,
+                    default => null,
+                },
+                renderer: is_string($attrs['renderer'] ?? null) ? $attrs['renderer'] : null,
+            );
         }
 
-        usort(
-            $normalizedHandlers,
-            static fn (array $a, array $b): int => self::handlerPriority($b) <=> self::handlerPriority($a)
+        return new RouteDebugInfo(
+            path: $routePath,
+            methods: $methods,
+            name: is_string($route['name'] ?? null) ? $route['name'] : null,
+            accessType: $this->stringifyAccessType($route['accessType'] ?? null),
+            type: is_string($route['type'] ?? null) ? $route['type'] : null,
+            payload: $this->locate($payloadClass),
+            resource: $resource,
+            handlers: $handlers,
+            requirements: self::map($route['requirements'] ?? null),
+            defaults: self::map($route['defaults'] ?? null),
+            options: self::map($route['options'] ?? null),
+            tags: array_values(array_filter(is_array($route['tags'] ?? null) ? $route['tags'] : [], 'is_string')),
         );
-
-        foreach ($normalizedHandlers as $h) {
-            $handlerClass = is_string($h['class'] ?? null) ? $h['class'] : '';
-            if ($handlerClass === '') {
-                continue;
-            }
-            $info['handlers'][] = [
-                'class' => $handlerClass,
-                'module' => $this->moduleRegistry->getModuleNameForClass($handlerClass) ?? 'project',
-                'execution' => is_string($h['execution'] ?? null) ? $h['execution'] : 'sync',
-                'priority' => $h['priority'] ?? 0,
-                'transport' => is_string($h['transport'] ?? null) ? $h['transport'] : null,
-                'queue' => is_string($h['queue'] ?? null) ? $h['queue'] : null,
-                'maxRetries' => $h['maxRetries'] ?? null,
-                'retryDelay' => $h['retryDelay'] ?? null,
-            ];
-        }
-
-        return $info;
     }
 
-    private static function handlerPriority(mixed $handler): int
+    private function renderHuman(SymfonyStyle $io, RouteDebugInfo $info): void
     {
-        if (!is_array($handler)) {
-            return 0;
-        }
-
-        $priority = $handler['priority'] ?? 0;
-
-        return is_int($priority) ? $priority : (is_numeric($priority) ? (int) $priority : 0);
-    }
-
-    /**
-     * @param array<string, mixed> $info
-     */
-    private function renderHuman(SymfonyStyle $io, array $info): void
-    {
-        $io->title($info['path']);
+        $io->title($info->path);
 
         $io->section('Route');
         $io->definitionList(
-            ['Methods' => implode(', ', $info['methods'])],
-            ['Path' => $info['path']],
-            ['Name' => $info['name'] ?? '-'],
-            ['Access' => $info['accessType'] ?? 'unknown'],
+            ['Methods' => implode(', ', $info->methods)],
+            ['Path' => $info->path],
+            ['Name' => $info->name ?? '-'],
+            ['Access' => $info->accessType],
         );
 
         $io->section('Payload');
         $io->definitionList(
-            ['Class' => $info['payload']['class']],
-            ['Module' => $info['payload']['module']],
-            ['File' => $info['payload']['file'] ?? '-'],
+            ['Class' => $info->payload->class],
+            ['Module' => $info->payload->module],
+            ['File' => $info->payload->file ?? '-'],
         );
 
-        if ($info['resource']) {
+        if ($info->resource !== null) {
             $io->section('Resource');
             $rows = [
-                ['Class' => $info['resource']['class']],
-                ['Module' => $info['resource']['module']],
-                ['File' => $info['resource']['file'] ?? '-'],
+                ['Class' => $info->resource->location->class],
+                ['Module' => $info->resource->location->module],
+                ['File' => $info->resource->location->file ?? '-'],
             ];
-            if ($info['resource']['handle'] !== null) {
-                $rows[] = ['Handle' => $info['resource']['handle']];
-            }
-            if ($info['resource']['format'] !== null) {
-                $format = $info['resource']['format'];
-                $rows[] = ['Format' => is_object($format) ? $format->value : (string) $format];
-            }
-            if ($info['resource']['renderer'] !== null) {
-                $rows[] = ['Renderer' => $info['resource']['renderer']];
+            foreach (['Handle' => $info->resource->handle, 'Format' => $info->resource->format, 'Renderer' => $info->resource->renderer] as $label => $value) {
+                if ($value !== null) {
+                    $rows[] = [$label => $value];
+                }
             }
             $io->definitionList(...$rows);
         }
 
-        if (!empty($info['handlers'])) {
-            $io->section('Handlers (' . count($info['handlers']) . ')');
+        if ($info->handlers !== []) {
+            $io->section('Handlers (' . count($info->handlers) . ')');
             $tableRows = [];
-            foreach ($info['handlers'] as $h) {
+            foreach ($info->handlers as $h) {
                 $extra = [];
-                if ($h['transport']) {
-                    $extra[] = "transport: {$h['transport']}";
+                if ($h->transport !== null && $h->transport !== '') {
+                    $extra[] = 'transport: ' . $h->transport;
                 }
-                if ($h['queue']) {
-                    $extra[] = "queue: {$h['queue']}";
+                if ($h->queue !== null && $h->queue !== '') {
+                    $extra[] = 'queue: ' . $h->queue;
                 }
-                if ($h['maxRetries'] !== null) {
-                    $extra[] = "retries: {$h['maxRetries']}";
+                if ($h->maxRetries !== null) {
+                    $extra[] = 'retries: ' . $h->maxRetries;
                 }
-                $tableRows[] = [
-                    $h['class'],
-                    $h['module'],
-                    $h['execution'],
-                    (string) $h['priority'],
-                    $extra ? implode(', ', $extra) : '-',
-                ];
+                $tableRows[] = [$h->class, $h->module, $h->execution, (string) $h->priority, $extra !== [] ? implode(', ', $extra) : '-'];
             }
             $io->table(['Class', 'Module', 'Execution', 'Priority', 'Extra'], $tableRows);
         } else {
@@ -264,32 +223,69 @@ class RoutesShowCommand extends BaseCommand
             $io->text('No handlers registered.');
         }
 
-        if (!empty($info['requirements'])) {
+        if ($info->requirements !== []) {
             $io->section('Requirements');
-            $io->definitionList(...array_map(
-                fn ($k, $v) => [$k => $v],
-                array_keys($info['requirements']),
-                array_values($info['requirements'])
-            ));
+            $io->definitionList(...self::definitions($info->requirements));
         }
 
-        if (!empty($info['defaults'])) {
+        if ($info->defaults !== []) {
             $io->section('Defaults');
-            $io->definitionList(...array_map(
-                fn ($k, $v) => [$k => is_string($v) ? $v : json_encode($v)],
-                array_keys($info['defaults']),
-                array_values($info['defaults'])
-            ));
+            $io->definitionList(...self::definitions($info->defaults));
         }
 
-        if (!empty($info['tags'])) {
+        if ($info->tags !== []) {
             $io->section('Tags');
-            $io->listing($info['tags']);
+            $io->listing($info->tags);
         }
+    }
+
+    private function locate(string $class): ClassLocation
+    {
+        return new ClassLocation($class, $this->moduleOf($class), $this->resolveFile($class));
+    }
+
+    private function moduleOf(string $class): string
+    {
+        return $this->moduleRegistry->getModuleNameForClass($class) ?? 'project';
+    }
+
+    private static function intOrNull(mixed $value): ?int
+    {
+        return is_int($value) ? $value : (is_numeric($value) ? (int) $value : null);
+    }
+
+    /** @return array<string, mixed> */
+    private static function map(mixed $value): array
+    {
+        $map = [];
+        foreach (is_array($value) ? $value : [] as $key => $item) {
+            $map[(string) $key] = $item;
+        }
+
+        return $map;
+    }
+
+    /**
+     * One definition-list row per entry; a value that is not text is shown as JSON.
+     *
+     * @param array<string, mixed> $map
+     * @return list<array<string, string>>
+     */
+    private static function definitions(array $map): array
+    {
+        $rows = [];
+        foreach ($map as $key => $value) {
+            $rows[] = [$key => is_string($value) ? $value : (string) json_encode($value, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)];
+        }
+
+        return $rows;
     }
 
     private function resolveFile(string $className): ?string
     {
+        if ($className === '' || (!class_exists($className) && !interface_exists($className))) {
+            return null;
+        }
         try {
             $file = (new \ReflectionClass($className))->getFileName();
             return $file !== false ? $file : null;
