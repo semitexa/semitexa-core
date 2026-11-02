@@ -62,7 +62,7 @@ final class DeprecatedApiRule implements Rule
 
     /**
      * The checks over one class-like declaration: the class itself when it is
-     * @api, then each member on the surface. A class's InClassNode does not
+     * marked as part of the API, then each member on the surface. A class's InClassNode does not
      * hold the members its traits bring; DeprecatedApiTraitRule checks those
      * in the trait, under the trait's name.
      *

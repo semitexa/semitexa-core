@@ -6,9 +6,12 @@ namespace Semitexa\Core\Pipeline;
 
 use Psr\Container\ContainerInterface;
 use Semitexa\Core\Container\SemitexaContainer;
+use Semitexa\Core\Contract\HandlesInvalidPayloadInterface;
 use Semitexa\Core\Contract\TypedHandlerInterface;
 use Semitexa\Core\Event\EventDispatcherInterface;
+use Semitexa\Core\Exception\PayloadValidationException;
 use Semitexa\Core\Exception\PipelineException;
+use Semitexa\Core\Http\HttpStatus;
 use Semitexa\Core\HttpResponse;
 use Semitexa\Core\Event\HandlerCompleted;
 use Semitexa\Core\Log\StaticLoggerBridge;
@@ -207,6 +210,11 @@ final class PipelineExecutor
 
     private function executeRouteHandlers(RequestPipelineContext $context): void
     {
+        if ($context->invalidPayload !== null) {
+            $this->executeInvalidPayloadHandlers($context, $context->invalidPayload);
+
+            return;
+        }
         $handlers = $context->route->handlers;
         $sessionId = $this->getSessionIdForAsyncDelivery($context->request);
 
@@ -255,6 +263,36 @@ final class PipelineExecutor
             // slow part is still charged to that handler, not to the phase.
             $this->span('pipeline.handler', ['handler' => $handlerClass, 'method' => 'handle'], function () use ($handlerClass, $context): void {
                 $this->invokeListener($this->resolveHandler($handlerClass), $context);
+                $context->lastHandlerClass = $handlerClass;
+            });
+        }
+    }
+
+    /**
+     * A payload that failed validation, for an HTML request: only the handlers
+     * that answer one run (HandlesInvalidPayloadInterface::invalid()), on a
+     * resource already set to 422 that invalid() may set otherwise.
+     */
+    private function executeInvalidPayloadHandlers(RequestPipelineContext $context, PayloadValidationException $invalid): void
+    {
+        foreach ($context->route->handlers as $handlerMeta) {
+            $handlerClass = $handlerMeta['class'] ?? null;
+            if (!is_string($handlerClass) || !is_a($handlerClass, HandlesInvalidPayloadInterface::class, true)) {
+                continue;
+            }
+            $this->span('pipeline.handler', ['handler' => $handlerClass, 'method' => 'invalid'], function () use ($handlerClass, $context, $invalid): void {
+                $handler = $this->resolveHandler($handlerClass);
+                $resource = $context->resourceDto;
+                if (!$handler instanceof HandlesInvalidPayloadInterface || !$resource instanceof \Semitexa\Core\Http\Response\ResourceResponse) {
+                    throw new PipelineException(sprintf('Handler %s answers an invalid payload on a ResourceResponse only.', $handlerClass));
+                }
+                $resource->setStatusCode(HttpStatus::UnprocessableEntity->value);
+                $answer = $handler->invalid($context->requestDto, $invalid->getErrors(), $resource);
+                // Never a 200 for input that failed validation, whichever resource came back.
+                if ($answer instanceof \Semitexa\Core\Http\Response\ResourceResponse && $answer->getStatusCode() === HttpStatus::Ok->value) {
+                    $answer->setStatusCode(HttpStatus::UnprocessableEntity->value);
+                }
+                $context->resourceDto = $answer;
                 $context->lastHandlerClass = $handlerClass;
             });
         }

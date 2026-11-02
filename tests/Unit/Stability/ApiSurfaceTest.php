@@ -39,6 +39,7 @@ final class ApiSurfaceTest extends TestCase
             'Semitexa\Core\Auth\AuthenticatableInterface',
             'Semitexa\Core\Console\BaseCommand',
             'Semitexa\Core\Contract\DoctorCheckInterface',
+            'Semitexa\Core\Contract\HandlesInvalidPayloadInterface',
             'Semitexa\Core\Contract\ResourceInterface',
             'Semitexa\Core\Contract\TypedHandlerInterface',
             'Semitexa\Core\Contract\ValidatablePayloadInterface',

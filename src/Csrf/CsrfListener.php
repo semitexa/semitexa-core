@@ -6,7 +6,6 @@ namespace Semitexa\Core\Csrf;
 
 use Semitexa\Core\Attribute\AsPipelineListener;
 use Semitexa\Core\Attribute\InjectAsMutable;
-use Semitexa\Core\Auth\AuthContextInterface;
 use Semitexa\Core\Csrf\Attribute\CsrfExempt;
 use Semitexa\Core\Environment;
 use Semitexa\Core\Pipeline\AuthCheck;
@@ -16,14 +15,20 @@ use Semitexa\Core\Pipeline\RequestPipelineContext;
 use Semitexa\Core\Session\SessionInterface;
 
 /**
- * Double-submit CSRF validator for session-authenticated state-changing requests.
+ * Double-submit CSRF validator for state-changing browser requests.
  *
- * Runs after AuthorizationListener so the authenticated subject is known. Only
- * enforces on unsafe HTTP methods (POST/PUT/PATCH/DELETE) and only when the
- * request carries an authenticated session — unauthenticated requests, webhook
- * ingest, and machine-auth API calls are out of scope.
+ * Enforces on unsafe HTTP methods (POST/PUT/PATCH/DELETE) whenever the request
+ * presents the session cookie, signed in or not. A guest session holds state
+ * too (a cart, a draft, a locale, the login itself), and a cross-site form
+ * posting into it is the same attack: until bench-anonymous-post-csrf a guest
+ * POST skipped the check, so a guest form without csrf_field() worked in
+ * development and the same form 403'd the moment its author signed in.
+ * Every session carries a token from its first request (SessionPhase), so a
+ * guest page can present it like any other.
  *
- * Skipped when the payload declares #[CsrfExempt] (e.g. webhook endpoints).
+ * Out of scope: a request with no session cookie (machine-auth API calls, a
+ * first request that has no session to forge into), and payloads that declare
+ * #[CsrfExempt] (e.g. webhook endpoints).
  *
  * The token lives on the session as CsrfToken. The matching value is sent over
  * the wire either as:
@@ -46,9 +51,6 @@ final class CsrfListener implements PipelineListenerInterface
     #[InjectAsMutable]
     protected SessionInterface $session;
 
-    #[InjectAsMutable]
-    protected AuthContextInterface $authContext;
-
     public function handle(RequestPipelineContext $context): void
     {
         $method = strtoupper($context->request->getMethod());
@@ -56,15 +58,9 @@ final class CsrfListener implements PipelineListenerInterface
             return;
         }
 
-        // CSRF is a session-cookie attack; only apply when the authenticated request
-        // actually presents the session cookie used by the browser flow.
+        // CSRF is a session-cookie attack: it applies whenever the request
+        // presents the session cookie the browser flow uses, guest or not.
         if (!$this->hasSessionCookie($context)) {
-            return;
-        }
-        if (!isset($this->authContext)) {
-            throw new AccessDeniedException('CSRF validation failed: no auth context.');
-        }
-        if ($this->authContext->isGuest()) {
             return;
         }
 

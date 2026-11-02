@@ -30,4 +30,13 @@ namespace Semitexa\Core\Exception;
  */
 class PayloadValidationException extends ValidationException
 {
+    /**
+     * @param array<string, list<string>> $errors
+     * @param object|null $payload the payload as hydrated, holding what was
+     *        submitted: a HandlesInvalidPayloadInterface handler shows it again
+     */
+    public function __construct(array $errors, public readonly ?object $payload = null)
+    {
+        parent::__construct($errors);
+    }
 }

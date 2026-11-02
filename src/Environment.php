@@ -77,15 +77,15 @@ readonly class Environment
     {
         $fileEnv = self::loadEnv();
 
-        $get = function (string $key, $default = null) use ($fileEnv) {
+        // The process environment first, then .env over .env.default, then the
+        // default: always a string, so every value below is read from text.
+        $get = static function (string $key, string $default) use ($fileEnv): string {
             $value = getenv($key);
+
             return $value !== false ? $value : ($fileEnv[$key] ?? $default);
         };
 
         $redisPoolSize = self::parsePositiveInt($get('REDIS_POOL_SIZE', '16'), 'REDIS_POOL_SIZE');
-        // Resolved through typed locals rather than an inline cast: $get() returns
-        // mixed, and a bad value here decides whether logs rotate at all.
-        $logRotation = $get('SWOOLE_LOG_ROTATION', 'daily');
         $logRetention = $get('SWOOLE_LOG_RETENTION_DAYS', '14');
 
         return new self(
@@ -115,7 +115,7 @@ readonly class Environment
             corsAllowHeaders: $get('CORS_ALLOW_HEADERS', 'Content-Type, Authorization'),
             corsAllowCredentials: filter_var($get('CORS_ALLOW_CREDENTIALS', '0'), FILTER_VALIDATE_BOOLEAN),
             redisPoolSize: $redisPoolSize,
-            swooleLogRotation: is_string($logRotation) ? $logRotation : 'daily',
+            swooleLogRotation: $get('SWOOLE_LOG_ROTATION', 'daily'),
             swooleLogRetentionDays: SwooleLogRetention::daysFromEnv($logRetention),
             swoolePackageMaxLength: self::parsePackageMaxLength($get('SWOOLE_PACKAGE_MAX_LENGTH', (string) self::DEFAULT_PACKAGE_MAX_LENGTH)),
         );

@@ -33,6 +33,13 @@ class RequestPipelineContext
      */
     public bool $reRun = false;
 
+    /**
+     * An HTML request whose payload failed validation, run for a handler that
+     * answers it (HandlesInvalidPayloadInterface): the handlers' invalid()
+     * runs instead of handle().
+     */
+    public ?\Semitexa\Core\Exception\PayloadValidationException $invalidPayload = null;
+
     public function __construct(
         public readonly object $requestDto,
         public readonly DiscoveredRoute $route,
