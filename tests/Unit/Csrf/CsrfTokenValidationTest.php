@@ -6,7 +6,6 @@ namespace Semitexa\Core\Tests\Unit\Csrf;
 
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
-use Semitexa\Core\Auth\AuthContextInterface;
 use Semitexa\Core\Csrf\Attribute\CsrfExempt;
 use Semitexa\Core\Csrf\CsrfField;
 use Semitexa\Core\Csrf\CsrfListener;
@@ -18,9 +17,9 @@ use Semitexa\Core\Request;
 use Semitexa\Core\Session\SessionInterface;
 
 /**
- * The token check itself, for a signed-in browser session
- * (tk-parity-proof-gaps): CsrfListenerTest proves only the two ways out
- * before it — no session cookie, no auth context.
+ * The token check itself, for a browser session signed in or not
+ * (tk-parity-proof-gaps, bench-anonymous-post-csrf): CsrfListenerTest proves
+ * only the two ways out before it — no session cookie, no session.
  */
 final class CsrfTokenValidationTest extends TestCase
 {
@@ -75,6 +74,20 @@ final class CsrfTokenValidationTest extends TestCase
         $this->check('POST', post: [CsrfField::NAME => ''], sessionToken: '');
     }
 
+    /**
+     * The check never asks who is signed in: a guest session holds state too,
+     * and its form was refused only once its author signed in. The stub of the
+     * auth context is gone because the listener no longer has one.
+     */
+    #[Test]
+    public function a_guest_session_is_checked_like_a_signed_in_one(): void
+    {
+        self::assertFalse(property_exists(CsrfListener::class, 'authContext'), 'a guest skip needs the auth context; without one there is none');
+
+        $this->expectException(AccessDeniedException::class);
+        $this->check('POST', post: ['email' => 'guest@example.com']);
+    }
+
     #[Test]
     public function reads_and_exempt_payloads_are_not_checked(): void
     {
@@ -94,12 +107,9 @@ final class CsrfTokenValidationTest extends TestCase
         $token->setValue($sessionToken);
         $session = $this->createStub(SessionInterface::class);
         $session->method('getPayload')->willReturn($token);
-        $auth = $this->createStub(AuthContextInterface::class);
-        $auth->method('isGuest')->willReturn(false);
 
         $listener = new CsrfListener();
         (new \ReflectionProperty(CsrfListener::class, 'session'))->setValue($listener, $session);
-        (new \ReflectionProperty(CsrfListener::class, 'authContext'))->setValue($listener, $auth);
 
         $listener->handle(new RequestPipelineContext(
             requestDto: $payload ?? new \stdClass(),

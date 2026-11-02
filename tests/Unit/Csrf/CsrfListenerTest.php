@@ -47,7 +47,7 @@ final class CsrfListenerTest extends TestCase
         $this->addToAssertionCount(1);
     }
 
-    public function testUnsafeSessionRequestWithoutAuthContextFailsClosed(): void
+    public function testUnsafeSessionRequestWithoutSessionFailsClosed(): void
     {
         $listener = new CsrfListener();
         $context = new RequestPipelineContext(
@@ -77,7 +77,8 @@ final class CsrfListenerTest extends TestCase
         );
 
         $this->expectException(AccessDeniedException::class);
-        $this->expectExceptionMessage('CSRF validation failed: no auth context.');
+        // verify:accept-test-change the listener no longer reads the auth context (guests are checked too, bench-anonymous-post-csrf); a missing session is what fails closed now
+        $this->expectExceptionMessage('CSRF validation failed: no session.');
 
         $listener->handle($context);
     }

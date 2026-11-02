@@ -5,6 +5,16 @@ Changes to `semitexa/core` that a consuming application can notice. Sections are
 next release tag. This file is machine-read by `update:changelog` and the OS
 "What's new" surface — keep entries short and operator-facing.
 
+## Unreleased
+
+### Changed
+- **A guest POST is CSRF-checked too.** Every unsafe request (POST, PUT, PATCH,
+  DELETE) that carries the session cookie must present the session's token,
+  signed in or not. A guest form without `{{ csrf_field() }}` (or a script
+  without the `X-CSRF-Token` header) now gets **403**. Add the field, or mark
+  a machine route `#[CsrfExempt]`. Before, such a form worked for guests and
+  was refused once its user signed in.
+
 ## 2026.10.09.0942 — 2026-10-09
 
 ### Changed
