@@ -282,18 +282,6 @@ class ClassDiscovery
     }
 
     /**
-     * Same as findClassesWithAttribute but matches subclasses of $attributeClass too
-     * (uses ReflectionAttribute::IS_INSTANCEOF).
-     *
-     * Used by the routable-payload discovery path: AbstractPayloadRoute is the
-     * shared base class for AsPublicPayload, AsProtectedPayload, and
-     * AsServicePayload (all three live in semitexa-authorization). Querying by
-     * the abstract base lets the framework discover payloads without coupling
-     * semitexa-core to the concrete attribute classes.
-     *
-     * @return list<string>
-     */
-    /**
      * The classes the attribute scans so far could not inspect, with why: a
      * class whose file failed to load, whose file is gone, or whose file
      * declares something else. An answer of findClassesWithAttribute() holds
@@ -311,6 +299,18 @@ class ClassDiscovery
         return $dropped;
     }
 
+    /**
+     * Same as findClassesWithAttribute but matches subclasses of $attributeClass too
+     * (uses ReflectionAttribute::IS_INSTANCEOF).
+     *
+     * Used by the routable-payload discovery path: AbstractPayloadRoute is the
+     * shared base class for AsPublicPayload, AsProtectedPayload, and
+     * AsServicePayload (all three live in semitexa-authorization). Querying by
+     * the abstract base lets the framework discover payloads without coupling
+     * semitexa-core to the concrete attribute classes.
+     *
+     * @return list<string>
+     */
     public function findClassesWithAttributeInstanceof(string $attributeParentClass): array
     {
         return $this->findClassesWithAttributeInternal($attributeParentClass, true);

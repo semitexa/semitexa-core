@@ -8,6 +8,7 @@ use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use ReflectionProperty;
 use Semitexa\Core\Attribute\AsService;
+use Semitexa\Core\Discovery\BootDiagnostics;
 use Semitexa\Core\Discovery\ClassDiscovery;
 use Semitexa\Core\Support\ProjectRoot;
 
@@ -24,8 +25,15 @@ final class UnloadableClassesTest extends TestCase
 {
     private string $dir;
 
+    private ?BootDiagnostics $diagnostics = null;
+
     protected function setUp(): void
     {
+        // The scan writes boot diagnostics, a process-wide collector: this test
+        // writes to its own and puts the previous one back.
+        $current = new ReflectionProperty(BootDiagnostics::class, 'current');
+        $this->diagnostics = $current->getValue();
+        $current->setValue(null, null);
         ClassDiscovery::resetSharedCache();
         $this->dir = sys_get_temp_dir() . '/semitexa-unloadable-' . bin2hex(random_bytes(4));
         mkdir($this->dir);
@@ -33,6 +41,7 @@ final class UnloadableClassesTest extends TestCase
 
     protected function tearDown(): void
     {
+        (new ReflectionProperty(BootDiagnostics::class, 'current'))->setValue(null, $this->diagnostics);
         ClassDiscovery::resetSharedCache();
         exec('rm -rf ' . escapeshellarg($this->dir));
     }
@@ -61,6 +70,8 @@ final class UnloadableClassesTest extends TestCase
         self::assertStringContainsString("Missing{$suffix}", $dropped[$broken]);
         self::assertSame($this->dir . '/Elsewhere.php does not declare it', $dropped[$elsewhere]);
         self::assertSame($this->dir . '/Gone.php does not exist', $dropped[$gone]);
+
+        self::assertCount(3, BootDiagnostics::current()->getWarnings(), 'every drop is a boot diagnostic too, the two silent ones included');
 
         // An instance served from the shared answer still hears what it left out.
         self::assertSame($dropped, (new ClassDiscovery())->unloadableClasses());
