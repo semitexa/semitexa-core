@@ -150,8 +150,8 @@ class RouteExecutor
             try {
                 $reqDto = (new PayloadAdmission($this->container, $this->authBootstrapper))->gateAndHydrate($route, $request, $isOptions, $tracer);
             } catch (PayloadValidationException $invalid) {
-                // An HTML form its handler can show again goes on (HandlesInvalidPayloadInterface); else the 422 below.
-                $reqDto = PayloadAdmission::answersInvalid($invalid, $route, $request) ? ($invalid->payload ?? throw $invalid) : throw $invalid;
+                // An HTML form may go on to a handler that shows it again (checked once the profile's handlers are bound, below).
+                $reqDto = PayloadAdmission::prefersHtml($request) ? ($invalid->payload ?? throw $invalid) : throw $invalid;
             }
 
             // For OPTIONS, swap the resolved route for a variant whose sole
@@ -167,6 +167,9 @@ class RouteExecutor
             $tracer?->begin('resource.resolve');
             $resDto = $this->resolveResponseDto($route, $request);
             $tracer?->end('resource.resolve', ['resource' => $resDto::class]);
+            if (isset($invalid) && !PayloadAdmission::answersInvalid($invalid, $route, $resDto)) {
+                throw $invalid;
+            }
 
             // 3. Build Context
             $context = new RequestPipelineContext(

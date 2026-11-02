@@ -89,21 +89,28 @@ final class PayloadAdmission
     }
 
     /**
-     * Whether a payload that failed validation is answered by its route's
-     * handler rather than with the JSON 422: the request prefers HTML (a
-     * browser's form post lists text/html; a wildcard or no Accept keeps
-     * JSON) and a handler of the route implements HandlesInvalidPayloadInterface.
+     * Whether a request prefers an HTML answer: a browser's form post lists
+     * text/html; a wildcard or no Accept keeps JSON.
      */
-    public static function answersInvalid(PayloadValidationException $invalid, DiscoveredRoute $route, Request $request): bool
+    public static function prefersHtml(Request $request): bool
     {
-        if ($invalid->payload === null) {
+        try {
+            return ContentNegotiator::negotiateResponseFormat(['application/json', 'text/html'], $request, 'json') === 'html';
+        } catch (\Throwable) {
             return false;
         }
-        try {
-            if (ContentNegotiator::negotiateResponseFormat(['application/json', 'text/html'], $request, 'json') !== 'html') {
-                return false;
-            }
-        } catch (\Throwable) {
+    }
+
+    /**
+     * Whether a payload that failed validation, for an HTML-preferring request,
+     * is answered by the route's handler rather than with the JSON 422: there
+     * is a payload to show again, the resource is a ResourceResponse (whose
+     * status the pipeline sets to 422), and a handler of the route as bound for
+     * this response's profile implements HandlesInvalidPayloadInterface.
+     */
+    public static function answersInvalid(PayloadValidationException $invalid, DiscoveredRoute $route, object $resource): bool
+    {
+        if ($invalid->payload === null || !$resource instanceof \Semitexa\Core\Http\Response\ResourceResponse) {
             return false;
         }
         foreach ($route->handlers as $handler) {

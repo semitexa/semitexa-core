@@ -283,13 +283,16 @@ final class PipelineExecutor
             $this->span('pipeline.handler', ['handler' => $handlerClass, 'method' => 'invalid'], function () use ($handlerClass, $context, $invalid): void {
                 $handler = $this->resolveHandler($handlerClass);
                 $resource = $context->resourceDto;
-                if (!$handler instanceof HandlesInvalidPayloadInterface || !$resource instanceof \Semitexa\Core\Contract\ResourceInterface) {
-                    throw new PipelineException(sprintf('Handler %s cannot answer an invalid payload without a resource.', $handlerClass));
+                if (!$handler instanceof HandlesInvalidPayloadInterface || !$resource instanceof \Semitexa\Core\Http\Response\ResourceResponse) {
+                    throw new PipelineException(sprintf('Handler %s answers an invalid payload on a ResourceResponse only.', $handlerClass));
                 }
-                if ($resource instanceof \Semitexa\Core\Http\Response\ResourceResponse) {
-                    $resource->setStatusCode(HttpStatus::UnprocessableEntity->value);
+                $resource->setStatusCode(HttpStatus::UnprocessableEntity->value);
+                $answer = $handler->invalid($context->requestDto, $invalid->getErrors(), $resource);
+                // Never a 200 for input that failed validation, whichever resource came back.
+                if ($answer instanceof \Semitexa\Core\Http\Response\ResourceResponse && $answer->getStatusCode() === HttpStatus::Ok->value) {
+                    $answer->setStatusCode(HttpStatus::UnprocessableEntity->value);
                 }
-                $context->resourceDto = $handler->invalid($context->requestDto, $invalid->getErrors(), $resource);
+                $context->resourceDto = $answer;
                 $context->lastHandlerClass = $handlerClass;
             });
         }

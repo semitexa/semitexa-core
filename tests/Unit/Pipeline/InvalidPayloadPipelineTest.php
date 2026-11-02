@@ -18,6 +18,7 @@ use Semitexa\Core\Tests\Unit\Pipeline\InvalidPayload\FixedContainer;
 use Semitexa\Core\Tests\Unit\Pipeline\InvalidPayload\FormLog;
 use Semitexa\Core\Tests\Unit\Pipeline\InvalidPayload\FormPage;
 use Semitexa\Core\Tests\Unit\Pipeline\InvalidPayload\FormPayload;
+use Semitexa\Core\Tests\Unit\Pipeline\InvalidPayload\FreshPageHandler;
 use Semitexa\Core\Tests\Unit\Pipeline\InvalidPayload\NoListeners;
 use Semitexa\Core\Tests\Unit\Pipeline\InvalidPayload\SavesFormHandler;
 use Semitexa\Core\Tests\Unit\Pipeline\InvalidPayload\ShowsFormAgainHandler;
@@ -96,17 +97,43 @@ final class InvalidPayloadPipelineTest extends TestCase
         self::assertSame(['handle', 'save'], FormLog::$calls);
     }
 
-    /** HTML preferred and a handler that answers: yes. Anything else keeps the JSON 422. */
+    /** A browser's form post prefers HTML; JSON and a wildcard keep the JSON 422. */
     #[Test]
-    public function only_an_html_request_to_a_route_with_an_answering_handler_is_answered(): void
+    public function only_a_request_preferring_html_goes_on(): void
+    {
+        self::assertTrue(PayloadAdmission::prefersHtml(self::request('text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8')));
+        self::assertFalse(PayloadAdmission::prefersHtml(self::request('application/json')));
+        self::assertFalse(PayloadAdmission::prefersHtml(self::request('*/*')), 'a wildcard keeps JSON');
+    }
+
+    /**
+     * Decided on the route as bound for the response's profile, with a
+     * ResourceResponse to answer on (its status is the pipeline's to set).
+     */
+    #[Test]
+    public function only_a_route_whose_bound_handler_answers_on_a_resource_response_is_answered(): void
     {
         $invalid = new PayloadValidationException(self::ERRORS, new FormPayload());
-        $browser = 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8';
 
-        self::assertTrue(PayloadAdmission::answersInvalid($invalid, self::route([ShowsFormAgainHandler::class]), self::request($browser)));
-        self::assertFalse(PayloadAdmission::answersInvalid($invalid, self::route([ShowsFormAgainHandler::class]), self::request('application/json')));
-        self::assertFalse(PayloadAdmission::answersInvalid($invalid, self::route([ShowsFormAgainHandler::class]), self::request('*/*')), 'a wildcard keeps JSON');
-        self::assertFalse(PayloadAdmission::answersInvalid($invalid, self::route([SavesFormHandler::class]), self::request($browser)), 'no handler answers');
-        self::assertFalse(PayloadAdmission::answersInvalid(new PayloadValidationException(self::ERRORS), self::route([ShowsFormAgainHandler::class]), self::request($browser)), 'no payload to show again');
+        self::assertTrue(PayloadAdmission::answersInvalid($invalid, self::route([ShowsFormAgainHandler::class]), new FormPage()));
+        self::assertFalse(PayloadAdmission::answersInvalid($invalid, self::route([SavesFormHandler::class]), new FormPage()), 'no handler answers');
+        self::assertFalse(PayloadAdmission::answersInvalid($invalid, self::route([ShowsFormAgainHandler::class]), new \stdClass()), 'no ResourceResponse to set 422 on');
+        self::assertFalse(PayloadAdmission::answersInvalid(new PayloadValidationException(self::ERRORS), self::route([ShowsFormAgainHandler::class]), new FormPage()), 'no payload to show again');
+    }
+
+    /** A handler that hands back a fresh resource at 200 still answers 422. */
+    #[Test]
+    public function an_answer_at_200_becomes_422(): void
+    {
+        $payload = new FormPayload();
+        $context = new RequestPipelineContext(requestDto: $payload, route: self::route([FreshPageHandler::class]), request: self::request('text/html'), resourceDto: new FormPage());
+        $context->invalidPayload = new PayloadValidationException(self::ERRORS, $payload);
+        HandlerReflectionCache::warm(FreshPageHandler::class);
+        $handlers = [FreshPageHandler::class => new FreshPageHandler()];
+
+        (new PipelineExecutor(new FixedContainer($handlers), new FixedContainer([PipelineListenerRegistry::class => new NoListeners()] + $handlers)))->execute($context);
+
+        self::assertInstanceOf(FormPage::class, $context->resourceDto);
+        self::assertSame(422, $context->resourceDto->getStatusCode());
     }
 }
