@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Http;
 
+use Semitexa\Core\Environment;
 use Semitexa\Core\Request;
 
 /**
@@ -28,7 +29,10 @@ use Semitexa\Core\Request;
  *   gateway: the local router forwards the address it saw, and a browser on
  *   the host reaches it through its network's gateway (measured: 172.23.0.1).
  *   Only a gateway, x.y.0.1 in Docker's 172.16.0.0/12 pool: any other address
- *   there could be a machine on a LAN numbered from the same range.
+ *   there could be a machine on a LAN numbered from the same range. A network
+ *   with its own subnet or gateway (docker network create --gateway) names
+ *   its gateway exactly in DEV_LOCAL_GATEWAYS, comma-separated; its other
+ *   addresses stay refused.
  * - **The Host is a local name**: localhost, *.localhost, a loopback literal or
  *   a *.test name (the local router's zone, resolved only here). A rebinding
  *   attacker controls only names that resolve publicly. No Host at all is
@@ -86,7 +90,7 @@ final class ThisMachine
             }
             foreach ($hops as $hop) {
                 $address = self::unmapped(self::withoutPort(trim($hop)));
-                if (!self::isLoopback($address) && !self::isDockerGateway($address)) {
+                if (!self::isLoopback($address) && !self::isDockerGateway($address) && !self::isConfiguredGateway($address)) {
                     return false;
                 }
             }
@@ -126,6 +130,21 @@ final class ThisMachine
         $long = filter_var($address, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) !== false ? ip2long($address) : false;
 
         return $long !== false && ($long & 0xFFF00000) === 0xAC100000 && ($long & 0xFFFF) === 1;
+    }
+
+    /** An exact address DEV_LOCAL_GATEWAYS names: a bridge with its own subnet or gateway. */
+    private static function isConfiguredGateway(string $address): bool
+    {
+        if (filter_var($address, FILTER_VALIDATE_IP) === false) {
+            return false;
+        }
+        foreach (explode(',', (string) Environment::getEnvValue('DEV_LOCAL_GATEWAYS', '')) as $gateway) {
+            if (self::unmapped(trim($gateway)) === $address) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /** `::ffff:a.b.c.d` (an IPv4 client on a dual-stack listener) is a.b.c.d. */
