@@ -11,6 +11,7 @@ use Psr\Container\NotFoundExceptionInterface;
 use Semitexa\Core\HttpResponse;
 use Semitexa\Core\Contract\ExceptionResponseMapperInterface;
 use Semitexa\Core\Discovery\ResolvedRouteMetadata;
+use Semitexa\Core\Pipeline\CurrentRequestTracer;
 use Semitexa\Core\Pipeline\RequestTracerInterface;
 use Semitexa\Core\Container\RequestScopedContainer;
 use Semitexa\Core\Discovery\DiscoveredRoute;
@@ -117,6 +118,46 @@ final class RouteExecutorExceptionTracingTest extends TestCase
         self::assertNotNull($escaped, "the mapper's exception must escape");
         // The mapper's own failure, not the exception it was mapping.
         self::assertSame(\LogicException::class, $tracer->ends['request']['exception'] ?? null);
+    }
+
+    #[Test]
+    public function the_request_publishes_its_tracer_for_the_code_that_runs_inside_it(): void
+    {
+        $before = CurrentRequestTracer::get();
+        try {
+            $tracer = new ExceptionMarkRecordingTracer();
+            // Code inside the request (here the exception mapper, called mid-request)
+            // reaches the same tracer the request records into.
+            $mapper = new class implements ExceptionResponseMapperInterface {
+                public ?RequestTracerInterface $seen = null;
+
+                public function map(\Throwable $e, Request $request, ResolvedRouteMetadata $metadata): HttpResponse
+                {
+                    $this->seen = CurrentRequestTracer::get();
+
+                    return new HttpResponse(content: 'mapped', statusCode: 500);
+                }
+            };
+            try {
+                $this->executeRoute(new ExceptionTracingContainer([
+                    RequestTracerInterface::class => $tracer,
+                    ExceptionResponseMapperInterface::class => $mapper,
+                ]));
+            } catch (\Throwable) {
+            }
+
+            self::assertNotNull($mapper->seen, 'reachable while the request runs');
+            $mapper->seen->mark('probe', ['from' => 'inside']);
+            self::assertSame(['from' => 'inside'], $tracer->contextOf('probe'), 'the published tracer is this request\'s');
+
+            try {
+                $this->executeRoute(new ExceptionTracingContainer([]));
+            } catch (\Throwable) {
+            }
+            self::assertNull(CurrentRequestTracer::get(), 'no tracer registered, none published');
+        } finally {
+            CurrentRequestTracer::publish($before);
+        }
     }
 
     /**

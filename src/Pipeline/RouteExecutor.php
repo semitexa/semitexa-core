@@ -103,7 +103,7 @@ class RouteExecutor
         $resolvedTracer = $this->container->has(RequestTracerInterface::class)
             ? $this->container->get(RequestTracerInterface::class)
             : null;
-        $tracer = SafeRequestTracer::wrap($resolvedTracer);
+        $tracer = CurrentRequestTracer::publish(SafeRequestTracer::wrap($resolvedTracer));
 
         // The root span also carries what the tracer needs in order to decide
         // whether this request is one it was asked to record - a developer traces
