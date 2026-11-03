@@ -25,7 +25,10 @@ use Semitexa\Core\Request;
  *   localhost:<port>, the shared local router) arrives from the bridge
  *   gateway, while one from another machine keeps its own address. Forwarded
  *   headers, when present, must name loopback or a Docker bridge
- *   (172.16.0.0/12) too: the local router forwards the address it saw.
+ *   gateway: the local router forwards the address it saw, and a browser on
+ *   the host reaches it through its network's gateway (measured: 172.23.0.1).
+ *   Only a gateway, x.y.0.1 in Docker's 172.16.0.0/12 pool: any other address
+ *   there could be a machine on a LAN numbered from the same range.
  * - **The Host is a local name**: localhost, *.localhost, a loopback literal or
  *   a *.test name (the local router's zone, resolved only here). A rebinding
  *   attacker controls only names that resolve publicly. No Host at all is
@@ -64,7 +67,7 @@ final class ThisMachine
         return self::isLoopback($peer) || ($peer === self::gateway() && $peer !== '');
     }
 
-    /** Every address a forwarding header names is loopback or a Docker bridge. */
+    /** Every address a forwarding header names is loopback or a Docker bridge gateway. */
     private static function forwardedFromHere(Request $request): bool
     {
         foreach (self::FORWARDING_HEADERS as $header) {
@@ -83,7 +86,7 @@ final class ThisMachine
             }
             foreach ($hops as $hop) {
                 $address = self::unmapped(self::withoutPort(trim($hop)));
-                if (!self::isLoopback($address) && !self::isDockerBridge($address)) {
+                if (!self::isLoopback($address) && !self::isDockerGateway($address)) {
                     return false;
                 }
             }
@@ -117,11 +120,12 @@ final class ThisMachine
         return filter_var($address, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) !== false && str_starts_with($address, '127.');
     }
 
-    private static function isDockerBridge(string $address): bool
+    /** x.y.0.1 in 172.16.0.0/12: the gateway Docker gives each network it numbers from its default pool. */
+    private static function isDockerGateway(string $address): bool
     {
         $long = filter_var($address, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) !== false ? ip2long($address) : false;
 
-        return $long !== false && ($long & 0xFFF00000) === (ip2long('172.16.0.0') & 0xFFF00000);
+        return $long !== false && ($long & 0xFFF00000) === 0xAC100000 && ($long & 0xFFFF) === 1;
     }
 
     /** `::ffff:a.b.c.d` (an IPv4 client on a dual-stack listener) is a.b.c.d. */

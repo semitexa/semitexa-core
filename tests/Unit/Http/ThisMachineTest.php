@@ -50,6 +50,7 @@ final class ThisMachineTest extends TestCase
         yield 'another machine sending a local Host' => ['192.168.100.7', ['Host' => 'dev.semitexa.test'], false];
         yield 'another machine through a router listening on every interface' => ['172.18.0.1', ['Host' => 'dev.semitexa.test', 'X-Real-Ip' => '192.168.100.7', 'X-Forwarded-For' => '192.168.100.7'], false];
         yield 'a client prepending loopback to the chain' => ['172.18.0.1', ['Host' => 'dev.semitexa.test', 'X-Forwarded-For' => '127.0.0.1, 192.168.100.7'], false];
+        yield 'a router hop naming a LAN host numbered from 172.16/12' => ['172.18.0.1', ['Host' => 'dev.semitexa.test', 'X-Forwarded-For' => '172.20.1.9'], false];
         yield 'RFC 7239 Forwarded naming another machine' => ['172.18.0.1', ['Host' => 'dev.semitexa.test', 'Forwarded' => 'for=192.168.100.7;proto=http'], false];
         yield 'RFC 7239 Forwarded with an obfuscated hop' => ['172.18.0.1', ['Host' => 'dev.semitexa.test', 'Forwarded' => 'for=_hidden'], false];
         yield 'DNS rebinding: a public name pointed at loopback' => ['172.18.0.1', ['Host' => 'rebind.evil.example:9507'], false];

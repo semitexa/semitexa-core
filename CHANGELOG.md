@@ -10,8 +10,10 @@ next release tag. This file is machine-read by `update:changelog` and the OS
 ### Added
 - **`Http\ThisMachine::sent()`** — whether a request came from the machine the
   app runs on (loopback or the container's gateway, forwarded hops on a Docker
-  bridge, a local Host name). The bar for developer surfaces that answer
-  without a sign-in; semitexa/dev and semitexa/platform-ui gate on it.
+  bridge gateway, a local Host name). The bar for developer surfaces that
+  answer without a sign-in. Core alone gates nothing: the Observatory,
+  Explorer and Workbench switch to it in their own packages' next release
+  (semitexa/dev, semitexa/platform-ui), which require this core.
 
 ## 2026.11.03.0259 — 2026-11-03
 
