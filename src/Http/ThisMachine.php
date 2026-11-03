@@ -56,6 +56,8 @@ final class ThisMachine
     /** Read once per worker, like the gateway. */
     private static ?bool $bridged = null;
 
+    private static string $sysNet = '/sys/class/net';
+
     public static function sent(?Request $request): bool
     {
         if ($request === null) {
@@ -207,27 +209,48 @@ final class ThisMachine
 
     /**
      * In a container on a Docker bridge network, where an x.y.0.1 gateway is
-     * the bridge to the host. A container on the host's network
-     * (--network host) has /.dockerenv too, but sees the host's routes:
-     * its docker0 and br-* bridges, which a bridged container never does.
+     * the bridge to the host. Proven, not assumed: there the default route
+     * leaves through one end of a veth pair, whose iflink names its peer
+     * (measured in the image: eth0 ifindex 2, iflink 291). A container on the
+     * host's network (--network host, with or without --bridge=none) has
+     * /.dockerenv too, but routes through the host's own interface, whose
+     * iflink is its ifindex.
      */
     private static function bridged(): bool
     {
         if (self::$bridged !== null) {
             return self::$bridged;
         }
-        if (!is_file(self::$containerMarker)) {
+        $iface = self::defaultInterface();
+        if (!is_file(self::$containerMarker) || preg_match('/^[A-Za-z0-9_.@-]+$/', $iface) !== 1) {
             return self::$bridged = false;
         }
+        $index = @file_get_contents(self::$sysNet . '/' . $iface . '/ifindex');
+        $link = @file_get_contents(self::$sysNet . '/' . $iface . '/iflink');
+
+        return self::$bridged = is_string($index) && is_string($link)
+            && trim($index) !== '' && trim($link) !== '' && trim($index) !== trim($link);
+    }
+
+    /** The interface the default route leaves through, '' when there is none. */
+    private static function defaultInterface(): string
+    {
         $lines = is_readable(self::$routeFile) ? (file(self::$routeFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: []) : [];
         foreach (array_slice($lines, 1) as $line) {
-            $iface = (preg_split('/\s+/', trim($line)) ?: [''])[0];
-            if (preg_match('/^(docker\d+|br-[0-9a-f]+)$/', $iface) === 1) {
-                return self::$bridged = false;
+            $fields = preg_split('/\s+/', trim($line)) ?: [];
+            if (($fields[1] ?? '') === '00000000') {
+                return (string) ($fields[0] ?? '');
             }
         }
 
-        return self::$bridged = true;
+        return '';
+    }
+
+    /** @internal for tests: read interfaces from another directory. */
+    public static function useSysNet(string $path): void
+    {
+        self::$sysNet = $path;
+        self::$bridged = null;
     }
 
     /** @internal for tests: decide "in a container" by another file. */

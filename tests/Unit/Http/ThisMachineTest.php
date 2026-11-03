@@ -20,6 +20,8 @@ final class ThisMachineTest extends TestCase
 {
     private string $routeFile = '';
 
+    private string $sysNet = '';
+
     private string|false $gateways = false;
 
     protected function setUp(): void
@@ -33,15 +35,35 @@ final class ThisMachineTest extends TestCase
             . "eth0\t00000000\t010012AC\t0003\t0\t0\t0\t00000000\n"
             . "eth0\t000012AC\t00000000\t0001\t0\t0\t0\t0000FFFF\n");
         ThisMachine::useRouteFile($this->routeFile);
-        // In a container, as the image runs; the host case sets its own.
+        // In a container on a bridge network, as the image runs (eth0 is one
+        // end of a veth pair: ifindex 2, iflink 291); host cases set their own.
         ThisMachine::useContainerMarker($this->routeFile);
+        $this->sysNet = $this->routeFile . '.net';
+        $this->iface('eth0', 2, 291);
+        ThisMachine::useSysNet($this->sysNet);
+    }
+
+    private function iface(string $name, int $index, int $link): void
+    {
+        @mkdir($this->sysNet . '/' . $name, 0777, true);
+        file_put_contents($this->sysNet . '/' . $name . '/ifindex', $index . "\n");
+        file_put_contents($this->sysNet . '/' . $name . '/iflink', $link . "\n");
+        ThisMachine::useSysNet($this->sysNet);
     }
 
     protected function tearDown(): void
     {
         @unlink($this->routeFile);
+        foreach (glob($this->sysNet . '/*/*') ?: [] as $file) {
+            @unlink($file);
+        }
+        foreach (glob($this->sysNet . '/*') ?: [] as $dir) {
+            @rmdir($dir);
+        }
+        @rmdir($this->sysNet);
         ThisMachine::useRouteFile('/proc/net/route');
         ThisMachine::useContainerMarker('/.dockerenv');
+        ThisMachine::useSysNet('/sys/class/net');
         putenv($this->gateways === false ? 'DEV_LOCAL_GATEWAYS' : 'DEV_LOCAL_GATEWAYS=' . $this->gateways);
     }
 
@@ -139,14 +161,19 @@ final class ThisMachineTest extends TestCase
     #[Test]
     public function a_container_on_the_host_network_does_not_trust_a_bridge_numbered_router(): void
     {
-        // --network host: /.dockerenv exists, but the routes are the host's, docker0 among them.
+        // --network host (here with --bridge=none: no docker0 or br-* route at
+        // all): /.dockerenv exists, but the default route leaves through the
+        // host's own NIC, whose iflink is its ifindex.
         file_put_contents($this->routeFile, "Iface\tDestination\tGateway \tFlags\tRefCnt\tUse\tMetric\tMask\n"
-            . "eth0\t00000000\t010014AC\t0003\t0\t0\t0\t00000000\n"
-            . "docker0\t000011AC\t00000000\t0001\t0\t0\t0\t0000FFFF\n");
+            . "enp3s0\t00000000\t010014AC\t0003\t0\t0\t0\t00000000\n");
         ThisMachine::useRouteFile($this->routeFile);
+        $this->iface('enp3s0', 2, 2);
         $fromRouter = new Request('GET', '/', ['Host' => 'localhost:9507'], [], [], ['remote_addr' => '172.20.0.1'], []);
 
         self::assertFalse(ThisMachine::sent($fromRouter), 'the host network: 172.20.0.1 is the LAN router');
+
+        putenv('DEV_LOCAL_GATEWAYS=172.20.0.1');
+        self::assertTrue(ThisMachine::sent($fromRouter), 'unless the operator names it');
     }
 
     #[Test]
