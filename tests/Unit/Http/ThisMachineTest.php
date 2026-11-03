@@ -20,8 +20,14 @@ final class ThisMachineTest extends TestCase
 {
     private string $routeFile = '';
 
+    private string|false $gateways = false;
+
     protected function setUp(): void
     {
+        // An empty process value, not an unset one: unset, a DEV_LOCAL_GATEWAYS
+        // in the project's .env would answer instead and change the cases.
+        $this->gateways = getenv('DEV_LOCAL_GATEWAYS');
+        putenv('DEV_LOCAL_GATEWAYS=');
         $this->routeFile = (string) tempnam(sys_get_temp_dir(), 'route');
         file_put_contents($this->routeFile, "Iface\tDestination\tGateway \tFlags\tRefCnt\tUse\tMetric\tMask\n"
             . "eth0\t00000000\t010012AC\t0003\t0\t0\t0\t00000000\n"
@@ -33,6 +39,7 @@ final class ThisMachineTest extends TestCase
     {
         @unlink($this->routeFile);
         ThisMachine::useRouteFile('/proc/net/route');
+        putenv($this->gateways === false ? 'DEV_LOCAL_GATEWAYS' : 'DEV_LOCAL_GATEWAYS=' . $this->gateways);
     }
 
     /** @return iterable<string, array{string, array<string, string>, bool}> */
@@ -83,18 +90,13 @@ final class ThisMachineTest extends TestCase
     public function a_router_hop_from_a_custom_bridge_gateway_counts_only_when_configured(): void
     {
         $through = static fn (string $hop): bool => ThisMachine::sent(new Request('GET', '/', ['Host' => 'dev.semitexa.test', 'X-Forwarded-For' => $hop], [], [], ['remote_addr' => '172.18.0.1'], []));
-        $previous = getenv('DEV_LOCAL_GATEWAYS');
-        try {
-            putenv('DEV_LOCAL_GATEWAYS');
-            self::assertFalse($through('172.23.1.1'), 'not the x.y.0.1 pattern, and not configured');
+        self::assertFalse($through('172.23.1.1'), 'not the x.y.0.1 pattern, and not configured');
 
-            putenv('DEV_LOCAL_GATEWAYS=10.9.0.254, 172.23.1.1');
-            self::assertTrue($through('172.23.1.1'));
-            self::assertTrue($through('10.9.0.254'));
-            self::assertFalse($through('172.23.1.9'), 'another address on that bridge is still refused');
-        } finally {
-            putenv($previous === false ? 'DEV_LOCAL_GATEWAYS' : 'DEV_LOCAL_GATEWAYS=' . $previous);
-        }
+        putenv('DEV_LOCAL_GATEWAYS=10.9.0.254, 172.23.1.1, fd00::1');
+        self::assertTrue($through('172.23.1.1'));
+        self::assertTrue($through('10.9.0.254'));
+        self::assertTrue($through('[fd00:0:0:0:0:0:0:1]'), 'an IPv6 gateway is matched by value, not spelling');
+        self::assertFalse($through('172.23.1.9'), 'another address on that bridge is still refused');
     }
 
     #[Test]

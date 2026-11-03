@@ -132,14 +132,15 @@ final class ThisMachine
         return $long !== false && ($long & 0xFFF00000) === 0xAC100000 && ($long & 0xFFFF) === 1;
     }
 
-    /** An exact address DEV_LOCAL_GATEWAYS names: a bridge with its own subnet or gateway. */
+    /** An address DEV_LOCAL_GATEWAYS names, compared by value (fd00::1 is fd00:0:0:0:0:0:0:1). */
     private static function isConfiguredGateway(string $address): bool
     {
-        if (filter_var($address, FILTER_VALIDATE_IP) === false) {
+        $packed = @inet_pton($address);
+        if ($packed === false) {
             return false;
         }
         foreach (explode(',', (string) Environment::getEnvValue('DEV_LOCAL_GATEWAYS', '')) as $gateway) {
-            if (self::unmapped(trim($gateway)) === $address) {
+            if (@inet_pton(self::unmapped(trim($gateway))) === $packed) {
                 return true;
             }
         }
