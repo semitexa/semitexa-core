@@ -103,6 +103,21 @@ final class ThisMachineTest extends TestCase
     }
 
     #[Test]
+    public function a_default_gateway_that_is_a_lan_router_is_another_machine(): void
+    {
+        // Run on a host, not in the image: the default route leads to the router.
+        file_put_contents($this->routeFile, "Iface\tDestination\tGateway \tFlags\tRefCnt\tUse\tMetric\tMask\n"
+            . "wlan0\t00000000\t0101A8C0\t0003\t0\t0\t0\t00000000\n");
+        ThisMachine::useRouteFile($this->routeFile);
+        $fromRouter = new Request('GET', '/', ['Host' => 'localhost:9507'], [], [], ['remote_addr' => '192.168.1.1'], []);
+
+        self::assertFalse(ThisMachine::sent($fromRouter), 'the router is not this machine');
+
+        putenv('DEV_LOCAL_GATEWAYS=192.168.1.1');
+        self::assertTrue(ThisMachine::sent($fromRouter), 'unless the operator names it as a local gateway');
+    }
+
+    #[Test]
     public function no_request_is_this_machine(): void
     {
         self::assertTrue(ThisMachine::sent(null));

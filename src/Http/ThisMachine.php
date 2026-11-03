@@ -68,7 +68,11 @@ final class ThisMachine
         }
         $peer = self::unmapped($peer);
 
-        return self::isLoopback($peer) || ($peer === self::gateway() && $peer !== '');
+        // The default gateway is the host only inside a container (a Docker
+        // bridge, or one named in DEV_LOCAL_GATEWAYS); run on a host itself
+        // it is the LAN router, which is another machine.
+        return self::isLoopback($peer) || ($peer === self::gateway() && $peer !== ''
+            && (self::isDockerGateway($peer) || self::isConfiguredGateway($peer)));
     }
 
     /** Every address a forwarding header names is loopback or a Docker bridge gateway. */
