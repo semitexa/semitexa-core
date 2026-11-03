@@ -53,6 +53,9 @@ final class ThisMachine
     /** Docker creates it in every container; on a host it is absent. */
     private static string $containerMarker = '/.dockerenv';
 
+    /** Read once per worker, like the gateway. */
+    private static ?bool $bridged = null;
+
     public static function sent(?Request $request): bool
     {
         if ($request === null) {
@@ -76,7 +79,7 @@ final class ThisMachine
         // it is the LAN router, another machine, even one numbered x.y.0.1
         // in 172.16.0.0/12 like a bridge (172.20.0.1).
         return self::isLoopback($peer) || ($peer === self::gateway() && $peer !== ''
-            && ((self::inContainer() && self::isDockerGateway($peer)) || self::isConfiguredGateway($peer)));
+            && ((self::bridged() && self::isDockerGateway($peer)) || self::isConfiguredGateway($peer)));
     }
 
     /** Every address a forwarding header names is loopback or a Docker bridge gateway. */
@@ -99,7 +102,9 @@ final class ThisMachine
             }
             foreach ($hops as $hop) {
                 $address = self::unmapped(self::withoutPort(trim($hop)));
-                if (!self::isLoopback($address) && !self::isDockerGateway($address) && !self::isConfiguredGateway($address)) {
+                // The same rule as the peer: a proxy on a host forwarding a LAN
+                // router numbered x.y.0.1 names another machine.
+                if (!self::isLoopback($address) && !(self::bridged() && self::isDockerGateway($address)) && !self::isConfiguredGateway($address)) {
                     return false;
                 }
             }
@@ -200,15 +205,36 @@ final class ThisMachine
         return self::$gateway;
     }
 
-    private static function inContainer(): bool
+    /**
+     * In a container on a Docker bridge network, where an x.y.0.1 gateway is
+     * the bridge to the host. A container on the host's network
+     * (--network host) has /.dockerenv too, but sees the host's routes:
+     * its docker0 and br-* bridges, which a bridged container never does.
+     */
+    private static function bridged(): bool
     {
-        return is_file(self::$containerMarker);
+        if (self::$bridged !== null) {
+            return self::$bridged;
+        }
+        if (!is_file(self::$containerMarker)) {
+            return self::$bridged = false;
+        }
+        $lines = is_readable(self::$routeFile) ? (file(self::$routeFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: []) : [];
+        foreach (array_slice($lines, 1) as $line) {
+            $iface = (preg_split('/\s+/', trim($line)) ?: [''])[0];
+            if (preg_match('/^(docker\d+|br-[0-9a-f]+)$/', $iface) === 1) {
+                return self::$bridged = false;
+            }
+        }
+
+        return self::$bridged = true;
     }
 
     /** @internal for tests: decide "in a container" by another file. */
     public static function useContainerMarker(string $path): void
     {
         self::$containerMarker = $path;
+        self::$bridged = null;
     }
 
     /** @internal for tests: read the route table from another file. */
@@ -216,5 +242,6 @@ final class ThisMachine
     {
         self::$routeFile = $path;
         self::$gateway = null;
+        self::$bridged = null;
     }
 }

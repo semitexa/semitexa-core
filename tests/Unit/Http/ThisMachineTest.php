@@ -137,6 +137,31 @@ final class ThisMachineTest extends TestCase
     }
 
     #[Test]
+    public function a_container_on_the_host_network_does_not_trust_a_bridge_numbered_router(): void
+    {
+        // --network host: /.dockerenv exists, but the routes are the host's, docker0 among them.
+        file_put_contents($this->routeFile, "Iface\tDestination\tGateway \tFlags\tRefCnt\tUse\tMetric\tMask\n"
+            . "eth0\t00000000\t010014AC\t0003\t0\t0\t0\t00000000\n"
+            . "docker0\t000011AC\t00000000\t0001\t0\t0\t0\t0000FFFF\n");
+        ThisMachine::useRouteFile($this->routeFile);
+        $fromRouter = new Request('GET', '/', ['Host' => 'localhost:9507'], [], [], ['remote_addr' => '172.20.0.1'], []);
+
+        self::assertFalse(ThisMachine::sent($fromRouter), 'the host network: 172.20.0.1 is the LAN router');
+    }
+
+    #[Test]
+    public function a_proxy_on_a_host_forwarding_a_bridge_numbered_router_names_another_machine(): void
+    {
+        ThisMachine::useContainerMarker($this->routeFile . '.absent');
+        $forwarded = new Request('GET', '/', ['Host' => 'localhost:9507', 'X-Forwarded-For' => '172.20.0.1'], [], [], ['remote_addr' => '127.0.0.1'], []);
+
+        self::assertFalse(ThisMachine::sent($forwarded), 'on a host the forwarded hop is a LAN router');
+
+        ThisMachine::useContainerMarker($this->routeFile);
+        self::assertTrue(ThisMachine::sent($forwarded), 'in a bridged container the same hop is the bridge');
+    }
+
+    #[Test]
     public function no_request_is_this_machine(): void
     {
         self::assertTrue(ThisMachine::sent(null));
