@@ -33,12 +33,15 @@ final class ThisMachineTest extends TestCase
             . "eth0\t00000000\t010012AC\t0003\t0\t0\t0\t00000000\n"
             . "eth0\t000012AC\t00000000\t0001\t0\t0\t0\t0000FFFF\n");
         ThisMachine::useRouteFile($this->routeFile);
+        // In a container, as the image runs; the host case sets its own.
+        ThisMachine::useContainerMarker($this->routeFile);
     }
 
     protected function tearDown(): void
     {
         @unlink($this->routeFile);
         ThisMachine::useRouteFile('/proc/net/route');
+        ThisMachine::useContainerMarker('/.dockerenv');
         putenv($this->gateways === false ? 'DEV_LOCAL_GATEWAYS' : 'DEV_LOCAL_GATEWAYS=' . $this->gateways);
     }
 
@@ -115,6 +118,22 @@ final class ThisMachineTest extends TestCase
 
         putenv('DEV_LOCAL_GATEWAYS=192.168.1.1');
         self::assertTrue(ThisMachine::sent($fromRouter), 'unless the operator names it as a local gateway');
+    }
+
+    #[Test]
+    public function on_a_host_a_router_numbered_like_a_docker_bridge_is_another_machine(): void
+    {
+        // A LAN on 172.20.0.0/16: its router is 172.20.0.1, the x.y.0.1 a bridge would have.
+        file_put_contents($this->routeFile, "Iface\tDestination\tGateway \tFlags\tRefCnt\tUse\tMetric\tMask\n"
+            . "eth0\t00000000\t010014AC\t0003\t0\t0\t0\t00000000\n");
+        ThisMachine::useRouteFile($this->routeFile);
+        $fromRouter = new Request('GET', '/', ['Host' => 'localhost:9507'], [], [], ['remote_addr' => '172.20.0.1'], []);
+
+        ThisMachine::useContainerMarker($this->routeFile . '.absent');
+        self::assertFalse(ThisMachine::sent($fromRouter), 'on a host the default gateway is a router');
+
+        ThisMachine::useContainerMarker($this->routeFile);
+        self::assertTrue(ThisMachine::sent($fromRouter), 'in a container the same address is the bridge to the host');
     }
 
     #[Test]

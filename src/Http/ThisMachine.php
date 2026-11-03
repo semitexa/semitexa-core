@@ -50,6 +50,9 @@ final class ThisMachine
 
     private static string $routeFile = '/proc/net/route';
 
+    /** Docker creates it in every container; on a host it is absent. */
+    private static string $containerMarker = '/.dockerenv';
+
     public static function sent(?Request $request): bool
     {
         if ($request === null) {
@@ -69,10 +72,11 @@ final class ThisMachine
         $peer = self::unmapped($peer);
 
         // The default gateway is the host only inside a container (a Docker
-        // bridge, or one named in DEV_LOCAL_GATEWAYS); run on a host itself
-        // it is the LAN router, which is another machine.
+        // bridge), or where DEV_LOCAL_GATEWAYS names it; run on a host itself
+        // it is the LAN router, another machine, even one numbered x.y.0.1
+        // in 172.16.0.0/12 like a bridge (172.20.0.1).
         return self::isLoopback($peer) || ($peer === self::gateway() && $peer !== ''
-            && (self::isDockerGateway($peer) || self::isConfiguredGateway($peer)));
+            && ((self::inContainer() && self::isDockerGateway($peer)) || self::isConfiguredGateway($peer)));
     }
 
     /** Every address a forwarding header names is loopback or a Docker bridge gateway. */
@@ -194,6 +198,17 @@ final class ThisMachine
         }
 
         return self::$gateway;
+    }
+
+    private static function inContainer(): bool
+    {
+        return is_file(self::$containerMarker);
+    }
+
+    /** @internal for tests: decide "in a container" by another file. */
+    public static function useContainerMarker(string $path): void
+    {
+        self::$containerMarker = $path;
     }
 
     /** @internal for tests: read the route table from another file. */
