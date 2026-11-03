@@ -11,6 +11,7 @@ use Psr\Container\NotFoundExceptionInterface;
 use Semitexa\Core\HttpResponse;
 use Semitexa\Core\Contract\ExceptionResponseMapperInterface;
 use Semitexa\Core\Discovery\ResolvedRouteMetadata;
+use Semitexa\Core\Pipeline\CurrentRequestTracer;
 use Semitexa\Core\Pipeline\RequestTracerInterface;
 use Semitexa\Core\Container\RequestScopedContainer;
 use Semitexa\Core\Discovery\DiscoveredRoute;
@@ -117,6 +118,28 @@ final class RouteExecutorExceptionTracingTest extends TestCase
         self::assertNotNull($escaped, "the mapper's exception must escape");
         // The mapper's own failure, not the exception it was mapping.
         self::assertSame(\LogicException::class, $tracer->ends['request']['exception'] ?? null);
+    }
+
+    #[Test]
+    public function the_request_publishes_its_tracer_for_the_code_that_renders(): void
+    {
+        $tracer = new ExceptionMarkRecordingTracer();
+        // Published before anything can fail: how this bare route ends does not matter.
+        try {
+            $this->executeRoute(new ExceptionTracingContainer([RequestTracerInterface::class => $tracer]));
+        } catch (\Throwable) {
+        }
+
+        $published = CurrentRequestTracer::get();
+        self::assertNotNull($published, 'what renders inside response.render can open spans');
+        $published->mark('probe', ['from' => 'ssr']);
+        self::assertSame(['from' => 'ssr'], $tracer->contextOf('probe'), 'the published tracer is this request\'s');
+
+        try {
+            $this->executeRoute(new ExceptionTracingContainer([]));
+        } catch (\Throwable) {
+        }
+        self::assertNull(CurrentRequestTracer::get(), 'no tracer registered, none published');
     }
 
     /**
