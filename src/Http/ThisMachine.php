@@ -80,7 +80,8 @@ final class ThisMachine
                 continue;
             }
             if ($header === 'Forwarded') {
-                preg_match_all('/for\s*=\s*"?\[?([^\]";,\s]+)/i', $value, $matches);
+                // `for` as a parameter of its own: `notfor=127.0.0.1` names no hop.
+                preg_match_all('/(?:^|[;,])\s*for\s*=\s*"?\[?([^\]";,\s]+)/i', $value, $matches);
                 $hops = $matches[1];
                 if ($hops === []) {
                     return false;

@@ -59,6 +59,9 @@ final class ThisMachineTest extends TestCase
         yield 'a client prepending loopback to the chain' => ['172.18.0.1', ['Host' => 'dev.semitexa.test', 'X-Forwarded-For' => '127.0.0.1, 192.168.100.7'], false];
         yield 'a router hop naming a LAN host numbered from 172.16/12' => ['172.18.0.1', ['Host' => 'dev.semitexa.test', 'X-Forwarded-For' => '172.20.1.9'], false];
         yield 'RFC 7239 Forwarded naming another machine' => ['172.18.0.1', ['Host' => 'dev.semitexa.test', 'Forwarded' => 'for=192.168.100.7;proto=http'], false];
+        yield 'RFC 7239 Forwarded whose only for is part of another name' => ['172.18.0.1', ['Host' => 'dev.semitexa.test', 'Forwarded' => 'notfor=127.0.0.1'], false];
+        yield 'RFC 7239 Forwarded with for after another parameter' => ['172.18.0.1', ['Host' => 'dev.semitexa.test', 'Forwarded' => 'proto=http;for=127.0.0.1'], true];
+        yield 'RFC 7239 Forwarded: a second element names another machine' => ['172.18.0.1', ['Host' => 'dev.semitexa.test', 'Forwarded' => 'for=127.0.0.1, for=192.168.100.7'], false];
         yield 'RFC 7239 Forwarded with an obfuscated hop' => ['172.18.0.1', ['Host' => 'dev.semitexa.test', 'Forwarded' => 'for=_hidden'], false];
         yield 'DNS rebinding: a public name pointed at loopback' => ['172.18.0.1', ['Host' => 'rebind.evil.example:9507'], false];
         yield 'the laptop calling its own Wi-Fi address' => ['192.168.100.2', ['Host' => '192.168.100.2:9507'], false];
