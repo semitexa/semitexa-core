@@ -7,6 +7,7 @@ namespace Semitexa\Core\Redis;
 use Predis\Client;
 use Predis\ClientInterface;
 use Predis\Connection\ConnectionException;
+use Semitexa\Core\Log\StaticLoggerBridge;
 
 /**
  * Coroutine-safe Redis connection pool backed by Swoole\Coroutine\Channel.
@@ -31,6 +32,17 @@ final class RedisConnectionPool
 
     /** @var \WeakMap<ClientInterface, float> when each client last went back into the pool */
     private \WeakMap $returnedAt;
+
+    /**
+     * Clients alive beyond the pool's size: made by a borrow that timed out,
+     * retired when a return finds the pool full. At most $size, so a stalled
+     * Redis under a thousand concurrent requests gets $size more connections,
+     * not a thousand (pool 2 + 50 borrowers held 3 s opened 50 before).
+     * Per worker, like the pool; no yield between its check and its change.
+     */
+    private int $extra = 0;
+
+    private bool $warnedExhausted = false;
 
     /**
      * A client idle at least this long is PINGed before use. After a Redis
@@ -108,12 +120,26 @@ final class RedisConnectionPool
             // (e.g. every connection held by a stalled read) suspends this
             // coroutine with no producer to wake it — a worker-killing deadlock.
             // On timeout, hand out a fresh (over-cap) client so the caller can
-            // proceed; put() drops it back if the pool is already full.
+            // proceed, at most $size of them; put() retires one when the pool
+            // is already full. Past that bound the borrow fails like an outage.
             $client = $this->pool->pop(self::BORROW_TIMEOUT_SECONDS);
-            if (!$client instanceof ClientInterface) {
-                return $this->createClient();
+            if ($client instanceof ClientInterface) {
+                return $client;
             }
-            return $client;
+            if ($this->extra >= $this->size) {
+                if (!$this->warnedExhausted) {
+                    $this->warnedExhausted = true;
+                    StaticLoggerBridge::warning('redis', 'Redis pool exhausted; refusing borrows until a client comes back.', [
+                        'size' => $this->size,
+                        'extra' => $this->extra,
+                    ]);
+                }
+
+                throw RedisUnavailableException::poolExhausted($this->size, $this->extra, self::BORROW_TIMEOUT_SECONDS);
+            }
+            $this->extra++;
+
+            return $this->createClient();
         }
 
         // CLI fallback: single shared client
@@ -131,11 +157,7 @@ final class RedisConnectionPool
             // created by a timed-out get()), drop this one instead of blocking on
             // a full channel — a blocking push would be the same deadlock, inverted.
             if (!$this->pool->push($client, self::RETURN_TIMEOUT_SECONDS)) {
-                try {
-                    $client->disconnect();
-                } catch (\Throwable) {
-                    // Ignore — the client is being discarded anyway.
-                }
+                $this->retire($client);
             }
             return;
         }
@@ -255,11 +277,7 @@ final class RedisConnectionPool
                     // Drop the replacement instead.
                     $replacement = $this->createClient();
                     if (!$this->pool->push($replacement, self::RETURN_TIMEOUT_SECONDS)) {
-                        try {
-                            $replacement->disconnect();
-                        } catch (\Throwable) {
-                            // Ignore — the replacement is being discarded anyway.
-                        }
+                        $this->retire($replacement);
                     }
                 } catch (\Throwable) {
                     // Pool might be closed or replacement creation failed; ignore
@@ -279,6 +297,19 @@ final class RedisConnectionPool
     public function getSize(): int
     {
         return $this->size;
+    }
+
+    /** A client the full pool has no room for: one fewer alive beyond the size. */
+    private function retire(ClientInterface $client): void
+    {
+        if ($this->extra > 0 && --$this->extra === 0) {
+            $this->warnedExhausted = false;
+        }
+        try {
+            $client->disconnect();
+        } catch (\Throwable) {
+            // Ignore — the client is being discarded anyway.
+        }
     }
 
     private function createClient(): ClientInterface
