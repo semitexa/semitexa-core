@@ -32,6 +32,54 @@ class PropertyInjectorTest extends TestCase
         PropertyInjector::clearCache();
     }
 
+    protected function tearDown(): void
+    {
+        // The cache is derived from code, so empty is its clean state: a throwaway
+        // class of this test must not stay in it for the next one.
+        PropertyInjector::clearCache();
+    }
+
+    public function test_a_mutable_property_is_refused_with_the_way_out_rather_than_left_unset(): void
+    {
+        $component = new class {
+            #[\Semitexa\Core\Attribute\InjectAsMutable]
+            protected \stdClass $draft;
+        };
+
+        $this->expectException(InjectionException::class);
+        $this->expectExceptionMessage('RequestScopedContainer::forCurrentExecution');
+
+        PropertyInjector::inject($component, $this->createStub(ContainerInterface::class));
+    }
+
+    public function test_an_optional_mutable_property_stays_unset_as_it_asks_to(): void
+    {
+        $sentinel = new \stdClass();
+        $payload = new class ($sentinel) {
+            #[\Semitexa\Core\Attribute\InjectAsMutable(optional: true)]
+            protected ?\stdClass $tracer;
+
+            public function __construct(?\stdClass $tracer)
+            {
+                $this->tracer = $tracer;
+            }
+
+            public function tracer(): ?\stdClass
+            {
+                return $this->tracer;
+            }
+        };
+
+        // A container that could fill it, so leaving it alone is a choice.
+        $container = $this->createStub(ContainerInterface::class);
+        $container->method('has')->willReturn(true);
+        $container->method('get')->willReturn(new \stdClass());
+
+        PropertyInjector::inject($payload, $container);
+
+        $this->assertSame($sentinel, $payload->tracer());
+    }
+
     public function test_inject_populates_readonly_property_from_container(): void
     {
         $dep = new PropertyInjectorTest_Dep();

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Semitexa\Core\Container;
 
 use Psr\Container\ContainerInterface;
+use Semitexa\Core\Attribute\InjectAsMutable;
 use Semitexa\Core\Attribute\InjectAsReadonly;
 use Semitexa\Core\Attribute\WorkerState;
 use Semitexa\Core\Container\Exception\InjectionException;
@@ -109,6 +110,23 @@ final class PropertyInjector
         $out = [];
 
         foreach ($ref->getProperties() as $prop) {
+            // This path fills objects the container does not manage: payloads,
+            // resources, commands, components. Leaving a mutable property unset
+            // here looked like success until the first read, far from the cause.
+            // An optional one is meant to stay unset and is guarded by isset().
+            $mutable = $prop->getAttributes(InjectAsMutable::class)[0] ?? null;
+            if ($mutable !== null && !$mutable->newInstance()->optional) {
+                throw new InjectionException(
+                    targetClass: $class,
+                    propertyName: $prop->getName(),
+                    propertyType: (string) $prop->getType(),
+                    injectionKind: 'mutable',
+                    message: "#[InjectAsMutable] on {$class}::\${$prop->getName()} is never filled: this class is not "
+                        . 'container-managed. Within a request, inject ContainerInterface with #[InjectAsReadonly] and read it at '
+                        . 'the point of use: RequestScopedContainer::forCurrentExecution($this->container)->get(Foo::class).',
+                );
+            }
+
             $attrs = $prop->getAttributes(InjectAsReadonly::class);
             if ($attrs === []) {
                 continue;
