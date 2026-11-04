@@ -32,6 +32,19 @@ class PropertyInjectorTest extends TestCase
         PropertyInjector::clearCache();
     }
 
+    public function test_a_mutable_property_is_refused_with_the_way_out_rather_than_left_unset(): void
+    {
+        $component = new class {
+            #[\Semitexa\Core\Attribute\InjectAsMutable]
+            protected \stdClass $draft;
+        };
+
+        $this->expectException(InjectionException::class);
+        $this->expectExceptionMessage('RequestScopedContainer::forCurrentExecution');
+
+        PropertyInjector::inject($component, $this->createStub(ContainerInterface::class));
+    }
+
     public function test_inject_populates_readonly_property_from_container(): void
     {
         $dep = new PropertyInjectorTest_Dep();
