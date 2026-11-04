@@ -5,7 +5,7 @@ Changes to `semitexa/core` that a consuming application can notice. Sections are
 next release tag. This file is machine-read by `update:changelog` and the OS
 "What's new" surface — keep entries short and operator-facing.
 
-## Unreleased
+## 2026.11.03.2020 — 2026-11-03
 
 ### Added
 - **`Http\ThisMachine::sent()`** — whether a request came from the machine the
