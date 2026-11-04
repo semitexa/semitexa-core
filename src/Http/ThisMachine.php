@@ -239,7 +239,7 @@ final class ThisMachine
         foreach (array_slice($lines, 1) as $line) {
             $fields = preg_split('/\s+/', trim($line)) ?: [];
             if (($fields[1] ?? '') === '00000000') {
-                return (string) ($fields[0] ?? '');
+                return $fields[0];
             }
         }
 
