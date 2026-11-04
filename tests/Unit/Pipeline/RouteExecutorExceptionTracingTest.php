@@ -160,6 +160,40 @@ final class RouteExecutorExceptionTracingTest extends TestCase
         }
     }
 
+    #[Test]
+    public function a_re_run_tick_does_not_record_into_the_trace_of_the_request_that_opened_the_stream(): void
+    {
+        $before = CurrentRequestTracer::get();
+        try {
+            // The stream's own request published its tracer in this coroutine, long ago.
+            CurrentRequestTracer::publish(new ExceptionMarkRecordingTracer());
+            $container = new ExceptionTracingContainer([]);
+            $executor = new RouteExecutor(new RequestScopedContainer($container), $container);
+            $route = new DiscoveredRoute(
+                path: '/traced',
+                methods: ['GET'],
+                name: 'traced',
+                requestClass: 'Semitexa\\Core\\Tests\\Unit\\Pipeline\\MissingOnPurposePayload',
+                responseClass: null,
+                handlers: [],
+                type: 'json',
+                transport: null,
+                produces: null,
+                consumes: null,
+                module: 'Test',
+            );
+            try {
+                $executor->reExecute($route, new Request('GET', '/traced', [], [], [], [], []), new \stdClass());
+            } catch (\Throwable) {
+                // How this bare route ends does not matter here.
+            }
+
+            self::assertNull(CurrentRequestTracer::get(), 're-run ticks are untraced');
+        } finally {
+            CurrentRequestTracer::publish($before);
+        }
+    }
+
     /**
      * Drive RouteExecutor far enough to reach the mapped-exception branch. The
      * route resolution is left to fail on purpose: whatever throws, the branch

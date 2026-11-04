@@ -311,16 +311,15 @@ class RouteExecutor
     public function reExecute(DiscoveredRoute $route, Request $request, object $cachedDto, array $filterOverride = []): ReRunResult
     {
         try {
+            // A re-run tick is untraced: its renders must not record into the trace of
+            // the request that opened the stream in this coroutine, long since ended.
+            CurrentRequestTracer::publish(null);
             $metadata = $this->resolveRouteMetadata($route);
 
-            // 1. The execution context first (Track R · R8c-2 / Gap A): the held-open
-            //    re-run skips the lifecycle SessionPhase, so the request-scoped trio
-            //    (Request / Session / CookieJar) is set here. It must come BEFORE the
-            //    auth gate: the session handler reads who the visitor is FROM that
-            //    session — gated first, a re-run saw no session, could not resolve
-            //    anyone, and a feed went on streaming to a page whose visitor had
-            //    signed out (tk-ls-kiss-visitor). SessionPhase::finalize() (persist +
-            //    Set-Cookie) is NOT run: a re-run tick is headless.
+            // 1. The execution context first (R8c-2 / Gap A): the re-run skips SessionPhase,
+            //    so Request / Session / CookieJar are set here, BEFORE the auth gate, which
+            //    reads the visitor from that session (gated first, a feed went on streaming
+            //    to a visitor who had signed out: tk-ls-kiss-visitor). Headless: no persist.
             $this->establishReRunExecutionContext($request);
 
             // 1b. Pre-hydration auth gate — before any data resolution. Fed the
