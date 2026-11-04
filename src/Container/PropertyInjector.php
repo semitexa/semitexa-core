@@ -113,15 +113,17 @@ final class PropertyInjector
             // This path fills objects the container does not manage: payloads,
             // resources, commands, components. Leaving a mutable property unset
             // here looked like success until the first read, far from the cause.
-            if ($prop->getAttributes(InjectAsMutable::class) !== []) {
+            // An optional one is meant to stay unset and is guarded by isset().
+            $mutable = $prop->getAttributes(InjectAsMutable::class)[0] ?? null;
+            if ($mutable !== null && !$mutable->newInstance()->optional) {
                 throw new InjectionException(
                     targetClass: $class,
                     propertyName: $prop->getName(),
                     propertyType: (string) $prop->getType(),
                     injectionKind: 'mutable',
                     message: "#[InjectAsMutable] on {$class}::\${$prop->getName()} is never filled: this class is not "
-                        . 'container-managed. Inject ContainerInterface with #[InjectAsReadonly] and read it at the point of use: '
-                        . 'RequestScopedContainer::forCurrentExecution($this->container)->get(Foo::class).',
+                        . 'container-managed. Within a request, inject ContainerInterface with #[InjectAsReadonly] and read it at '
+                        . 'the point of use: RequestScopedContainer::forCurrentExecution($this->container)->get(Foo::class).',
                 );
             }
 

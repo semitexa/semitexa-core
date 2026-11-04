@@ -45,6 +45,23 @@ class PropertyInjectorTest extends TestCase
         PropertyInjector::inject($component, $this->createStub(ContainerInterface::class));
     }
 
+    public function test_an_optional_mutable_property_stays_unset_as_it_asks_to(): void
+    {
+        $payload = new class {
+            #[\Semitexa\Core\Attribute\InjectAsMutable(optional: true)]
+            protected ?\stdClass $tracer = null;
+
+            public function hasTracer(): bool
+            {
+                return $this->tracer !== null;
+            }
+        };
+
+        PropertyInjector::inject($payload, $this->createStub(ContainerInterface::class));
+
+        $this->assertFalse($payload->hasTracer());
+    }
+
     public function test_inject_populates_readonly_property_from_container(): void
     {
         $dep = new PropertyInjectorTest_Dep();
