@@ -32,6 +32,13 @@ class PropertyInjectorTest extends TestCase
         PropertyInjector::clearCache();
     }
 
+    protected function tearDown(): void
+    {
+        // The cache is derived from code, so empty is its clean state: a throwaway
+        // class of this test must not stay in it for the next one.
+        PropertyInjector::clearCache();
+    }
+
     public function test_a_mutable_property_is_refused_with_the_way_out_rather_than_left_unset(): void
     {
         $component = new class {
@@ -47,19 +54,25 @@ class PropertyInjectorTest extends TestCase
 
     public function test_an_optional_mutable_property_stays_unset_as_it_asks_to(): void
     {
-        $payload = new class {
+        $sentinel = new \stdClass();
+        $payload = new class ($sentinel) {
             #[\Semitexa\Core\Attribute\InjectAsMutable(optional: true)]
-            protected ?\stdClass $tracer = null;
+            protected ?\stdClass $tracer;
 
-            public function hasTracer(): bool
+            public function __construct(?\stdClass $tracer)
             {
-                return $this->tracer !== null;
+                $this->tracer = $tracer;
+            }
+
+            public function tracer(): ?\stdClass
+            {
+                return $this->tracer;
             }
         };
 
         PropertyInjector::inject($payload, $this->createStub(ContainerInterface::class));
 
-        $this->assertFalse($payload->hasTracer());
+        $this->assertSame($sentinel, $payload->tracer());
     }
 
     public function test_inject_populates_readonly_property_from_container(): void
