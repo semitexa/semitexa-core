@@ -70,7 +70,12 @@ class PropertyInjectorTest extends TestCase
             }
         };
 
-        PropertyInjector::inject($payload, $this->createStub(ContainerInterface::class));
+        // A container that could fill it, so leaving it alone is a choice.
+        $container = $this->createStub(ContainerInterface::class);
+        $container->method('has')->willReturn(true);
+        $container->method('get')->willReturn(new \stdClass());
+
+        PropertyInjector::inject($payload, $container);
 
         $this->assertSame($sentinel, $payload->tracer());
     }
