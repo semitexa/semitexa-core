@@ -50,6 +50,14 @@ final class ThisMachine
 
     private static string $routeFile = '/proc/net/route';
 
+    /** Docker creates it in every container; on a host it is absent. */
+    private static string $containerMarker = '/.dockerenv';
+
+    /** Read once per worker, like the gateway. */
+    private static ?bool $bridged = null;
+
+    private static string $sysNet = '/sys/class/net';
+
     public static function sent(?Request $request): bool
     {
         if ($request === null) {
@@ -68,7 +76,12 @@ final class ThisMachine
         }
         $peer = self::unmapped($peer);
 
-        return self::isLoopback($peer) || ($peer === self::gateway() && $peer !== '');
+        // The default gateway is the host only inside a container (a Docker
+        // bridge), or where DEV_LOCAL_GATEWAYS names it; run on a host itself
+        // it is the LAN router, another machine, even one numbered x.y.0.1
+        // in 172.16.0.0/12 like a bridge (172.20.0.1).
+        return self::isLoopback($peer) || ($peer === self::gateway() && $peer !== ''
+            && ((self::bridged() && self::isDockerGateway($peer)) || self::isConfiguredGateway($peer)));
     }
 
     /** Every address a forwarding header names is loopback or a Docker bridge gateway. */
@@ -91,7 +104,9 @@ final class ThisMachine
             }
             foreach ($hops as $hop) {
                 $address = self::unmapped(self::withoutPort(trim($hop)));
-                if (!self::isLoopback($address) && !self::isDockerGateway($address) && !self::isConfiguredGateway($address)) {
+                // The same rule as the peer: a proxy on a host forwarding a LAN
+                // router numbered x.y.0.1 names another machine.
+                if (!self::isLoopback($address) && !(self::bridged() && self::isDockerGateway($address)) && !self::isConfiguredGateway($address)) {
                     return false;
                 }
             }
@@ -192,10 +207,64 @@ final class ThisMachine
         return self::$gateway;
     }
 
+    /**
+     * In a container on a Docker bridge network, where an x.y.0.1 gateway is
+     * the bridge to the host. Proven, not assumed: there the default route
+     * leaves through one end of a veth pair, whose iflink names its peer
+     * (measured in the image: eth0 ifindex 2, iflink 291). A container on the
+     * host's network (--network host, with or without --bridge=none) has
+     * /.dockerenv too, but routes through the host's own interface, whose
+     * iflink is its ifindex.
+     */
+    private static function bridged(): bool
+    {
+        if (self::$bridged !== null) {
+            return self::$bridged;
+        }
+        $iface = self::defaultInterface();
+        if (!is_file(self::$containerMarker) || preg_match('/^[A-Za-z0-9_.@-]+$/', $iface) !== 1) {
+            return self::$bridged = false;
+        }
+        $index = @file_get_contents(self::$sysNet . '/' . $iface . '/ifindex');
+        $link = @file_get_contents(self::$sysNet . '/' . $iface . '/iflink');
+
+        return self::$bridged = is_string($index) && is_string($link)
+            && trim($index) !== '' && trim($link) !== '' && trim($index) !== trim($link);
+    }
+
+    /** The interface the default route leaves through, '' when there is none. */
+    private static function defaultInterface(): string
+    {
+        $lines = is_readable(self::$routeFile) ? (file(self::$routeFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: []) : [];
+        foreach (array_slice($lines, 1) as $line) {
+            $fields = preg_split('/\s+/', trim($line)) ?: [];
+            if (($fields[1] ?? '') === '00000000') {
+                return (string) ($fields[0] ?? '');
+            }
+        }
+
+        return '';
+    }
+
+    /** @internal for tests: read interfaces from another directory. */
+    public static function useSysNet(string $path): void
+    {
+        self::$sysNet = $path;
+        self::$bridged = null;
+    }
+
+    /** @internal for tests: decide "in a container" by another file. */
+    public static function useContainerMarker(string $path): void
+    {
+        self::$containerMarker = $path;
+        self::$bridged = null;
+    }
+
     /** @internal for tests: read the route table from another file. */
     public static function useRouteFile(string $path): void
     {
         self::$routeFile = $path;
         self::$gateway = null;
+        self::$bridged = null;
     }
 }

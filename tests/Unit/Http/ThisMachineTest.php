@@ -20,6 +20,8 @@ final class ThisMachineTest extends TestCase
 {
     private string $routeFile = '';
 
+    private string $sysNet = '';
+
     private string|false $gateways = false;
 
     protected function setUp(): void
@@ -33,12 +35,35 @@ final class ThisMachineTest extends TestCase
             . "eth0\t00000000\t010012AC\t0003\t0\t0\t0\t00000000\n"
             . "eth0\t000012AC\t00000000\t0001\t0\t0\t0\t0000FFFF\n");
         ThisMachine::useRouteFile($this->routeFile);
+        // In a container on a bridge network, as the image runs (eth0 is one
+        // end of a veth pair: ifindex 2, iflink 291); host cases set their own.
+        ThisMachine::useContainerMarker($this->routeFile);
+        $this->sysNet = $this->routeFile . '.net';
+        $this->iface('eth0', 2, 291);
+        ThisMachine::useSysNet($this->sysNet);
+    }
+
+    private function iface(string $name, int $index, int $link): void
+    {
+        @mkdir($this->sysNet . '/' . $name, 0777, true);
+        file_put_contents($this->sysNet . '/' . $name . '/ifindex', $index . "\n");
+        file_put_contents($this->sysNet . '/' . $name . '/iflink', $link . "\n");
+        ThisMachine::useSysNet($this->sysNet);
     }
 
     protected function tearDown(): void
     {
         @unlink($this->routeFile);
+        foreach (glob($this->sysNet . '/*/*') ?: [] as $file) {
+            @unlink($file);
+        }
+        foreach (glob($this->sysNet . '/*') ?: [] as $dir) {
+            @rmdir($dir);
+        }
+        @rmdir($this->sysNet);
         ThisMachine::useRouteFile('/proc/net/route');
+        ThisMachine::useContainerMarker('/.dockerenv');
+        ThisMachine::useSysNet('/sys/class/net');
         putenv($this->gateways === false ? 'DEV_LOCAL_GATEWAYS' : 'DEV_LOCAL_GATEWAYS=' . $this->gateways);
     }
 
@@ -100,6 +125,67 @@ final class ThisMachineTest extends TestCase
         self::assertTrue($through('10.9.0.254'));
         self::assertTrue($through('[fd00:0:0:0:0:0:0:1]'), 'an IPv6 gateway is matched by value, not spelling');
         self::assertFalse($through('172.23.1.9'), 'another address on that bridge is still refused');
+    }
+
+    #[Test]
+    public function a_default_gateway_that_is_a_lan_router_is_another_machine(): void
+    {
+        // Run on a host, not in the image: the default route leads to the router.
+        file_put_contents($this->routeFile, "Iface\tDestination\tGateway \tFlags\tRefCnt\tUse\tMetric\tMask\n"
+            . "wlan0\t00000000\t0101A8C0\t0003\t0\t0\t0\t00000000\n");
+        ThisMachine::useRouteFile($this->routeFile);
+        $fromRouter = new Request('GET', '/', ['Host' => 'localhost:9507'], [], [], ['remote_addr' => '192.168.1.1'], []);
+
+        self::assertFalse(ThisMachine::sent($fromRouter), 'the router is not this machine');
+
+        putenv('DEV_LOCAL_GATEWAYS=192.168.1.1');
+        self::assertTrue(ThisMachine::sent($fromRouter), 'unless the operator names it as a local gateway');
+    }
+
+    #[Test]
+    public function on_a_host_a_router_numbered_like_a_docker_bridge_is_another_machine(): void
+    {
+        // A LAN on 172.20.0.0/16: its router is 172.20.0.1, the x.y.0.1 a bridge would have.
+        file_put_contents($this->routeFile, "Iface\tDestination\tGateway \tFlags\tRefCnt\tUse\tMetric\tMask\n"
+            . "eth0\t00000000\t010014AC\t0003\t0\t0\t0\t00000000\n");
+        ThisMachine::useRouteFile($this->routeFile);
+        $fromRouter = new Request('GET', '/', ['Host' => 'localhost:9507'], [], [], ['remote_addr' => '172.20.0.1'], []);
+
+        ThisMachine::useContainerMarker($this->routeFile . '.absent');
+        self::assertFalse(ThisMachine::sent($fromRouter), 'on a host the default gateway is a router');
+
+        ThisMachine::useContainerMarker($this->routeFile);
+        self::assertTrue(ThisMachine::sent($fromRouter), 'in a container the same address is the bridge to the host');
+    }
+
+    #[Test]
+    public function a_container_on_the_host_network_does_not_trust_a_bridge_numbered_router(): void
+    {
+        // --network host (here with --bridge=none: no docker0 or br-* route at
+        // all): /.dockerenv exists, but the default route leaves through the
+        // host's own NIC, whose iflink is its ifindex.
+        file_put_contents($this->routeFile, "Iface\tDestination\tGateway \tFlags\tRefCnt\tUse\tMetric\tMask\n"
+            . "enp3s0\t00000000\t010014AC\t0003\t0\t0\t0\t00000000\n");
+        ThisMachine::useRouteFile($this->routeFile);
+        $this->iface('enp3s0', 2, 2);
+        $fromRouter = new Request('GET', '/', ['Host' => 'localhost:9507'], [], [], ['remote_addr' => '172.20.0.1'], []);
+
+        self::assertFalse(ThisMachine::sent($fromRouter), 'the host network: 172.20.0.1 is the LAN router');
+
+        putenv('DEV_LOCAL_GATEWAYS=172.20.0.1');
+        self::assertTrue(ThisMachine::sent($fromRouter), 'unless the operator names it');
+    }
+
+    #[Test]
+    public function a_proxy_on_a_host_forwarding_a_bridge_numbered_router_names_another_machine(): void
+    {
+        ThisMachine::useContainerMarker($this->routeFile . '.absent');
+        $forwarded = new Request('GET', '/', ['Host' => 'localhost:9507', 'X-Forwarded-For' => '172.20.0.1'], [], [], ['remote_addr' => '127.0.0.1'], []);
+
+        self::assertFalse(ThisMachine::sent($forwarded), 'on a host the forwarded hop is a LAN router');
+
+        ThisMachine::useContainerMarker($this->routeFile);
+        self::assertTrue(ThisMachine::sent($forwarded), 'in a bridged container the same hop is the bridge');
     }
 
     #[Test]
