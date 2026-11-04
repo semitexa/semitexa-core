@@ -55,6 +55,15 @@ use Attribute;
  * The criterion was not invented for this docblock: every one of the eighteen
  * capabilities declared when it was written already names an alternative.
  *
+ * ## Saying how, not only when
+ *
+ * `useWhen` gets a capability chosen; `usage` gets it finished. A benchmark agent
+ * chose `#[AsDeferred]`, read the example, could not see how the page's data
+ * reaches a slot, and fell back to a `fetch()` against a JSON route: the exact
+ * thing the capability exists to replace. So `usage` holds the smallest working
+ * code and says how data gets in and out, which is the part an example of a
+ * neighbouring feature does not show.
+ *
  * Nothing reads this at runtime. It exists for tooling: `ai:ask capabilities`
  * derives its catalog from these declarations across every installed package,
  * which is what lets a consumer project pick up a capability added later from
@@ -99,6 +108,11 @@ final class Capability
      *                        something detectable in code rather than a vague
      *                        alternative.
      * @param string $seeAlso Optional pointer to a related capability id.
+     * @param string $usage  The smallest code that works, and how data gets in
+     *                       and out. Copied from code that runs, not written from
+     *                       memory: a wrong example teaches the wrong thing with
+     *                       more authority than no example. Shown only for one
+     *                       capability at a time, so it costs the catalog nothing.
      */
     public function __construct(
         public readonly string $id,
@@ -107,6 +121,7 @@ final class Capability
         public readonly string $avoidWhen,
         public readonly array $replaces,
         public readonly string $seeAlso = '',
+        public readonly string $usage = '',
     ) {
     }
 }
