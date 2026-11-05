@@ -26,7 +26,8 @@ final class WorkerExitLeftoverConnectionTest extends TestCase
         $server = new Swoole\Http\Server('127.0.0.1', (int) $port, SWOOLE_BASE);
         $server->set(['worker_num' => (int) $workers, 'max_request' => (int) $maxRequest, 'reload_async' => true,
             'max_wait_time' => 3, 'log_file' => $dir . '/swoole.log', 'enable_coroutine' => true]);
-        // Wired as SwooleBootstrap wires them.
+        // Wired as SwooleBootstrap wires them, but for served(): it runs on connect
+        // there, and here on the request, which is what these clients all send.
         $connections = new Semitexa\Core\Server\ServedConnections();
         $drain = new Semitexa\Core\Server\WorkerExitDrain(
             Semitexa\Core\Server\WorkerExitDrainPolicy::forMaxWaitTime(3),

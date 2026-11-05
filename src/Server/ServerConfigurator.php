@@ -33,7 +33,10 @@ readonly class ServerConfigurator
     {
         return [
             'worker_num'       => $this->env->swooleWorkerNum,
-            'max_request'      => $this->env->swooleMaxRequest,
+            // Off where WorkerRecycle does it: Swoole's own recycle cuts keep-alive clients.
+            'max_request'      => WorkerRecycle::manages($this->env->swooleMaxRequest, $this->env->swooleWorkerNum)
+                ? 0
+                : $this->env->swooleMaxRequest,
             'enable_coroutine' => true,
             'max_coroutine'    => $this->env->swooleMaxCoroutine,
             // The largest request accepted; a bigger one is refused before any
