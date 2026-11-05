@@ -223,6 +223,10 @@ class PayloadHydrator
             } else {
                 $content = $httpRequest->getContent();
                 $decoded = json_decode($content, true);
+                // A decoding failure left an empty body, and the handler ran on its defaults.
+                if (json_last_error() === JSON_ERROR_UTF8) {
+                    throw new TypeMismatchException('body', 'valid UTF-8 text', 'invalid bytes');
+                }
                 if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
                     /** @var array<string, mixed> $decoded */
                     $data = array_merge($data, $decoded);
@@ -280,6 +284,12 @@ class PayloadHydrator
 
     private static function castValue(mixed $value, ?\ReflectionType $type, string $fieldName = '', bool $strict = false): mixed
     {
+        // Not text in any mode: it passed here and failed later, as a 500 from the database
+        // or the JSON encoder. The bytes stay out of the exception, whose message is sent back.
+        if (self::holdsInvalidUtf8($value)) {
+            throw new TypeMismatchException($fieldName, 'valid UTF-8 text', 'invalid bytes');
+        }
+
         if ($type === null) {
             return $value;
         }
@@ -366,6 +376,21 @@ class PayloadHydrator
             'array' => is_array($value) ? $value : [$value],
             default => $value,
         };
+    }
+
+    private static function holdsInvalidUtf8(mixed $value): bool
+    {
+        if (is_array($value)) {
+            foreach ($value as $key => $item) {
+                if (self::holdsInvalidUtf8($key) || self::holdsInvalidUtf8($item)) {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        return is_string($value) && !mb_check_encoding($value, 'UTF-8');
     }
 
     private static function isNumericType(string $type): bool
