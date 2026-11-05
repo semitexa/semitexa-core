@@ -117,10 +117,13 @@ final class WorkerRecycleKeepsRequestsTest extends TestCase
         $port = $this->startServer(maxRequests: 30);
         $socket = $this->connect($port);
 
-        do {
+        $closing = false;
+        // Bounded: a server that stopped saying close must fail here, not hang the suite.
+        for ($i = 0; $i < 100 && !$closing; $i++) {
             [$pid, $closing] = $this->ask($socket);
             self::assertNotSame('', $pid, 'answered until it says close');
-        } while (!$closing);
+        }
+        self::assertTrue($closing, 'a tenth of the limit is three requests, not a hundred');
 
         // A client that reads to the end of the stream must get that end. It keeps
         // the socket open and sends nothing, so only the server can end this.
