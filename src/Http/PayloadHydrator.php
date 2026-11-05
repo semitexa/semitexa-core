@@ -350,6 +350,12 @@ class PayloadHydrator
             };
         }
 
+        // Not text in any mode: it passed here and failed later, as a 500 from the database
+        // or the JSON encoder. The bytes stay out of the exception, whose message is sent back.
+        if (self::holdsInvalidUtf8($value)) {
+            throw new TypeMismatchException($fieldName, 'valid UTF-8 text', 'invalid bytes');
+        }
+
         // Strict mode: reject values that cannot be meaningfully coerced to the target type.
         // Numbers are checked in every mode: the cast would turn "abc" into 0 and
         // clamp a 20-digit id to PHP_INT_MAX, handing the handler a value the
@@ -366,6 +372,21 @@ class PayloadHydrator
             'array' => is_array($value) ? $value : [$value],
             default => $value,
         };
+    }
+
+    private static function holdsInvalidUtf8(mixed $value): bool
+    {
+        if (is_array($value)) {
+            foreach ($value as $key => $item) {
+                if (self::holdsInvalidUtf8($key) || self::holdsInvalidUtf8($item)) {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        return is_string($value) && !mb_check_encoding($value, 'UTF-8');
     }
 
     private static function isNumericType(string $type): bool
