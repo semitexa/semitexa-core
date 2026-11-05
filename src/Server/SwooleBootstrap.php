@@ -133,6 +133,7 @@ class SwooleBootstrap
         // reports on is the worker's own last few seconds and must not be shared.
         $drainReporter = new WorkerExitDrainReporter();
         $servedConnections = new ServedConnections();
+        $workerRecycle = new WorkerRecycle($env->swooleMaxRequest, $env->swooleWorkerNum);
         $drain = new WorkerExitDrain(WorkerExitDrainPolicy::forMaxWaitTime(ServerConfigurator::maxWaitSeconds()), $drainReporter, $servedConnections);
 
         $corsHandler = new CorsHandler($env);
@@ -386,21 +387,44 @@ class SwooleBootstrap
         };
 
         // Every request says it is in flight, so a worker that is leaving lets
-        // it finish instead of cancelling it (WorkerExitDrainPolicy), and names
-        // its connection, which the drain closes once nothing runs (ServedConnections).
-        $server->on(SwooleEvent::Request->value, static function (SwooleRequest $request, SwooleResponse $response) use ($handleRequest, $servedConnections): void {
+        // it finish instead of cancelling it (WorkerExitDrainPolicy).
+        $server->on(SwooleEvent::Request->value, static function (SwooleRequest $request, SwooleResponse $response) use ($handleRequest, $workerRecycle, $server): void {
             $cid = Row::asInt(Coroutine::getCid());
-            $servedConnections->served(Row::asInt($request->fd));
+            $sessionId = Row::asInt($request->fd);
+            $clientTold = $workerRecycle->arrived($sessionId);
+            if ($clientTold) {
+                $response->header('Connection', 'close');
+            }
+            if ($workerRecycle->dueToLeave()) {
+                \Swoole\Timer::after(WorkerRecycle::LEAVE_AFTER_MS, static function () use ($server): void {
+                    $server->stop();
+                });
+            }
             InFlightRequests::enter($cid);
             try {
                 $handleRequest($request, $response);
             } finally {
                 InFlightRequests::leave($cid);
+                // A stream still writing is not over: it keeps its connection.
+                if ($clientTold && !$response->isWritable()) {
+                    \Swoole\Timer::after(WorkerRecycle::CLOSE_AFTER_MS, static function () use ($server, $sessionId): void {
+                        if ($server->exist($sessionId)) {
+                            $server->close($sessionId);
+                        }
+                    });
+                }
             }
         });
 
-        $server->on(SwooleEvent::Close->value, static function (Server $server, int $sessionId) use ($servedConnections): void {
+        // On connect, not on the first request: a client accepted as the worker stops
+        // never reaches a request, and the drain must still be able to close it.
+        $server->on(SwooleEvent::Connect->value, static function (Server $server, int $sessionId) use ($servedConnections): void {
+            $servedConnections->served($sessionId);
+        });
+
+        $server->on(SwooleEvent::Close->value, static function (Server $server, int $sessionId) use ($servedConnections, $workerRecycle): void {
             $servedConnections->closed($sessionId);
+            $workerRecycle->closed($sessionId);
         });
 
         $server->start();

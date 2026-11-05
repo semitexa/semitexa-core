@@ -12,6 +12,7 @@ enum SwooleEvent: string
     case WorkerError = 'WorkerError';
     case Start = 'Start';
     case Shutdown = 'Shutdown';
+    case Connect = 'connect';
     case Request = 'request';
     case Close = 'close';
 }

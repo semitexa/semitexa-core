@@ -5,9 +5,8 @@ declare(strict_types=1);
 namespace Semitexa\Core\Server;
 
 /**
- * The client sessions this worker has served a request on and Swoole has not
- * closed yet — what a leaving worker closes once nothing runs any more (see
- * {@see WorkerExitDrain}).
+ * The client sessions connected to this worker and not closed yet — what a
+ * leaving worker closes once nothing runs any more (see {@see WorkerExitDrain}).
  *
  * Swoole's own list cannot answer that. In BASE mode each worker keeps its
  * connections by fd in process memory, but the fd range every walk of them uses
