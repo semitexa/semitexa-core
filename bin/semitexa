@@ -41,7 +41,11 @@ require_once $autoload;
 
 use Semitexa\Core\Console\Application;
 use Semitexa\Core\Container\BrokenContainerReport;
+use Semitexa\Core\Container\Exception\CircularDependencyException;
+use Semitexa\Core\Container\Exception\ContainerBuildException;
 use Semitexa\Core\Container\Exception\InjectionException;
+use Semitexa\Core\Exception\BootstrapException;
+use Semitexa\Core\Exception\ContainerException;
 
 if (semitexaIsLifecycleCommand($argv[1] ?? '')) {
     exit(semitexaRunLifecycleCommand($argv));
@@ -49,7 +53,7 @@ if (semitexaIsLifecycleCommand($argv[1] ?? '')) {
 
 try {
     $application = new Application();
-} catch (InjectionException $failure) {
+} catch (InjectionException | CircularDependencyException | ContainerBuildException | ContainerException | BootstrapException $failure) {
     exit((new BrokenContainerReport($failure))->write($argv, STDOUT, STDERR));
 }
 $application->run();

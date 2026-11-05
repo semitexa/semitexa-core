@@ -16,7 +16,7 @@ final readonly class BrokenContainerReport
 {
     private const EXIT_FAILURE = 1;
 
-    public function __construct(private InjectionException $failure)
+    public function __construct(private \Throwable $failure)
     {
     }
 
@@ -32,15 +32,17 @@ final readonly class BrokenContainerReport
             $this->failure->getMessage(),
         ));
         if (in_array('--json', $argv, true)) {
-            fwrite($stdout, json_encode([
-                'verdict' => 'fail',
-                'error' => 'container_not_built',
+            $where = !$this->failure instanceof InjectionException ? [] : [
                 'class' => $this->failure->targetClass,
                 'property' => $this->failure->propertyName,
                 'type' => $this->failure->propertyType,
                 'kind' => $this->failure->injectionKind,
-                'message' => $this->failure->getMessage(),
-            ], JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR) . "\n");
+            ];
+            // Substituted, not thrown: a stray byte must not turn this report back into a fatal.
+            fwrite($stdout, json_encode(
+                ['verdict' => 'fail', 'error' => 'container_not_built'] + $where + ['message' => $this->failure->getMessage()],
+                JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE | JSON_THROW_ON_ERROR,
+            ) . "\n");
         }
 
         return self::EXIT_FAILURE;

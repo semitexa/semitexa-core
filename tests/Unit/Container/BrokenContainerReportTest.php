@@ -7,6 +7,7 @@ namespace Semitexa\Core\Tests\Unit\Container;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Semitexa\Core\Container\BrokenContainerReport;
+use Semitexa\Core\Container\Exception\CircularDependencyException;
 use Semitexa\Core\Container\Exception\InjectionException;
 
 final class BrokenContainerReportTest extends TestCase
@@ -37,18 +38,39 @@ final class BrokenContainerReportTest extends TestCase
         self::assertSame('iri', $verdict['property']);
     }
 
+    #[Test]
+    public function a_cycle_is_reported_the_same_way_with_no_class_to_name(): void
+    {
+        [$code, $stdout] = $this->report(['bin/semitexa', 'ai:verify', '--json'], new CircularDependencyException(['A', 'B', 'A'], 'Circular dependency: A -> B -> A'));
+
+        self::assertSame(1, $code);
+        $verdict = json_decode($stdout, true, 512, JSON_THROW_ON_ERROR);
+        self::assertSame('fail', $verdict['verdict']);
+        self::assertSame('Circular dependency: A -> B -> A', $verdict['message']);
+        self::assertArrayNotHasKey('class', $verdict);
+    }
+
+    #[Test]
+    public function a_stray_byte_in_the_message_still_gives_a_verdict(): void
+    {
+        [$code, $stdout] = $this->report(['bin/semitexa', 'ai:verify', '--json'], new \RuntimeException("Bad name \xff here"));
+
+        self::assertSame(1, $code);
+        self::assertSame('fail', json_decode($stdout, true, 512, JSON_THROW_ON_ERROR)['verdict']);
+    }
+
     /**
      * @param list<string> $argv
      * @return array{0: int, 1: string, 2: string}
      */
-    private function report(array $argv): array
+    private function report(array $argv, ?\Throwable $failure = null): array
     {
         $stdout = fopen('php://memory', 'w+');
         $stderr = fopen('php://memory', 'w+');
         self::assertIsResource($stdout);
         self::assertIsResource($stderr);
 
-        $code = (new BrokenContainerReport(new InjectionException(
+        $code = (new BrokenContainerReport($failure ?? new InjectionException(
             targetClass: 'App\\Thing',
             propertyName: 'iri',
             propertyType: 'App\\Iri',
