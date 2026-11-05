@@ -7,8 +7,8 @@ namespace Semitexa\Core\Container;
 use Semitexa\Core\Container\Exception\InjectionException;
 
 /**
- * Every command boots the container, so one bad injection stops them all,
- * including the lint and the verification that exist to catch it. They answer
+ * Commands boot the container, so one bad injection stops all but the server
+ * lifecycle ones, including the lint and the verification that exist to catch it. They answer
  * with what is wrong instead of a stack trace, and with a verdict on --json,
  * so a change can be refused before a restart takes the server down.
  */
@@ -28,7 +28,7 @@ final readonly class BrokenContainerReport
     public function write(array $argv, $stdout, $stderr): int
     {
         fwrite($stderr, sprintf(
-            "The container did not build, so no command can run, and a server restarted now would not start.\n\n%s\n",
+            "The container did not build, so commands that need it cannot run, and a server restarted now would not start.\n\n%s\n",
             $this->failure->getMessage(),
         ));
         if (in_array('--json', $argv, true)) {

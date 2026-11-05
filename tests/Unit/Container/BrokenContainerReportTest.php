@@ -28,7 +28,8 @@ final class BrokenContainerReportTest extends TestCase
         [$code, $stdout] = $this->report(['bin/semitexa', 'ai:verify', '--json']);
 
         self::assertSame(1, $code);
-        self::assertSame(1, substr_count(rtrim($stdout), "\n") + 1);
+        self::assertStringEndsWith("\n", $stdout);
+        self::assertSame(1, substr_count($stdout, "\n"), 'one line, ended once');
         $verdict = json_decode($stdout, true, 512, JSON_THROW_ON_ERROR);
         self::assertSame('fail', $verdict['verdict']);
         self::assertSame('container_not_built', $verdict['error']);
