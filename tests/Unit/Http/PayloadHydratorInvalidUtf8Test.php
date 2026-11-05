@@ -25,6 +25,7 @@ final class PayloadHydratorInvalidUtf8Test extends TestCase
         yield 'a truncated sequence' => [['name' => "\xC3("], 'name'];
         yield 'inside an array' => [['tags' => ['ok', "bad\xFF"]], 'tags'];
         yield 'an array key' => [['tags' => ["bad\xFF" => 'ok']], 'tags'];
+        yield 'an untyped setter' => [['note' => "bad\xFF"], 'note'];
     }
 
     /** @param array<string, mixed> $post */
@@ -38,8 +39,37 @@ final class PayloadHydratorInvalidUtf8Test extends TestCase
         } catch (TypeMismatchException $refused) {
             self::assertSame($field, $refused->field);
             self::assertNotFalse(json_encode($refused->getMessage()), 'the message goes back as JSON');
-            self::assertNotFalse(json_encode($refused->receivedValue), 'so does the value');
+            self::assertSame('invalid bytes', $refused->receivedValue, 'a description, never the bytes');
         }
+    }
+
+    #[Test]
+    public function a_json_body_that_is_not_text_is_refused_not_emptied(): void
+    {
+        $request = RequestFactory::fromArray([
+            'method' => 'POST',
+            'uri' => '/x',
+            'headers' => ['Content-Type' => 'application/json'],
+            'content' => "{\"name\":\"bad\xFF\"}",
+        ]);
+
+        $this->expectException(TypeMismatchException::class);
+        PayloadHydrator::hydrate(new HydratorTextFixturePayload(), $request);
+    }
+
+    #[Test]
+    public function malformed_json_with_valid_text_keeps_its_old_answer(): void
+    {
+        $payload = new HydratorTextFixturePayload();
+
+        PayloadHydrator::hydrate($payload, RequestFactory::fromArray([
+            'method' => 'POST',
+            'uri' => '/x',
+            'headers' => ['Content-Type' => 'application/json'],
+            'content' => '{"name":',
+        ]));
+
+        self::assertNull($payload->name);
     }
 
     #[Test]

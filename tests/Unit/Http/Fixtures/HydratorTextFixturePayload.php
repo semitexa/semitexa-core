@@ -11,6 +11,14 @@ final class HydratorTextFixturePayload
     /** @var array<array-key, mixed> */
     public array $tags = [];
 
+    /** No declared type, so nothing but the check itself stands in front of the setter. */
+    public mixed $note = null;
+
+    public function setNote($note): void
+    {
+        $this->note = $note;
+    }
+
     public function setName(?string $name): void
     {
         $this->name = $name;
