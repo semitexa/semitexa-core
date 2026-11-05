@@ -40,12 +40,22 @@ if ($autoload === null || !file_exists($autoload)) {
 require_once $autoload;
 
 use Semitexa\Core\Console\Application;
+use Semitexa\Core\Container\BrokenContainerReport;
+use Semitexa\Core\Container\Exception\CircularDependencyException;
+use Semitexa\Core\Container\Exception\ContainerBuildException;
+use Semitexa\Core\Container\Exception\InjectionException;
+use Semitexa\Core\Exception\BootstrapException;
+use Semitexa\Core\Exception\ContainerException;
 
 if (semitexaIsLifecycleCommand($argv[1] ?? '')) {
     exit(semitexaRunLifecycleCommand($argv));
 }
 
-$application = new Application();
+try {
+    $application = new Application();
+} catch (InjectionException | CircularDependencyException | ContainerBuildException | ContainerException | BootstrapException $failure) {
+    exit((new BrokenContainerReport($failure))->write($argv, STDOUT, STDERR));
+}
 $application->run();
 
 function semitexaPrebuildAutoload(): void
