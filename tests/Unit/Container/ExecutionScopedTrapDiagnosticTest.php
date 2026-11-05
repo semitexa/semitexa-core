@@ -45,6 +45,7 @@ final class ExecutionScopedTrapDiagnosticTest extends TestCase
         $this->assertStringContainsString('#[ExecutionScoped]', $note);
         $this->assertStringContainsString('AT CALL TIME', $note);
         $this->assertStringContainsString('worker-local in-memory substitute', $note);
+        $this->assertStringContainsString('#[InjectAsMutable]', $note, 'the way out for a handler');
     }
 
     #[Test]

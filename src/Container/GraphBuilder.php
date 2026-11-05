@@ -777,8 +777,8 @@ final class GraphBuilder
             . 'singleton that resolves per-request state AT CALL TIME through a '
             . 'coroutine-local seam (inject TenantContextStoreInterface and read tryGet() '
             . 'per call — see CalendarEventDbRepository / FormCollabDraftDbRepository), or '
-            . "(2) drop #[ExecutionScoped] from {$implementer} if it holds no per-execution "
-            . 'state. Do NOT bind a worker-local in-memory substitute: it boots, then '
+            . "(2) drop #[ExecutionScoped] from {$implementer} if it holds no per-execution state. "
+            . 'A handler or listener is execution-scoped itself and takes it with #[InjectAsMutable]. Do NOT bind a worker-local in-memory substitute: it boots, then '
             . 'silently breaks cross-worker behavior (the collab draft-store regression).';
     }
 
