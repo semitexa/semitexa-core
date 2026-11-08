@@ -26,6 +26,7 @@ use Semitexa\Core\Log\FallbackErrorLogger;
 final class RoutePhase
 {
     /** Route name for custom 404 page */
+    public const ROUTE_NAME_401 = ErrorRouteDispatcher::ROUTE_NAME_401;
     public const ROUTE_NAME_404 = ErrorRouteDispatcher::ROUTE_NAME_404;
     public const ROUTE_NAME_500 = ErrorRouteDispatcher::ROUTE_NAME_500;
 

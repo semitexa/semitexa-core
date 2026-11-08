@@ -29,6 +29,13 @@ use Semitexa\Core\Session\TransientSessionHandler;
 
 final class ErrorRouteDispatcher
 {
+    /**
+     * A guest who opens a protected page in a browser. The gate refuses before
+     * the page runs; a module that registers this route answers with its
+     * sign-in form (ErrorPageContext::$requestPath says where to come back to),
+     * so no page has to be made public to greet a guest.
+     */
+    public const ROUTE_NAME_401 = 'error.401';
     public const ROUTE_NAME_404 = 'error.404';
     public const ROUTE_NAME_500 = 'error.500';
 
@@ -248,6 +255,7 @@ final class ErrorRouteDispatcher
     private function mapStatusToRouteName(int $statusCode): ?string
     {
         return match ($statusCode) {
+            HttpStatus::Unauthorized->value => self::ROUTE_NAME_401,
             HttpStatus::NotFound->value => self::ROUTE_NAME_404,
             HttpStatus::InternalServerError->value => self::ROUTE_NAME_500,
             default => null,
