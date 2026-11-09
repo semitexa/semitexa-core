@@ -115,20 +115,33 @@ final class ErrorRouteDispatcherTest extends TestCase
                 /** @var ErrorPageContext $context */
                 $context = $requestScopedContainer->get(ErrorPageContext::class);
 
-                return HttpResponse::html('<form>sign in, then back to ' . $context->requestPath . '</form>', 200);
+                return HttpResponse::html('<form>sign in, then back to ' . $context->returnTo . ' (routed ' . $context->requestPath . ')</form>', 200);
             },
+        );
+
+        // As the locale layer leaves it: the prefix stripped from the routed
+        // uri, kept in request_uri; the query arrives on its own, as under Swoole.
+        $request = new Request(
+            method: 'GET',
+            uri: '/account/profile',
+            headers: ['Accept' => 'text/html'],
+            query: ['tab' => 'security'],
+            post: [],
+            server: ['request_uri' => '/uk/account/profile'],
+            cookies: [],
         );
 
         $response = $dispatcher->dispatchThrowable(
             new AuthenticationException('Authentication required'),
-            $this->makeHtmlRequest('/account/profile'),
+            $request,
             ['name' => 'account.profile'],
         );
 
         self::assertNotNull($response);
         // Still a refusal: the sign-in form is what a 401 says to a browser.
         self::assertSame(401, $response->getStatusCode());
-        self::assertStringContainsString('back to /account/profile', $response->getContent());
+        // Back to the address the guest asked for, language and query kept.
+        self::assertStringContainsString('back to /uk/account/profile?tab=security (routed /account/profile)', $response->getContent());
     }
 
     #[Test]

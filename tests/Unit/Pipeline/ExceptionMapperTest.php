@@ -8,10 +8,14 @@ use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Psr\Container\ContainerInterface;
 use Semitexa\Core\Container\RequestScopedContainer;
+use Semitexa\Core\Discovery\DiscoveredRoute;
 use Semitexa\Core\Discovery\RouteRegistry;
 use Semitexa\Core\Discovery\ResolvedRouteMetadata;
 use Semitexa\Core\Environment;
+use Semitexa\Core\Error\ErrorPageContext;
+use Semitexa\Core\Error\ErrorPageContextStore;
 use Semitexa\Core\Error\ErrorRouteDispatcher;
+use Semitexa\Core\Pipeline\Exception\AuthenticationRequiredException;
 use Semitexa\Core\Exception\PayloadValidationException;
 use Semitexa\Core\Exception\ValidationException;
 use Semitexa\Core\Pipeline\ExceptionMapper;
@@ -46,6 +50,53 @@ final class ExceptionMapperTest extends TestCase
         self::assertSame(500, $response->getStatusCode());
         self::assertSame('application/json', $response->getHeaders()['Content-Type']);
         self::assertStringContainsString('Internal Server Error', $response->getContent());
+    }
+
+    /**
+     * The whole way a guest's refusal travels past the gate: the exception the
+     * gate throws (PreHydrationAuthGate, AuthorizationListener), the mapper,
+     * the dispatcher, and the error.401 route a module registered by name.
+     * Only the route's own handler is stood in for.
+     */
+    #[Test]
+    public function a_guest_refused_on_an_html_page_is_answered_by_the_registered_error_401_route(): void
+    {
+        $routes = new RouteRegistry();
+        $routes->register([
+            'path' => '/__error__/401',
+            'methods' => ['GET'],
+            'name' => ErrorRouteDispatcher::ROUTE_NAME_401,
+            'class' => 'App\\SignIn\\SignInPagePayload',
+            'type' => 'http-request',
+        ]);
+
+        $seen = null;
+        $dispatcher = new ErrorRouteDispatcher(
+            routeRegistry: $routes,
+            requestScopedContainer: new RequestScopedContainer(new ExceptionMapperTestContainer()),
+            container: new ExceptionMapperTestContainer(),
+            authBootstrapper: null,
+            environment: $this->makeEnvironment(),
+            routeExecutor: static function (DiscoveredRoute $route) use (&$seen): HttpResponse {
+                $seen = ErrorPageContextStore::current();
+
+                return HttpResponse::html('<form data-route="' . $route->name . '">sign in</form>', 200);
+            },
+        );
+        $mapper = (new ExceptionMapper())->withErrorRouteDispatcher($dispatcher);
+        $request = new Request('GET', '/account', ['Accept' => 'text/html'], ['tab' => 'keys'], [], ['request_uri' => '/uk/account'], []);
+
+        $response = $mapper->map(
+            new AuthenticationRequiredException('Authentication required'),
+            $request,
+            $this->makeMetadata(['text/html']),
+        );
+
+        self::assertSame(401, $response->getStatusCode());
+        self::assertStringContainsString('data-route="error.401"', $response->getContent());
+        self::assertInstanceOf(ErrorPageContext::class, $seen);
+        self::assertSame('/uk/account?tab=keys', $seen->returnTo);
+        self::assertSame('/account', $seen->requestPath);
     }
 
     /**

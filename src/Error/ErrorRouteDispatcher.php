@@ -249,6 +249,7 @@ final class ErrorRouteDispatcher
             debugMessage: $debugEnabled && $throwable !== null ? $throwable->getMessage() : null,
             trace: $debugEnabled && $throwable !== null ? $throwable->getTraceAsString() : null,
             originalRouteName: $originalRouteName,
+            returnTo: ErrorPageContext::returnToOf($request),
         );
     }
 

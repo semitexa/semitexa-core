@@ -26,6 +26,7 @@ class ErrorRenderer
                 debugMessage: $debug ? $e->getMessage() : null,
                 trace: $debug ? $e->getTraceAsString() : null,
                 originalRouteName: null,
+                returnTo: $request !== null ? ErrorPageContext::returnToOf($request) : '/',
             ),
             $request,
         );
