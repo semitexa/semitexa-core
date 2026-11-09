@@ -20,6 +20,7 @@ use Semitexa\Core\Environment;
 use Semitexa\Core\Error\ErrorPageContext;
 use Semitexa\Core\Error\ErrorRouteDispatcher;
 use Semitexa\Core\Exception\AccessDeniedException;
+use Semitexa\Core\Exception\AuthenticationException;
 use Semitexa\Core\Request;
 use Semitexa\Core\HttpResponse;
 use Semitexa\Core\Session\Session;
@@ -91,6 +92,76 @@ final class ErrorRouteDispatcherTest extends TestCase
         self::assertSame(500, $response->getStatusCode());
         self::assertStringContainsString(ErrorRouteDispatcher::ROUTE_NAME_500, $response->getContent());
         self::assertStringContainsString('/broken', $response->getContent());
+    }
+
+    #[Test]
+    public function a_guest_refused_by_a_protected_page_gets_the_modules_sign_in_route(): void
+    {
+        $routes = $this->createMock(RouteRegistry::class);
+        $routes->expects($this->once())
+            ->method('findByNameTyped')
+            ->with(ErrorRouteDispatcher::ROUTE_NAME_401)
+            ->willReturn($this->makeDiscoveredRoute(ErrorRouteDispatcher::ROUTE_NAME_401));
+
+        $container = new InMemoryContainer();
+        $requestScopedContainer = new RequestScopedContainer($container);
+        $dispatcher = new ErrorRouteDispatcher(
+            routeRegistry: $routes,
+            requestScopedContainer: $requestScopedContainer,
+            container: $container,
+            authBootstrapper: null,
+            environment: $this->makeEnvironment(),
+            routeExecutor: static function () use ($requestScopedContainer): HttpResponse {
+                /** @var ErrorPageContext $context */
+                $context = $requestScopedContainer->get(ErrorPageContext::class);
+
+                return HttpResponse::html('<form>sign in, then back to ' . $context->returnTo . ' (routed ' . $context->requestPath . ')</form>', 200);
+            },
+        );
+
+        // As the locale layer leaves it: the prefix stripped from the routed
+        // uri, kept in request_uri; the query arrives on its own, as under Swoole.
+        $request = new Request(
+            method: 'GET',
+            uri: '/account/profile',
+            headers: ['Accept' => 'text/html'],
+            query: ['tab' => 'security'],
+            post: [],
+            server: ['request_uri' => '/uk/account/profile'],
+            cookies: [],
+        );
+
+        $response = $dispatcher->dispatchThrowable(
+            new AuthenticationException('Authentication required'),
+            $request,
+            ['name' => 'account.profile'],
+        );
+
+        self::assertNotNull($response);
+        // Still a refusal: the sign-in form is what a 401 says to a browser.
+        self::assertSame(401, $response->getStatusCode());
+        // Back to the address the guest asked for, language and query kept.
+        self::assertStringContainsString('back to /uk/account/profile?tab=security (routed /account/profile)', $response->getContent());
+    }
+
+    #[Test]
+    public function a_401_without_a_sign_in_route_keeps_the_built_in_page(): void
+    {
+        $routes = $this->createMock(RouteRegistry::class);
+        $routes->expects($this->once())
+            ->method('findByNameTyped')
+            ->with(ErrorRouteDispatcher::ROUTE_NAME_401)
+            ->willReturn(null);
+
+        $response = $this->makeDispatcher($routes)->dispatchThrowable(
+            new AuthenticationException('Authentication required'),
+            $this->makeHtmlRequest('/account/profile'),
+            ['name' => 'account.profile'],
+        );
+
+        self::assertNotNull($response);
+        self::assertSame(401, $response->getStatusCode());
+        self::assertStringContainsString('401', $response->getContent());
     }
 
     #[Test]
