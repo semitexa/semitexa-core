@@ -7,6 +7,7 @@ namespace Semitexa\Core\Tests\Unit\Error;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Semitexa\Core\Error\ErrorPageContext;
+use Semitexa\Core\Http\RedirectTarget;
 use Semitexa\Core\Request;
 
 /**
@@ -23,6 +24,17 @@ final class ErrorPageContextTest extends TestCase
         $request = $this->request('/account', ['a' => '2', 'preview' => ''], ['request_uri' => '/uk/account', 'query_string' => 'a=1&a=2&preview']);
 
         self::assertSame('/uk/account?a=1&a=2&preview', ErrorPageContext::returnToOf($request));
+    }
+
+    #[Test]
+    public function a_backslash_in_the_query_is_encoded_so_the_return_survives_the_redirect_guard(): void
+    {
+        $request = $this->request('/search', ['q' => 'C:\\Users'], ['request_uri' => '/uk/search', 'query_string' => 'q=C:\\Users']);
+        $returnTo = ErrorPageContext::returnToOf($request);
+
+        self::assertSame('/uk/search?q=C:%5CUsers', $returnTo);
+        self::assertSame($returnTo, RedirectTarget::localPath($returnTo));
+        self::assertSame($returnTo, RedirectTarget::sanitize($returnTo, 'example.test'));
     }
 
     #[Test]

@@ -38,11 +38,16 @@ final readonly class ErrorPageContext
      * Swoole getQueryString() rebuilds it from the parsed parameters, and
      * http_build_query() is not the inverse of parsing: `?a=1&a=2` comes back
      * as `a=2`, `?preview` as `preview=`.
+     *
+     * A browser sends `\` in a query unencoded, and every redirect guard
+     * refuses a backslash (a browser reads one in a path as `/`), so
+     * `/search?q=C:\Users` would send the visitor home. It is written as
+     * `%5C`, which the server decodes to the same value.
      */
     public static function returnToOf(Request $request): string
     {
         $raw = $request->server['query_string'] ?? $request->server['QUERY_STRING'] ?? null;
-        $query = is_string($raw) && $raw !== '' ? $raw : $request->getQueryString();
+        $query = str_replace('\\', '%5C', is_string($raw) && $raw !== '' ? $raw : $request->getQueryString());
 
         return $request->getServedPath() . ($query !== '' ? '?' . $query : '');
     }

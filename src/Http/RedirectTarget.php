@@ -25,6 +25,29 @@ final class RedirectTarget
         'appleid.apple.com',
     ];
 
+    /**
+     * $target when it is a path on this origin, $fallback otherwise.
+     *
+     * For a return address the browser sends back — a hidden field, a `?next=`
+     * parameter — which anyone can post with a value of their own. sanitize()
+     * is the wrong guard for it: a handler's own redirect may legitimately go
+     * to a sibling host, localhost or a login provider, so it lets those
+     * through, and `https://github.com/attacker` passes it. A return address is
+     * always a path here, so nothing that leaves the origin is accepted: no
+     * scheme, no host, no `//`, and none of the bytes a browser rewrites
+     * (`\` read as `/`, ASCII controls and spaces dropped) that turn
+     * `/\evil.com` or `/<TAB>/evil.com` into `//evil.com`.
+     */
+    public static function localPath(string $target, string $fallback = '/'): string
+    {
+        if ($target === '' || $target[0] !== '/' || str_starts_with($target, '//')
+            || preg_match('/[\x00-\x20\x7F\\\\]/', $target) === 1) {
+            return $fallback;
+        }
+
+        return $target;
+    }
+
     public static function sanitize(string $url, string $requestHost): string
     {
         // Before any parsing: a browser drops ASCII controls and reads `\`
