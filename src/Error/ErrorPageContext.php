@@ -27,16 +27,22 @@ final readonly class ErrorPageContext
          * sign-in form on `error.401` that returned there would land a `/uk/...`
          * guest in the default language and lose `?cart=123`.
          */
-        public string $returnTo = '',
+        public string $returnTo = '/',
     ) {}
 
     /**
      * The served path plus the query string of $request: the address the
      * visitor typed or followed, for a link back to it.
+     *
+     * The query is the raw one the server received when it has it. Under
+     * Swoole getQueryString() rebuilds it from the parsed parameters, and
+     * http_build_query() is not the inverse of parsing: `?a=1&a=2` comes back
+     * as `a=2`, `?preview` as `preview=`.
      */
     public static function returnToOf(Request $request): string
     {
-        $query = $request->getQueryString();
+        $raw = $request->server['query_string'] ?? $request->server['QUERY_STRING'] ?? null;
+        $query = is_string($raw) && $raw !== '' ? $raw : $request->getQueryString();
 
         return $request->getServedPath() . ($query !== '' ? '?' . $query : '');
     }
