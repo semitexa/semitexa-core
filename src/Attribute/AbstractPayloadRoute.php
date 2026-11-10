@@ -72,6 +72,18 @@ abstract class AbstractPayloadRoute
          */
         public ?SseGateModel $sseGateModel = null,
         public RouteExposure $exposure = RouteExposure::Public,
+        /**
+         * Why a public route is public, in a sentence, when that is not obvious:
+         * a public page that reads who is signed in (a sign-in page greeting a
+         * returning visitor) or sits on a path that sounds private (/account)
+         * states it here, and lint:mechanisms / lint:access accept it. A page
+         * that only shows a signed-in visitor's things should be
+         * #[AsProtectedPayload] instead; the guard refuses a guest before the
+         * handler runs. Read for #[AsPublicPayload] only.
+         *
+         * Declared LAST, as sseGateModel was, so no positional argument shifts.
+         */
+        public ?string $reason = null,
     ) {
         $this->doc = $doc;
         if ($this->consumes !== null) {
