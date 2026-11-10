@@ -38,8 +38,10 @@ final class PublicPayloadReasonTest extends TestCase
     public function reason_is_the_last_constructor_parameter(): void
     {
         $parameters = (new \ReflectionMethod(AbstractPayloadRoute::class, '__construct'))->getParameters();
+        $last = end($parameters);
+        self::assertInstanceOf(\ReflectionParameter::class, $last, 'the constructor has parameters');
 
-        self::assertSame('reason', $parameters[array_key_last($parameters)]->getName());
+        self::assertSame('reason', $last->getName());
         self::assertSame('doc', $parameters[0]->getName(), 'positional callers keep their order');
     }
 
