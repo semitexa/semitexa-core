@@ -102,7 +102,14 @@ class ResourceResponse implements ResourceInterface, LayoutRenderableInterface
     // Redirect support
     private ?string $redirectUrl = null;
 
-    /** @api */
+    /**
+     * Answer the request with a redirect: the one a handler uses.
+     *
+     * The renderer checks the target (RedirectTarget: an off-site URL falls back
+     * to `/`) and keeps the current locale, then skips rendering.
+     *
+     * @api
+     */
     public function setRedirect(string $url, int $statusCode = HttpStatus::Found->value): self
     {
         $this->redirectUrl = $url;
