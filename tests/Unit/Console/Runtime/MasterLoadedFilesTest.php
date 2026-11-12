@@ -36,32 +36,55 @@ final class MasterLoadedFilesTest extends TestCase
     #[Test]
     public function a_file_the_master_loaded_and_that_changed_since_is_named(): void
     {
-        MasterLoadedFiles::record($this->root, $this->loaded(), 2_000);
+        self::assertTrue(MasterLoadedFiles::record($this->root, $this->loaded(), 2_000));
         self::assertSame([], MasterLoadedFiles::changedSince($this->root), 'nothing changed since the master started');
 
-        touch($this->root . '/src/Handler.php', 3_000);
+        file_put_contents($this->root . '/src/Handler.php', "<?php // edited\n");
 
         self::assertSame([$this->root . '/src/Handler.php'], MasterLoadedFiles::changedSince($this->root));
+    }
+
+    /** Review, core#231: a time in whole seconds misses an edit in the start's second, or a file put back with an old time. */
+    #[Test]
+    public function a_change_is_seen_by_its_contents_whatever_its_time(): void
+    {
+        MasterLoadedFiles::record($this->root, $this->loaded(), 2_000);
+        file_put_contents($this->root . '/src/Handler.php', "<?php // same second\n");
+        touch($this->root . '/src/Handler.php', 2_000);
+        file_put_contents($this->root . '/src/Payload.php', "<?php // restored from an old copy\n");
+        touch($this->root . '/src/Payload.php', 500);
+
+        self::assertSame([$this->root . '/src/Handler.php', $this->root . '/src/Payload.php'], MasterLoadedFiles::changedSince($this->root));
     }
 
     #[Test]
     public function a_removed_file_counts_and_compiled_caches_do_not(): void
     {
         MasterLoadedFiles::record($this->root, $this->loaded(), 2_000);
-        touch($this->root . '/var/cache/compiled.php', 3_000);
+        file_put_contents($this->root . '/var/cache/compiled.php', "<?php // recompiled\n");
         unlink($this->root . '/src/Payload.php');
 
         self::assertSame([$this->root . '/src/Payload.php'], MasterLoadedFiles::changedSince($this->root), 'a cache a reload rebuilds is not in the way');
     }
 
     #[Test]
-    public function with_nothing_recorded_a_reload_is_not_held_back(): void
+    public function no_record_holds_nothing_back_and_an_unreadable_one_is_unknown(): void
     {
-        self::assertSame([], MasterLoadedFiles::changedSince($this->root), 'an older server that wrote no record');
+        self::assertSame([], MasterLoadedFiles::changedSince($this->root), 'a master started before the record existed');
 
         mkdir(dirname($this->root . '/' . MasterLoadedFiles::RELATIVE_PATH), 0o775, true);
         file_put_contents($this->root . '/' . MasterLoadedFiles::RELATIVE_PATH, 'not json');
-        self::assertSame([], MasterLoadedFiles::changedSince($this->root));
+        self::assertNull(MasterLoadedFiles::changedSince($this->root), 'review, core#231: a record that cannot be read is not a clean one');
+    }
+
+    /** Review, core#231: a record that could not be written is said, and leaves nothing that reads as clean. */
+    #[Test]
+    public function a_record_that_cannot_be_written_is_reported(): void
+    {
+        mkdir($this->root . '/var/run/master-loaded-files.json', 0o775, true); // a directory where the file belongs
+
+        self::assertFalse(MasterLoadedFiles::record($this->root, $this->loaded(), 2_000));
+        self::assertNull(MasterLoadedFiles::changedSince($this->root));
     }
 
     /** @return list<string> */

@@ -76,6 +76,11 @@ final class ReloadRuntimeAction
         // A reloaded worker is forked from the master, which already holds these
         // classes as they were: the reload would report success and change nothing.
         $changed = MasterLoadedFiles::changedSince(ProjectRoot::get());
+        if ($changed === null) {
+            $this->io->error('The record of what the server\'s master process loaded (' . MasterLoadedFiles::RELATIVE_PATH . ') cannot be read, so whether a reload would apply your change is unknown. Run server:restart app.');
+
+            return false;
+        }
         if ($changed !== []) {
             $root = rtrim(ProjectRoot::get(), '/') . '/';
             $shown = array_map(static fn (string $f): string => str_starts_with($f, $root) ? substr($f, strlen($root)) : $f, array_slice($changed, 0, 3));
