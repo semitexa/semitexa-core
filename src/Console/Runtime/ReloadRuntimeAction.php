@@ -171,6 +171,7 @@ final class ReloadRuntimeAction
 
     private function findMasterPid(): ?int
     {
+        $this->masterPidfile = null;
         $root = ProjectRoot::get();
 
         foreach ($this->pidfileCandidates() as $path) {
