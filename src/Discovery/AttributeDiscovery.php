@@ -331,14 +331,10 @@ class AttributeDiscovery
                         'consumes' => $attr->consumes,
                         'produces' => $attr->produces,
                         'transport' => $attr->transport,
-                        // SSE gate-model axis (boot guard, see assertSseGateCoherence).
-                        // Read in this same IS_INSTANCEOF pass; threaded through the
-                        // override-merge so the selected route carries it.
+                        // SSE gate-model axis (assertSseGateCoherence); the override-merge carries it to the winner.
                         'sseGateModel' => $attr->sseGateModel,
                         'exposure' => $attr->exposure,
-                        // Multi-profile dispatch metadata. Both fields
-                        // pass through unchanged — RouteExecutor + dispatcher
-                        // consume them at request time.
+                        // Multi-profile dispatch metadata, read at request time by RouteExecutor and the dispatcher.
                         'renderProfile' => $attr->renderProfile,
                         'responsesByProfile' => $attr->responsesByProfile,
                     ],
@@ -347,6 +343,9 @@ class AttributeDiscovery
                 if ($meta['attr']['base'] !== null) {
                     $this->payloadPartRegistry->registerPayloadBase($className, $meta['attr']['base']);
                 }
+            } catch (\InvalidArgumentException $e) {
+                // What the author wrote was refused: a mistake to fix, not a skip (tk-route-attribute-refusal-is-a-skip).
+                $diagnostics->invalidUsage('AttributeDiscovery', "The route attribute on {$className} refused its arguments, so the route is not registered: " . $e->getMessage(), $e);
             } catch (\Throwable $e) {
                 $diagnostics->skip('AttributeDiscovery', "Payload reflection failed for {$className}: " . $e->getMessage(), $e);
             }
