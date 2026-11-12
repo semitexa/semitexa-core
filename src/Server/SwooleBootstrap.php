@@ -429,7 +429,7 @@ class SwooleBootstrap
 
         // What the master holds now, every worker inherits; server:reload reads this.
         if (!\Semitexa\Core\Console\Runtime\MasterLoadedFiles::record(\Semitexa\Core\Support\ProjectRoot::get(), get_included_files(), time())) {
-            error_log('[semitexa] Could not record the files the master loaded; server:reload will refuse until it can (run server:restart app).');
+            \Semitexa\Core\Log\StaticLoggerBridge::warning('server', 'Could not record the files the master loaded; server:reload will refuse until it can (run server:restart app).', []);
         }
         $server->start();
     }
