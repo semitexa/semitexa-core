@@ -73,6 +73,24 @@ final class ReloadRuntimeAction
             return false;
         }
 
+        // A reloaded worker is forked from the master, which already holds these
+        // classes as they were: the reload would report success and change nothing.
+        $changed = MasterLoadedFiles::changedSince(ProjectRoot::get());
+        if ($changed !== []) {
+            $root = rtrim(ProjectRoot::get(), '/') . '/';
+            $shown = array_map(static fn (string $f): string => str_starts_with($f, $root) ? substr($f, strlen($root)) : $f, array_slice($changed, 0, 3));
+            $this->io->error(sprintf(
+                "%d file(s) the server's master process loaded before it started its workers changed since (%s%s). "
+                . 'A reload cannot apply them: every worker is forked from the master and gets those classes as they were. '
+                . 'Run server:restart app.',
+                count($changed),
+                implode(', ', $shown),
+                count($changed) > 3 ? ', …' : '',
+            ));
+
+            return false;
+        }
+
         $this->io->text("<info>[reload]</info> Sending SIGUSR1 to Swoole master (PID {$pid})...");
 
         if (!posix_kill($pid, SIGUSR1)) {

@@ -427,6 +427,8 @@ class SwooleBootstrap
             $workerRecycle->closed($sessionId);
         });
 
+        // What the master holds now, every worker inherits; server:reload reads this.
+        \Semitexa\Core\Console\Runtime\MasterLoadedFiles::record(\Semitexa\Core\Support\ProjectRoot::get(), get_included_files(), time());
         $server->start();
     }
 
