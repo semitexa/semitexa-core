@@ -13,6 +13,7 @@ use Semitexa\Core\Discovery\BootSeverity;
 use Semitexa\Core\Discovery\ClassDiscovery;
 use Semitexa\Core\Discovery\RouteRegistry;
 use Semitexa\Core\ModuleRegistry;
+use Semitexa\Core\Tests\Unit\Discovery\Fixture\AcceptedRoutePayload;
 use Semitexa\Core\Tests\Unit\Discovery\Fixture\RefusedRoutePayload;
 
 /**
@@ -29,7 +30,9 @@ final class RouteAttributeRefusalTest extends TestCase
         $diagnostics = new BootDiagnostics();
         $meta = $this->collect($diagnostics);
 
-        self::assertArrayNotHasKey(RefusedRoutePayload::class, $meta, 'the route is still left out');
+        // Review, core#229: a discovery that dropped every payload would pass an omission check alone.
+        self::assertSame([AcceptedRoutePayload::class], array_keys($meta), 'the refused route is left out, the accepted one kept');
+        self::assertSame('/accepted', $meta[AcceptedRoutePayload::class]['attr']['path']);
         $warnings = $diagnostics->getWarnings();
         self::assertCount(1, $warnings);
         self::assertSame(BootSeverity::InvalidUsage, $warnings[0]->severity);
@@ -45,7 +48,7 @@ final class RouteAttributeRefusalTest extends TestCase
     private function collect(BootDiagnostics $diagnostics): array
     {
         $classes = $this->createStub(ClassDiscovery::class);
-        $classes->method('findClassesWithAttributeInstanceof')->willReturn([RefusedRoutePayload::class]);
+        $classes->method('findClassesWithAttributeInstanceof')->willReturn([AcceptedRoutePayload::class, RefusedRoutePayload::class]);
         $modules = $this->createStub(ModuleRegistry::class);
         $modules->method('isClassActive')->willReturn(true);
         $discovery = new AttributeDiscovery($classes, $modules, $this->createStub(RouteRegistry::class));
