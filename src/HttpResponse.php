@@ -77,6 +77,12 @@ readonly class HttpResponse implements ResourceInterface
         ], HttpStatus::NotFound->value);
     }
 
+    /**
+     * A raw redirect, Location as given; a handler uses ResourceResponse::setRedirect().
+     *
+     * The renderer checks setRedirect()'s target before it builds this one
+     * (tk-ask-api-search-truncates-silently).
+     */
     public static function redirect(string $url, int $statusCode = HttpStatus::Found->value): self
     {
         return new self(
