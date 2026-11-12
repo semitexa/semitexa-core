@@ -9,6 +9,9 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 
 final class ReloadRuntimeAction
 {
+    /** The pidfile the master's PID came from: its time is when that master started. */
+    private ?string $masterPidfile = null;
+
     public function __construct(private readonly SymfonyStyle $io) {}
 
     /** No pidfile at all: there is nothing running, and nothing to reload. */
@@ -70,6 +73,32 @@ final class ReloadRuntimeAction
 
         if (!defined('SIGUSR1')) {
             $this->io->error('SIGUSR1 signal is unavailable; server reload requires the PCNTL extension.');
+            return false;
+        }
+
+        // A reloaded worker is forked from the master, which already holds these
+        // classes as they were: the reload would report success and change nothing.
+        // The start time comes from the pidfile that named this master (review, core#231):
+        // an older build wrote another one. Without it, a previous master's record could pass.
+        $startedAt = $this->masterPidfile !== null ? (@filemtime($this->masterPidfile) ?: null) : null;
+        $changed = $startedAt === null ? null : MasterLoadedFiles::changedSince(ProjectRoot::get(), $startedAt);
+        if ($changed === null) {
+            $this->io->error('There is no readable record of the PHP files this server\'s master process loaded (' . MasterLoadedFiles::RELATIVE_PATH . '): it started before reload could check, or the record is missing or stale. Whether a reload would apply your change is unknown. Run server:restart app.');
+
+            return false;
+        }
+        if ($changed !== []) {
+            $root = rtrim(ProjectRoot::get(), '/') . '/';
+            $shown = array_map(static fn (string $f): string => str_starts_with($f, $root) ? substr($f, strlen($root)) : $f, array_slice($changed, 0, 3));
+            $this->io->error(sprintf(
+                "%d PHP file(s) the server's master process loaded before it started its workers changed since (%s%s). "
+                . 'A reload cannot apply them: every worker is forked from the master and gets that code as it was. '
+                . 'Run server:restart app.',
+                count($changed),
+                implode(', ', $shown),
+                count($changed) > 3 ? ', …' : '',
+            ));
+
             return false;
         }
 
@@ -142,6 +171,7 @@ final class ReloadRuntimeAction
 
     private function findMasterPid(): ?int
     {
+        $this->masterPidfile = null;
         $root = ProjectRoot::get();
 
         foreach ($this->pidfileCandidates() as $path) {
@@ -153,6 +183,7 @@ final class ReloadRuntimeAction
 
                 $pid = (int) trim($pidRaw);
                 if ($pid > 0 && RuntimePidfile::verifyProcess($pid, $root)) {
+                    $this->masterPidfile = $path;
                     return $pid;
                 }
             }

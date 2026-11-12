@@ -16,17 +16,20 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 /**
  * Lifecycle: clear cache → reload → verify
  *
- * Does NOT rebuild autoload or recreate containers.
- * Only safe for code changes inside existing files.
- * For new/renamed/deleted classes or .env changes, use server:restart.
+ * Does NOT rebuild autoload or recreate containers. Workers are forked from the
+ * master, which loads the discovered classes (payloads, handlers, resources) before
+ * it starts them, so a reload applies templates and caches, not a change to that
+ * code or its attributes: for those, and for new classes or .env changes,
+ * server:restart app. It refuses when a file the master loaded has changed
+ * (MasterLoadedFiles, tk-server-reload-keeps-route-access).
  */
-#[AsCommand(name: 'server:reload', description: 'Gracefully reload Swoole workers (fast, code-only, no env refresh)')]
+#[AsCommand(name: 'server:reload', description: 'Gracefully reload Swoole workers: templates and caches; a code or attribute change needs server:restart app')]
 class ServerReloadCommand extends Command
 {
     protected function configure(): void
     {
         $this->setName('server:reload')
-            ->setDescription('Gracefully reload Swoole workers (fast, code-only, no env refresh)');
+            ->setDescription('Gracefully reload Swoole workers: templates and caches; a code or attribute change needs server:restart app');
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
