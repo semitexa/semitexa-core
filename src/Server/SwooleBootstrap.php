@@ -97,6 +97,7 @@ class SwooleBootstrap
 
     public static function run(): void
     {
+        $bootStartedAt = time(); // MasterLoadedFiles: a file touched after this may not be what the master loaded
         // Hook all blocking PHP functions (PDO, streams, file I/O, sleep, etc.)
         // so they yield to other coroutines instead of blocking the worker.
         // Must be called before Server creation.
@@ -428,7 +429,7 @@ class SwooleBootstrap
         });
 
         // What the master holds now, every worker inherits; server:reload reads this.
-        if (!\Semitexa\Core\Console\Runtime\MasterLoadedFiles::record(\Semitexa\Core\Support\ProjectRoot::get(), get_included_files(), time())) {
+        if (!\Semitexa\Core\Console\Runtime\MasterLoadedFiles::record(\Semitexa\Core\Support\ProjectRoot::get(), get_included_files(), time(), $bootStartedAt)) {
             \Semitexa\Core\Log\StaticLoggerBridge::warning('server', 'Could not record the files the master loaded; server:reload will refuse until it can (run server:restart app).', []);
         }
         $server->start();

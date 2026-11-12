@@ -57,6 +57,18 @@ final class MasterLoadedFilesTest extends TestCase
         self::assertSame([$this->root . '/src/Handler.php', $this->root . '/src/Payload.php'], MasterLoadedFiles::changedSince($this->root));
     }
 
+    /** Review, core#231: an edit during the boot, after the master loaded the file, is not taken for what it holds. */
+    #[Test]
+    public function a_file_touched_while_the_master_booted_is_never_taken_as_unchanged(): void
+    {
+        file_put_contents($this->root . '/src/Handler.php', "<?php // edited after it was loaded\n");
+        touch($this->root . '/src/Handler.php', 1_500);
+
+        MasterLoadedFiles::record($this->root, $this->loaded(), 2_000, bootStartedAt: 1_500);
+
+        self::assertSame([$this->root . '/src/Handler.php'], MasterLoadedFiles::changedSince($this->root), 'the disk is not proof of what the master holds');
+    }
+
     #[Test]
     public function a_removed_file_counts_and_compiled_caches_do_not(): void
     {

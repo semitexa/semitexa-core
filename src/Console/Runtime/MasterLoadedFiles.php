@@ -30,10 +30,16 @@ final class MasterLoadedFiles
      * its contents, not a time: a change in the same second as the start, or a
      * file put back with an older time, is a change all the same (review, core#231).
      *
+     * A file touched since the boot began may have been edited after the master
+     * loaded it, so its contents on disk are not proof of what the master holds:
+     * it is recorded with no hash, which every reload reads as changed (review,
+     * core#231). Times are whole seconds, so "since" includes the boot's own second.
+     *
      * @param list<string> $files get_included_files()
+     * @param int $bootStartedAt when the master's boot began, before it loaded anything of the application
      * @return bool false when the record could not be written: a reload then refuses
      */
-    public static function record(string $projectRoot, array $files, int $at): bool
+    public static function record(string $projectRoot, array $files, int $at, ?int $bootStartedAt = null): bool
     {
         $root = rtrim($projectRoot, '/') . '/';
         $kept = [];
@@ -42,7 +48,10 @@ final class MasterLoadedFiles
             if (str_starts_with($file, $root . 'var/')) {
                 continue;
             }
-            $hash = @hash_file(self::HASH, $file);
+            clearstatcache(true, $file);
+            $mtime = @filemtime($file);
+            $touchedDuringBoot = $bootStartedAt !== null && ($mtime === false || $mtime >= $bootStartedAt);
+            $hash = $touchedDuringBoot ? false : @hash_file(self::HASH, $file);
             $kept[$file] = is_string($hash) ? $hash : '';
         }
         $path = $root . self::RELATIVE_PATH;
