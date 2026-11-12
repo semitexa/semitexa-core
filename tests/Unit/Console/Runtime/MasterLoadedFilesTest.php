@@ -80,9 +80,9 @@ final class MasterLoadedFilesTest extends TestCase
     }
 
     #[Test]
-    public function no_record_holds_nothing_back_and_an_unreadable_one_is_unknown(): void
+    public function no_record_or_an_unreadable_one_is_unknown(): void
     {
-        self::assertSame([], MasterLoadedFiles::changedSince($this->root), 'a master started before the record existed');
+        self::assertNull(MasterLoadedFiles::changedSince($this->root), 'Fable review, core#231: a master started before the record existed may hold code since updated');
 
         mkdir(dirname($this->root . '/' . MasterLoadedFiles::RELATIVE_PATH), 0o775, true);
         file_put_contents($this->root . '/' . MasterLoadedFiles::RELATIVE_PATH, 'not json');
@@ -97,6 +97,15 @@ final class MasterLoadedFilesTest extends TestCase
 
         self::assertFalse(MasterLoadedFiles::record($this->root, $this->loaded(), 2_000));
         self::assertNull(MasterLoadedFiles::changedSince($this->root));
+    }
+
+    #[Test]
+    public function a_previous_masters_record_is_not_this_ones(): void
+    {
+        MasterLoadedFiles::record($this->root, $this->loaded(), 2_000);
+
+        self::assertSame([], MasterLoadedFiles::changedSince($this->root, masterStartedAt: 2_030), 'written just before this master forked');
+        self::assertNull(MasterLoadedFiles::changedSince($this->root, masterStartedAt: 9_000), 'left by an earlier boot');
     }
 
     /** @return list<string> */

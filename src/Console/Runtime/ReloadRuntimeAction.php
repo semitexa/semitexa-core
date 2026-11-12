@@ -75,9 +75,11 @@ final class ReloadRuntimeAction
 
         // A reloaded worker is forked from the master, which already holds these
         // classes as they were: the reload would report success and change nothing.
-        $changed = MasterLoadedFiles::changedSince(ProjectRoot::get());
+        $pidfile = ProjectRoot::get() . '/var/run/semitexa.pid';
+        $startedAt = is_file($pidfile) ? (filemtime($pidfile) ?: null) : null;
+        $changed = MasterLoadedFiles::changedSince(ProjectRoot::get(), $startedAt);
         if ($changed === null) {
-            $this->io->error('The record of what the server\'s master process loaded (' . MasterLoadedFiles::RELATIVE_PATH . ') cannot be read, so whether a reload would apply your change is unknown. Run server:restart app.');
+            $this->io->error('There is no readable record of the PHP files this server\'s master process loaded (' . MasterLoadedFiles::RELATIVE_PATH . '): it started before reload could check, or the record is missing or stale. Whether a reload would apply your change is unknown. Run server:restart app.');
 
             return false;
         }
@@ -85,8 +87,8 @@ final class ReloadRuntimeAction
             $root = rtrim(ProjectRoot::get(), '/') . '/';
             $shown = array_map(static fn (string $f): string => str_starts_with($f, $root) ? substr($f, strlen($root)) : $f, array_slice($changed, 0, 3));
             $this->io->error(sprintf(
-                "%d file(s) the server's master process loaded before it started its workers changed since (%s%s). "
-                . 'A reload cannot apply them: every worker is forked from the master and gets those classes as they were. '
+                "%d PHP file(s) the server's master process loaded before it started its workers changed since (%s%s). "
+                . 'A reload cannot apply them: every worker is forked from the master and gets that code as it was. '
                 . 'Run server:restart app.',
                 count($changed),
                 implode(', ', $shown),

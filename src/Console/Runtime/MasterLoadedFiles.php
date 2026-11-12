@@ -71,22 +71,29 @@ final class MasterLoadedFiles
 
     /**
      * The master-loaded files whose contents changed, or that are gone, since the
-     * master started: a reload cannot apply any of them. Empty when no master
-     * left a record at all (one started before this existed). Null when a record
-     * is there but cannot be read: whether a reload would work is then unknown,
-     * and the caller refuses rather than reports a success it cannot vouch for.
+     * master started: a reload cannot apply any of them. Null when that cannot be
+     * known: no record (a master started before this existed, or the record was
+     * removed), one that cannot be read, or one older than the running master (a
+     * previous master's, left when this one could not write its own). The caller
+     * then refuses rather than reports a success it cannot vouch for (Fable review,
+     * core#231: a missing record failing open was the very bug, after an update).
      *
+     * @param int|null $masterStartedAt when the running master started (its pidfile's time)
      * @return list<string>|null
      */
-    public static function changedSince(string $projectRoot): ?array
+    public static function changedSince(string $projectRoot, ?int $masterStartedAt = null): ?array
     {
         $path = rtrim($projectRoot, '/') . '/' . self::RELATIVE_PATH;
         if (!file_exists($path)) {
-            return [];
+            return null;
         }
         $raw = @file_get_contents($path);
         $record = is_string($raw) ? json_decode($raw, true) : null;
-        if (!is_array($record) || !is_array($record['files'] ?? null)) {
+        if (!is_array($record) || !is_array($record['files'] ?? null) || !is_int($record['at'] ?? null)) {
+            return null;
+        }
+        // Written just before start(); a minute's slack for a slow fork, not for another boot.
+        if ($masterStartedAt !== null && $record['at'] < $masterStartedAt - 60) {
             return null;
         }
 
