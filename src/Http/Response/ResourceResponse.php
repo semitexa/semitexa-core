@@ -108,9 +108,10 @@ class ResourceResponse implements ResourceInterface, LayoutRenderableInterface
      * The renderer checks the target with RedirectTarget::sanitize(): a URL on
      * another host falls back to `/` unless that host is this one, a sibling of
      * the same site, localhost, or a login provider such as github.com. It keeps
-     * the current locale, then skips rendering. A return address that comes from
-     * the request (a `?next=`, a hidden field) goes through
-     * RedirectTarget::localPath() first, which accepts a path on this origin only.
+     * the current locale, then skips rendering. setRedirect() itself checks
+     * nothing: a handler that redirects to a return address from the request
+     * (a `?next=`, a hidden field) must pass it through RedirectTarget::localPath()
+     * first, which accepts a path on this origin only.
      *
      * @api
      */
