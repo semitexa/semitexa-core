@@ -6,6 +6,11 @@ namespace Semitexa\Core\Resource\Attribute;
 
 use Attribute;
 
+/**
+ * A property holding a list of resource objects of the target class.
+ *
+ * @api
+ */
 #[Attribute(Attribute::TARGET_PROPERTY)]
 final class ResourceListOf
 {
