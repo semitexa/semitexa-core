@@ -4,6 +4,11 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Auth;
 
+/**
+ * Who the current request acts as: the authenticated user, or a guest.
+ *
+ * @api
+ */
 interface AuthContextInterface
 {
     public function getUser(): ?AuthenticatableInterface;

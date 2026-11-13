@@ -44,6 +44,7 @@ final class ApiSurfaceTest extends TestCase
             'Semitexa\Core\Attribute\SatisfiesServiceContract',
             'Semitexa\Core\Attribute\TransportType',
             'Semitexa\Core\Attribute\WatchScopes',
+            'Semitexa\Core\Auth\AuthContextInterface',
             'Semitexa\Core\Auth\AuthenticatableInterface',
             'Semitexa\Core\Console\BaseCommand',
             'Semitexa\Core\Contract\DoctorCheckInterface',
@@ -52,7 +53,12 @@ final class ApiSurfaceTest extends TestCase
             'Semitexa\Core\Contract\TypedHandlerInterface',
             'Semitexa\Core\Contract\ValidatablePayloadInterface',
             'Semitexa\Core\Contract\WorkerProcessSourceInterface',
+            'Semitexa\Core\Event\EventDispatcherInterface',
+            'Semitexa\Core\Exception\AccessDeniedException',
             'Semitexa\Core\Exception\DomainException',
+            'Semitexa\Core\Exception\NotFoundException',
+            'Semitexa\Core\Exception\ValidationException',
+            'Semitexa\Core\Http\HttpStatus',
             'Semitexa\Core\Http\Response\ResourceResponse::getContent()',
             'Semitexa\Core\Http\Response\ResourceResponse::getContext()',
             'Semitexa\Core\Http\Response\ResourceResponse::getHeaders()',
@@ -70,6 +76,7 @@ final class ApiSurfaceTest extends TestCase
             'Semitexa\Core\Resource\JsonResourceResponse::withResources()',
             'Semitexa\Core\Resource\ResourceObjectInterface',
             'Semitexa\Core\Server\Lifecycle\ServerLifecycleListenerInterface',
+            'Semitexa\Core\Session\SessionInterface',
         ], self::marked(dirname(__DIR__, 3) . '/src'));
     }
 

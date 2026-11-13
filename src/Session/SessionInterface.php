@@ -6,6 +6,8 @@ namespace Semitexa\Core\Session;
 
 /**
  * Session contract. Prefer typed access via session payloads (getPayload/setPayload).
+ *
+ * @api
  */
 interface SessionInterface
 {
