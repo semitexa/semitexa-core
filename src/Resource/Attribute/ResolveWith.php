@@ -23,6 +23,8 @@ use Attribute;
  * `Semitexa\Core\Resource\RelationResolverInterface`, is registered as
  * a `#[AsService]`, and that `#[ResolveWith]` is only used on relation
  * fields (`#[ResourceRef]`, `#[ResourceRefList]`, `#[ResourceUnion]`).
+ *
+ * @api
  */
 #[Attribute(Attribute::TARGET_PROPERTY)]
 final class ResolveWith
