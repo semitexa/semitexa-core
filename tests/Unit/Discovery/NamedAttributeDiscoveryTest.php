@@ -15,8 +15,9 @@ use Semitexa\Core\Support\ProjectRoot;
  * server:reload cannot change it.
  *
  * A project of its own (review, core#232): two listeners, one naming its attribute in lower case
- * (PHP matches attribute names case-insensitively), and a handler that must stay unread. Neither is
- * Composer's to autoload, like a module under src/modules. Each scan runs in a fresh PHP process.
+ * (PHP matches attribute names case-insensitively), and a handler that must stay unread. Composer
+ * learns their files from the classmap ClassDiscovery hands it, so the require_once path for a
+ * module Composer does not know is not what this checks. Each scan runs in a fresh PHP process.
  */
 final class NamedAttributeDiscoveryTest extends TestCase
 {

@@ -25,10 +25,10 @@ final class ContainerBuildProbe
         );
         // Errors to stdout, and stderr into a file read after the build: one pipe, so no deadlock,
         // and what a build writes to STDERR is kept (review, core#232).
+        // No temp file (a full or read-only /tmp) loses only what a failed build writes to STDERR;
+        // it must not refuse a server whose container builds (Fable's review, core#232).
         $stderr = tempnam(sys_get_temp_dir(), 'semitexa-build-probe-');
-        if ($stderr === false) {
-            return 'could not create a file for the build output';
-        }
+        $stderr = $stderr === false ? '/dev/null' : $stderr;
         $process = proc_open(
             [PHP_BINARY, '-d', 'display_errors=stdout', '-d', 'log_errors=0', '-r', $script],
             [1 => ['pipe', 'w'], 2 => ['file', $stderr, 'w']],
@@ -36,15 +36,19 @@ final class ContainerBuildProbe
             $projectRoot,
         );
         if (!is_resource($process)) {
-            @unlink($stderr);
+            if ($stderr !== '/dev/null') {
+                @unlink($stderr);
+            }
 
             return 'could not start a PHP process to build the container';
         }
         $output = (string) stream_get_contents($pipes[1]);
         fclose($pipes[1]);
         $code = proc_close($process);
-        $output .= (string) @file_get_contents($stderr);
-        @unlink($stderr);
+        if ($stderr !== '/dev/null') {
+            $output .= (string) @file_get_contents($stderr);
+            @unlink($stderr);
+        }
         if ($code === 0) {
             return null;
         }
