@@ -17,6 +17,8 @@ use Attribute;
  * The signature does not cover the method: a link handed out for a GET was
  * also good for a POST or DELETE to the same route. Only $methods are let
  * through (GET and HEAD unless the route says otherwise).
+ *
+ * @api
  */
 #[Attribute(Attribute::TARGET_CLASS)]
 final readonly class RequiresSignedUrl

@@ -17,6 +17,8 @@ use Attribute;
  * The declaration is the flag's default and its documentation; an operator
  * overrides it per site or per user (`feature:enable`). A flag nobody declared
  * is off.
+ *
+ * @api
  */
 #[Attribute(Attribute::TARGET_CLASS | Attribute::IS_REPEATABLE)]
 final readonly class AsFeatureFlag

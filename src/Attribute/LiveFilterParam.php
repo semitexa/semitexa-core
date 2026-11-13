@@ -34,6 +34,8 @@ use Attribute;
  * PROMOTED constructor parameter (which also becomes a property) — both are
  * detected. A non-promoted constructor parameter is NOT a property and is NOT
  * detected; declare filter fields as properties (promoted or plain).
+ *
+ * @api
  */
 #[Attribute(Attribute::TARGET_PROPERTY | Attribute::TARGET_PARAMETER)]
 final class LiveFilterParam
