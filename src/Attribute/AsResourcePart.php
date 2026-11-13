@@ -11,6 +11,8 @@ use Attribute;
  *
  * Modules can provide resource parts that will be composed into the DTO instance
  * at runtime via dynamic class composition (eval'd wrapper class).
+ *
+ * @api
  */
 #[Attribute(Attribute::TARGET_CLASS)]
 class AsResourcePart

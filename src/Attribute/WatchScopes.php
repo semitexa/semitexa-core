@@ -34,6 +34,8 @@ use Attribute;
  * Lives in semitexa-core so both readers — semitexa-ssr (subscription
  * resolution) and semitexa-api (contract projection) — reach it without an
  * api↔ssr cross-dependency.
+ *
+ * @api
  */
 #[Attribute(Attribute::TARGET_CLASS)]
 final class WatchScopes

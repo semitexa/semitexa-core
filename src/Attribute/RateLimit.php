@@ -14,6 +14,8 @@ use Semitexa\Core\RateLimit\RateLimitKey;
  * Repeatable: `#[RateLimit(10, 60)] #[RateLimit(100, 3600)]` holds both.
  * The window slides (the previous window's count fades out as the current one
  * fills), so a burst at a window's edge cannot pass twice the limit.
+ *
+ * @api
  */
 #[Attribute(Attribute::TARGET_CLASS | Attribute::IS_REPEATABLE)]
 final readonly class RateLimit

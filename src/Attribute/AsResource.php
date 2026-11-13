@@ -12,6 +12,8 @@ use Attribute;
  * All parameters are matched by name; order in source does not matter.
  * Single positional value (e.g. #[AsResource('about')]) sets handle.
  *
+ *
+ * @api
  */
 #[Attribute(Attribute::TARGET_CLASS)]
 class AsResource
