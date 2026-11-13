@@ -16,20 +16,21 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 /**
  * Lifecycle: clear cache → reload → verify
  *
- * Does NOT rebuild autoload or recreate containers. Workers are forked from the
- * master, which loads the discovered classes (payloads, handlers, resources) before
- * it starts them, so a reload applies templates and caches, not a change to that
- * code or its attributes: for those, and for new classes or .env changes,
- * server:restart app. It refuses when a file the master loaded has changed
- * (MasterLoadedFiles, tk-server-reload-keeps-route-access).
+ * Does NOT rebuild autoload. Workers are forked from the master, which since
+ * tk-master-loads-no-app-classes loads no payload, handler or resource: each worker
+ * builds its own container, so a reload applies a change to application code and its
+ * attributes as well as templates and caches (measured 13.11: a route path changed in
+ * a payload attribute answered after a reload). What the master itself loaded, the
+ * framework's bootstrap and the lifecycle listeners, a reload cannot change: it
+ * refuses, naming the file, and server:restart app applies it (MasterLoadedFiles).
  */
-#[AsCommand(name: 'server:reload', description: 'Gracefully reload Swoole workers: templates and caches; a code or attribute change needs server:restart app')]
+#[AsCommand(name: 'server:reload', description: 'Gracefully reload Swoole workers: application code and attributes, templates and caches; refuses when a file the master loaded changed')]
 class ServerReloadCommand extends Command
 {
     protected function configure(): void
     {
         $this->setName('server:reload')
-            ->setDescription('Gracefully reload Swoole workers: templates and caches; a code or attribute change needs server:restart app');
+            ->setDescription('Gracefully reload Swoole workers: application code and attributes, templates and caches; refuses when a file the master loaded changed');
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
