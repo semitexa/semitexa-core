@@ -49,15 +49,13 @@ readonly class Request
         public bool $strictHydration = false,
     ) {}
 
-    /**
-     * Create Request using Factory (recommended)
-     */
+    /** Create Request using Factory (recommended) */
     public static function create(mixed $source = null): self
     {
         return RequestFactory::create($source);
     }
 
-
+    /** @api */
     public function getMethod(): string
     {
         return $this->method;
@@ -68,6 +66,7 @@ readonly class Request
         return $this->uri;
     }
 
+    /** @api */
     public function getPath(): string
     {
         return RequestTarget::path($this->uri) ?? '/';
@@ -158,14 +157,13 @@ readonly class Request
         );
     }
 
+    /** @api */
     public function getHeader(string $name): ?string
     {
-        // Try exact match first
-        if (isset($this->headers[$name])) {
+        if (isset($this->headers[$name])) { // exact match first, then case-insensitive
             return $this->headers[$name];
         }
 
-        // Try case-insensitive match
         $nameLower = strtolower($name);
         foreach ($this->headers as $key => $value) {
             if (strtolower($key) === $nameLower) {
@@ -176,6 +174,7 @@ readonly class Request
         return null;
     }
 
+    /** @api */
     public function getHost(): string
     {
         $hostHeader = trim($this->getHeader('Host') ?? '');
@@ -201,6 +200,7 @@ readonly class Request
         return '';
     }
 
+    /** @api */
     public function getScheme(): string
     {
         $schemeHeader = trim($this->getHeader('X-Forwarded-Proto') ?? '');
@@ -301,7 +301,7 @@ readonly class Request
         return TrustedProxies::isUsableEntry($entry);
     }
 
-
+    /** @api */
     public function getQuery(string $key, string $default = ''): string
     {
         $value = $this->query[$key] ?? null;
@@ -353,6 +353,7 @@ readonly class Request
         return $this->cookies[$key] ?? $default;
     }
 
+    /** @api */
     public function getContent(): ?string
     {
         return $this->content;
@@ -404,7 +405,6 @@ readonly class Request
 
     /**
      * Get parsed JSON body as array (object → assoc, array → list).
-     *
      * @return array<int|string, mixed>|null
      */
     public function getJsonBody(): ?array
