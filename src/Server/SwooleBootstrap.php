@@ -18,6 +18,7 @@ use Semitexa\Core\Console\Runtime\RuntimePidfile;
 use Semitexa\Core\Request;
 use Semitexa\Core\HttpResponse;
 use Semitexa\Core\Discovery\ClassDiscovery;
+use Semitexa\Core\Discovery\NamedAttributeDiscovery;
 use Semitexa\Core\Server\Lifecycle\ServerLifecycleContext;
 use Semitexa\Core\Server\Lifecycle\ServerBootstrapState;
 use Semitexa\Core\Server\Lifecycle\ServerLifecycleInvoker;
@@ -98,6 +99,14 @@ class SwooleBootstrap
     public static function run(): void
     {
         $bootStartedAt = time(); // MasterLoadedFiles: a file touched after this may not be what the master loaded
+        // Every worker builds its own container: one that cannot build fails the start here, not in
+        // a respawn loop of workers (Fable's review of tk-master-loads-no-app-classes). Before the
+        // hooks below: a hooked proc_open needs a coroutine.
+        $buildFailure = ContainerBuildProbe::failure(\Semitexa\Core\Support\ProjectRoot::get());
+        if ($buildFailure !== null) {
+            fwrite(STDERR, "The container does not build, so no worker could start:\n{$buildFailure}\n");
+            exit(1);
+        }
         // Hook all blocking PHP functions (PDO, streams, file I/O, sleep, etc.)
         // so they yield to other coroutines instead of blocking the worker.
         // Must be called before Server creation.
@@ -144,11 +153,14 @@ class SwooleBootstrap
         $hstsHeader = StrictTransportSecurity::headerValue();
         $healthHandler = new HealthCheckHandler();
         $metricsHandler = new MetricsHandler($server);
-        /** @var ModuleRegistry $moduleRegistry */
-        $moduleRegistry = ContainerFactory::get()->get(ModuleRegistry::class);
+        // The master builds no container and loads no application class: whatever it loads, every
+        // worker inherits through the fork, and server:reload (which only respawns workers) could
+        // never change it (tk-master-loads-no-app-classes). Each worker builds its own container.
+        $moduleRegistry = new ModuleRegistry();
+        $moduleRegistry->initialize();
         $staticAssetHandler = new StaticAssetHandler($moduleRegistry);
         $bootstrapState = new ServerBootstrapState();
-        $lifecycleRegistry = new ServerLifecycleRegistry(new ClassDiscovery());
+        $lifecycleRegistry = new ServerLifecycleRegistry(new NamedAttributeDiscovery());
         $lifecycleInvoker = new ServerLifecycleInvoker($lifecycleRegistry);
         $bootstrapContext = new ServerLifecycleContext(
             server: $server,
@@ -157,6 +169,9 @@ class SwooleBootstrap
             bootstrapState: $bootstrapState,
         );
         $lifecycleInvoker->invokePhase(ServerLifecyclePhase::PreStart, $bootstrapContext, false);
+        // The class map the master walked stays here: each worker walks the tree again, so a class
+        // added since the master started is found after server:reload.
+        ClassDiscovery::resetSharedCache();
 
         $bootGate = new WorkerBootGate();
 
@@ -174,6 +189,8 @@ class SwooleBootstrap
                     workerId: $workerId,
                     environment: $workerEnv,
                     bootstrapState: $bootstrapState,
+                    // The master builds no container: this is the worker's own, built here, and
+                    // create() below returns the same one.
                     container: ContainerFactory::get(),
                     recentWorkerCrashes: $crashLoopBreaker->crashCount($workerId, time()),
                 );
