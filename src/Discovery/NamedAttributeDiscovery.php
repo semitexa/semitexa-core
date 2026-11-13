@@ -36,7 +36,8 @@ final class NamedAttributeDiscovery extends ClassDiscovery
         $classes = [];
         foreach ($this->getClassMap() as $class => $file) {
             $source = is_file($file) ? file_get_contents($file) : false;
-            if ($source === false || !str_contains($source, $name)) {
+            // Case-insensitive, as PHP matches attribute names (review, core#232).
+            if ($source === false || stripos($source, $name) === false) {
                 continue;
             }
             try {

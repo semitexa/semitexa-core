@@ -23,19 +23,28 @@ final class ContainerBuildProbe
             'require %s; \Semitexa\Core\Container\ContainerFactory::create();',
             var_export($projectRoot . '/vendor/autoload.php', true),
         );
-        // What a failed build prints goes to the one pipe read: errors to stdout, stderr dropped.
+        // Errors to stdout, and stderr into a file read after the build: one pipe, so no deadlock,
+        // and what a build writes to STDERR is kept (review, core#232).
+        $stderr = tempnam(sys_get_temp_dir(), 'semitexa-build-probe-');
+        if ($stderr === false) {
+            return 'could not create a file for the build output';
+        }
         $process = proc_open(
             [PHP_BINARY, '-d', 'display_errors=stdout', '-d', 'log_errors=0', '-r', $script],
-            [1 => ['pipe', 'w'], 2 => ['file', '/dev/null', 'w']],
+            [1 => ['pipe', 'w'], 2 => ['file', $stderr, 'w']],
             $pipes,
             $projectRoot,
         );
         if (!is_resource($process)) {
+            @unlink($stderr);
+
             return 'could not start a PHP process to build the container';
         }
         $output = (string) stream_get_contents($pipes[1]);
         fclose($pipes[1]);
         $code = proc_close($process);
+        $output .= (string) @file_get_contents($stderr);
+        @unlink($stderr);
         if ($code === 0) {
             return null;
         }

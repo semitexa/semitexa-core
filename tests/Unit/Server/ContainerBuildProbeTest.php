@@ -35,6 +35,15 @@ final class ContainerBuildProbeTest extends TestCase
         self::assertStringContainsString('two services claim PaymentGatewayInterface', (string) ContainerBuildProbe::failure($this->root));
     }
 
+    /** Review, core#232: what a build writes to STDERR is part of the report. */
+    #[Test]
+    public function what_a_failed_build_writes_to_stderr_is_reported(): void
+    {
+        file_put_contents($this->root . '/vendor/autoload.php', "<?php\nfwrite(STDERR, 'Missing configuration: DB_HOST');\nexit(1);\n");
+
+        self::assertStringContainsString('Missing configuration: DB_HOST', (string) ContainerBuildProbe::failure($this->root));
+    }
+
     #[Test]
     public function a_build_that_completes_is_no_failure(): void
     {
