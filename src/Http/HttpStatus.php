@@ -4,6 +4,11 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Http;
 
+/**
+ * HTTP status codes by name.
+ *
+ * @api
+ */
 enum HttpStatus: int
 {
     // 2xx Success

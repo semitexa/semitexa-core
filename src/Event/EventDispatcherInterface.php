@@ -6,6 +6,8 @@ namespace Semitexa\Core\Event;
 
 /**
  * Contract for event dispatch. Implementations are registered via #[AsServiceContract(of: EventDispatcherInterface::class)].
+ *
+ * @api
  */
 interface EventDispatcherInterface
 {

@@ -6,6 +6,11 @@ namespace Semitexa\Core\Exception;
 
 use Semitexa\Core\Http\HttpStatus;
 
+/**
+ * A payload or input that fails validation; answered as 422.
+ *
+ * @api
+ */
 class ValidationException extends DomainException
 {
     /**
