@@ -16,8 +16,10 @@ use Semitexa\Core\Attribute\InjectAsFactory;
 use Semitexa\Core\Attribute\InjectAsMutable;
 use Semitexa\Core\Attribute\SatisfiesServiceContract;
 use Semitexa\Core\Attribute\SatisfiesRepositoryContract;
+use Semitexa\Core\Container\ExecutionContextAwareContainerInterface;
 use Semitexa\Core\Discovery\AttributeDiscovery;
 use Semitexa\Core\Discovery\ClassDiscovery;
+use Psr\Container\ContainerInterface;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Style\SymfonyStyle;
@@ -28,7 +30,9 @@ use Symfony\Component\Console\Style\SymfonyStyle;
  *   themselves are allowed, just not as a DI channel);
  * - no static container access;
  * - injected properties are protected;
- * - #[Config] on scalars only, #[InjectAs*] on class types only.
+ * - #[Config] on scalars only, #[InjectAs*] on class types only;
+ * - #[InjectAsReadonly] never on an execution-scoped type, here and on commands,
+ *   the edge objects PropertyInjector fills (tk-inject-from-context-attr).
  */
 #[AsCommand(name: 'lint:di', description: 'Verify DI injection rules on all container-managed classes')]
 final class LintDiCommand extends BaseCommand
@@ -41,6 +45,9 @@ final class LintDiCommand extends BaseCommand
 
     #[InjectAsReadonly]
     protected AttributeDiscovery $attributeDiscovery;
+
+    #[InjectAsReadonly]
+    protected ContainerInterface $container;
 
     private const CONTAINER_MANAGED_ATTRIBUTES = [
         AsService::class,
@@ -146,6 +153,11 @@ final class LintDiCommand extends BaseCommand
                     }
                 }
 
+                $scoped = $this->readonlyInjectionOfExecutionScoped($class, $prop);
+                if ($scoped !== null) {
+                    $errors[] = $scoped;
+                }
+
                 // #[InjectAs*] type check
                 if ($hasInject) {
                     if ($type instanceof \ReflectionNamedType) {
@@ -160,6 +172,23 @@ final class LintDiCommand extends BaseCommand
             }
         }
 
+        // Commands are not container-managed: PropertyInjector fills their
+        // #[InjectAsReadonly] properties, and refuses an execution-scoped type
+        // only when the command first runs. Only that rule applies to them; the
+        // Symfony constructor they inherit takes a name.
+        foreach ($this->classDiscovery->findClassesWithAttribute(AsCommand::class) as $command) {
+            if (isset($classes[$command]) || !class_exists($command)) {
+                continue;
+            }
+            $classesChecked++;
+            foreach ((new \ReflectionClass($command))->getProperties() as $prop) {
+                $scoped = $this->readonlyInjectionOfExecutionScoped($command, $prop);
+                if ($scoped !== null) {
+                    $errors[] = $scoped;
+                }
+            }
+        }
+
         if ($errors === []) {
             $io->success(sprintf('All %d container-managed classes pass DI lint.', $classesChecked));
             return self::SUCCESS;
@@ -170,6 +199,22 @@ final class LintDiCommand extends BaseCommand
         }
         $io->error(sprintf('%d error(s) found in %d classes.', count($errors), $classesChecked));
         return self::FAILURE;
+    }
+
+    /**
+     * The refusal PropertyInjector makes at runtime, asked of the same container,
+     * so an interface resolves to the class it is bound to.
+     */
+    private function readonlyInjectionOfExecutionScoped(string $class, \ReflectionProperty $prop): ?string
+    {
+        $type = $prop->getType();
+        if ($prop->getAttributes(InjectAsReadonly::class) === [] || !$type instanceof \ReflectionNamedType || $type->isBuiltin()
+            || !$this->container instanceof ExecutionContextAwareContainerInterface || !$this->container->isExecutionScoped($type->getName())) {
+            return null;
+        }
+
+        return "Cannot inject execution-scoped {$type->getName()} into {$class}::\${$prop->getName()} with #[InjectAsReadonly]. "
+            . 'Use #[InjectAsMutable] on container-managed objects instead.';
     }
 
     /**

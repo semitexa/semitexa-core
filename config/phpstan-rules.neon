@@ -52,6 +52,7 @@ rules:
     - Semitexa\Core\PHPStan\Rules\DirectResponseConstructionRule
     - Semitexa\Core\PHPStan\Rules\EventListenerMissingExecutionRule
     - Semitexa\Core\PHPStan\Rules\ExecutionScopedWithoutAttributeRule
+    - Semitexa\Core\PHPStan\Rules\ReadonlyInjectionOfExecutionScopedRule
     - Semitexa\Core\PHPStan\Rules\DiscoveryCallSiteRule
     - Semitexa\Core\PHPStan\Rules\WorkerServiceConnectionHandleRule
 
