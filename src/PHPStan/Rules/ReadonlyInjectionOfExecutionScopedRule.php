@@ -26,6 +26,8 @@ use PHPStan\Rules\RuleErrorBuilder;
  *
  * Only a concrete class type is judged: which class an interface resolves to
  * is the container's knowledge, and lint:di asks the container for it.
+ * The attribute list is the one InjectionAnalyzer reads; a class whose parent
+ * carries it is not counted, as the container does not count it.
  *
  * @implements Rule<Property>
  */

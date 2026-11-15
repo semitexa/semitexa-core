@@ -19,7 +19,7 @@ use Semitexa\Core\PHPStan\Rules\ReadonlyInjectionOfExecutionScopedRule;
  */
 final class ReadonlyInjectionOfExecutionScopedRuleTest extends RuleTestCase
 {
-    private const FIXTURES = ['ScopedFixtureService', 'ScopedFixtureListener', 'WorkerFixtureService', 'ReadonlyInjectionHolder'];
+    private const FIXTURES = ['ScopedFixtureService', 'ScopedFixtureListener', 'ScopedFixtureHandler', 'WorkerFixtureService', 'ReadonlyInjectionHolder'];
 
     protected function getRule(): Rule
     {
@@ -50,6 +50,7 @@ final class ReadonlyInjectionOfExecutionScopedRuleTest extends RuleTestCase
             'ReadonlyInjectionHolder.php:13' => 'Cannot inject execution-scoped Semitexa\\Core\\Tests\\Unit\\PHPStan\\Fixtures\\ScopedFixtureService into Semitexa\\Core\\Tests\\Unit\\PHPStan\\Fixtures\\ReadonlyInjectionHolder::$scoped with #[InjectAsReadonly]. Use #[InjectAsMutable] on container-managed objects instead.',
             'ReadonlyInjectionHolder.php:16' => 'Cannot inject execution-scoped Semitexa\\Core\\Tests\\Unit\\PHPStan\\Fixtures\\ScopedFixtureListener into Semitexa\\Core\\Tests\\Unit\\PHPStan\\Fixtures\\ReadonlyInjectionHolder::$listener with #[InjectAsReadonly]. Use #[InjectAsMutable] on container-managed objects instead.',
             'ReadonlyInjectionHolder.php:28' => 'Cannot inject execution-scoped Semitexa\\Core\\Tests\\Unit\\PHPStan\\Fixtures\\ScopedFixtureService into Semitexa\\Core\\Tests\\Unit\\PHPStan\\Fixtures\\ReadonlyInjectionHolder::$nullable with #[InjectAsReadonly]. Use #[InjectAsMutable] on container-managed objects instead.',
+            'ReadonlyInjectionHolder.php:31' => 'Cannot inject execution-scoped Semitexa\\Core\\Tests\\Unit\\PHPStan\\Fixtures\\ScopedFixtureHandler into Semitexa\\Core\\Tests\\Unit\\PHPStan\\Fixtures\\ReadonlyInjectionHolder::$handler with #[InjectAsReadonly]. Use #[InjectAsMutable] on container-managed objects instead.',
         ], $reported);
     }
 }

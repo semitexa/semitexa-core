@@ -35,7 +35,7 @@ final class LintDiReadonlyScopedTest extends TestCase
     #[Test]
     public function nothing_is_refused_when_the_container_scopes_nothing(): void
     {
-        self::assertCount(6, (new \ReflectionClass(ReadonlyInjectionHolder::class))->getProperties(), 'the fixture still has its six properties');
+        self::assertCount(7, (new \ReflectionClass(ReadonlyInjectionHolder::class))->getProperties(), 'the fixture still has its seven properties');
         self::assertSame([], $this->judge([]));
     }
 

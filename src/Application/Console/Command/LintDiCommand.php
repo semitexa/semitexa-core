@@ -172,6 +172,12 @@ final class LintDiCommand extends BaseCommand
             }
         }
 
+        // Without the container's answer the execution-scope check cannot run:
+        // that is a failure, not a quiet pass (independent review, core#238).
+        if (!$this->container instanceof ExecutionContextAwareContainerInterface) {
+            $errors[] = 'The container (' . $this->container::class . ') cannot say which types are execution-scoped, so #[InjectAsReadonly] was not checked against them.';
+        }
+
         // Commands are not container-managed: PropertyInjector fills their
         // #[InjectAsReadonly] properties, and refuses an execution-scoped type
         // only when the command first runs. Only that rule applies to them; the
@@ -192,7 +198,7 @@ final class LintDiCommand extends BaseCommand
         // A class discovery could not load was in none of the lists above, so
         // none of it was checked: that is not a pass (review, core#238).
         foreach ($this->classDiscovery->unloadableClasses() as $class => $reason) {
-            $errors[] = "{$class}: not checked — discovery could not load it: {$reason}";
+            $errors[] = "{$class}: could not be loaded, so lint:di cannot tell whether it is container-managed or a command: {$reason}";
         }
 
         if ($errors === []) {

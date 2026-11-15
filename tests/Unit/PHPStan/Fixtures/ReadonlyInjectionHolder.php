@@ -27,4 +27,7 @@ final class ReadonlyInjectionHolder
 
     #[Readonly_]
     protected ?ScopedFixtureService $nullable = null;
+
+    #[Readonly_]
+    protected ScopedFixtureHandler $handler;
 }
