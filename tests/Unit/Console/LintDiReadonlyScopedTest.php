@@ -28,13 +28,14 @@ final class LintDiReadonlyScopedTest extends TestCase
         self::assertSame([
             'scoped' => 'Cannot inject execution-scoped ' . ScopedFixtureService::class . ' into ' . ReadonlyInjectionHolder::class . '::$scoped with #[InjectAsReadonly]. Use #[InjectAsMutable] on container-managed objects instead.',
             'byInterface' => 'Cannot inject execution-scoped ' . EventDispatcherInterface::class . ' into ' . ReadonlyInjectionHolder::class . '::$byInterface with #[InjectAsReadonly]. Use #[InjectAsMutable] on container-managed objects instead.',
+            'nullable' => 'Cannot inject execution-scoped ' . ScopedFixtureService::class . ' into ' . ReadonlyInjectionHolder::class . '::$nullable with #[InjectAsReadonly]. Use #[InjectAsMutable] on container-managed objects instead.',
         ], $said, '#[InjectAsMutable] $mutable is not judged, a worker-scoped type is not refused');
     }
 
     #[Test]
     public function nothing_is_refused_when_the_container_scopes_nothing(): void
     {
-        self::assertCount(5, (new \ReflectionClass(ReadonlyInjectionHolder::class))->getProperties(), 'the fixture still has its five properties');
+        self::assertCount(6, (new \ReflectionClass(ReadonlyInjectionHolder::class))->getProperties(), 'the fixture still has its six properties');
         self::assertSame([], $this->judge([]));
     }
 

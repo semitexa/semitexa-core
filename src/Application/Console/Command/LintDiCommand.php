@@ -189,6 +189,12 @@ final class LintDiCommand extends BaseCommand
             }
         }
 
+        // A class discovery could not load was in none of the lists above, so
+        // none of it was checked: that is not a pass (review, core#238).
+        foreach ($this->classDiscovery->unloadableClasses() as $class => $reason) {
+            $errors[] = "{$class}: not checked — discovery could not load it: {$reason}";
+        }
+
         if ($errors === []) {
             $io->success(sprintf('All %d container-managed classes pass DI lint.', $classesChecked));
             return self::SUCCESS;

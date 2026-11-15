@@ -45,10 +45,11 @@ final class ReadonlyInjectionOfExecutionScopedRuleTest extends RuleTestCase
             $reported[basename($error->getFilePath()) . ':' . $error->getLine()] = $error->getMessage();
         }
         ksort($reported);
-        // The alias `InjectAsReadonly as Readonly_` is resolved; $worker, $mutable and $byInterface are not reported.
+        // The alias `InjectAsReadonly as Readonly_` is resolved; $worker, $mutable and $byInterface are not reported; ?ScopedFixtureService is.
         self::assertSame([
             'ReadonlyInjectionHolder.php:13' => 'Cannot inject execution-scoped Semitexa\\Core\\Tests\\Unit\\PHPStan\\Fixtures\\ScopedFixtureService into Semitexa\\Core\\Tests\\Unit\\PHPStan\\Fixtures\\ReadonlyInjectionHolder::$scoped with #[InjectAsReadonly]. Use #[InjectAsMutable] on container-managed objects instead.',
             'ReadonlyInjectionHolder.php:16' => 'Cannot inject execution-scoped Semitexa\\Core\\Tests\\Unit\\PHPStan\\Fixtures\\ScopedFixtureListener into Semitexa\\Core\\Tests\\Unit\\PHPStan\\Fixtures\\ReadonlyInjectionHolder::$listener with #[InjectAsReadonly]. Use #[InjectAsMutable] on container-managed objects instead.',
+            'ReadonlyInjectionHolder.php:28' => 'Cannot inject execution-scoped Semitexa\\Core\\Tests\\Unit\\PHPStan\\Fixtures\\ScopedFixtureService into Semitexa\\Core\\Tests\\Unit\\PHPStan\\Fixtures\\ReadonlyInjectionHolder::$nullable with #[InjectAsReadonly]. Use #[InjectAsMutable] on container-managed objects instead.',
         ], $reported);
     }
 }

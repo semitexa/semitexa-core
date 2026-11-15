@@ -6,6 +6,7 @@ namespace Semitexa\Core\PHPStan\Rules;
 
 use PhpParser\Node;
 use PhpParser\Node\Name;
+use PhpParser\Node\NullableType;
 use PhpParser\Node\Stmt\Property;
 use PHPStan\Analyser\Scope;
 use PHPStan\Reflection\ClassReflection;
@@ -54,10 +55,12 @@ final class ReadonlyInjectionOfExecutionScopedRule implements Rule
 
     public function processNode(Node $node, Scope $scope): array
     {
-        if (!$this->hasReadonlyInjection($node, $scope) || !$node->type instanceof Name) {
+        // ?Type is still that type: PropertyInjector refuses it alike (review, core#238).
+        $declared = $node->type instanceof NullableType ? $node->type->type : $node->type;
+        if (!$this->hasReadonlyInjection($node, $scope) || !$declared instanceof Name) {
             return [];
         }
-        $typeName = $scope->resolveName($node->type);
+        $typeName = $scope->resolveName($declared);
         if (!$this->reflectionProvider->hasClass($typeName)) {
             return [];
         }

@@ -24,4 +24,7 @@ final class ReadonlyInjectionHolder
 
     #[Readonly_]
     protected EventDispatcherInterface $byInterface;
+
+    #[Readonly_]
+    protected ?ScopedFixtureService $nullable = null;
 }
