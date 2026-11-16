@@ -7,6 +7,7 @@ namespace Semitexa\Core\Redis;
 use Predis\Client;
 use Predis\ClientInterface;
 use Predis\Connection\ConnectionException;
+use Predis\Response\ServerException;
 use Semitexa\Core\Log\StaticLoggerBridge;
 
 /**
@@ -212,10 +213,24 @@ final class RedisConnectionPool
             $this->discardIdleClients();
 
             return $this->createClient();
-        } catch (\Throwable $e) {
-            // Redis answered (-LOADING, say): the socket is fine. Back into
-            // the pool, or a pooled client is lost until the worker restarts.
+        } catch (ServerException $e) {
+            // Redis answered with an error (-LOADING, say): the reply was read
+            // whole and the socket is in step. Back into the pool, or a pooled
+            // client is lost until the worker restarts.
             $this->put($client);
+
+            throw $e;
+        } catch (\Throwable $e) {
+            // Anything else leaves the client mid-reply: above all a coroutine
+            // cancelled while it waited for the PONG (Coroutine::cancel(...,
+            // true) throws CanceledException right there; an SSE stream whose
+            // browser left is cancelled so). The client still says it is
+            // connected, and the next command on it fails with "Error while
+            // reading line from the server" (measured: Swoole 6.2, Predis 2.4).
+            // Put back, that error landed on another request's session read,
+            // opened the breaker for seconds, and served guest sessions that
+            // then failed CSRF. Reported 2026-11-16.
+            $this->replace($client);
 
             throw $e;
         }
@@ -262,35 +277,46 @@ final class RedisConnectionPool
         try {
             return $callback($client);
         } catch (\Throwable $e) {
-            // On error, discard the potentially broken connection and create a fresh one
-            if ($this->pool !== null) {
-                try {
-                    $client->disconnect();
-                } catch (\Throwable) {
-                    // Ignore disconnect failures for broken clients.
-                }
-
-                try {
-                    // Bounded, like put(): when the borrowed client was an
-                    // over-cap extra the channel is already full, and an
-                    // unbounded push would suspend this coroutine forever.
-                    // Drop the replacement instead.
-                    $replacement = $this->createClient();
-                    if (!$this->pool->push($replacement, self::RETURN_TIMEOUT_SECONDS)) {
-                        $this->retire($replacement);
-                    }
-                } catch (\Throwable) {
-                    // Pool might be closed or replacement creation failed; ignore
-                }
-            } else {
-                $this->cliFallback = null;
-            }
+            // On error the connection may be broken or out of step: never back.
+            $this->replace($client);
             throw $e;
         } finally {
             // Only return if no exception (exception path creates a new one above)
             if (!isset($e)) {
                 $this->put($client);
             }
+        }
+    }
+
+    /**
+     * Close a client that may hold a reply nobody read, and put a fresh one in
+     * its place: a client goes back into the pool only when its last reply was
+     * read whole.
+     */
+    private function replace(ClientInterface $client): void
+    {
+        try {
+            $client->disconnect();
+        } catch (\Throwable) {
+            // A broken client may not close cleanly; it is dropped either way.
+        }
+
+        if ($this->pool === null) {
+            $this->cliFallback = null;
+
+            return;
+        }
+
+        try {
+            // Bounded, like put(): when the client was an over-cap extra the
+            // channel is already full, and an unbounded push would suspend this
+            // coroutine forever. Drop the replacement instead.
+            $replacement = $this->createClient();
+            if (!$this->pool->push($replacement, self::RETURN_TIMEOUT_SECONDS)) {
+                $this->retire($replacement);
+            }
+        } catch (\Throwable) {
+            // Pool might be closed or replacement creation failed; ignore
         }
     }
 
