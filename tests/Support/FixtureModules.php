@@ -29,6 +29,7 @@ final class FixtureModules
         'Semitexa\\Core\\Tests\\Fixtures\\WebhookDemo\\' => __DIR__ . '/../Fixtures/WebhookDemo',
         'Semitexa\\Core\\Tests\\Fixtures\\RateLimitDemo\\' => __DIR__ . '/../Fixtures/RateLimitDemo',
         'Semitexa\\Core\\Tests\\Fixtures\\SignedUrlDemo\\' => __DIR__ . '/../Fixtures/SignedUrlDemo',
+        'Semitexa\\Core\\Tests\\Fixtures\\ImpliedServiceDemo\\' => __DIR__ . '/../Fixtures/ImpliedServiceDemo',
     ];
 
     /** @var array<class-string, string>|null */

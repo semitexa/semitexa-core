@@ -5,12 +5,14 @@ declare(strict_types=1);
 namespace Semitexa\Core\Container\BuildPhase;
 
 use Semitexa\Core\Attribute\AsService;
+use Semitexa\Core\Attribute\ImpliesService;
 use Semitexa\Core\Pipeline\AuthCheck;
 use Semitexa\Core\Pipeline\HandleRequest;
 
 /**
  * Registers all service classes in idToClass: payload handlers, #[AsService] classes,
- * ORM repositories, auth handlers, slot handlers, and pipeline listeners.
+ * carriers of an attribute that implements ImpliesService, ORM repositories, auth
+ * handlers, slot handlers, and pipeline listeners.
  *
  * Preconditions: context->classDiscovery, attributeDiscovery, pipelineListenerRegistry must be set.
  * Postconditions: context->idToClass populated with all service classes.
@@ -31,6 +33,14 @@ final class ServiceRegistrationPhase implements BuildPhaseInterface
 
         // #[AsService] classes
         foreach ($context->classDiscovery->findClassesWithAttribute(AsService::class) as $serviceClass) {
+            /** @var class-string $serviceClass */
+            $context->idToClass[$serviceClass] = $serviceClass;
+        }
+
+        // Classes carrying an attribute that implements ImpliesService: a
+        // package's own attribute, which core does not name, says they are
+        // services (semitexa-scheduler's jobs).
+        foreach ($context->classDiscovery->findClassesWithAttributeInstanceof(ImpliesService::class) as $serviceClass) {
             /** @var class-string $serviceClass */
             $context->idToClass[$serviceClass] = $serviceClass;
         }
