@@ -29,8 +29,21 @@ final class DiscoveryFollowsProjectRootTest extends TestCase
     private string $cwd = '';
     private string $empty = '';
 
+    /**
+     * The process-wide registries, as earlier tests left them: restored after,
+     * so this test changes no one else's state (review, core#239).
+     *
+     * @var array<string, mixed>
+     */
+    private array $registries = [];
+
+    private const REGISTRIES = ['sharedClassMaps', 'sharedAttributeCaches', 'sharedUnloadable', 'coroutineGates', 'coroutineGateOwners'];
+
     protected function setUp(): void
     {
+        foreach (self::REGISTRIES as $name) {
+            $this->registries[$name] = (new ReflectionProperty(ClassDiscovery::class, $name))->getValue();
+        }
         ClassDiscovery::resetSharedCache();
         $this->cwd = (string) getcwd();
         $this->realRoot = ProjectRoot::get();
@@ -44,7 +57,9 @@ final class DiscoveryFollowsProjectRootTest extends TestCase
     {
         chdir($this->cwd);
         ProjectRoot::reset();
-        ClassDiscovery::resetSharedCache();
+        foreach ($this->registries as $name => $value) {
+            (new ReflectionProperty(ClassDiscovery::class, $name))->setValue(null, $value);
+        }
         exec('rm -rf ' . escapeshellarg($this->empty));
     }
 
