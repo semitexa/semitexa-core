@@ -35,6 +35,7 @@ final class InterruptedPingDoesNotReturnTheClientTest extends TestCase
 
         self::assertSame(CanceledException::class, $outcome['thrown']);
         self::assertSame(1, $outcome['disconnects'], 'the interrupted client is closed');
+        self::assertSame(1, $outcome['pooled'], 'a fresh client took its place in the pool');
         self::assertFalse($outcome['nextIsTheSameClient'], 'the next borrower gets a fresh client, not the one with a PONG on its socket');
     }
 
@@ -45,15 +46,16 @@ final class InterruptedPingDoesNotReturnTheClientTest extends TestCase
 
         self::assertSame(ServerException::class, $outcome['thrown']);
         self::assertSame(0, $outcome['disconnects'], 'an error reply was read whole: the socket is in step');
+        self::assertSame(1, $outcome['pooled'], 'the client is back in the pool');
         self::assertTrue($outcome['nextIsTheSameClient'], 'so the client is kept, not lost until the worker restarts');
     }
 
-    /** @return array{thrown: ?string, disconnects: int, nextIsTheSameClient: bool} */
+    /** @return array{thrown: ?string, disconnects: int, pooled: int, nextIsTheSameClient: bool} */
     private function borrowAfterAPingThat(\Throwable $pingFailure): array
     {
         $disconnects = 0;
         $client = $this->idleClientWhosePingThrows($pingFailure, $disconnects);
-        $outcome = ['thrown' => null, 'disconnects' => 0, 'nextIsTheSameClient' => false];
+        $outcome = ['thrown' => null, 'disconnects' => 0, 'pooled' => -1, 'nextIsTheSameClient' => false];
         $failure = null;
 
         Coroutine\run(function () use ($client, &$disconnects, &$outcome, &$failure): void {
@@ -73,6 +75,11 @@ final class InterruptedPingDoesNotReturnTheClientTest extends TestCase
                 }
 
                 $outcome['disconnects'] = $disconnects;
+                // Counted before the next borrow: with nothing pooled, get() would
+                // wait out its timeout and hand out an extra client, which is not
+                // the interrupted one either, and the test would pass for a wrong reason.
+                $channel = (new \ReflectionProperty(RedisConnectionPool::class, 'pool'))->getValue($pool);
+                $outcome['pooled'] = $channel instanceof Coroutine\Channel ? $channel->length() : -1;
                 $outcome['nextIsTheSameClient'] = $pool->get() === $client;
             } catch (\Throwable $e) {
                 $failure = $e;
