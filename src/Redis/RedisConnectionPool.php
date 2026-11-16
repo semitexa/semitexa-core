@@ -67,9 +67,15 @@ final class RedisConnectionPool
     /**
      * @param int $size Number of connections in the pool
      * @param array{scheme?:string, host?:string, port?:int, password?:string} $config Redis connection params
+     * @param (\Closure(): ClientInterface)|null $clientFactory builds the pool's clients instead of
+     *                                                          Predis; injectable for tests
      */
-    public function __construct(int $size, array $config, ?RedisCircuitBreaker $circuit = null)
-    {
+    public function __construct(
+        int $size,
+        array $config,
+        ?RedisCircuitBreaker $circuit = null,
+        private readonly ?\Closure $clientFactory = null,
+    ) {
         $this->circuit = $circuit ?? new RedisCircuitBreaker();
         $this->returnedAt = new \WeakMap();
         if ($size < 1) {
@@ -180,6 +186,34 @@ final class RedisConnectionPool
         // The callback runs exactly once: replaying it after a lost response
         // could apply a non-idempotent command (INCR, RPUSH) twice.
         return $this->circuit->call(fn (): mixed => $this->runWithConnection($callback));
+    }
+
+    /**
+     * withConnection() for a read that is safe to run twice (a GET): a
+     * connection-level failure is answered by one retry on fresh clients, so
+     * one dead socket does not cost the caller its answer (a session read that
+     * failed served the request a guest session). Each attempt goes through
+     * the breaker, so a retry that fails too is the second failure, and the
+     * breaker opens. Reads only: a write cut off mid-reply may have been
+     * applied, and running it again would apply it twice.
+     *
+     * @template T
+     * @param callable(ClientInterface): T $read
+     * @return T
+     */
+    public function withIdempotentRead(callable $read): mixed
+    {
+        try {
+            return $this->withConnection($read);
+        } catch (ConnectionException $e) {
+            if (RedisCircuitBreaker::cancelledByDrain($e)) {
+                throw $e;
+            }
+            // After a restart every idle client is dead, not just the one that failed.
+            $this->discardIdleClients();
+
+            return $this->withConnection($read);
+        }
     }
 
     /**
@@ -340,6 +374,9 @@ final class RedisConnectionPool
 
     private function createClient(): ClientInterface
     {
+        if ($this->clientFactory !== null) {
+            return ($this->clientFactory)();
+        }
         $params = [
             'scheme' => $this->scheme,
             'host'   => $this->host,
