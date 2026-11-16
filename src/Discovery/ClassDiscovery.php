@@ -15,6 +15,11 @@ class ClassDiscovery
     private bool $initialized = false;
     /** @var array<string, list<class-string>> keyed by attribute cache key ('@instanceof:'-prefixed for instanceof queries) */
     private array $attributeCache = [];
+    /**
+     * The root $classMap and $attributeCache were read under: kept across a root change,
+     * they answered the new root from the old map, into the new root's shared bucket.
+     */
+    private ?string $stateRoot = null;
 
     /**
      * Coroutine gates that serialise one-time, blocking-IO work per key.
@@ -136,7 +141,7 @@ class ClassDiscovery
 
     public function initialize(): void
     {
-        $projectRoot = ProjectRoot::get();
+        $projectRoot = $this->followProjectRoot();
 
         $this->runOncePerKey(
             '@init',
@@ -153,6 +158,20 @@ class ClassDiscovery
             $this->classMap = self::$sharedClassMaps[$projectRoot];
             $this->initialized = true;
         }
+    }
+
+    /** Drops this instance's own state when the project root moved; returns the root. */
+    private function followProjectRoot(): string
+    {
+        $root = ProjectRoot::get();
+        if ($this->stateRoot !== null && $this->stateRoot !== $root) {
+            $this->classMap = [];
+            $this->attributeCache = [];
+            $this->initialized = false;
+        }
+        $this->stateRoot = $root;
+
+        return $root;
     }
 
     private function runInitialization(): void
@@ -322,6 +341,7 @@ class ClassDiscovery
     private function findClassesWithAttributeInternal(string $attributeClass, bool $instanceof): array
     {
         $cacheKey = $instanceof ? '@instanceof:' . $attributeClass : $attributeClass;
+        $this->followProjectRoot();
 
         if (isset($this->attributeCache[$cacheKey])) {
             return $this->attributeCache[$cacheKey];
