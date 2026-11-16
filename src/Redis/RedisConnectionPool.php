@@ -221,14 +221,15 @@ final class RedisConnectionPool
 
             throw $e;
         } catch (\Throwable $e) {
-            // Anything else may leave the PONG on the socket: above all a
-            // coroutine cancelled while it waited for it (Coroutine::cancel(...,
+            // Anything else leaves the client mid-reply: above all a coroutine
+            // cancelled while it waited for the PONG (Coroutine::cancel(...,
             // true) throws CanceledException right there; an SSE stream whose
-            // browser left is cancelled so). Put back, that client handed the
-            // next borrower the PONG as the answer to its own command, and its
-            // real answer to the borrower after: an empty session at best,
-            // another visitor's session at worst. Reported 2026-11-16 as guest
-            // sessions and CSRF failures right after a closed stream.
+            // browser left is cancelled so). The client still says it is
+            // connected, and the next command on it fails with "Error while
+            // reading line from the server" (measured: Swoole 6.2, Predis 2.4).
+            // Put back, that error landed on another request's session read,
+            // opened the breaker for seconds, and served guest sessions that
+            // then failed CSRF. Reported 2026-11-16.
             $this->replace($client);
 
             throw $e;
