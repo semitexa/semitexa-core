@@ -8,7 +8,9 @@ use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Semitexa\Core\Container\ContainerFactory;
 use Semitexa\Core\Discovery\AttributeDiscovery;
+use Semitexa\Core\Discovery\ClassDiscovery;
 use Semitexa\Core\Tests\Fixtures\ImpliedServiceDemo\MarkedJob;
+use Semitexa\Core\Tests\Fixtures\ImpliedServiceDemo\MarksNothing;
 use Semitexa\Core\Tests\Fixtures\ImpliedServiceDemo\UnmarkedJob;
 use Semitexa\Core\Tests\Support\FixtureModules;
 
@@ -49,6 +51,11 @@ final class AnAttributeCanMakeItsCarriersServicesTest extends TestCase
     #[Test]
     public function a_class_carrying_any_other_attribute_is_not_a_service(): void
     {
+        self::assertContains(
+            UnmarkedJob::class,
+            (new ClassDiscovery())->findClassesWithAttribute(MarksNothing::class),
+            'discovery sees it, so the next assertion is about registration, not about a class nobody found',
+        );
         self::assertFalse(ContainerFactory::get()->has(UnmarkedJob::class));
     }
 }
