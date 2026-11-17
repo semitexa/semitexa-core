@@ -70,6 +70,11 @@ final class SessionPhase
         try {
             $session = new Session($sessionId, $this->sessionHandler, $cookieName, $sessionLifetime);
         } catch (\Throwable $e) {
+            // A coroutine its server cancelled (an SSE stream whose browser left)
+            // is not a store that cannot be read: it stops here, unlogged.
+            if (self::isCancellation($e)) {
+                throw $e;
+            }
             // The store is unreadable (Redis down). Serve the request as a guest
             // on a session that persists nothing, rather than failing the page.
             $this->logSessionStoreUnreadable($e, $request);
@@ -318,6 +323,23 @@ final class SessionPhase
         }
 
         FallbackErrorLogger::log($message, $context);
+    }
+
+    /**
+     * By exact type through the previous-chain, as semitexa-ssr's
+     * SseSessionCoroutines::isCancellation() does. Degraded to a guest, a
+     * cancelled request ran on and read as a broken session store (87 such
+     * warnings in one consumer's E2E run, 2026-11-16).
+     */
+    private static function isCancellation(\Throwable $e): bool
+    {
+        for ($current = $e; $current !== null; $current = $current->getPrevious()) {
+            if ($current instanceof \Swoole\Coroutine\CanceledException) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
