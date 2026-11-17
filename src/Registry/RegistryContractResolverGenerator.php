@@ -122,6 +122,7 @@ class RegistryContractResolverGenerator
      */
     private static function writeFactoryClass(string $root, string $baseInterface, string $factoryInterface, array $implementations): ?string
     {
+        $implementations = self::inClassOrder($implementations);
         try {
             $baseRef = new ReflectionClass($baseInterface);
             $factoryRef = new ReflectionClass($factoryInterface);
@@ -137,8 +138,7 @@ class RegistryContractResolverGenerator
 
         /** @var array<string, string> $imports */
         $imports = [];
-        /** @var array<string, string> $usedShortNames */
-        $usedShortNames = [];
+        $usedShortNames = self::namesTakenBy($factoryShortName);
         $innerTypeHint = self::addImport(ContractFactoryInterface::class, $imports, $usedShortNames);
         $factoryInterfaceTypeHint = self::addImport($factoryInterface, $imports, $usedShortNames);
         $baseInterfaceTypeHint = self::addImport($baseInterface, $imports, $usedShortNames);
@@ -286,13 +286,14 @@ PHP;
      */
     private static function writeResolverClass(string $root, string $interface, array $implementations, string $active): ?string
     {
+        $implementations = self::inClassOrder($implementations);
         try {
             $ref = new ReflectionClass($interface);
         } catch (\Throwable $e) {
             return null;
         }
         $shortName = $ref->getShortName();
-        $resolverShortName = preg_replace('/Interface$/', 'Resolver', $shortName);
+        $resolverShortName = preg_replace('/Interface$/', 'Resolver', $shortName) ?? $shortName;
         if ($resolverShortName === $shortName) {
             $resolverShortName = $shortName . 'Resolver';
         }
@@ -300,8 +301,7 @@ PHP;
 
         /** @var array<string, string> $imports */
         $imports = [];
-        /** @var array<string, string> $usedShortNames */
-        $usedShortNames = [];
+        $usedShortNames = self::namesTakenBy($resolverShortName);
         $params = [];
         foreach ($implementations as $impl) {
             $implClass = $impl['class'];
@@ -387,6 +387,23 @@ PHP;
         return CanonicalRegistryPaths::REGISTRY_CONTRACTS_NAMESPACE . '\\' . $resolverShortName;
     }
 
+    /**
+     * The implementations by class name, never in discovery order: that order differs
+     * between machines and filesystems, and the files followed it, so a fresh clone
+     * came up with every committed resolver rewritten, its use lines, parameters and
+     * aliases reordered (tk-registry-resolvers-reorder-on-every-boot). The active
+     * implementation is named separately, so the order only ever decided the bytes.
+     *
+     * @param list<array{module: string, class: string}> $implementations
+     * @return list<array{module: string, class: string}>
+     */
+    private static function inClassOrder(array $implementations): array
+    {
+        usort($implementations, static fn (array $a, array $b): int => strcmp($a['class'], $b['class']));
+
+        return $implementations;
+    }
+
     private static function uniqueParamName(string $class, array $used): string
     {
         $ref = new ReflectionClass($class);
@@ -403,23 +420,41 @@ PHP;
     }
 
     /**
+     * The names a generated file starts with: the class it declares. An import under
+     * that name would not compile either.
+     *
+     * @return array<string, string> lower-cased name => the class holding it
+     */
+    private static function namesTakenBy(string $generatedShortName): array
+    {
+        return [strtolower($generatedShortName) => CanonicalRegistryPaths::REGISTRY_CONTRACTS_NAMESPACE . '\\' . $generatedShortName];
+    }
+
+    /**
      * @param array<string, string> $imports
      * @param-out array<string, string> $imports
-     * @param array<string, string> $usedShortNames
+     * @param array<string, string> $usedShortNames lower-cased name => the class holding it
      * @param-out array<string, string> $usedShortNames
      */
     private static function addImport(string $fqn, array &$imports, array &$usedShortNames): string
     {
-        $ref = new ReflectionClass($fqn);
-        $short = $ref->getShortName();
-        if (isset($usedShortNames[$short]) && $usedShortNames[$short] !== $fqn) {
-            $alias = $short . 'Alias' . count($usedShortNames);
-            $imports[$fqn] = $alias;
-            return $alias;
+        if (isset($imports[$fqn])) {
+            return $imports[$fqn];
         }
-        $usedShortNames[$short] = $fqn;
-        $imports[$fqn] = $short;
-        return $short;
+        $short = (new ReflectionClass($fqn))->getShortName();
+        $name = $short;
+        // Names are reserved as PHP compares them: case-insensitively, the declared class
+        // included. A name another class holds gets the first free Alias<n>, reserved in
+        // turn. Counting the names in use gave two classes one alias once the class-name
+        // order put three of them in a row, and FixedClock/fixedClock or Foo/FooALIAS1
+        // were two names only to an array key: PHP refuses such a file (review, core#245).
+        for ($n = 1; isset($usedShortNames[strtolower($name)]); $n++) {
+            $name = $short . 'Alias' . $n;
+        }
+        $usedShortNames[strtolower($name)] = $fqn;
+        $imports[$fqn] = $name;
+
+        return $name;
     }
 
     /**
@@ -427,6 +462,7 @@ PHP;
      */
     private static function formatUseBlock(array $imports): string
     {
+        ksort($imports, SORT_STRING);
         $lines = [];
         foreach ($imports as $fqn => $alias) {
             $short = str_contains($fqn, '\\')
