@@ -111,7 +111,13 @@ final readonly class CollectionPageRequest
         if (!preg_match('/^-?\d+$/', $raw)) {
             throw new InvalidPaginationException($name, $raw, 'must be an integer');
         }
-        $value = (int) $raw;
+        // (int) saturates a digit string past the int range at PHP_INT_MAX, but
+        // one past a double's range too (some 309 digits) came out 0, and a huge
+        // page or perPage then read "must be >= 1". Saturated by sign, both read
+        // as what they are.
+        $value = is_numeric($raw) && is_int($raw + 0)
+            ? (int) $raw
+            : (str_starts_with($raw, '-') ? PHP_INT_MIN : PHP_INT_MAX);
         self::guard($name, $raw, $value, $maxPerPage);
         // (int) saturates digit strings beyond the int range at
         // PHP_INT_MAX instead of failing; numeric-string arithmetic

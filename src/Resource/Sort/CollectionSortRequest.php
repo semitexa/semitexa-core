@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Resource\Sort;
 
+use Semitexa\Core\Resource\EchoedValue;
 use Semitexa\Core\Resource\Exception\InvalidSortException;
 
 /**
@@ -99,21 +100,21 @@ final readonly class CollectionSortRequest
             if (str_contains($token, '.')) {
                 throw new InvalidSortException(
                     rawValue: $raw,
-                    reason:   sprintf('nested / relation field "%s" is not allowed in this phase', $token),
+                    reason:   sprintf('nested / relation field "%s" is not allowed in this phase', EchoedValue::of($token)),
                     allowedFields: $allowedFields,
                 );
             }
             if (!in_array($token, $allowedFields, true)) {
                 throw new InvalidSortException(
                     rawValue: $raw,
-                    reason:   sprintf('field "%s" is not in the route allowlist', $token),
+                    reason:   sprintf('field "%s" is not in the route allowlist', EchoedValue::of($token)),
                     allowedFields: $allowedFields,
                 );
             }
             if (isset($seen[$token])) {
                 throw new InvalidSortException(
                     rawValue: $raw,
-                    reason:   sprintf('field "%s" appears more than once', $token),
+                    reason:   sprintf('field "%s" appears more than once', EchoedValue::of($token)),
                     allowedFields: $allowedFields,
                 );
             }

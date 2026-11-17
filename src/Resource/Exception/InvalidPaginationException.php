@@ -6,6 +6,7 @@ namespace Semitexa\Core\Resource\Exception;
 
 use Semitexa\Core\Exception\DomainException;
 use Semitexa\Core\Http\HttpStatus;
+use Semitexa\Core\Resource\EchoedValue;
 
 /**
  * Thrown when a `?page=` / `?perPage=` query parameter
@@ -28,7 +29,7 @@ final class InvalidPaginationException extends DomainException
         parent::__construct(sprintf(
             'Invalid pagination parameter "%s"=%s: %s.',
             $parameter,
-            $rawValue === '' ? '<empty>' : '"' . $rawValue . '"',
+            $rawValue === '' ? '<empty>' : '"' . EchoedValue::of($rawValue) . '"',
             $reason,
         ));
     }
@@ -42,7 +43,7 @@ final class InvalidPaginationException extends DomainException
     {
         return [
             'parameter' => $this->parameter,
-            'value'     => $this->rawValue,
+            'value'     => EchoedValue::of($this->rawValue),
             'reason'    => $this->reason,
         ];
     }
