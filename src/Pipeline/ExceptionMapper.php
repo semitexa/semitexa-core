@@ -10,7 +10,7 @@ use Semitexa\Core\Discovery\ResolvedRouteMetadata;
 use Semitexa\Core\Error\ErrorRouteDispatcher;
 use Semitexa\Core\Exception\DomainException;
 use Semitexa\Core\Exception\PayloadValidationException;
-use Semitexa\Core\Exception\RateLimitException;
+use Semitexa\Core\Http\CarriesResponseHeadersInterface;
 use Semitexa\Core\Http\ContentNegotiator;
 use Semitexa\Core\Http\HttpStatus;
 use Semitexa\Core\Request;
@@ -88,7 +88,7 @@ final class ExceptionMapper implements ExceptionResponseMapperInterface
         if ($format === 'html' && $this->errorRouteDispatcher !== null) {
             $response = $this->errorRouteDispatcher->dispatchThrowable($e, $request, ['name' => $metadata->name]);
             if ($response !== null) {
-                if ($e instanceof RateLimitException) {
+                if ($e instanceof CarriesResponseHeadersInterface) {
                     $response = $response->withHeaders($e->headers());
                 }
 
@@ -104,7 +104,7 @@ final class ExceptionMapper implements ExceptionResponseMapperInterface
             default => HttpResponse::text($e->getMessage(), $status->value),
         };
 
-        if ($e instanceof RateLimitException) {
+        if ($e instanceof CarriesResponseHeadersInterface) {
             $response = $response->withHeaders($e->headers());
         }
 
