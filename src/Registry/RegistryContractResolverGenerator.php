@@ -138,8 +138,7 @@ class RegistryContractResolverGenerator
 
         /** @var array<string, string> $imports */
         $imports = [];
-        /** @var array<string, string> $usedShortNames */
-        $usedShortNames = [];
+        $usedShortNames = self::namesTakenBy($factoryShortName);
         $innerTypeHint = self::addImport(ContractFactoryInterface::class, $imports, $usedShortNames);
         $factoryInterfaceTypeHint = self::addImport($factoryInterface, $imports, $usedShortNames);
         $baseInterfaceTypeHint = self::addImport($baseInterface, $imports, $usedShortNames);
@@ -294,7 +293,7 @@ PHP;
             return null;
         }
         $shortName = $ref->getShortName();
-        $resolverShortName = preg_replace('/Interface$/', 'Resolver', $shortName);
+        $resolverShortName = preg_replace('/Interface$/', 'Resolver', $shortName) ?? $shortName;
         if ($resolverShortName === $shortName) {
             $resolverShortName = $shortName . 'Resolver';
         }
@@ -302,8 +301,7 @@ PHP;
 
         /** @var array<string, string> $imports */
         $imports = [];
-        /** @var array<string, string> $usedShortNames */
-        $usedShortNames = [];
+        $usedShortNames = self::namesTakenBy($resolverShortName);
         $params = [];
         foreach ($implementations as $impl) {
             $implClass = $impl['class'];
@@ -422,9 +420,20 @@ PHP;
     }
 
     /**
+     * The names a generated file starts with: the class it declares. An import under
+     * that name would not compile either.
+     *
+     * @return array<string, string> lower-cased name => the class holding it
+     */
+    private static function namesTakenBy(string $generatedShortName): array
+    {
+        return [strtolower($generatedShortName) => CanonicalRegistryPaths::REGISTRY_CONTRACTS_NAMESPACE . '\\' . $generatedShortName];
+    }
+
+    /**
      * @param array<string, string> $imports
      * @param-out array<string, string> $imports
-     * @param array<string, string> $usedShortNames
+     * @param array<string, string> $usedShortNames lower-cased name => the class holding it
      * @param-out array<string, string> $usedShortNames
      */
     private static function addImport(string $fqn, array &$imports, array &$usedShortNames): string
@@ -434,14 +443,15 @@ PHP;
         }
         $short = (new ReflectionClass($fqn))->getShortName();
         $name = $short;
-        // A short name another class holds: the first free Alias<n>, reserved like any
-        // name, so a third class sharing it cannot be given the same alias. Counting the
-        // names in use did, once the class-name order put three of them in a row, and PHP
-        // refuses a file that imports two classes as one name (review, core#245).
-        for ($n = 1; isset($usedShortNames[$name]); $n++) {
+        // Names are reserved as PHP compares them: case-insensitively, the declared class
+        // included. A name another class holds gets the first free Alias<n>, reserved in
+        // turn. Counting the names in use gave two classes one alias once the class-name
+        // order put three of them in a row, and FixedClock/fixedClock or Foo/FooALIAS1
+        // were two names only to an array key: PHP refuses such a file (review, core#245).
+        for ($n = 1; isset($usedShortNames[strtolower($name)]); $n++) {
             $name = $short . 'Alias' . $n;
         }
-        $usedShortNames[$name] = $fqn;
+        $usedShortNames[strtolower($name)] = $fqn;
         $imports[$fqn] = $name;
 
         return $name;

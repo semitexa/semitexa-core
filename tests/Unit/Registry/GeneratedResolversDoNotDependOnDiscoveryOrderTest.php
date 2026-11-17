@@ -10,7 +10,10 @@ use Semitexa\Core\Registry\RegistryContractResolverGenerator;
 use Semitexa\Core\Support\ProjectRoot;
 use Semitexa\Core\Tests\Fixtures\ResolverOrder\A\FixedClock as FixedClockA;
 use Semitexa\Core\Tests\Fixtures\ResolverOrder\B\FixedClock as FixedClockB;
+use Semitexa\Core\Tests\Fixtures\ResolverOrder\B\FixedClockALIAS1 as FixedClockAlias1Named;
 use Semitexa\Core\Tests\Fixtures\ResolverOrder\C\FixedClock as FixedClockC;
+use Semitexa\Core\Tests\Fixtures\ResolverOrder\D\fixedClock as LowerCaseFixedClock;
+use Semitexa\Core\Tests\Fixtures\ResolverOrder\F\ClockResolver as NamedLikeTheResolver;
 use Semitexa\Core\Tests\Fixtures\ResolverOrder\Clock;
 use Semitexa\Core\Tests\Fixtures\ResolverOrder\SystemClock;
 use Semitexa\Core\Tests\Support\StaticState;
@@ -204,5 +207,47 @@ final class GeneratedResolversDoNotDependOnDiscoveryOrderTest extends TestCase
         // PHP itself accepts the file: two imports under one name fail to compile.
         exec(escapeshellarg(PHP_BINARY) . ' -l ' . escapeshellarg($resolver) . ' 2>&1', $lint, $exit);
         self::assertSame(0, $exit, implode("\n", $lint));
+    }
+
+    /**
+     * PHP compares imported names case-insensitively, and the class the file declares
+     * holds its name too (review, core#245, round 2: FixedClock and fixedClock, and a
+     * class literally named FixedClockALIAS1 next to a generated FixedClockAlias1).
+     */
+    #[Test]
+    public function names_in_the_generated_file_are_unique_the_way_php_compares_them(): void
+    {
+        $base = 'Semitexa\\Core\\Tests\\Fixtures\\ResolverOrder\\';
+        $cases = [
+            'one name in two cases' => [
+                [FixedClockA::class, LowerCaseFixedClock::class],
+                ["use {$base}A\\FixedClock;", "use {$base}Clock;", "use {$base}D\\fixedClock as fixedClockAlias1;"],
+            ],
+            'a class named like a generated alias' => [
+                [FixedClockA::class, FixedClockAlias1Named::class, FixedClockC::class],
+                ["use {$base}A\\FixedClock;", "use {$base}B\\FixedClockALIAS1;", "use {$base}C\\FixedClock as FixedClockAlias2;", "use {$base}Clock;"],
+            ],
+            'a class named like the resolver itself' => [
+                [FixedClockA::class, NamedLikeTheResolver::class],
+                ["use {$base}A\\FixedClock;", "use {$base}Clock;", "use {$base}F\\ClockResolver as ClockResolverAlias1;"],
+            ],
+        ];
+        $resolver = $this->root . '/src/registry/Contracts/ClockResolver.php';
+        foreach ($cases as $case => [$implementations, $uses]) {
+            RegistryContractResolverGenerator::generateAll([Clock::class => [
+                'active' => FixedClockA::class,
+                'implementations' => array_map(
+                    static fn (string $class): array => ['module' => 'Clocks', 'class' => $class],
+                    $implementations,
+                ),
+            ]]);
+
+            $source = (string) file_get_contents($resolver);
+            preg_match_all('/^use [^;]+;$/m', $source, $lines);
+            self::assertSame($uses, $lines[0], $case);
+            exec(escapeshellarg(PHP_BINARY) . ' -l ' . escapeshellarg($resolver) . ' 2>&1', $lint, $exit);
+            self::assertSame(0, $exit, $case . ': ' . implode("\n", $lint));
+            $lint = [];
+        }
     }
 }
