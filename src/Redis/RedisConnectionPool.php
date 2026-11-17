@@ -163,9 +163,7 @@ final class RedisConnectionPool
             // Non-blocking return: if the pool is already full (an over-cap client
             // created by a timed-out get()), drop this one instead of blocking on
             // a full channel — a blocking push would be the same deadlock, inverted.
-            if (!$this->pool->push($client, self::RETURN_TIMEOUT_SECONDS)) {
-                $this->retire($client);
-            }
+            $this->pushOrRetire($client);
             return;
         }
 
@@ -345,10 +343,7 @@ final class RedisConnectionPool
             // Bounded, like put(): when the client was an over-cap extra the
             // channel is already full, and an unbounded push would suspend this
             // coroutine forever. Drop the replacement instead.
-            $replacement = $this->createClient();
-            if (!$this->pool->push($replacement, self::RETURN_TIMEOUT_SECONDS)) {
-                $this->retire($replacement);
-            }
+            $this->pushOrRetire($this->createClient());
         } catch (\Throwable) {
             // Pool might be closed or replacement creation failed; ignore
         }
@@ -357,6 +352,28 @@ final class RedisConnectionPool
     public function getSize(): int
     {
         return $this->size;
+    }
+
+    /**
+     * Back into the pool within RETURN_TIMEOUT_SECONDS, or retired: a full pool
+     * means this client is one over the cap. A cancel inside that wait
+     * (Coroutine::cancel(..., true) throws CanceledException there) leaves it over
+     * the cap all the same, so it is retired before the cancel goes on: thrown
+     * past retire(), the client stayed open and the pool counted it for good, one
+     * step nearer to "exhausted" (tk-cancel-during-full-pool-put-leaks-an-extra).
+     */
+    private function pushOrRetire(ClientInterface $client): void
+    {
+        \assert($this->pool !== null);
+        try {
+            $pushed = $this->pool->push($client, self::RETURN_TIMEOUT_SECONDS);
+        } catch (\Throwable $cutOff) {
+            $this->retire($client);
+            throw $cutOff;
+        }
+        if (!$pushed) {
+            $this->retire($client);
+        }
     }
 
     /** A client the full pool has no room for: one fewer alive beyond the size. */
