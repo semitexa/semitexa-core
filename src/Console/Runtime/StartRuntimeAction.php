@@ -6,6 +6,7 @@ namespace Semitexa\Core\Console\Runtime;
 
 use Semitexa\Core\Environment;
 use Semitexa\Core\Support\ProjectRoot;
+use Symfony\Component\Console\Formatter\OutputFormatter;
 use Symfony\Component\Console\Style\SymfonyStyle;
 use Symfony\Component\Process\Process;
 
@@ -25,8 +26,11 @@ final class StartRuntimeAction
             // init is retired and docs/RUNNING.md does not exist: the hint sent
             // you to neither (tk-init-command-lands-in-every-projects-src).
             $this->io->error('docker-compose.yml not found in ' . $projectRoot . '.');
+            // The root named in the command: the shell may stand in another
+            // repository, whose own file it would restore (review, core#249).
             $this->io->text([
-                'Run it in a Semitexa project. A file removed by mistake comes back with: <comment>git checkout -- docker-compose.yml</comment>',
+                'Run it in a Semitexa project. A file removed by mistake comes back with: <comment>git -C '
+                    . OutputFormatter::escape(escapeshellarg($projectRoot)) . ' checkout -- docker-compose.yml</comment>',
                 'A new project is made by the installer: <comment>curl -fsSL https://semitexa.com/install.sh | bash -s my-project</comment>',
             ]);
             return false;

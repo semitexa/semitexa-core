@@ -108,7 +108,11 @@ final class StartRuntimeActionTest extends TestCase
         self::assertSame(['-f', 'docker-compose.yml', '-f', 'docker-compose.nats.yml'], $this->action()->getComposeArgs());
     }
 
-    /** tk-init-command-lands-in-every-projects-src: init is retired, so the hint no longer names it. */
+    /**
+     * tk-init-command-lands-in-every-projects-src: init is retired, so the hint no
+     * longer names it; the restore command names the root, since the shell may
+     * stand in another repository (review, core#249).
+     */
     #[Test]
     public function outside_a_project_it_says_how_to_get_one_and_does_not_send_you_to_init(): void
     {
@@ -121,7 +125,7 @@ final class StartRuntimeActionTest extends TestCase
         $said = trim((string) preg_replace('/\s+/', ' ', $output->fetch()));
         self::assertSame(
             '[ERROR] docker-compose.yml not found in ' . $this->root . '. '
-            . 'Run it in a Semitexa project. A file removed by mistake comes back with: git checkout -- docker-compose.yml '
+            . "Run it in a Semitexa project. A file removed by mistake comes back with: git -C '" . $this->root . "' checkout -- docker-compose.yml "
             . 'A new project is made by the installer: curl -fsSL https://semitexa.com/install.sh | bash -s my-project',
             $said,
         );
