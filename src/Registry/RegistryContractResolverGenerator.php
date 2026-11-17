@@ -122,6 +122,7 @@ class RegistryContractResolverGenerator
      */
     private static function writeFactoryClass(string $root, string $baseInterface, string $factoryInterface, array $implementations): ?string
     {
+        $implementations = self::inClassOrder($implementations);
         try {
             $baseRef = new ReflectionClass($baseInterface);
             $factoryRef = new ReflectionClass($factoryInterface);
@@ -286,6 +287,7 @@ PHP;
      */
     private static function writeResolverClass(string $root, string $interface, array $implementations, string $active): ?string
     {
+        $implementations = self::inClassOrder($implementations);
         try {
             $ref = new ReflectionClass($interface);
         } catch (\Throwable $e) {
@@ -387,6 +389,23 @@ PHP;
         return CanonicalRegistryPaths::REGISTRY_CONTRACTS_NAMESPACE . '\\' . $resolverShortName;
     }
 
+    /**
+     * The implementations by class name, never in discovery order: that order differs
+     * between machines and filesystems, and the files followed it, so a fresh clone
+     * came up with every committed resolver rewritten, its use lines, parameters and
+     * aliases reordered (tk-registry-resolvers-reorder-on-every-boot). The active
+     * implementation is named separately, so the order only ever decided the bytes.
+     *
+     * @param list<array{module: string, class: string}> $implementations
+     * @return list<array{module: string, class: string}>
+     */
+    private static function inClassOrder(array $implementations): array
+    {
+        usort($implementations, static fn (array $a, array $b): int => strcmp($a['class'], $b['class']));
+
+        return $implementations;
+    }
+
     private static function uniqueParamName(string $class, array $used): string
     {
         $ref = new ReflectionClass($class);
@@ -427,6 +446,7 @@ PHP;
      */
     private static function formatUseBlock(array $imports): string
     {
+        ksort($imports, SORT_STRING);
         $lines = [];
         foreach ($imports as $fqn => $alias) {
             $short = str_contains($fqn, '\\')
