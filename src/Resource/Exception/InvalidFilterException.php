@@ -6,6 +6,7 @@ namespace Semitexa\Core\Resource\Exception;
 
 use Semitexa\Core\Exception\DomainException;
 use Semitexa\Core\Http\HttpStatus;
+use Semitexa\Core\Resource\EchoedValue;
 
 /**
  * Thrown when the `?filter=` query parameter fails parsing
@@ -38,7 +39,7 @@ final class InvalidFilterException extends DomainException
     ) {
         parent::__construct(sprintf(
             'Invalid filter parameter "filter"=%s: %s.',
-            $rawValue === '' ? '<empty>' : '"' . $rawValue . '"',
+            $rawValue === '' ? '<empty>' : '"' . EchoedValue::of($rawValue) . '"',
             $reason,
         ));
     }
@@ -52,7 +53,7 @@ final class InvalidFilterException extends DomainException
     {
         return [
             'parameter'        => 'filter',
-            'value'            => $this->rawValue,
+            'value'            => EchoedValue::of($this->rawValue),
             'reason'           => $this->reason,
             'allowed_filters'  => $this->allowedFilters,
         ];

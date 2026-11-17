@@ -6,6 +6,7 @@ namespace Semitexa\Core\Resource\Exception;
 
 use Semitexa\Core\Exception\DomainException;
 use Semitexa\Core\Http\HttpStatus;
+use Semitexa\Core\Resource\EchoedValue;
 
 /**
  * Thrown when the `?sort=` query parameter fails parsing
@@ -35,7 +36,7 @@ final class InvalidSortException extends DomainException
     ) {
         parent::__construct(sprintf(
             'Invalid sort parameter "sort"=%s: %s.',
-            $rawValue === '' ? '<empty>' : '"' . $rawValue . '"',
+            $rawValue === '' ? '<empty>' : '"' . EchoedValue::of($rawValue) . '"',
             $reason,
         ));
     }
@@ -49,7 +50,7 @@ final class InvalidSortException extends DomainException
     {
         return [
             'parameter'      => 'sort',
-            'value'          => $this->rawValue,
+            'value'          => EchoedValue::of($this->rawValue),
             'reason'         => $this->reason,
             'allowed_fields' => $this->allowedFields,
         ];

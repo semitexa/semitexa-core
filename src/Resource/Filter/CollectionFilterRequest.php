@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Resource\Filter;
 
+use Semitexa\Core\Resource\EchoedValue;
 use Semitexa\Core\Resource\Exception\InvalidFilterException;
 
 /**
@@ -169,7 +170,7 @@ final readonly class CollectionFilterRequest
         if ($firstColon === false) {
             throw new InvalidFilterException(
                 rawValue: $raw,
-                reason:   sprintf('term "%s" is missing operator separator ":"', $segment),
+                reason:   sprintf('term "%s" is missing operator separator ":"', EchoedValue::of($segment)),
                 allowedFilters: $allowedFilters,
             );
         }
@@ -177,7 +178,7 @@ final readonly class CollectionFilterRequest
         if ($secondColon === false) {
             throw new InvalidFilterException(
                 rawValue: $raw,
-                reason:   sprintf('term "%s" is missing value separator ":"', $segment),
+                reason:   sprintf('term "%s" is missing value separator ":"', EchoedValue::of($segment)),
                 allowedFilters: $allowedFilters,
             );
         }
@@ -196,28 +197,28 @@ final readonly class CollectionFilterRequest
         if ($operator === '') {
             throw new InvalidFilterException(
                 rawValue: $raw,
-                reason:   sprintf('term "%s" has empty operator', $segment),
+                reason:   sprintf('term "%s" has empty operator', EchoedValue::of($segment)),
                 allowedFilters: $allowedFilters,
             );
         }
         if ($value === '') {
             throw new InvalidFilterException(
                 rawValue: $raw,
-                reason:   sprintf('term "%s" has empty value', $segment),
+                reason:   sprintf('term "%s" has empty value', EchoedValue::of($segment)),
                 allowedFilters: $allowedFilters,
             );
         }
         if (str_contains($field, '.')) {
             throw new InvalidFilterException(
                 rawValue: $raw,
-                reason:   sprintf('nested / relation field "%s" is not allowed in this phase', $field),
+                reason:   sprintf('nested / relation field "%s" is not allowed in this phase', EchoedValue::of($field)),
                 allowedFilters: $allowedFilters,
             );
         }
         if (!array_key_exists($field, $allowedFilters)) {
             throw new InvalidFilterException(
                 rawValue: $raw,
-                reason:   sprintf('field "%s" is not in the route filter allowlist', $field),
+                reason:   sprintf('field "%s" is not in the route filter allowlist', EchoedValue::of($field)),
                 allowedFilters: $allowedFilters,
             );
         }
@@ -228,8 +229,8 @@ final readonly class CollectionFilterRequest
                 rawValue: $raw,
                 reason:   sprintf(
                     'operator "%s" is not allowed on field "%s" (allowed: %s)',
-                    $operator,
-                    $field,
+                    EchoedValue::of($operator),
+                    EchoedValue::of($field),
                     implode(', ', $allowedOps),
                 ),
                 allowedFilters: $allowedFilters,
@@ -243,7 +244,7 @@ final readonly class CollectionFilterRequest
             // an operator the framework does not implement.
             throw new InvalidFilterException(
                 rawValue: $raw,
-                reason:   sprintf('operator "%s" is not implemented by the framework', $operator),
+                reason:   sprintf('operator "%s" is not implemented by the framework', EchoedValue::of($operator)),
                 allowedFilters: $allowedFilters,
             );
         }
@@ -255,7 +256,7 @@ final readonly class CollectionFilterRequest
                 if ($candidate === '') {
                     throw new InvalidFilterException(
                         rawValue: $raw,
-                        reason:   sprintf('empty entry in "in" list for field "%s"', $field),
+                        reason:   sprintf('empty entry in "in" list for field "%s"', EchoedValue::of($field)),
                         allowedFilters: $allowedFilters,
                     );
                 }
@@ -264,7 +265,7 @@ final readonly class CollectionFilterRequest
             if ($cleaned === []) {
                 throw new InvalidFilterException(
                     rawValue: $raw,
-                    reason:   sprintf('"in" list for field "%s" is empty', $field),
+                    reason:   sprintf('"in" list for field "%s" is empty', EchoedValue::of($field)),
                     allowedFilters: $allowedFilters,
                 );
             }
