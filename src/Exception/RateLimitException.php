@@ -4,9 +4,10 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Exception;
 
+use Semitexa\Core\Http\CarriesResponseHeadersInterface;
 use Semitexa\Core\Http\HttpStatus;
 
-class RateLimitException extends DomainException
+class RateLimitException extends DomainException implements CarriesResponseHeadersInterface
 {
     public function __construct(
         private readonly int $retryAfter = 60,

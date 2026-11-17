@@ -8,10 +8,12 @@ use Semitexa\Core\Attribute\AsPipelineListener;
 use Semitexa\Core\Attribute\InjectAsMutable;
 use Semitexa\Core\Csrf\Attribute\CsrfExempt;
 use Semitexa\Core\Environment;
+use Semitexa\Core\Exception\ServiceUnavailableException;
 use Semitexa\Core\Pipeline\AuthCheck;
 use Semitexa\Core\Pipeline\Exception\AccessDeniedException;
 use Semitexa\Core\Pipeline\PipelineListenerInterface;
 use Semitexa\Core\Pipeline\RequestPipelineContext;
+use Semitexa\Core\Session\Session;
 use Semitexa\Core\Session\SessionInterface;
 
 /**
@@ -72,6 +74,15 @@ final class CsrfListener implements PipelineListenerInterface
 
         if (!isset($this->session)) {
             throw new AccessDeniedException('CSRF validation failed: no session.');
+        }
+
+        // The session store could not be read (Redis down): SessionPhase serves
+        // a transient session with a token of its own, so the token the page
+        // carries cannot match and the visitor was refused as a forgery, 403, for
+        // an outage. A 503 with Retry-After tells it to try again
+        // (tk-post-during-redis-outage-fails-csrf-not-retryable).
+        if ($this->session instanceof Session && !$this->session->persists()) {
+            throw new ServiceUnavailableException();
         }
 
         /** @var CsrfToken $token */
