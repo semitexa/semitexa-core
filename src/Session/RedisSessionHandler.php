@@ -29,7 +29,8 @@ final class RedisSessionHandler implements SessionHandlerInterface
     {
         $key = self::KEY_PREFIX . $sessionId;
 
-        $raw = $this->pool->withConnection(
+        // A GET is safe to repeat: one dead socket must not make the visitor a guest.
+        $raw = $this->pool->withIdempotentRead(
             static fn ($redis): mixed => $redis->get($key)
         );
 

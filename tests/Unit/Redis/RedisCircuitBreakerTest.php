@@ -16,7 +16,8 @@ use Semitexa\Core\Redis\RedisUnavailableException;
 
 /**
  * While Redis is down a call must fail at once, not after a connect or DNS
- * timeout (5 s per page, measured with the container stopped).
+ * timeout (5 s per page, measured with the container stopped), and one dead
+ * socket must not count as Redis being down (tk-one-redis-read-error-makes-everyone-a-guest).
  */
 final class RedisCircuitBreakerTest extends TestCase
 {
@@ -25,24 +26,67 @@ final class RedisCircuitBreakerTest extends TestCase
     private int $attempts = 0;
 
     #[Test]
-    public function a_connection_failure_opens_it_and_later_calls_fail_without_trying(): void
+    public function a_second_connection_failure_opens_it_and_later_calls_fail_without_trying(): void
     {
         $breaker = $this->breaker();
+        $this->expectFailure($breaker, ConnectionException::class);
+        $this->now += 1.0;
         $this->expectFailure($breaker, ConnectionException::class);
 
         for ($i = 0; $i < 50; $i++) {
             $this->expectFailure($breaker, RedisUnavailableException::class);
         }
 
-        self::assertSame(1, $this->attempts, 'only the first call reached the network');
+        self::assertSame(2, $this->attempts, 'only the first two calls reached the network');
         self::assertTrue($breaker->isOpen());
+    }
+
+    /**
+     * One dead socket is not an outage. Opening on it served every request of
+     * the window a guest session, and each sign-in POST in it failed CSRF
+     * (consumer production, 2026-11-16).
+     */
+    #[Test]
+    public function one_connection_failure_is_not_an_outage_yet(): void
+    {
+        $breaker = $this->breaker();
+        $this->expectFailure($breaker, ConnectionException::class);
+
+        self::assertFalse($breaker->isOpen());
+        self::assertSame('PONG', $breaker->call(static fn (): string => 'PONG'), 'the next call still reaches Redis');
+    }
+
+    #[Test]
+    public function a_success_between_two_failures_starts_the_count_again(): void
+    {
+        $breaker = $this->breaker();
+        $this->expectFailure($breaker, ConnectionException::class);
+        $breaker->call(static fn (): string => 'PONG');
+        $this->expectFailure($breaker, ConnectionException::class);
+
+        self::assertFalse($breaker->isOpen());
+    }
+
+    #[Test]
+    public function failures_further_apart_than_ten_seconds_do_not_open_it(): void
+    {
+        $breaker = $this->breaker();
+        $this->expectFailure($breaker, ConnectionException::class);
+        $this->now += 10.5;
+        $this->expectFailure($breaker, ConnectionException::class);
+
+        self::assertFalse($breaker->isOpen(), 'the second failure only starts a new count');
+
+        $this->expectFailure($breaker, ConnectionException::class);
+        self::assertTrue($breaker->isOpen(), 'the third, within ten seconds of the second, opens it');
     }
 
     #[Test]
     public function after_the_cooldown_one_probe_goes_through_and_a_success_closes_it(): void
     {
         $breaker = $this->breaker();
-        $this->expectFailure($breaker, ConnectionException::class);
+        $this->open($breaker);
+        self::assertTrue($breaker->isOpen());
 
         $this->now += 2.0;
         self::assertSame('PONG', $breaker->call(function (): string {
@@ -59,20 +103,20 @@ final class RedisCircuitBreakerTest extends TestCase
     public function a_failed_probe_reopens_it_for_another_cooldown(): void
     {
         $breaker = $this->breaker();
-        $this->expectFailure($breaker, ConnectionException::class);
+        $this->open($breaker);
         $this->now += 2.0;
         $this->expectFailure($breaker, ConnectionException::class);
         $this->now += 1.0;
 
         $this->expectFailure($breaker, RedisUnavailableException::class);
-        self::assertSame(2, $this->attempts);
+        self::assertSame(3, $this->attempts, 'the two that opened it and the probe');
     }
 
     #[Test]
     public function the_window_doubles_on_each_failed_probe_up_to_the_cap_and_resets_on_success(): void
     {
         $breaker = $this->breaker();
-        $this->expectFailure($breaker, ConnectionException::class);
+        $this->open($breaker);
         $windows = [];
         for ($i = 0; $i < 6; $i++) {
             $start = $this->now;
@@ -92,7 +136,7 @@ final class RedisCircuitBreakerTest extends TestCase
 
         // A new outage starts from the first window and doubles from there,
         // not from where the previous outage left off (30 s).
-        $this->expectFailure($breaker, ConnectionException::class);
+        $this->open($breaker);
         $this->now += 2.0;
         $this->expectFailure($breaker, ConnectionException::class);
         $this->now += 3.5;
@@ -106,8 +150,9 @@ final class RedisCircuitBreakerTest extends TestCase
     public function calls_already_in_flight_when_redis_failed_do_not_lengthen_the_window(): void
     {
         $breaker = $this->breaker();
+        $this->expectFailure($breaker, ConnectionException::class);
         // The outer call started while the breaker was closed; the inner one
-        // fails first and opens it; then the outer one fails too — as five
+        // fails next and opens it; then the outer one fails too — as five
         // concurrent requests do when Redis goes away under them.
         try {
             $breaker->call(function () use ($breaker): never {
@@ -138,7 +183,7 @@ final class RedisCircuitBreakerTest extends TestCase
     public function the_refusal_carries_the_failure_that_opened_it(): void
     {
         $breaker = $this->breaker();
-        $this->expectFailure($breaker, ConnectionException::class);
+        $this->open($breaker);
 
         try {
             $breaker->call(static fn (): null => null);
@@ -161,6 +206,8 @@ final class RedisCircuitBreakerTest extends TestCase
     public function a_call_the_drain_cancelled_does_not_open_it(): void
     {
         $breaker = $this->breaker();
+        // A real failure first: counted, the cancelled call would be the second and open it.
+        $this->expectFailure($breaker, ConnectionException::class);
         WorkerDrainSignal::begin();
         try {
             \Swoole\Coroutine\run(function () use ($breaker): void {
@@ -187,6 +234,7 @@ final class RedisCircuitBreakerTest extends TestCase
     public function a_failure_that_says_it_was_canceled_while_draining_does_not_open_it(): void
     {
         $breaker = $this->breaker();
+        $this->expectFailure($breaker, ConnectionException::class);
         WorkerDrainSignal::begin();
         try {
             try {
@@ -209,12 +257,19 @@ final class RedisCircuitBreakerTest extends TestCase
         $breaker = $this->breaker();
         WorkerDrainSignal::begin();
         try {
-            $this->expectFailure($breaker, ConnectionException::class);
+            $this->open($breaker);
         } finally {
             WorkerDrainSignal::reset();
         }
 
         self::assertTrue($breaker->isOpen());
+    }
+
+    /** Two connection-level failures in a row: what opens it. */
+    private function open(RedisCircuitBreaker $breaker): void
+    {
+        $this->expectFailure($breaker, ConnectionException::class);
+        $this->expectFailure($breaker, ConnectionException::class);
     }
 
     private function breaker(): RedisCircuitBreaker

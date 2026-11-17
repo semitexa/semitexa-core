@@ -14,8 +14,9 @@ use Semitexa\Core\Log\StaticLoggerBridge;
  * Without it, every request that touched Redis while Redis was down paid a full
  * connect attempt: with the container gone, getaddrinfo alone took 5 s, so every
  * page of the site answered 500 after five seconds (measured 2026-10-15). After
- * a connection-level failure ({@see ConnectionException}: refused, DNS, a read
- * that timed out) the breaker opens for `cooldownSeconds`; calls in that window
+ * a second connection-level failure ({@see ConnectionException}: refused, DNS, a
+ * read that timed out) within STRIKE_SPAN_SECONDS of the first, the breaker
+ * opens for `cooldownSeconds`; calls in that window
  * fail immediately with a {@see RedisUnavailableException} carrying the original
  * failure. When the window ends exactly one caller is let through as a probe;
  * the others keep failing fast until it resolves. A success closes the breaker.
@@ -30,6 +31,18 @@ use Semitexa\Core\Log\StaticLoggerBridge;
  */
 final class RedisCircuitBreaker
 {
+    /**
+     * A first failure is not yet an outage. Opening on it turned one dead
+     * socket into a guest session for every request of the cooldown window,
+     * and every sign-in POST in it failed CSRF (consumer production,
+     * 2026-11-16). A second failure within this span opens the breaker, so a
+     * real outage still fails fast after its second call.
+     */
+    private const STRIKE_SPAN_SECONDS = 10.0;
+
+    /** When the breaker, still closed, last saw a connection-level failure; null after a success. */
+    private ?float $strikeAt = null;
+
     private ?ConnectionException $lastFailure = null;
 
     private float $openedAt = 0.0;
@@ -109,8 +122,13 @@ final class RedisCircuitBreaker
                 throw $e;
             }
             $wasClosed = $this->lastFailure === null;
-            $this->lastFailure = $e;
             $now = ($this->clock)();
+            if ($wasClosed && ($this->strikeAt === null || $now - $this->strikeAt > self::STRIKE_SPAN_SECONDS)) {
+                $this->strikeAt = $now;
+
+                throw $e;
+            }
+            $this->lastFailure = $e;
             if ($wasClosed) {
                 $this->window = $this->cooldownSeconds;
                 $this->openUntil = $now + $this->window;
@@ -149,6 +167,7 @@ final class RedisCircuitBreaker
             ]);
         }
         $this->lastFailure = null;
+        $this->strikeAt = null;
         $this->openUntil = 0.0;
         $this->probeStartedAt = null;
         $this->refused = 0;
