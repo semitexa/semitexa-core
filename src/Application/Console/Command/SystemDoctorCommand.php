@@ -16,6 +16,7 @@ use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
+use Symfony\Component\Console\Output\StreamOutput;
 use Symfony\Component\Console\Style\SymfonyStyle;
 
 #[AsCommand(name: 'system:doctor', description: 'Run environment capability checks declared by installed packages')]
@@ -33,6 +34,16 @@ final class SystemDoctorCommand extends BaseCommand
                 name:        'json',
                 mode:        InputOption::VALUE_NONE,
                 description: 'Emit a machine-readable JSON report',
+            )
+            ->addOption(
+                name:        'compact',
+                mode:        InputOption::VALUE_NONE,
+                description: 'Only the checks that are not OK, one line each, and the counts (the default when stdout is not a terminal)',
+            )
+            ->addOption(
+                name:        'table',
+                mode:        InputOption::VALUE_NONE,
+                description: 'The full table of every check, whatever stdout is',
             );
     }
 
@@ -92,6 +103,13 @@ final class SystemDoctorCommand extends BaseCommand
             return $healthy ? Command::SUCCESS : Command::FAILURE;
         }
 
+        // Read by an agent or a log, the table cost about 7,000 characters for 24
+        // rows, 20 of them OK, every row padded to the widest message (reported by
+        // the Guard project, tk-doctor-table-pads-to-230-columns).
+        if ((bool) $input->getOption('compact') || (!$input->getOption('table') && !self::isTerminal($output))) {
+            return $this->renderCompact($output, $report, $healthy);
+        }
+
         $io->title('System doctor');
 
         if ($report === []) {
@@ -111,13 +129,7 @@ final class SystemDoctorCommand extends BaseCommand
         $io->table(['Status', 'Check', 'Package', 'Details'], $rows);
 
         $counts = array_count_values(array_column($report, 'status'));
-        $summary = sprintf(
-            '%d pass, %d warn, %d fail, %d skip',
-            $counts[DoctorStatus::Pass->value] ?? 0,
-            $counts[DoctorStatus::Warn->value] ?? 0,
-            $counts[DoctorStatus::Fail->value] ?? 0,
-            $counts[DoctorStatus::Skip->value] ?? 0,
-        );
+        $summary = self::summary($report);
 
         if (!$healthy) {
             $io->error("Environment is NOT healthy: {$summary}");
@@ -129,6 +141,60 @@ final class SystemDoctorCommand extends BaseCommand
             : $io->success("Environment is healthy: {$summary}");
 
         return Command::SUCCESS;
+    }
+
+    /**
+     * One line of counts, then a line for each check that is not OK (and its fix),
+     * then the verdict: nothing padded, nothing an OK check adds. Written raw, so a
+     * message carrying markup is printed as it is.
+     *
+     * @param list<array{name: string, package: string, status: string, message: string, hint: ?string}> $report
+     */
+    private function renderCompact(OutputInterface $output, array $report, bool $healthy): int
+    {
+        if ($report === []) {
+            $output->writeln('No doctor checks discovered — installed packages declare none.', OutputInterface::OUTPUT_RAW);
+
+            return Command::SUCCESS;
+        }
+        $output->writeln('System doctor: ' . self::summary($report), OutputInterface::OUTPUT_RAW);
+        foreach ($report as $entry) {
+            if ($entry['status'] === DoctorStatus::Pass->value) {
+                continue;
+            }
+            $output->writeln(sprintf('  %s %s (%s): %s', strtoupper($entry['status']), $entry['name'], $entry['package'], $entry['message']), OutputInterface::OUTPUT_RAW);
+            if ($entry['hint'] !== null) {
+                $output->writeln('    fix: ' . $entry['hint'], OutputInterface::OUTPUT_RAW);
+            }
+        }
+        $warned = in_array(DoctorStatus::Warn->value, array_column($report, 'status'), true);
+        $output->writeln(match (true) {
+            !$healthy => 'Environment is NOT healthy.',
+            $warned => 'Environment is usable with warnings.',
+            default => 'Environment is healthy.',
+        }, OutputInterface::OUTPUT_RAW);
+
+        return $healthy ? Command::SUCCESS : Command::FAILURE;
+    }
+
+    /** @param list<array{name: string, package: string, status: string, message: string, hint: ?string}> $report */
+    private static function summary(array $report): string
+    {
+        $counts = array_count_values(array_column($report, 'status'));
+
+        return sprintf(
+            '%d pass, %d warn, %d fail, %d skip',
+            $counts[DoctorStatus::Pass->value] ?? 0,
+            $counts[DoctorStatus::Warn->value] ?? 0,
+            $counts[DoctorStatus::Fail->value] ?? 0,
+            $counts[DoctorStatus::Skip->value] ?? 0,
+        );
+    }
+
+    /** A person at a terminal reads the table; a pipe, a log or an agent gets the compact form. */
+    private static function isTerminal(OutputInterface $output): bool
+    {
+        return $output instanceof StreamOutput && stream_isatty($output->getStream());
     }
 
     /**
