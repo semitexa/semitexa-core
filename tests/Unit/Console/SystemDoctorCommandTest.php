@@ -68,7 +68,8 @@ final class SystemDoctorCommandTest extends TestCase
     {
         $tester = $this->tester([PassingDoctorCheck::class]);
 
-        $exit = $tester->execute([]);
+        // The table on request: a tester's output is no terminal, which gets the compact form.
+        $exit = $tester->execute(['--table' => true]);
 
         self::assertSame(0, $exit, $tester->getDisplay());
         self::assertStringContainsString('test.pass', $tester->getDisplay());
@@ -92,7 +93,7 @@ final class SystemDoctorCommandTest extends TestCase
     {
         $tester = $this->tester([ThrowingDoctorCheck::class, PassingDoctorCheck::class]);
 
-        $exit = $tester->execute([]);
+        $exit = $tester->execute(['--table' => true]);
 
         self::assertSame(1, $exit);
         self::assertStringContainsString('probe exploded', $tester->getDisplay());
@@ -111,6 +112,33 @@ final class SystemDoctorCommandTest extends TestCase
         self::assertSame('semitexa.system-doctor/v1', $data['artifact']);
         self::assertFalse($data['healthy']);
         self::assertSame('test.fail', $data['checks'][0]['name']);
+    }
+
+    /**
+     * tk-doctor-table-pads-to-230-columns (reported by the Guard project): read by an
+     * installer, a log or an agent, the table cost about 7,000 characters for 24 rows,
+     * 20 of them OK, each padded to the widest message. Off a terminal the doctor says
+     * the counts, what is not OK with its fix, and the verdict.
+     */
+    #[Test]
+    public function offATerminalOnlyWhatIsNotOkIsListed(): void
+    {
+        foreach ([[], ['--compact' => true]] as $options) {
+            $tester = $this->tester([PassingDoctorCheck::class, FailingDoctorCheck::class]);
+            self::assertSame(1, $tester->execute($options));
+            self::assertSame(
+                "System doctor: 1 pass, 0 warn, 1 fail, 0 skip\n"
+                . "  FAIL test.fail (semitexa/test): broken thing\n"
+                . "    fix: do the fix\n"
+                . "Environment is NOT healthy.\n",
+                $tester->getDisplay(),
+                'options: ' . json_encode($options),
+            );
+        }
+
+        $healthy = $this->tester([PassingDoctorCheck::class]);
+        self::assertSame(0, $healthy->execute(['--compact' => true]));
+        self::assertSame("System doctor: 1 pass, 0 warn, 0 fail, 0 skip\nEnvironment is healthy.\n", $healthy->getDisplay());
     }
 
     #[Test]
