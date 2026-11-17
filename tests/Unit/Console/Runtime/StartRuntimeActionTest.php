@@ -131,6 +131,27 @@ final class StartRuntimeActionTest extends TestCase
         );
     }
 
+    /** Independent review of core#249: the root is quoted for the shell, a quote and a space in it included. */
+    #[Test]
+    public function a_root_with_a_quote_and_a_space_is_quoted_for_the_shell(): void
+    {
+        $root = sys_get_temp_dir() . "/it's a root-" . bin2hex(random_bytes(4));
+        mkdir($root);
+        (new \ReflectionProperty(ProjectRoot::class, 'root'))->setValue(null, $root);
+        try {
+            $output = new BufferedOutput(decorated: false);
+            self::assertFalse((new StartRuntimeAction(new SymfonyStyle(new ArrayInput([]), $output)))->execute());
+            $said = (string) preg_replace('/\s+/', ' ', $output->fetch());
+        } finally {
+            rmdir($root);
+        }
+
+        self::assertStringContainsString(
+            "comes back with: git -C '" . str_replace("'", "'\\''", $root) . "' checkout -- docker-compose.yml A new project",
+            $said,
+        );
+    }
+
     /** @param array<string, string> $values */
     private function environment(array $values): void
     {
