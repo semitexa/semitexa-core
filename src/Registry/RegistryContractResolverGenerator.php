@@ -429,16 +429,22 @@ PHP;
      */
     private static function addImport(string $fqn, array &$imports, array &$usedShortNames): string
     {
-        $ref = new ReflectionClass($fqn);
-        $short = $ref->getShortName();
-        if (isset($usedShortNames[$short]) && $usedShortNames[$short] !== $fqn) {
-            $alias = $short . 'Alias' . count($usedShortNames);
-            $imports[$fqn] = $alias;
-            return $alias;
+        if (isset($imports[$fqn])) {
+            return $imports[$fqn];
         }
-        $usedShortNames[$short] = $fqn;
-        $imports[$fqn] = $short;
-        return $short;
+        $short = (new ReflectionClass($fqn))->getShortName();
+        $name = $short;
+        // A short name another class holds: the first free Alias<n>, reserved like any
+        // name, so a third class sharing it cannot be given the same alias. Counting the
+        // names in use did, once the class-name order put three of them in a row, and PHP
+        // refuses a file that imports two classes as one name (review, core#245).
+        for ($n = 1; isset($usedShortNames[$name]); $n++) {
+            $name = $short . 'Alias' . $n;
+        }
+        $usedShortNames[$name] = $fqn;
+        $imports[$fqn] = $name;
+
+        return $name;
     }
 
     /**
