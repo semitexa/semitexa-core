@@ -22,10 +22,12 @@ final class StartRuntimeAction
         $projectRoot = ProjectRoot::get();
 
         if (!file_exists($projectRoot . '/docker-compose.yml')) {
-            $this->io->error('docker-compose.yml not found.');
+            // init is retired and docs/RUNNING.md does not exist: the hint sent
+            // you to neither (tk-init-command-lands-in-every-projects-src).
+            $this->io->error('docker-compose.yml not found in ' . $projectRoot . '.');
             $this->io->text([
-                'Run <comment>semitexa init</comment> to generate project structure including docker-compose.yml.',
-                'See docs/RUNNING.md (or vendor/semitexa/core/docs/RUNNING.md when installed) for the supported way to run the app (Docker only).',
+                'Run it in a Semitexa project. A file removed by mistake comes back with: <comment>git checkout -- docker-compose.yml</comment>',
+                'A new project is made by the installer: <comment>curl -fsSL https://semitexa.com/install.sh | bash -s my-project</comment>',
             ]);
             return false;
         }
