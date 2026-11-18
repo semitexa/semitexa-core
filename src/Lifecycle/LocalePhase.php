@@ -6,9 +6,14 @@ namespace Semitexa\Core\Lifecycle;
 
 use Semitexa\Core\Container\RequestScopedContainer;
 use Semitexa\Core\Cookie\CookieJarInterface;
+use Semitexa\Core\Environment;
 use Semitexa\Core\Http\HttpStatus;
+use Semitexa\Core\Http\SecureCookieSetting;
 use Semitexa\Core\Locale\LocaleContextInterface;
+use Semitexa\Core\Locale\LocaleSwitch;
 use Semitexa\Core\HttpResponse;
+use Semitexa\Core\Request;
+use Semitexa\Locale\Application\Service\Resolver\CookieLocaleResolver;
 use Semitexa\Locale\Context\LocaleContextStore;
 use Semitexa\Locale\Application\Service\LocaleBootstrapper;
 
@@ -48,6 +53,28 @@ final class LocalePhase
         LocaleContextStore::setUrlPrefixEnabled($config->urlPrefixEnabled);
         LocaleContextStore::setDefaultLocale($config->defaultLocale);
 
+        // An explicit choice: the switcher's own link. Before both redirects
+        // below, because it is the one request a stored preference must not
+        // outrank; see LocaleSwitch for the trap this ends.
+        if ($resolution !== null && $config->urlPrefixEnabled) {
+            $chosen = $request->getQuery(LocaleSwitch::QUERY_PARAMETER);
+            $target = LocaleSwitch::target(
+                $resolution->hadPathPrefix ? ($resolution->strippedPath ?? '/') : $request->getPath(),
+                $request->getQueryString(),
+                $request->getMethod(),
+                $request->getHeader('Accept'),
+                $chosen,
+                $config->defaultLocale,
+                $config->supportedLocales,
+            );
+
+            if ($target !== null) {
+                $context->setEarlyResponse($this->switchResponse($request, $cookieJar, $chosen, $target));
+
+                return;
+            }
+        }
+
         // 301 redirect: /{defaultLocale}/path -> /path (GET/HEAD only)
         if ($resolution !== null
             && $resolution->hadPathPrefix
@@ -62,8 +89,7 @@ final class LocalePhase
             // Browsers also DROP tab/newline/CR, so `/en/\t/evil.example` became
             // `//evil.example` after the collapse: a path with ASCII controls is
             // not redirected anywhere but `/`.
-            $stripped = str_replace('\\', '/', $resolution->strippedPath ?? '');
-            $target = preg_match('/[\x00-\x1F\x7F]/', $stripped) === 1 ? '/' : '/' . ltrim($stripped, '/');
+            $target = LocaleSwitch::onThisSite($resolution->strippedPath ?? '');
             $qs = $request->getQueryString();
             if ($qs !== '') {
                 $target .= '?' . $qs;
@@ -103,7 +129,7 @@ final class LocalePhase
                 $request->getQueryString(),
                 $request->getMethod(),
                 $request->getHeader('Accept'),
-                $request->getCookie('locale'),
+                $request->getCookie(CookieLocaleResolver::DEFAULT_COOKIE_NAME),
                 $config->defaultLocale,
                 $config->supportedLocales,
             );
@@ -127,6 +153,72 @@ final class LocalePhase
         if ($resolution !== null && $resolution->strippedPath !== null && $config->urlPrefixEnabled) {
             $context->setLocaleStrippedPath($resolution->strippedPath);
         }
+    }
+
+    /**
+     * The answer to a switcher link: the stored preference brought in line
+     * with the choice, and a redirect to the page without the marker.
+     *
+     * The cookie is only ever UPDATED. A visitor who carries none has no
+     * stored preference to get in the way, and whether to keep one at all
+     * stays the application's decision. It is written the way the application
+     * is told to write it (`Path=/`, `SameSite=Lax`, a year, readable by
+     * scripts so a client-side switcher can still replace it), on the
+     * session's domain so the two cookies of one site cover the same hosts,
+     * and a same-named cookie under the other Domain variant is expired.
+     *
+     * Not written for a HEAD (which changes nothing), nor for a navigation
+     * another site started: that visitor still gets the redirect, and then
+     * their own language as before. A link fetched ahead of a click is
+     * refused instead, since a browser may replay a prefetched redirect on
+     * the real click, and that one would arrive without the cookie change.
+     */
+    private function switchResponse(Request $request, ?CookieJarInterface $cookieJar, string $chosen, string $target): HttpResponse
+    {
+        // Never stored by a browser or a shared cache: the answer changes a
+        // cookie, and the next visitor's click must reach this code too.
+        $headers = ['Cache-Control' => 'no-store'];
+
+        $stored = $request->getCookie(CookieLocaleResolver::DEFAULT_COOKIE_NAME);
+        $changes = $cookieJar !== null
+            && $stored !== ''
+            && $stored !== $chosen
+            && strtoupper($request->getMethod()) === 'GET'
+            && !LocaleSwitch::startedElsewhere($request->getHeader('Sec-Fetch-Site'));
+
+        if ($changes) {
+            if (LocaleSwitch::isSpeculative(
+                $request->getHeader('Sec-Purpose'),
+                $request->getHeader('Purpose'),
+                $request->getHeader('X-Purpose'),
+                $request->getHeader('X-Moz'),
+            )) {
+                // 503 because a browser discards a failed prefetch and makes
+                // the real request on the click; any redirect could be kept.
+                return new HttpResponse('', HttpStatus::ServiceUnavailable->value, $headers);
+            }
+
+            $options = [
+                'path' => '/',
+                'maxAge' => 31536000,
+                'sameSite' => 'lax',
+                'secure' => SecureCookieSetting::fromEnvironment()->secureFor($request->getScheme() === 'https'),
+            ];
+            $domain = (string) (Environment::getEnvValue('SESSION_COOKIE_DOMAIN') ?? '');
+            if ($domain !== '') {
+                $options['domain'] = $domain;
+            }
+
+            // First, so a store that counts the two as one cookie ends with
+            // the new value: the same-named cookie under the other Domain
+            // variant, which the browser would otherwise keep sending first.
+            foreach (LocaleSwitch::otherCookieDomains($request->getHost(), $domain) as $other) {
+                $cookieJar->remove(CookieLocaleResolver::DEFAULT_COOKIE_NAME, '/', $other);
+            }
+            $cookieJar->set(CookieLocaleResolver::DEFAULT_COOKIE_NAME, $chosen, $options);
+        }
+
+        return new HttpResponse('', HttpStatus::Found->value, ['Location' => $target] + $headers);
     }
 
     /**
