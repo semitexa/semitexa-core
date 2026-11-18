@@ -38,12 +38,18 @@ final class LocalePhaseTest extends TestCase
 
     private string|false $cookieDomainBefore = false;
 
+    private string|false $cookieSecureBefore = false;
+
     protected function setUp(): void
     {
         // The switch writes its cookie on the session's domain: pinned to
         // "none configured" so a developer's .env cannot change the answer.
         $this->cookieDomainBefore = getenv('SESSION_COOKIE_DOMAIN');
         putenv('SESSION_COOKIE_DOMAIN=');
+        // And to "never Secure": the exact Set-Cookie lines below hold under
+        // any deployment's SESSION_COOKIE_SECURE (review, core#250).
+        $this->cookieSecureBefore = getenv('SESSION_COOKIE_SECURE');
+        putenv('SESSION_COOKIE_SECURE=never');
 
         // Snapshot BEFORE resetting: whatever an earlier test left in the
         // store is put back in tearDown(), so this class leaves no trace.
@@ -56,6 +62,9 @@ final class LocalePhaseTest extends TestCase
         $this->cookieDomainBefore === false
             ? putenv('SESSION_COOKIE_DOMAIN')
             : putenv('SESSION_COOKIE_DOMAIN=' . $this->cookieDomainBefore);
+        $this->cookieSecureBefore === false
+            ? putenv('SESSION_COOKIE_SECURE')
+            : putenv('SESSION_COOKIE_SECURE=' . $this->cookieSecureBefore);
         StaticState::restore($this->localeState);
     }
 
