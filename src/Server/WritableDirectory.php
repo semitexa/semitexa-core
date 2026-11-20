@@ -36,6 +36,7 @@ final class WritableDirectory
         string $chownTarget,
         ?string $chmodTarget = null,
         bool $blocked = false,
+        bool $readToo = false,
     ): ?string {
         if ($exists && $writable) {
             return null;
@@ -46,7 +47,7 @@ final class WritableDirectory
                 ? "[Semitexa] {$path} is not writable by this process (uid {$processUid})."
                 : "[Semitexa] {$path} does not exist and this process (uid {$processUid}) cannot create it.",
             '[Semitexa]   ' . self::ownerLine($exists ? 'owner' : 'nearest existing parent: owner', $ownerUid, $ownerGid, $mode),
-            '[Semitexa]   fix: ' . self::repair($ownerUid, $ownerGid, $mode, $processUid, $processGid, $chownTarget, $chmodTarget ?? $path, $blocked),
+            '[Semitexa]   fix: ' . self::repair($ownerUid, $ownerGid, $mode, $processUid, $processGid, $chownTarget, $chmodTarget ?? $path, $blocked, $readToo),
         ]);
     }
 
@@ -57,7 +58,9 @@ final class WritableDirectory
      * nothing. Another owner whose group is the process's: the group is what
      * lets it write, so chmod ug+w is named beside the chown. $blocked: a file
      * stands where the directory has to be, at the path or above it, and no
-     * owner or mode repairs that.
+     * owner or mode repairs that. $readToo: the path is the Swoole log, opened
+     * for reading as well, so a mode without the owner's read bit is the fault
+     * even when the write bit is there.
      */
     public static function repair(
         ?int $ownerUid,
@@ -68,12 +71,18 @@ final class WritableDirectory
         string $chownTarget,
         string $chmodTarget,
         bool $blocked = false,
+        bool $readToo = false,
     ): string {
         if ($blocked) {
             return 'move ' . escapeshellarg($chmodTarget) . ' away: it is a file where a directory has to be.';
         }
         $chmod = static fn (string $bits): string => 'chmod ' . $bits . ' ' . escapeshellarg($chmodTarget);
+        $noRead = $readToo && $mode !== null && ($mode & 0600) === 0200;
         if ($ownerUid === $processUid) {
+            if ($noRead) {
+                return $chmod('u+r') . ': uid ' . $processUid . ' owns it, and the mode forbids the read Swoole opens its log with.';
+            }
+
             return $mode !== null && ($mode & 0200) === 0
                 ? $chmod('u+w') . ': uid ' . $processUid . ' owns it, the mode forbids the write.'
                 : 'the owner and the mode allow the write, so look for a read-only mount or an ACL on ' . $chmodTarget . '.';
@@ -84,6 +93,9 @@ final class WritableDirectory
         }
         if ($mode !== null && ($mode & 0200) === 0) {
             return $fix . ' Then ' . $chmod('u+w') . ': the mode forbids the owner the write.';
+        }
+        if ($noRead) {
+            return $fix . ' Then ' . $chmod('u+r') . ': the mode forbids the owner the read Swoole opens its log with.';
         }
 
         return $fix;
@@ -101,11 +113,14 @@ final class WritableDirectory
      * answers from the mode bits and is wrong on a read-only mount or under an
      * ACL. A directory gets a probe file, created and removed.
      *
-     * The path is a directory unless $file says it is a file the server appends
-     * to (see {@see startPaths()}). Only then is it opened, for append, and
-     * closed, nothing written and nothing truncated; and only a regular file
-     * is: opening a FIFO nobody reads blocks for good, the hang this exists to
-     * prevent. Anything but a directory where a directory is required is
+     * The path is a directory unless $open says it is a file the server appends
+     * to (see {@see startPaths()}), and names how its writer opens it: 'a+',
+     * read and write, for the Swoole log, because Swoole opens its log
+     * O_RDWR|O_APPEND|O_CREAT and a write-only one (mode 0200) refuses that;
+     * 'a' for error.log, which PHP only appends to. Only then is it opened,
+     * that way, and closed, nothing written and nothing truncated; and only a
+     * regular file is: opening a FIFO nobody reads blocks for good, the hang
+     * this exists to prevent. Anything but a directory where a directory is required is
      * `blocked`, however writable: Swoole cannot create its log inside a file.
      *
      * A missing directory is created only when $create is set, and only the
@@ -114,11 +129,12 @@ final class WritableDirectory
      * whether the nearest existing parent could take it, and the owner and mode
      * are that parent's, at `described`.
      *
+     * @param 'a'|'a+'|null $open
      * @return array{exists: bool, writable: bool, ownerUid: ?int, ownerGid: ?int, mode: ?int, described: string, blocked: bool}
      */
-    public static function facts(string $path, bool $create = false, bool $file = false): array
+    public static function facts(string $path, bool $create = false, ?string $open = null): array
     {
-        if ($create && !$file && !file_exists($path)) {
+        if ($create && $open === null && !file_exists($path)) {
             @mkdir($path, 0775, true);
         }
         clearstatcache(true, $path);
@@ -129,8 +145,8 @@ final class WritableDirectory
         }
         $writable = false;
         $blocked = false;
-        if ($file && $exists) {
-            $handle = is_file($path) ? @fopen($path, 'a') : false;
+        if ($open !== null && $exists) {
+            $handle = is_file($path) ? @fopen($path, $open) : false;
             if ($handle !== false) {
                 $writable = true;
                 fclose($handle);
@@ -162,11 +178,13 @@ final class WritableDirectory
     /**
      * Null when the process can write $directory, else the block of {@see problem()}.
      * With $create, a missing directory is made first: the server's start only.
-     * With $file, the path is an existing file to append to, as in {@see facts()}.
+     * With $open, the path is an existing file opened that way, as in {@see facts()}.
+     *
+     * @param 'a'|'a+'|null $open
      */
-    public static function inspect(string $directory, ?string $projectRoot = null, bool $create = false, bool $file = false): ?string
+    public static function inspect(string $directory, ?string $projectRoot = null, bool $create = false, ?string $open = null): ?string
     {
-        $facts = self::facts($directory, $create, $file);
+        $facts = self::facts($directory, $create, $open);
 
         return self::problem(
             $directory,
@@ -180,6 +198,7 @@ final class WritableDirectory
             self::chownTarget($directory, $projectRoot ?? ProjectRoot::get()),
             $facts['described'],
             $facts['blocked'],
+            $open === 'a+',
         );
     }
 
@@ -209,7 +228,8 @@ final class WritableDirectory
      * Each path carries its kind, because a writable file where a directory
      * has to be can take no log file.
      *
-     * @return array<string, bool> path => true for an existing file to open for append, false for a directory
+     * @return array<string, 'a'|'a+'|null> path => how an existing file is opened ('a+' the Swoole log, read
+     *                                      and write as Swoole opens it; 'a' error.log), null for a directory
      */
     public static function startPaths(ServerConfigurator $config, ?string $projectRoot = null): array
     {
@@ -221,9 +241,10 @@ final class WritableDirectory
         $errorLogIsFile = is_file($errorLog);
 
         $paths = [];
-        $paths[$logIsFile ? $logFile : dirname($logFile)] = $logIsFile;
-        $paths[$errorLogIsFile ? $errorLog : dirname($errorLog)] = $errorLogIsFile;
-        $paths[$root . '/var/run'] = false;
+        $paths[$logIsFile ? $logFile : dirname($logFile)] = $logIsFile ? 'a+' : null;
+        // ??=: one file that is both logs keeps the stricter open, Swoole's.
+        $paths[$errorLogIsFile ? $errorLog : dirname($errorLog)] ??= $errorLogIsFile ? 'a' : null;
+        $paths[$root . '/var/run'] = null;
 
         return $paths;
     }
@@ -231,7 +252,7 @@ final class WritableDirectory
     /**
      * {@see startPaths()} for the environment as it is now.
      *
-     * @return array<string, bool>
+     * @return array<string, 'a'|'a+'|null>
      */
     public static function currentStartPaths(): array
     {
@@ -244,14 +265,14 @@ final class WritableDirectory
      * own user, and nowhere else. Refusing is the point: a server that cannot open
      * its log does not fail, it hangs with every worker blocked and no word.
      *
-     * @param array<string, bool> $paths as {@see startPaths()} returns them
+     * @param array<string, 'a'|'a+'|null> $paths as {@see startPaths()} returns them
      * @param resource $stderr
      */
     public static function refusalExitCode(array $paths, $stderr, ?string $projectRoot = null): int
     {
         $problems = [];
-        foreach ($paths as $path => $file) {
-            $problem = self::inspect($path, $projectRoot, true, $file);
+        foreach ($paths as $path => $open) {
+            $problem = self::inspect($path, $projectRoot, true, $open);
             if ($problem !== null) {
                 $problems[] = $problem;
             }

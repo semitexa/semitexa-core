@@ -25,11 +25,11 @@ final class VarWritableDoctorCheck implements DoctorCheckInterface
     {
         $root = ProjectRoot::get();
         $paths = [];
-        foreach (WritableDirectory::currentStartPaths() as $path => $file) {
+        foreach (WritableDirectory::currentStartPaths() as $path => $open) {
             // Never created from here: made by a doctor run as root, a missing var/log would be
             // root's, and the next start as the server's user could not write it.
-            $paths[] = ['path' => $path, 'chownTarget' => WritableDirectory::chownTarget($path, $root)]
-                + WritableDirectory::facts($path, false, $file);
+            $paths[] = ['path' => $path, 'chownTarget' => WritableDirectory::chownTarget($path, $root), 'open' => $open]
+                + WritableDirectory::facts($path, false, $open);
         }
 
         return self::verdict($paths, WritableDirectory::processUid(), WritableDirectory::processGid());
@@ -37,9 +37,10 @@ final class VarWritableDoctorCheck implements DoctorCheckInterface
 
     /**
      * For a path that does not exist, `writable`, the owner and the mode are
-     * those of `described`, its nearest existing parent.
+     * those of `described`, its nearest existing parent. `open` is how an
+     * existing file is opened, as {@see WritableDirectory::startPaths()} gives it.
      *
-     * @param list<array{path: string, chownTarget: string, exists: bool, writable: bool, ownerUid: ?int, ownerGid: ?int, mode: ?int, described: string, blocked: bool}> $paths
+     * @param list<array{path: string, chownTarget: string, open?: ?string, exists: bool, writable: bool, ownerUid: ?int, ownerGid: ?int, mode: ?int, described: string, blocked: bool}> $paths
      */
     public static function verdict(array $paths, int $processUid, int $processGid): DoctorResult
     {
@@ -48,7 +49,7 @@ final class VarWritableDoctorCheck implements DoctorCheckInterface
         foreach ($paths as $p) {
             $owner = ($p['ownerUid'] ?? '?') . ':' . ($p['ownerGid'] ?? '?')
                 . ', mode ' . ($p['mode'] === null ? '?' : sprintf('%04o', $p['mode']));
-            $repair = WritableDirectory::repair($p['ownerUid'], $p['ownerGid'], $p['mode'], $processUid, $processGid, $p['chownTarget'], $p['described'], $p['blocked']);
+            $repair = WritableDirectory::repair($p['ownerUid'], $p['ownerGid'], $p['mode'], $processUid, $processGid, $p['chownTarget'], $p['described'], $p['blocked'], ($p['open'] ?? null) === 'a+');
             $foreign = $p['ownerUid'] !== null && $p['ownerUid'] !== $processUid;
             if ($processUid === 0) {
                 // The write was tried, not read from the mode: what stops root (a read-only mount,

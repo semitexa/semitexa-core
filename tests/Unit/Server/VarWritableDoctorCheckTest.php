@@ -182,6 +182,26 @@ final class VarWritableDoctorCheckTest extends TestCase
         self::assertSame("move '/app/var/log' away: it is a file where a directory has to be.", $file->hint);
     }
 
+    /** Review of core#253: Swoole opens its log for reading too, and a 0200 one passed the append probe. */
+    #[Test]
+    public function a_swoole_log_without_the_read_bit_fails_with_the_chmod_that_adds_it(): void
+    {
+        $log = ['open' => 'a+'] + $this->directory('/app/var/log/swoole.log', false, 1000, 0200);
+
+        $result = VarWritableDoctorCheck::verdict([$log], 1000, 1000);
+
+        self::assertSame('fail', $result->status->value);
+        self::assertSame(
+            '/app/var/log/swoole.log is not writable by uid 1000 (owner 1000:1000, mode 0200): '
+            . 'the server refuses to start, because it would hang on its log file.',
+            $result->message,
+        );
+        self::assertSame(
+            "chmod u+r '/app/var/log/swoole.log': uid 1000 owns it, and the mode forbids the read Swoole opens its log with.",
+            $result->hint,
+        );
+    }
+
     #[Test]
     public function it_is_declared_as_var_writable(): void
     {
