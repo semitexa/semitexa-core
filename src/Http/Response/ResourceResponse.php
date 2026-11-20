@@ -21,7 +21,15 @@ class ResourceResponse implements ResourceInterface, LayoutRenderableInterface
     ) {
     }
 
-    /** @api */
+    /**
+     * Returns this object as its own class (static), so a handler typed to its
+     * resource can return the fluent call. The native type stays self: roave
+     * reads a changed native return type on this open class as a break.
+     *
+     * @return static
+     *
+     * @api
+     */
     public function setContent(string $content): self
     {
         $this->content = $content;
@@ -34,7 +42,11 @@ class ResourceResponse implements ResourceInterface, LayoutRenderableInterface
         return $this->content;
     }
 
-    /** @api */
+    /**
+     * @return static
+     *
+     * @api
+     */
     public function setStatusCode(int $statusCode): self
     {
         $this->statusCode = $statusCode;
@@ -47,7 +59,11 @@ class ResourceResponse implements ResourceInterface, LayoutRenderableInterface
         return $this->statusCode;
     }
 
-    /** @api */
+    /**
+     * @return static
+     *
+     * @api
+     */
     public function setHeader(string $name, string $value): self
     {
         $this->headers[$name] = $value;
@@ -82,6 +98,8 @@ class ResourceResponse implements ResourceInterface, LayoutRenderableInterface
      * returning). SwooleResponseEmitter sees this flag and skips its own
      * status/header/end emission — preventing a double-end SIGSEGV on the
      * same underlying Swoole Response.
+     *
+     * @return static
      */
     public function markAsAlreadySent(): self
     {
@@ -114,6 +132,8 @@ class ResourceResponse implements ResourceInterface, LayoutRenderableInterface
      * (a `?next=`, a hidden field) must pass it through RedirectTarget::localPath()
      * first, which accepts a path on this origin only.
      *
+     * @return static
+     *
      * @api
      */
     public function setRedirect(string $url, int $statusCode = HttpStatus::Found->value): self
@@ -137,7 +157,11 @@ class ResourceResponse implements ResourceInterface, LayoutRenderableInterface
     private ?\Semitexa\Core\Http\Response\ResponseFormat $renderFormat = null;
     private ?string $rendererClass = null;
 
-    /** @api */
+    /**
+     * @return static
+     *
+     * @api
+     */
     public function setRenderHandle(string $handle): self
     {
         $this->renderHandle = $handle;
@@ -150,7 +174,11 @@ class ResourceResponse implements ResourceInterface, LayoutRenderableInterface
         return $this->renderHandle;
     }
 
-    /** Optional layout frame (e.g. one-column, two-columns-left) for layout-level slots. */
+    /**
+     * Optional layout frame (e.g. one-column, two-columns-left) for layout-level slots.
+     *
+     * @return static
+     */
     public function setLayoutFrame(?string $layoutFrame): self
     {
         $this->layoutFrame = $layoutFrame;
@@ -164,6 +192,8 @@ class ResourceResponse implements ResourceInterface, LayoutRenderableInterface
 
     /**
      * @param array<string, mixed> $context
+     *
+     * @return static
      */
     public function setRenderContext(array $context): self
     {
@@ -181,9 +211,10 @@ class ResourceResponse implements ResourceInterface, LayoutRenderableInterface
 
     /**
      * Alias for setRenderContext for convenience
-     */
-    /**
+     *
      * @param array<string, mixed> $context
+     *
+     * @return static
      *
      * @api
      */
@@ -205,6 +236,7 @@ class ResourceResponse implements ResourceInterface, LayoutRenderableInterface
         return $this->getRenderContext();
     }
 
+    /** @return static */
     public function setRenderFormat(?\Semitexa\Core\Http\Response\ResponseFormat $format): self
     {
         $this->renderFormat = $format;
@@ -216,6 +248,7 @@ class ResourceResponse implements ResourceInterface, LayoutRenderableInterface
         return $this->renderFormat;
     }
 
+    /** @return static */
     public function setRendererClass(?string $rendererClass): self
     {
         $this->rendererClass = $rendererClass;
