@@ -24,59 +24,67 @@ final class VarWritableDoctorCheck implements DoctorCheckInterface
     public function run(): DoctorResult
     {
         $root = ProjectRoot::get();
-        $directories = [];
-        foreach (WritableDirectory::currentStartDirectories() as $directory) {
-            $facts = WritableDirectory::facts($directory);
-            $directories[] = [
-                'path' => $directory,
-                'chownTarget' => WritableDirectory::chownTarget($directory, $root),
-                'exists' => $facts['exists'],
-                'writable' => $facts['writable'],
-                'ownerUid' => $facts['ownerUid'],
-                'ownerGid' => $facts['ownerGid'],
-                'mode' => $facts['mode'],
-            ];
+        $paths = [];
+        foreach (WritableDirectory::currentStartPaths() as $path) {
+            // Never created from here: made by a doctor run as root, a missing var/log would be
+            // root's, and the next start as the server's user could not write it.
+            $paths[] = ['path' => $path, 'chownTarget' => WritableDirectory::chownTarget($path, $root)]
+                + WritableDirectory::facts($path);
         }
 
-        return self::verdict($directories, WritableDirectory::processUid(), WritableDirectory::processGid());
+        return self::verdict($paths, WritableDirectory::processUid(), WritableDirectory::processGid());
     }
 
     /**
-     * @param list<array{path: string, chownTarget: string, exists: bool, writable: bool, ownerUid: ?int, ownerGid: ?int, mode: ?int}> $directories
+     * For a path that does not exist, `writable`, the owner and the mode are
+     * those of `described`, its nearest existing parent.
+     *
+     * @param list<array{path: string, chownTarget: string, exists: bool, writable: bool, ownerUid: ?int, ownerGid: ?int, mode: ?int, described: string, blocked: bool}> $paths
      */
-    public static function verdict(array $directories, int $processUid, int $processGid): DoctorResult
+    public static function verdict(array $paths, int $processUid, int $processGid): DoctorResult
     {
-        $foreign = [];
-        foreach ($directories as $d) {
-            $owner = ($d['ownerUid'] ?? '?') . ':' . ($d['ownerGid'] ?? '?')
-                . ', mode ' . ($d['mode'] === null ? '?' : sprintf('%04o', $d['mode']));
-            if (!$d['exists'] || !$d['writable']) {
+        $verdict = null;
+        $missing = [];
+        foreach ($paths as $p) {
+            $owner = ($p['ownerUid'] ?? '?') . ':' . ($p['ownerGid'] ?? '?')
+                . ', mode ' . ($p['mode'] === null ? '?' : sprintf('%04o', $p['mode']));
+            $repair = WritableDirectory::repair($p['ownerUid'], $p['ownerGid'], $p['mode'], $processUid, $processGid, $p['chownTarget'], $p['described'], $p['blocked']);
+            $foreign = $p['ownerUid'] !== null && $p['ownerUid'] !== $processUid;
+            if ($processUid === 0) {
+                // Root writes anywhere and owns nothing here by right: a chown to 0 is the incident itself.
+                if (!$p['exists'] || $foreign) {
+                    $verdict ??= DoctorResult::warn(
+                        'This check ran as root, and ' . $p['path']
+                        . ($p['exists'] ? " is owned by {$owner}" : ' does not exist (the server creates it at its start, as its own user)')
+                        . ": it cannot judge the server's user.",
+                        'Run system:doctor as the user the server runs as.',
+                    );
+                }
+                continue;
+            }
+            if (!$p['writable']) {
                 return DoctorResult::fail(
-                    $d['path'] . ($d['exists'] ? ' is not writable' : ' does not exist and cannot be created')
-                    . " by uid {$processUid} (owner {$owner}): the server refuses to start, because it would hang on its log file.",
-                    WritableDirectory::fix($processUid, $processGid, $d['chownTarget']),
+                    ($p['exists']
+                        ? "{$p['path']} is not writable by uid {$processUid} (owner {$owner})"
+                        : "{$p['path']} does not exist and uid {$processUid} cannot create it in {$p['described']} (owner {$owner})")
+                    . ': the server refuses to start, because it would hang on its log file.',
+                    $repair,
                 );
             }
-            if ($d['ownerUid'] !== null && $d['ownerUid'] !== $processUid) {
-                $foreign[] = [$d, $owner];
+            if (!$p['exists']) {
+                $missing[] = $p['path'];
+            } elseif ($foreign) {
+                $verdict ??= DoctorResult::fail(
+                    "{$p['path']} is owned by {$owner}, not by uid {$processUid}: writable today, but files another user "
+                    . 'creates in it (a command run as root) are not, and the server hangs on a log file it cannot open.',
+                    $repair,
+                );
             }
         }
-        if ($foreign === []) {
-            return DoctorResult::pass('The log and run directories are writable and owned by uid ' . $processUid . '.');
-        }
-        [$d, $owner] = $foreign[0];
-        if ($processUid === 0) {
-            // Root writes anywhere and owns nothing here by right: a chown to 0 is the incident itself.
-            return DoctorResult::warn(
-                "This check ran as root, and {$d['path']} is owned by {$owner}: it cannot judge the server's user.",
-                'Run system:doctor as the user the server runs as.',
-            );
-        }
 
-        return DoctorResult::fail(
-            "{$d['path']} is owned by {$owner}, not by uid {$processUid}: writable today, but files another user "
-            . 'creates in it (a command run as root) are not, and the server hangs on a log file it cannot open.',
-            WritableDirectory::fix($processUid, $processGid, $d['chownTarget']),
+        return $verdict ?? DoctorResult::pass(
+            'The log and run paths are writable and owned by uid ' . $processUid . '.'
+            . ($missing === [] ? '' : ' Not there yet, created at the server\'s start: ' . implode(', ', $missing) . '.'),
         );
     }
 }

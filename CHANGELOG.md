@@ -16,27 +16,22 @@ next release tag. This file is machine-read by `update:changelog` and the OS
   `bin/semitexa system:doctor` reports a missing one (check `app.secret`).
 
 ### Added
-- **The server refuses to start when it cannot write its log directory.** A
+- **The server refuses to start when it cannot write where it logs.** A
   command run as root (`bin/semitexa update`, for one) can leave `var/` owned by
   root; the server, running as another user, then could not create its daily
   `swoole.log.<date>` and hung at every start with no log line. Now the start
   stops with an `[Semitexa] THE SERVER WILL NOT START` block on stderr naming
-  the directory, its owner and mode, the process uid and the fix
-  (`chown -R <uid>:<gid> var`, or `bin/semitexa server:start`, which reclaims
-  ownership), and exits with code 1. Checked: the directory of
-  `SWOOLE_LOG_FILE`, `var/log` and `var/run`.
-- **`system:doctor` check `var.writable`.** It fails when one of those
-  directories cannot be written by, or is not owned by, the user running the
-  check. Run it as the server's user; run as root it only warns.
-- **A warning at server start when `APP_SECRET` is missing.** Outside dev and
-  test the server prints an `[Semitexa] APP_SECRET IS NOT SET` block to stderr
-  once, before the workers start, with the `APP_ENV` it judged and the fix. It
-  still starts: a project that signs nothing runs without the secret.
-- **`settings` on `#[AsDoctorCheck]`, and in `system:doctor --json`.** A check
-  names the env settings it judges (`settings: ['APP_SECRET']`), and each check
-  in the JSON report carries a `settings` list, empty when it declares none. A
-  failed check that names a setting is a required setting missing. Nothing else
-  in the report changed.
+  the path, its owner and mode, the process uid and the fix, and exits with
+  code 1. The fix is `chown -R <uid>:<gid> var` (or `bin/semitexa server:start`,
+  which reclaims ownership) for another owner, and `chmod u+w <path>` when the
+  server's user owns the path and the mode forbids the write. Checked: the
+  directory of `SWOOLE_LOG_FILE`, `var/log` and `var/run`. With Swoole's
+  log rotation off (`single`) an existing log file is checked itself, so a
+  writable file in a read-only directory still starts.
+- **`system:doctor` check `var.writable`.** It fails when one of those paths
+  cannot be written by, or is not owned by, the user running the check. It
+  creates nothing: a missing directory is reported, and made by the server at
+  its start. Run it as the server's user; run as root it only warns.
 
 ## 2026.11.03.2020 — 2026-11-03
 

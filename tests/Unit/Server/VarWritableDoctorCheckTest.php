@@ -15,7 +15,7 @@ final class VarWritableDoctorCheckTest extends TestCase
     private const FIX = "chown -R 1000:1000 '/app/var' (as root), or start with bin/semitexa server:start, which reclaims ownership.";
 
     /**
-     * @return array{path: string, chownTarget: string, exists: bool, writable: bool, ownerUid: ?int, ownerGid: ?int, mode: ?int}
+     * @return array{path: string, chownTarget: string, exists: bool, writable: bool, ownerUid: ?int, ownerGid: ?int, mode: ?int, described: string, blocked: bool}
      */
     private function directory(string $path, bool $writable, int $ownerUid, int $mode = 0775, bool $exists = true): array
     {
@@ -27,6 +27,8 @@ final class VarWritableDoctorCheckTest extends TestCase
             'ownerUid' => $ownerUid,
             'ownerGid' => $ownerUid,
             'mode' => $mode,
+            'described' => $exists ? $path : dirname($path),
+            'blocked' => false,
         ];
     }
 
@@ -58,13 +60,54 @@ final class VarWritableDoctorCheckTest extends TestCase
     }
 
     #[Test]
-    public function a_directory_that_cannot_be_created_fails(): void
+    public function a_directory_that_cannot_be_created_fails_and_names_the_parent(): void
     {
         $result = VarWritableDoctorCheck::verdict([$this->directory('/app/var/log', false, 0, 0755, false)], 1000, 1000);
 
         self::assertSame('fail', $result->status->value);
-        self::assertStringStartsWith('/app/var/log does not exist and cannot be created by uid 1000', $result->message);
+        self::assertStringStartsWith('/app/var/log does not exist and uid 1000 cannot create it in /app/var (owner 0:0, mode 0755)', $result->message);
         self::assertSame(self::FIX, $result->hint);
+    }
+
+    /** Review of core#253: the check creates nothing; a directory the start can create is no failure. */
+    #[Test]
+    public function a_missing_directory_the_server_can_create_passes_and_is_named(): void
+    {
+        $result = VarWritableDoctorCheck::verdict([$this->directory('/app/var/run', true, 1000, 0775, false)], 1000, 1000);
+
+        self::assertSame('pass', $result->status->value);
+        self::assertStringEndsWith("Not there yet, created at the server's start: /app/var/run.", $result->message);
+    }
+
+    #[Test]
+    public function run_as_root_a_missing_directory_is_a_warning(): void
+    {
+        $result = VarWritableDoctorCheck::verdict([$this->directory('/app/var/log', true, 0, 0755, false)], 0, 0);
+
+        self::assertSame('warn', $result->status->value);
+        self::assertStringContainsString('/app/var/log does not exist (the server creates it at its start, as its own user)', $result->message);
+        self::assertSame('Run system:doctor as the user the server runs as.', $result->hint);
+    }
+
+    #[Test]
+    public function a_file_where_the_directory_has_to_be_is_to_be_moved_not_chowned(): void
+    {
+        $blocked = ['blocked' => true] + $this->directory('/app/var/log/swoole', false, 1000, 0644, false);
+
+        $result = VarWritableDoctorCheck::verdict([$blocked], 1000, 1000);
+
+        self::assertSame('fail', $result->status->value);
+        self::assertSame("move '/app/var/log' away: it is a file where a directory has to be.", $result->hint);
+    }
+
+    /** Review of core#253: its own 0555 directory needs a chmod; a chown to the owner it has changes nothing. */
+    #[Test]
+    public function the_users_own_directory_without_the_write_bit_gets_the_chmod_hint(): void
+    {
+        $result = VarWritableDoctorCheck::verdict([$this->directory('/app/var/log', false, 1000, 0555)], 1000, 1000);
+
+        self::assertSame('fail', $result->status->value);
+        self::assertSame("chmod u+w '/app/var/log': uid 1000 owns it, the mode forbids the write.", $result->hint);
     }
 
     /** Writable through the group or a 777 today; the next file root creates in it is not. */
@@ -103,13 +146,35 @@ final class VarWritableDoctorCheckTest extends TestCase
     }
 
     #[Test]
-    public function it_is_declared_as_var_writable_and_runs_against_the_real_directories(): void
+    public function it_is_declared_as_var_writable(): void
     {
         $attribute = (new \ReflectionClass(VarWritableDoctorCheck::class))->getAttributes(AsDoctorCheck::class)[0]->newInstance();
+
         self::assertSame('var.writable', $attribute->name);
         self::assertSame('semitexa/core', $attribute->package);
+    }
 
-        // The suite's own project: its var/log is where this very run logs.
-        self::assertContains((new VarWritableDoctorCheck())->run()->status->value, ['pass', 'warn']);
+    /**
+     * Review of core#253, against the real file system: run as root (as this
+     * suite is) the check made the missing log directory root:root 0755.
+     */
+    #[Test]
+    public function running_it_creates_no_directory(): void
+    {
+        $parent = sys_get_temp_dir() . '/semitexa-doctor-' . bin2hex(random_bytes(6));
+        mkdir($parent);
+        $before = getenv('SWOOLE_LOG_FILE');
+        putenv('SWOOLE_LOG_FILE=' . $parent . '/log/swoole.log');
+        try {
+            $result = (new VarWritableDoctorCheck())->run();
+
+            self::assertDirectoryDoesNotExist($parent . '/log');
+            self::assertSame([], array_values(array_diff((array) scandir($parent), ['.', '..'])), 'and the probe file is gone');
+            // pass as the server's uid, warn as root (this suite may run as either): never fail, never empty.
+            self::assertContains($result->status->value, ['pass', 'warn'], $result->message);
+        } finally {
+            putenv($before === false ? 'SWOOLE_LOG_FILE' : 'SWOOLE_LOG_FILE=' . $before);
+            rmdir($parent);
+        }
     }
 }
