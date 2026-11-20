@@ -107,6 +107,13 @@ class SwooleBootstrap
             fwrite(STDERR, "The container does not build, so no worker could start:\n{$buildFailure}\n");
             exit(1);
         }
+        // Once, from the master, before any worker exists; to STDERR because outside dev
+        // error_log goes to var/log/error.log, where nobody looks at a start. A warning,
+        // not a refusal: a project that signs nothing runs without the secret.
+        $secretWarning = \Semitexa\Core\Security\AppSecretStartWarning::current();
+        if ($secretWarning !== null) {
+            fwrite(STDERR, $secretWarning . "\n");
+        }
         // Hook all blocking PHP functions (PDO, streams, file I/O, sleep, etc.)
         // so they yield to other coroutines instead of blocking the worker.
         // Must be called before Server creation.

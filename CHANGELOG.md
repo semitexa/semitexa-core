@@ -5,6 +5,27 @@ Changes to `semitexa/core` that a consuming application can notice. Sections are
 next release tag. This file is machine-read by `update:changelog` and the OS
 "What's new" surface — keep entries short and operator-facing.
 
+## Unreleased
+
+### Changed
+- **`APP_SECRET` is required outside dev and test, and has been since
+  2026.10.29.1052.** That release did not say so here. With `APP_ENV` set to
+  anything but `dev` or `test` and no `APP_SECRET`, signed components, encrypted
+  values and signed links each fail with a 500 at their first use. Set it in
+  `.env` to a long random value, for example `openssl rand -hex 32`.
+  `bin/semitexa system:doctor` reports a missing one (check `app.secret`).
+
+### Added
+- **A warning at server start when `APP_SECRET` is missing.** Outside dev and
+  test the server prints an `[Semitexa] APP_SECRET IS NOT SET` block to stderr
+  once, before the workers start, with the `APP_ENV` it judged and the fix. It
+  still starts: a project that signs nothing runs without the secret.
+- **`settings` on `#[AsDoctorCheck]`, and in `system:doctor --json`.** A check
+  names the env settings it judges (`settings: ['APP_SECRET']`), and each check
+  in the JSON report carries a `settings` list, empty when it declares none. A
+  failed check that names a setting is a required setting missing. Nothing else
+  in the report changed.
+
 ## 2026.11.03.2020 — 2026-11-03
 
 ### Added

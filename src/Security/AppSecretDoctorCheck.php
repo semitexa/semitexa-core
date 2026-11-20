@@ -14,7 +14,7 @@ use Semitexa\Core\Support\DoctorResult;
  * missing one fails each signed component, encrypted value and signed link at
  * its first use, as a 500 — usually found after the switch to APP_ENV=prod.
  */
-#[AsDoctorCheck(name: 'app.secret', package: 'semitexa/core')]
+#[AsDoctorCheck(name: 'app.secret', package: 'semitexa/core', settings: ['APP_SECRET'])]
 final class AppSecretDoctorCheck implements DoctorCheckInterface
 {
     private const MIN_LENGTH = 32;
