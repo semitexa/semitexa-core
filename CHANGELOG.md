@@ -16,6 +16,18 @@ next release tag. This file is machine-read by `update:changelog` and the OS
   `bin/semitexa system:doctor` reports a missing one (check `app.secret`).
 
 ### Added
+- **The server refuses to start when it cannot write its log directory.** A
+  command run as root (`bin/semitexa update`, for one) can leave `var/` owned by
+  root; the server, running as another user, then could not create its daily
+  `swoole.log.<date>` and hung at every start with no log line. Now the start
+  stops with an `[Semitexa] THE SERVER WILL NOT START` block on stderr naming
+  the directory, its owner and mode, the process uid and the fix
+  (`chown -R <uid>:<gid> var`, or `bin/semitexa server:start`, which reclaims
+  ownership), and exits with code 1. Checked: the directory of
+  `SWOOLE_LOG_FILE`, `var/log` and `var/run`.
+- **`system:doctor` check `var.writable`.** It fails when one of those
+  directories cannot be written by, or is not owned by, the user running the
+  check. Run it as the server's user; run as root it only warns.
 - **A warning at server start when `APP_SECRET` is missing.** Outside dev and
   test the server prints an `[Semitexa] APP_SECRET IS NOT SET` block to stderr
   once, before the workers start, with the `APP_ENV` it judged and the fix. It
