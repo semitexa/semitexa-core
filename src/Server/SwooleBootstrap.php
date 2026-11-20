@@ -114,15 +114,22 @@ class SwooleBootstrap
         if ($secretWarning !== null) {
             fwrite(STDERR, $secretWarning . "\n");
         }
+        $env = Environment::create();
+        $config = new ServerConfigurator($env);
+        // A refusal, unlike the warning above: a server that cannot create its log file does not
+        // fail, it hangs with every worker blocked inside Swoole's logger and writes nothing
+        // (tk-root-owned-var-hangs-the-server). Before the hooks and before ErrorHandler, which
+        // points error_log into the same directory.
+        $unwritable = WritableDirectory::refusalExitCode(WritableDirectory::startPaths($config), STDERR);
+        if ($unwritable !== 0) {
+            exit($unwritable);
+        }
         // Hook all blocking PHP functions (PDO, streams, file I/O, sleep, etc.)
         // so they yield to other coroutines instead of blocking the worker.
         // Must be called before Server creation.
         \Swoole\Runtime::enableCoroutine(SWOOLE_HOOK_ALL);
 
-        $env = Environment::create();
         ErrorHandler::configure($env);
-
-        $config = new ServerConfigurator($env);
 
         // Age out rotated logs here: the master process, before any worker exists,
         // is the one point that runs exactly once per boot. Doing it per worker
