@@ -61,6 +61,7 @@ final class SystemDoctorCommand extends BaseCommand
             // one failed row, never abort the whole diagnosis.
             $name = $className;
             $package = '';
+            $settings = [];
             try {
                 /** @var class-string $className */
                 $ref = new \ReflectionClass($className);
@@ -72,6 +73,8 @@ final class SystemDoctorCommand extends BaseCommand
                 $attr = $attrs[0]->newInstance();
                 $name = $attr->name;
                 $package = $attr->package;
+                // Names only: a mis-declared entry is dropped, never a crashed report.
+                $settings = array_values(array_filter($attr->settings, is_string(...)));
 
                 /** @var DoctorCheckInterface $check */
                 $check = $ref->newInstance();
@@ -86,6 +89,10 @@ final class SystemDoctorCommand extends BaseCommand
                 'status' => $result->status->value,
                 'message' => $result->message,
                 'hint' => $result->hint,
+                // The env settings the check judges (#[AsDoctorCheck(settings: …)]): a FAIL
+                // on a check that names one is a required setting missing, which an update
+                // run must tell from any other failure. Last, so older readers see no change.
+                'settings' => $settings,
             ];
         }
 
@@ -148,7 +155,7 @@ final class SystemDoctorCommand extends BaseCommand
      * then the verdict: nothing padded, nothing an OK check adds. Written raw, so a
      * message carrying markup is printed as it is.
      *
-     * @param list<array{name: string, package: string, status: string, message: string, hint: ?string}> $report
+     * @param list<array{name: string, package: string, status: string, message: string, hint: ?string, settings: list<string>}> $report
      */
     private function renderCompact(OutputInterface $output, array $report, bool $healthy): int
     {
@@ -177,7 +184,7 @@ final class SystemDoctorCommand extends BaseCommand
         return $healthy ? Command::SUCCESS : Command::FAILURE;
     }
 
-    /** @param list<array{name: string, package: string, status: string, message: string, hint: ?string}> $report */
+    /** @param list<array{name: string, package: string, status: string, message: string, hint: ?string, settings: list<string>}> $report */
     private static function summary(array $report): string
     {
         $counts = array_count_values(array_column($report, 'status'));
@@ -198,7 +205,7 @@ final class SystemDoctorCommand extends BaseCommand
     }
 
     /**
-     * @param list<array{name: string, package: string, status: string, message: string, hint: ?string}> $report
+     * @param list<array{name: string, package: string, status: string, message: string, hint: ?string, settings: list<string>}> $report
      */
     private function hasFailures(array $report): bool
     {

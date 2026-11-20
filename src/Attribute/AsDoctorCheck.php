@@ -18,10 +18,16 @@ class AsDoctorCheck
     /**
      * @param string $name Short check identifier shown in the report (e.g. "media.imagick-coders")
      * @param string $package Owning package label (e.g. "semitexa/media")
+     * @param list<string> $settings Names of the env settings the check judges (e.g. ['APP_SECRET']).
+     *                               A FAIL on a check that declares one means a required setting is
+     *                               missing or wrong; 'system:doctor --json' emits the list so an
+     *                               update can tell that from any other failure. Empty for a check
+     *                               that judges no setting.
      */
     public function __construct(
         public string $name,
         public string $package = '',
+        public array $settings = [],
     ) {
     }
 }

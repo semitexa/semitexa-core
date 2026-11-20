@@ -10,6 +10,7 @@ use Semitexa\Core\Application\Console\Command\SystemDoctorCommand;
 use Semitexa\Core\Attribute\AsDoctorCheck;
 use Semitexa\Core\Contract\DoctorCheckInterface;
 use Semitexa\Core\Discovery\ClassDiscovery;
+use Semitexa\Core\Security\AppSecretDoctorCheck;
 use Semitexa\Core\Support\DoctorResult;
 use Symfony\Component\Console\Tester\CommandTester;
 
@@ -112,6 +113,35 @@ final class SystemDoctorCommandTest extends TestCase
         self::assertSame('semitexa.system-doctor/v1', $data['artifact']);
         self::assertFalse($data['healthy']);
         self::assertSame('test.fail', $data['checks'][0]['name']);
+    }
+
+    /**
+     * tk-new-required-setting-reaches-prod-silently: an update run reads this report from a
+     * subprocess and blocks on a FAIL of a check that names a setting, so the names must be
+     * there for the check that declares them and an empty list for one that does not.
+     */
+    #[Test]
+    public function jsonModeNamesTheSettingsEachCheckJudges(): void
+    {
+        $tester = $this->tester([AppSecretDoctorCheck::class, PassingDoctorCheck::class, ThrowingDoctorCheck::class]);
+
+        $tester->execute(['--json' => true]);
+
+        $data = json_decode($tester->getDisplay(), true, 16, JSON_THROW_ON_ERROR);
+        self::assertIsArray($data);
+        self::assertIsArray($data['checks']);
+        $settings = array_column($data['checks'], 'settings', 'name');
+        self::assertSame(
+            ['app.secret' => ['APP_SECRET'], 'test.pass' => [], 'test.throws' => []],
+            $settings,
+        );
+        $first = $data['checks'][0] ?? null;
+        self::assertIsArray($first);
+        self::assertSame(
+            ['name', 'package', 'status', 'message', 'hint', 'settings'],
+            array_keys($first),
+            'the field is added last; the rest of a check is as it was',
+        );
     }
 
     /**
