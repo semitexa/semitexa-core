@@ -145,6 +145,43 @@ final class VarWritableDoctorCheckTest extends TestCase
         self::assertSame('pass', VarWritableDoctorCheck::verdict([$this->directory('/app/var/log', true, 0)], 0, 0)->status->value);
     }
 
+    /**
+     * Review of core#253: the probe writes, so "not writable" under uid 0 is a
+     * read-only mount or the like, and it stops the server's user as well. It
+     * passed, because root was assumed to write anywhere.
+     */
+    #[Test]
+    public function run_as_root_a_path_even_root_cannot_write_fails(): void
+    {
+        $result = VarWritableDoctorCheck::verdict(
+            [$this->directory('/app/var/run', true, 1000), $this->directory('/app/var/log', false, 0, 0755)],
+            0,
+            0,
+        );
+
+        self::assertSame('fail', $result->status->value);
+        self::assertSame(
+            '/app/var/log is not writable even by root (owner 0:0, mode 0755): '
+            . 'the server refuses to start, because it would hang on its log file.',
+            $result->message,
+        );
+        self::assertSame('No owner or mode stops root: look for a read-only mount or an immutable flag on /app/var/log.', $result->hint);
+
+        $missing = VarWritableDoctorCheck::verdict([$this->directory('/app/var/log', false, 1000, 0755, false)], 0, 0);
+        self::assertSame('fail', $missing->status->value);
+        self::assertSame(
+            '/app/var/log does not exist and even root cannot create it in /app/var (owner 1000:1000, mode 0755): '
+            . 'the server refuses to start, because it would hang on its log file.',
+            $missing->message,
+        );
+        self::assertSame('No owner or mode stops root: look for a read-only mount or an immutable flag on /app/var.', $missing->hint);
+
+        $blocked = ['blocked' => true] + $this->directory('/app/var/log', false, 1000, 0644);
+        $file = VarWritableDoctorCheck::verdict([$blocked], 0, 0);
+        self::assertSame('fail', $file->status->value);
+        self::assertSame("move '/app/var/log' away: it is a file where a directory has to be.", $file->hint);
+    }
+
     #[Test]
     public function it_is_declared_as_var_writable(): void
     {

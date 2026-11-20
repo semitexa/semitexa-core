@@ -112,7 +112,7 @@ final class WritableDirectoryTest extends TestCase
         self::assertNull(WritableDirectory::inspect($this->root . '/var/log', $this->root, true));
         self::assertDirectoryExists($this->root . '/var/log');
 
-        self::assertSame(0, WritableDirectory::refusalExitCode([$this->root . '/var/run'], $this->stream(), $this->root));
+        self::assertSame(0, WritableDirectory::refusalExitCode([$this->root . '/var/run' => false], $this->stream(), $this->root));
         self::assertDirectoryExists($this->root . '/var/run');
     }
 
@@ -123,10 +123,11 @@ final class WritableDirectoryTest extends TestCase
         mkdir($this->root . '/var/log');
         file_put_contents($this->root . '/var/log/swoole.log', "a line\n");
 
-        $facts = WritableDirectory::facts($this->root . '/var/log/swoole.log', true);
+        $facts = WritableDirectory::facts($this->root . '/var/log/swoole.log', true, true);
 
         self::assertTrue($facts['exists']);
         self::assertTrue($facts['writable']);
+        self::assertFalse($facts['blocked']);
         self::assertSame($this->root . '/var/log/swoole.log', $facts['described']);
         self::assertSame("a line\n", file_get_contents($this->root . '/var/log/swoole.log'));
         self::assertSame(['swoole.log'], array_values(array_diff((array) scandir($this->root . '/var/log'), ['.', '..'])));
@@ -145,17 +146,22 @@ final class WritableDirectoryTest extends TestCase
 
         self::assertSame(
             $this->root . '/logs',
-            WritableDirectory::startPaths(new ServerConfigurator($this->env($file, 'single')), '/app')[0],
+            array_key_first(WritableDirectory::startPaths(new ServerConfigurator($this->env($file, 'single')), '/app')),
             'no file yet: Swoole has to create it',
         );
 
         touch($file);
-        self::assertSame($file, WritableDirectory::startPaths(new ServerConfigurator($this->env($file, 'single')), '/app')[0]);
-        self::assertSame($file, WritableDirectory::startPaths(new ServerConfigurator($this->env($file, 'off')), '/app')[0]);
+        self::assertSame(
+            [$file => true, '/app/var/log' => false, '/app/var/run' => false],
+            WritableDirectory::startPaths(new ServerConfigurator($this->env($file, 'single')), '/app'),
+            'the file is the one entry opened for append; the rest are directories',
+        );
+        self::assertSame($file, array_key_first(WritableDirectory::startPaths(new ServerConfigurator($this->env($file, 'single')), '/app')));
+        self::assertSame($file, array_key_first(WritableDirectory::startPaths(new ServerConfigurator($this->env($file, 'off')), '/app')));
         foreach (['daily', 'hourly', 'monthly', 'every-minute'] as $rotation) {
             self::assertSame(
                 $this->root . '/logs',
-                WritableDirectory::startPaths(new ServerConfigurator($this->env($file, $rotation)), '/app')[0],
+                array_key_first(WritableDirectory::startPaths(new ServerConfigurator($this->env($file, $rotation)), '/app')),
                 $rotation . ': Swoole creates <log_file>.<date> beside it',
             );
         }
@@ -166,11 +172,17 @@ final class WritableDirectoryTest extends TestCase
     public function an_existing_error_log_is_checked_itself(): void
     {
         $config = new ServerConfigurator($this->env('/srv/logs/swoole.log'));
-        self::assertSame($this->root . '/var/log', WritableDirectory::startPaths($config, $this->root)[1]);
+        self::assertSame(
+            ['/srv/logs' => false, $this->root . '/var/log' => false, $this->root . '/var/run' => false],
+            WritableDirectory::startPaths($config, $this->root),
+        );
 
         mkdir($this->root . '/var/log');
         touch($this->root . '/var/log/error.log');
-        self::assertSame($this->root . '/var/log/error.log', WritableDirectory::startPaths($config, $this->root)[1]);
+        self::assertSame(
+            ['/srv/logs' => false, $this->root . '/var/log/error.log' => true, $this->root . '/var/run' => false],
+            WritableDirectory::startPaths($config, $this->root),
+        );
     }
 
     /** Review of core#253: 0555 owned by the server's own uid, and the advice was a chown to that uid. */
@@ -251,17 +263,87 @@ final class WritableDirectoryTest extends TestCase
     #[Test]
     public function the_start_checks_the_directory_of_the_log_file_swoole_is_configured_with(): void
     {
+        // A relative log file resolves as Swoole is handed it. The root passed in is this test's
+        // own: the real project's var/log may hold an error.log, which is an entry of its own.
         $relative = new ServerConfigurator($this->env('var/log/swoole.log'));
-        self::assertSame(
-            [ProjectRoot::get() . '/var/log', ProjectRoot::get() . '/var/run'],
-            WritableDirectory::startPaths($relative),
-        );
+        self::assertSame(ProjectRoot::get() . '/var/log/swoole.log', $relative->logFilePath());
         self::assertSame($relative->logFilePath(), $relative->getServerOptions()['log_file']);
-        self::assertSame(dirname($relative->logFilePath()), WritableDirectory::startPaths($relative)[0]);
+        self::assertSame(
+            [ProjectRoot::get() . '/var/log' => false, $this->root . '/var/log' => false, $this->root . '/var/run' => false],
+            WritableDirectory::startPaths($relative, $this->root),
+        );
 
         self::assertSame(
-            ['/srv/logs', '/app/var/log', '/app/var/run'],
+            ['/srv/logs' => false, '/app/var/log' => false, '/app/var/run' => false],
             WritableDirectory::startPaths(new ServerConfigurator($this->env('/srv/logs/swoole.log')), '/app'),
+        );
+        self::assertSame(
+            [$this->root . '/var/log' => false, $this->root . '/var/run' => false],
+            WritableDirectory::startPaths(new ServerConfigurator($this->env($this->root . '/var/log/swoole.log')), $this->root),
+            'the log directory and var/log are one entry when they are one path',
+        );
+    }
+
+    /**
+     * Review of core#253: the parent of a rotated log has to be a directory. A
+     * writable regular file there passed the append probe, and Swoole could not
+     * create swoole.log.<date> inside it.
+     */
+    #[Test]
+    public function a_writable_file_where_a_directory_is_required_is_refused(): void
+    {
+        $logs = $this->root . '/logs';
+        file_put_contents($logs, "kept\n");
+        chmod($logs, 0664);
+        $paths = WritableDirectory::startPaths(new ServerConfigurator($this->env($logs . '/swoole.log')), $this->root);
+        self::assertSame([$logs => false, $this->root . '/var/log' => false, $this->root . '/var/run' => false], $paths);
+
+        self::assertSame(
+            [
+                'exists' => true,
+                'writable' => false,
+                'ownerUid' => WritableDirectory::processUid(),
+                'ownerGid' => filegroup($logs),
+                'mode' => 0664,
+                'described' => $logs,
+                'blocked' => true,
+            ],
+            WritableDirectory::facts($logs, true),
+        );
+
+        $stderr = $this->stream();
+        self::assertSame(1, WritableDirectory::refusalExitCode($paths, $stderr, $this->root));
+        self::assertStringContainsString(
+            "[Semitexa] {$logs} is not writable by this process (uid " . WritableDirectory::processUid() . ").\n"
+            . '[Semitexa]   owner ' . WritableDirectory::processUid() . ':' . filegroup($logs) . ", mode 0664\n"
+            . '[Semitexa]   fix: move ' . escapeshellarg($logs) . " away: it is a file where a directory has to be.\n",
+            $this->written($stderr),
+        );
+        self::assertSame("kept\n", file_get_contents($logs), 'looked at, never written');
+    }
+
+    /**
+     * Review of core#253: opening a FIFO nobody reads for append blocks for
+     * good, so the check that exists to prevent a silent hang would be one.
+     * Run in a child with a time limit: without the guard this is exit 124.
+     */
+    #[Test]
+    public function a_fifo_is_never_opened_whichever_kind_of_path_it_stands_for(): void
+    {
+        $fifo = $this->root . '/var/run';
+        self::assertTrue(posix_mkfifo($fifo, 0600));
+        $class = (string) (new \ReflectionClass(WritableDirectory::class))->getFileName();
+        $code = 'require $argv[1]; echo json_encode(array_map('
+            . 'static fn (bool $file): array => array_intersect_key('
+            . '\\' . WritableDirectory::class . '::facts($argv[2], false, $file), ["exists" => 1, "writable" => 1, "blocked" => 1]), '
+            . '["directory" => false, "file" => true]));';
+
+        exec('timeout 10 ' . escapeshellarg(PHP_BINARY) . ' -r ' . escapeshellarg($code) . ' ' . escapeshellarg($class) . ' ' . escapeshellarg($fifo) . ' 2>&1', $output, $exit);
+
+        self::assertSame(0, $exit, 'the probe returned instead of blocking on the FIFO: ' . implode("\n", $output));
+        self::assertSame(
+            '{"directory":{"exists":true,"writable":false,"blocked":true},"file":{"exists":true,"writable":false,"blocked":false}}',
+            implode("\n", $output),
         );
     }
 
@@ -270,7 +352,7 @@ final class WritableDirectoryTest extends TestCase
     {
         $stderr = $this->stream();
 
-        self::assertSame(0, WritableDirectory::refusalExitCode([$this->root . '/var/log', $this->root . '/var/run'], $stderr, $this->root));
+        self::assertSame(0, WritableDirectory::refusalExitCode([$this->root . '/var/log' => false, $this->root . '/var/run' => false], $stderr, $this->root));
         self::assertSame('', $this->written($stderr));
     }
 
@@ -281,7 +363,7 @@ final class WritableDirectoryTest extends TestCase
         $stderr = $this->stream();
 
         $code = WritableDirectory::refusalExitCode(
-            [$this->root . '/var/log/a', $this->root . '/var/run', $this->root . '/var/log/b'],
+            [$this->root . '/var/log/a' => false, $this->root . '/var/run' => false, $this->root . '/var/log/b' => false],
             $stderr,
             $this->root,
         );

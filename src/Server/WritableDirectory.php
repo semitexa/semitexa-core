@@ -56,7 +56,8 @@ final class WritableDirectory
      * write bit: chmod, because a chown to the owner it already has changes
      * nothing. Another owner whose group is the process's: the group is what
      * lets it write, so chmod ug+w is named beside the chown. $blocked: a file
-     * stands where the directory has to be, and no owner or mode repairs that.
+     * stands where the directory has to be, at the path or above it, and no
+     * owner or mode repairs that.
      */
     public static function repair(
         ?int $ownerUid,
@@ -98,8 +99,14 @@ final class WritableDirectory
     /**
      * The facts about one path, gathered by writing, because is_writable()
      * answers from the mode bits and is wrong on a read-only mount or under an
-     * ACL. An existing file is opened for append and closed, nothing written
-     * and nothing truncated. A directory gets a probe file, created and removed.
+     * ACL. A directory gets a probe file, created and removed.
+     *
+     * The path is a directory unless $file says it is a file the server appends
+     * to (see {@see startPaths()}). Only then is it opened, for append, and
+     * closed, nothing written and nothing truncated; and only a regular file
+     * is: opening a FIFO nobody reads blocks for good, the hang this exists to
+     * prevent. Anything but a directory where a directory is required is
+     * `blocked`, however writable: Swoole cannot create its log inside a file.
      *
      * A missing directory is created only when $create is set, and only the
      * server's start sets it: made by a diagnostic run as root it would be
@@ -109,9 +116,9 @@ final class WritableDirectory
      *
      * @return array{exists: bool, writable: bool, ownerUid: ?int, ownerGid: ?int, mode: ?int, described: string, blocked: bool}
      */
-    public static function facts(string $path, bool $create = false): array
+    public static function facts(string $path, bool $create = false, bool $file = false): array
     {
-        if ($create && !file_exists($path)) {
+        if ($create && !$file && !file_exists($path)) {
             @mkdir($path, 0775, true);
         }
         clearstatcache(true, $path);
@@ -120,20 +127,22 @@ final class WritableDirectory
         while (!file_exists($described) && dirname($described) !== $described) {
             $described = dirname($described);
         }
-        if (is_dir($described)) {
+        $writable = false;
+        $blocked = false;
+        if ($file && $exists) {
+            $handle = is_file($path) ? @fopen($path, 'a') : false;
+            if ($handle !== false) {
+                $writable = true;
+                fclose($handle);
+            }
+        } elseif (is_dir($described)) {
             $probe = $described . '/.semitexa-write-probe-' . getmypid() . '-' . bin2hex(random_bytes(4));
             $writable = @file_put_contents($probe, '') !== false;
             if ($writable) {
                 @unlink($probe);
             }
-        } elseif ($exists) {
-            $handle = @fopen($described, 'a');
-            $writable = $handle !== false;
-            if ($handle !== false) {
-                fclose($handle);
-            }
         } else {
-            $writable = false; // a file stands where a directory has to be
+            $blocked = true; // a file stands where a directory has to be
         }
         $owner = @fileowner($described);
         $group = @filegroup($described);
@@ -146,17 +155,18 @@ final class WritableDirectory
             'ownerGid' => $group === false ? null : $group,
             'mode' => $perms === false ? null : $perms & 07777,
             'described' => $described,
-            'blocked' => !$exists && !is_dir($described),
+            'blocked' => $blocked,
         ];
     }
 
     /**
      * Null when the process can write $directory, else the block of {@see problem()}.
      * With $create, a missing directory is made first: the server's start only.
+     * With $file, the path is an existing file to append to, as in {@see facts()}.
      */
-    public static function inspect(string $directory, ?string $projectRoot = null, bool $create = false): ?string
+    public static function inspect(string $directory, ?string $projectRoot = null, bool $create = false, bool $file = false): ?string
     {
-        $facts = self::facts($directory, $create);
+        $facts = self::facts($directory, $create, $file);
 
         return self::problem(
             $directory,
@@ -196,24 +206,32 @@ final class WritableDirectory
      * - error.log in var/log, by the same rule: PHP appends to an existing one;
      * - var/run, where the pid file is created.
      *
-     * @return list<string> existing files to open for append, and directories
+     * Each path carries its kind, because a writable file where a directory
+     * has to be can take no log file.
+     *
+     * @return array<string, bool> path => true for an existing file to open for append, false for a directory
      */
     public static function startPaths(ServerConfigurator $config, ?string $projectRoot = null): array
     {
         $root = rtrim($projectRoot ?? ProjectRoot::get(), '/');
         $logFile = $config->logFilePath();
 
-        return array_values(array_unique([
-            !$config->logRotation()->isEnabled() && is_file($logFile) ? $logFile : dirname($logFile),
-            is_file($root . '/var/log/error.log') ? $root . '/var/log/error.log' : $root . '/var/log',
-            $root . '/var/run',
-        ]));
+        $errorLog = $root . '/var/log/error.log';
+        $logIsFile = !$config->logRotation()->isEnabled() && is_file($logFile);
+        $errorLogIsFile = is_file($errorLog);
+
+        $paths = [];
+        $paths[$logIsFile ? $logFile : dirname($logFile)] = $logIsFile;
+        $paths[$errorLogIsFile ? $errorLog : dirname($errorLog)] = $errorLogIsFile;
+        $paths[$root . '/var/run'] = false;
+
+        return $paths;
     }
 
     /**
      * {@see startPaths()} for the environment as it is now.
      *
-     * @return list<string>
+     * @return array<string, bool>
      */
     public static function currentStartPaths(): array
     {
@@ -226,14 +244,14 @@ final class WritableDirectory
      * own user, and nowhere else. Refusing is the point: a server that cannot open
      * its log does not fail, it hangs with every worker blocked and no word.
      *
-     * @param list<string> $directories
+     * @param array<string, bool> $paths as {@see startPaths()} returns them
      * @param resource $stderr
      */
-    public static function refusalExitCode(array $directories, $stderr, ?string $projectRoot = null): int
+    public static function refusalExitCode(array $paths, $stderr, ?string $projectRoot = null): int
     {
         $problems = [];
-        foreach ($directories as $directory) {
-            $problem = self::inspect($directory, $projectRoot, true);
+        foreach ($paths as $path => $file) {
+            $problem = self::inspect($path, $projectRoot, true, $file);
             if ($problem !== null) {
                 $problems[] = $problem;
             }

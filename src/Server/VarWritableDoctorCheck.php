@@ -25,11 +25,11 @@ final class VarWritableDoctorCheck implements DoctorCheckInterface
     {
         $root = ProjectRoot::get();
         $paths = [];
-        foreach (WritableDirectory::currentStartPaths() as $path) {
+        foreach (WritableDirectory::currentStartPaths() as $path => $file) {
             // Never created from here: made by a doctor run as root, a missing var/log would be
             // root's, and the next start as the server's user could not write it.
             $paths[] = ['path' => $path, 'chownTarget' => WritableDirectory::chownTarget($path, $root)]
-                + WritableDirectory::facts($path);
+                + WritableDirectory::facts($path, false, $file);
         }
 
         return self::verdict($paths, WritableDirectory::processUid(), WritableDirectory::processGid());
@@ -51,7 +51,20 @@ final class VarWritableDoctorCheck implements DoctorCheckInterface
             $repair = WritableDirectory::repair($p['ownerUid'], $p['ownerGid'], $p['mode'], $processUid, $processGid, $p['chownTarget'], $p['described'], $p['blocked']);
             $foreign = $p['ownerUid'] !== null && $p['ownerUid'] !== $processUid;
             if ($processUid === 0) {
-                // Root writes anywhere and owns nothing here by right: a chown to 0 is the incident itself.
+                // The write was tried, not read from the mode: what stops root (a read-only mount,
+                // a file where the directory has to be) stops the server's user too.
+                if (!$p['writable']) {
+                    return DoctorResult::fail(
+                        ($p['exists']
+                            ? "{$p['path']} is not writable even by root (owner {$owner})"
+                            : "{$p['path']} does not exist and even root cannot create it in {$p['described']} (owner {$owner})")
+                        . ': the server refuses to start, because it would hang on its log file.',
+                        $p['blocked']
+                            ? $repair
+                            : "No owner or mode stops root: look for a read-only mount or an immutable flag on {$p['described']}.",
+                    );
+                }
+                // Root writes anywhere else and owns nothing here by right: a chown to 0 is the incident itself.
                 if (!$p['exists'] || $foreign) {
                     $verdict ??= DoctorResult::warn(
                         'This check ran as root, and ' . $p['path']
