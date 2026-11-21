@@ -22,6 +22,17 @@ next release tag. This file is machine-read by `update:changelog` and the OS
   in hand and loads the code again without the process exiting, and a role
   started again while a loaded file has changed names the files in the log.
 
+### Changed
+- **A worker that finds a valid classmap cache no longer reads every source
+  file to learn what it declares.** The classmap discovery builds by walking
+  the sources is kept in `var/cache/discovery` and checked against them on
+  every boot by each file's mtime, size and ctime: an edited, new or removed
+  file is still seen with nothing to clear, and only changed files are read.
+  On an empty cache (a first boot, or the one after `cache:clear`) every file
+  is read as before, then the result is stored. Attribute lookups are not
+  cached: every process still loads the classes of the map to read them.
+  `cache:clear` removes the cache; `cache:clear --twig` does not.
+
 ## 2026.11.21.1434 — 2026-11-21
 
 ### Changed

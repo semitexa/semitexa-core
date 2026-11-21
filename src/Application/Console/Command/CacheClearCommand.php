@@ -47,7 +47,12 @@ use Symfony\Component\Process\Process;
 )]
 class CacheClearCommand extends BaseCommand
 {
-    private const CACHE_DIRS = ['twig'];
+    /**
+     * `discovery` is what ClassDiscovery stored of the classmap. It
+     * checks that against the sources on every boot, so nothing has to clear it for an edit to
+     * show; clearing it is the way to make the next boot read every file again regardless.
+     */
+    private const CACHE_DIRS = ['twig', 'discovery'];
 
     protected function configure(): void
     {
@@ -75,8 +80,29 @@ class CacheClearCommand extends BaseCommand
         $cleared = [];
         $failed = [];
 
+        // A var/cache this user cannot search hides what is in it: is_dir() is false for
+        // everything below, so its directories were skipped as absent ("Nothing to clear")
+        // and the fallback into the container never ran (review semitexa-core#257).
+        $unsearchable = is_dir($baseDir) && !$this->canSearch($baseDir);
+        if ($unsearchable) {
+            foreach ($dirsToClear as $subDir) {
+                $failed[] = 'var/cache/' . $subDir;
+            }
+            $dirsToClear = [];
+        }
+
         foreach ($dirsToClear as $subDir) {
             $path = $baseDir . '/' . $subDir;
+            // is_dir() follows a link: a cache directory that is one would have the files of
+            // its target deleted. The link is what sits in var/cache, so the link is removed.
+            if (is_link($path)) {
+                if (@unlink($path)) {
+                    $cleared[] = 'var/cache/' . $subDir;
+                } else {
+                    $failed[] = 'var/cache/' . $subDir;
+                }
+                continue;
+            }
             if (!is_dir($path)) {
                 continue;
             }
@@ -87,7 +113,9 @@ class CacheClearCommand extends BaseCommand
             }
         }
 
-        if (!$twigOnly) {
+        if (!$twigOnly && $unsearchable) {
+            $failed[] = 'var/cache/resource-metadata.php';
+        } elseif (!$twigOnly) {
             $resourceMetadata = $baseDir . '/resource-metadata.php';
             if (is_file($resourceMetadata)) {
                 if (@unlink($resourceMetadata)) {
@@ -188,6 +216,12 @@ class CacheClearCommand extends BaseCommand
         return Command::FAILURE;
     }
 
+    /** Whether this process may look inside $directory: its search (execute) permission. */
+    protected function canSearch(string $directory): bool
+    {
+        return is_executable($directory);
+    }
+
     private function canRunViaDocker(string $root): bool
     {
         if (!is_file($root . '/docker-compose.yml')) {
@@ -218,7 +252,7 @@ class CacheClearCommand extends BaseCommand
                 continue;
             }
             $full = $path . '/' . $item;
-            if (is_dir($full)) {
+            if (!is_link($full) && is_dir($full)) {
                 $ok = $this->removeDirectoryRecursive($full) && $ok;
             } else {
                 $ok = @unlink($full) && $ok;
@@ -241,7 +275,7 @@ class CacheClearCommand extends BaseCommand
                 continue;
             }
             $full = $path . '/' . $item;
-            if (is_dir($full)) {
+            if (!is_link($full) && is_dir($full)) {
                 $this->removeDirectoryRecursive($full);
             }
             @unlink($full);

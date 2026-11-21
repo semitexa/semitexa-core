@@ -207,9 +207,9 @@ class ClassDiscovery
             }
         }
 
-        $this->mergePsr4ClassCandidates($composerPsr4Map);
-
-        self::$sharedClassMaps[$projectRoot] = $this->classMap;
+        $fileIndex = new DiscoveryFileIndex(DiscoveryCacheStore::forProjectRoot($projectRoot));
+        $this->mergePsr4ClassCandidates($composerPsr4Map, $fileIndex);
+        self::$sharedClassMaps[$projectRoot] = $this->classMap = $fileIndex->finish($this->classMap);
     }
 
     /**
@@ -599,7 +599,7 @@ class ClassDiscovery
     /**
      * @param array<string, list<string>|string> $psr4Map
      */
-    private function mergePsr4ClassCandidates(array $psr4Map): void
+    private function mergePsr4ClassCandidates(array $psr4Map, DiscoveryFileIndex $fileIndex): void
     {
         uksort($psr4Map, static fn (string $a, string $b): int => strlen($b) <=> strlen($a));
 
@@ -646,7 +646,7 @@ class ClassDiscovery
                     }
 
                     ++$scanned;
-                    $className = self::extractDeclaredClassName($fileInfo->getPathname());
+                    $className = $fileIndex->declaredClass($fileInfo, self::extractDeclaredClassName(...));
                     if ($className === null
                         || !$this->isNamespaceAllowed($className)
                         || $this->isRuntimeExcluded($className)
@@ -698,11 +698,11 @@ class ClassDiscovery
         return str_starts_with($dir, $vendorRoot) && !str_starts_with($realPath, $vendorRootReal);
     }
 
-    private static function extractDeclaredClassName(string $filePath): ?string
+    private static function extractDeclaredClassName(string $filePath): string|false|null
     {
         $source = @file_get_contents($filePath);
         if ($source === false) {
-            return null;
+            return false; // not read, which is not "declares nothing": the file index must not remember it
         }
 
         $tokens = token_get_all($source);
