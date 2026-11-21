@@ -82,6 +82,16 @@ class CacheClearCommand extends BaseCommand
 
         foreach ($dirsToClear as $subDir) {
             $path = $baseDir . '/' . $subDir;
+            // is_dir() follows a link: a cache directory that is one would have the files of
+            // its target deleted. The link is what sits in var/cache, so the link is removed.
+            if (is_link($path)) {
+                if (@unlink($path)) {
+                    $cleared[] = 'var/cache/' . $subDir;
+                } else {
+                    $failed[] = 'var/cache/' . $subDir;
+                }
+                continue;
+            }
             if (!is_dir($path)) {
                 continue;
             }
@@ -223,7 +233,7 @@ class CacheClearCommand extends BaseCommand
                 continue;
             }
             $full = $path . '/' . $item;
-            if (is_dir($full)) {
+            if (!is_link($full) && is_dir($full)) {
                 $ok = $this->removeDirectoryRecursive($full) && $ok;
             } else {
                 $ok = @unlink($full) && $ok;
@@ -246,7 +256,7 @@ class CacheClearCommand extends BaseCommand
                 continue;
             }
             $full = $path . '/' . $item;
-            if (is_dir($full)) {
+            if (!is_link($full) && is_dir($full)) {
                 $this->removeDirectoryRecursive($full);
             }
             @unlink($full);

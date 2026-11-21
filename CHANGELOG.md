@@ -5,19 +5,6 @@ Changes to `semitexa/core` that a consuming application can notice. Sections are
 next release tag. This file is machine-read by `update:changelog` and the OS
 "What's new" surface — keep entries short and operator-facing.
 
-## Unreleased` collects changes until the
-next release tag. This file is machine-read by `update:changelog` and the OS
-"What's new" surface — keep entries short and operator-facing.
-
-### Changed
-- **A worker no longer reads every source file to boot.** What discovery found
-  (which class each file declares, which classes carry which attribute) is
-  kept in `var/cache/discovery` and checked against the sources on every boot
-  by mtime and size: an edited, new or removed file is still seen with nothing
-  to clear. Measured on 4 workers: boot after a reload 5.6 s to 1.1 s, a first
-  start 7.5 s to 1.6 s. `cache:clear` removes it; `cache:clear --twig` does not.
-  A worker now loads only the classes it uses, not every class of the map.
-
 ## Unreleased
 
 ### Added
@@ -34,6 +21,18 @@ next release tag. This file is machine-read by `update:changelog` and the OS
   what is on disk: `kill -HUP` on `worker:run` makes every role finish the work
   in hand and loads the code again without the process exiting, and a role
   started again while a loaded file has changed names the files in the log.
+
+### Changed
+- **A worker that finds a valid discovery cache no longer reads every source
+  file to boot.** What discovery found (which class each file declares, which
+  classes carry which attribute) is kept in `var/cache/discovery` and checked
+  against the sources on every boot by each file's mtime, size and ctime: an
+  edited, new or removed file is still seen with nothing to clear. On a hit a
+  boot skips tokenising unchanged files and the scan that loads every class;
+  measured on 4 workers, boot after a reload 5.6 s to 1.0 s. On an empty cache
+  (a first boot, or the one after `cache:clear`) discovery reads every file
+  and loads every class as before, then stores the result. `cache:clear`
+  removes the cache; `cache:clear --twig` does not.
 
 ## 2026.11.21.1434 — 2026-11-21
 

@@ -48,13 +48,13 @@ final class DiscoveryFileIndex
     }
 
     /**
-     * @param callable(string): (string|null) $read tokenises the file and names what it declares
+     * @param callable(string): (string|false|null) $read tokenises the file and names what it declares; false when it could not read it
      */
     public function declaredClass(\SplFileInfo $file, callable $read): ?string
     {
         $path = $file->getPathname();
         if ($this->store === null) {
-            return $read($path);
+            return self::declared($read($path));
         }
         if (isset($this->seen[$path])) {
             return $this->seen[$path][3];
@@ -66,10 +66,10 @@ final class DiscoveryFileIndex
             $ctime = $file->getCTime();
         } catch (\RuntimeException) {
             // Gone between the listing and the stat: nothing to remember.
-            return $read($path);
+            return self::declared($read($path));
         }
         if ($mtime === false || $size === false) {
-            return $read($path);
+            return self::declared($read($path));
         }
 
         $known = $this->known[$path] ?? null;
@@ -85,6 +85,11 @@ final class DiscoveryFileIndex
         } else {
             $class = $read($path);
             $this->reread = true;
+            if ($class === false) {
+                // Not remembered: "nothing declared here" under this mtime and size would be
+                // believed by every later walk, and the read may work again by then.
+                return null;
+            }
         }
 
         $this->seen[$path] = [$mtime, $size, $ctime, $class];
@@ -106,5 +111,10 @@ final class DiscoveryFileIndex
         }
 
         $this->store->writeState(self::STATE, ['builtAt' => $this->startedAt, 'files' => $this->seen]);
+    }
+
+    private static function declared(string|false|null $read): ?string
+    {
+        return $read === false ? null : $read;
     }
 }

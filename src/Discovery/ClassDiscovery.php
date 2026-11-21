@@ -386,21 +386,25 @@ class ClassDiscovery
         $this->initialize();
 
         $projectRoot = ProjectRoot::get();
-        // First, because it is what notices a classmap other than the one the shared answers
-        // were read from, and drops them.
         $index = $this->attributeIndex($projectRoot, $attributeClass);
         if ($index === null) {
-            // A lookup made from inside the scan itself: nothing to answer from yet, and
-            // nothing to remember.
+            // A lookup made from inside the scan itself: nothing to answer from, nothing to remember.
             return [];
         }
 
-        if (isset(self::$sharedAttributeCaches[$projectRoot][$cacheKey])) {
+        // The answers kept per lookup belong to the shared index. This call's index may not be
+        // it: a waiter on another classmap replaces it as soon as the scan's gate closes, and
+        // carriersOf() autoloads attribute classes, which suspends under SWOOLE_HOOK_ALL.
+        $isShared = fn (): bool => (self::$sharedAttributeIndexes[$projectRoot]['attributes'] ?? null) === $index
+            && self::$sharedAttributeIndexes[$projectRoot]['classMap'] === $this->classMap;
+        if ($isShared() && isset(self::$sharedAttributeCaches[$projectRoot][$cacheKey])) {
             return $this->attributeCache[$cacheKey] = self::$sharedAttributeCaches[$projectRoot][$cacheKey];
         }
 
         $carriers = DiscoveryAttributeIndex::carriersOf($index, $this->classMap, $attributeClass, $instanceof);
-        self::$sharedAttributeCaches[$projectRoot][$cacheKey] = $carriers;
+        if ($isShared()) {
+            self::$sharedAttributeCaches[$projectRoot][$cacheKey] = $carriers;
+        }
 
         return $this->attributeCache[$cacheKey] = $carriers;
     }
@@ -417,20 +421,13 @@ class ClassDiscovery
         $isCurrent = fn (): bool => isset(self::$sharedAttributeIndexes[$projectRoot])
             && self::$sharedAttributeIndexes[$projectRoot]['classMap'] === $this->classMap;
 
-        if (isset(self::$sharedAttributeIndexes[$projectRoot]) && !$isCurrent()) {
-            // Built from another classmap: its answers are not this instance's. The closed gate
-            // of that scan goes too, or the wait below would spin on it.
-            unset(self::$sharedAttributeIndexes[$projectRoot], self::$sharedAttributeCaches[$projectRoot]);
-            $gate = $projectRoot . "\0@attributes";
-            if (!isset(self::$coroutineGateOwners[$gate])) {
-                unset(self::$coroutineGates[$gate]);
-            }
-        }
-
+        // What this call scanned itself. Closing the gate resumes the waiters at once, and one
+        // on another classmap replaces the shared index before this call reads it back.
+        $own = null;
         $this->runOncePerKey(
             '@attributes',
             $isCurrent,
-            function () use ($projectRoot, $askedFor): void {
+            function () use ($projectRoot, $askedFor, &$own): void {
                 [$attributes, $unloadable] = DiscoveryAttributeIndex::readOrScan(
                     $this->classMap,
                     $projectRoot,
@@ -438,12 +435,14 @@ class ClassDiscovery
                     $askedFor,
                     $this->shouldAbortScan(...),
                 );
+                // The answers kept per lookup were read from the index this one replaces.
+                unset(self::$sharedAttributeCaches[$projectRoot]);
                 self::$sharedUnloadable[$projectRoot] = $unloadable;
-                self::$sharedAttributeIndexes[$projectRoot] = ['classMap' => $this->classMap, 'attributes' => $attributes];
+                self::$sharedAttributeIndexes[$projectRoot] = ['classMap' => $this->classMap, 'attributes' => $own = $attributes];
             },
         );
 
-        return $isCurrent() ? self::$sharedAttributeIndexes[$projectRoot]['attributes'] : null;
+        return $own ?? ($isCurrent() ? self::$sharedAttributeIndexes[$projectRoot]['attributes'] : null);
     }
 
     /**
@@ -519,9 +518,10 @@ class ClassDiscovery
                 throw $e;
             }
 
-            // Success: wake every waiter. The closed gate stays in the map so late
-            // arrivals resolve via the cheap $isDone() short-circuit above.
-            unset(self::$coroutineGateOwners[$key]);
+            // Success: the gate leaves the map before the waiters wake. One whose $isDone() is
+            // still false (an attribute lookup on another classmap) must find no gate and produce
+            // its own answer: popping a closed channel returns at once, so it would spin on it.
+            unset(self::$coroutineGates[$key], self::$coroutineGateOwners[$key]);
             $gate->close();
             return;
         }
@@ -697,11 +697,12 @@ class ClassDiscovery
         return str_starts_with($dir, $vendorRoot) && !str_starts_with($realPath, $vendorRootReal);
     }
 
-    private static function extractDeclaredClassName(string $filePath): ?string
+    /** @return string|false|null false when the file could not be read, null when it declares nothing */
+    private static function extractDeclaredClassName(string $filePath): string|false|null
     {
         $source = @file_get_contents($filePath);
         if ($source === false) {
-            return null;
+            return false;
         }
 
         $tokens = token_get_all($source);

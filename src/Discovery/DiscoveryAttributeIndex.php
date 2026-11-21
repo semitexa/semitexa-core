@@ -33,6 +33,11 @@ final class DiscoveryAttributeIndex
     {
         $store = null;
         $fingerprint = '';
+        $newestSource = 0;
+        // What this call already learned of a class. A second try in one process is not the
+        // first: a file required once is not required again, and the reason would change.
+        $tried = [];
+        $readFromTheFiles = true;
         if ($storedHash !== null && DiscoveryCacheStore::hashOf($classMap) === $storedHash) {
             $store = DiscoveryCacheStore::forProjectRoot($projectRoot);
         }
@@ -50,24 +55,23 @@ final class DiscoveryAttributeIndex
             ) {
                 $stored = $store->load('attributes', $pointer['hash']);
                 $read = $stored !== null ? self::attributesFromStored($stored) : null;
-                if ($read !== null) {
-                    // The scan that wrote the file reported these; a boot that reads it must too.
-                    foreach ($read[1] as $className => $why) {
-                        BootDiagnostics::current()->skip('ClassDiscovery', "Skipping {$className}: {$why}");
-                    }
-
+                // The stored scan stands only while the classes it could not load still do not,
+                // for the same reason: what such a class lacks (a parent outside the map, say)
+                // is in no fingerprint, so each boot tries them again. That also reports them,
+                // as the scan that wrote the file did.
+                if ($read !== null && self::stillUnloadable($classMap, $read[1], $tried, $readFromTheFiles)) {
                     return $read;
                 }
             }
         }
 
         $startedAt = time();
-        [$attributes, $unloadable, $readFromTheFiles] = self::scan($classMap, $askedFor, $shouldAbort);
+        [$attributes, $unloadable] = self::scan($classMap, $askedFor, $shouldAbort, $tried, $readFromTheFiles);
 
         // A scan that read an older class than the file now holds is right for this process,
         // which runs that class, and wrong for the next one: stored, it would be found under
         // the file's new mtime and answer for it until something cleared the cache.
-        if ($store !== null && $readFromTheFiles) {
+        if ($store !== null && $readFromTheFiles && $newestSource < self::bytecodeIsCurrentBefore($startedAt)) {
             $payload = ['attributes' => $attributes, 'unloadable' => $unloadable];
             $shared = $store->share('attributes', $payload);
             $store->writeState('attributes', [
@@ -158,7 +162,7 @@ final class DiscoveryAttributeIndex
         $matches = [];
         foreach ($index as $name => $carriers) {
             // PHP matches an attribute's name case-insensitively.
-            if (strcasecmp($name, $attributeClass) === 0 || ($instanceof && self::isSubclass($name, $attributeClass))) {
+            if (strcasecmp($name, $attributeClass) === 0 || ($instanceof && self::isA($name, $attributeClass))) {
                 $matches[] = $carriers;
             }
         }
@@ -181,10 +185,14 @@ final class DiscoveryAttributeIndex
         return array_keys(array_intersect_key($classMap, $carrying));
     }
 
-    private static function isSubclass(string $attributeName, string $parentClass): bool
+    /**
+     * As ReflectionAttribute::IS_INSTANCEOF decides it: both names resolved to their classes,
+     * so an alias of the attribute's own class matches it, which is_subclass_of() refuses.
+     */
+    private static function isA(string $attributeName, string $parentClass): bool
     {
         try {
-            return is_subclass_of($attributeName, $parentClass, true);
+            return is_a($attributeName, $parentClass, true);
         } catch (\Throwable) {
             // An attribute whose own class does not load is an instance of nothing.
             return false;
@@ -197,33 +205,23 @@ final class DiscoveryAttributeIndex
      * Reflection reads the class in memory, not the file. A class this process declared before
      * the scan may be older than its file: a worker is forked from a master that loaded its
      * lifecycle listeners when the server started, and server:reload respawns workers only. So
-     * the third value says whether every class read is the one its file holds now: false when
+     * $readFromTheFiles says whether every class read is the one its file holds now: false when
      * a class declared beforehand has a file written since the process tree started.
      *
      * @param array<class-string, string> $classMap
      * @param \Closure(): bool $shouldAbort
-     * @return array{0: array<string, list<class-string>>, 1: array<string, string>, 2: bool}
+     * @param array<string, array{0: list<string>, 1: null}|array{0: null, 1: string}> $tried classes already inspected in this call
+     * @return array{0: array<string, list<class-string>>, 1: array<string, string>}
      */
-    private static function scan(array $classMap, string $askedFor, \Closure $shouldAbort): array
+    private static function scan(array $classMap, string $askedFor, \Closure $shouldAbort, array $tried, bool &$readFromTheFiles): array
     {
         $attributes = [];
         $unloadable = [];
-        // Every drop lands here as well as in the boot diagnostics, which a
-        // console command never reads (orm:sync finished green over a resource
-        // whose file did not load).
-        $drop = static function (string $className, string $reason) use (&$unloadable): void {
-            $unloadable[$className] = $reason;
-        };
-
-        $readFromTheFiles = true;
         $processStartedAt = self::processTreeStartedAt();
 
         $scanned = 0;
         foreach ($classMap as $className => $filePath) {
-            if ($readFromTheFiles
-                && (class_exists($className, false) || interface_exists($className, false) || trait_exists($className, false))
-                && self::writtenSince($filePath, $processStartedAt)
-            ) {
+            if ($readFromTheFiles && !isset($tried[$className]) && self::declaredFromAnOlderFile($className, $filePath, $processStartedAt)) {
                 $readFromTheFiles = false;
             }
 
@@ -238,50 +236,130 @@ final class DiscoveryAttributeIndex
             }
             ++$scanned;
 
-            try {
-                $exists = class_exists($className, true) || interface_exists($className, true) || trait_exists($className, true);
-            } catch (\Throwable $e) {
-                BootDiagnostics::current()->skip('ClassDiscovery', "Skipping {$className} (load error): " . $e->getMessage(), $e);
-                $drop($className, 'load error: ' . $e->getMessage());
+            [$named, $why] = $tried[$className] ?? self::inspect($className, $filePath);
+            if ($named === null) {
+                $unloadable[$className] = (string) $why;
                 continue;
             }
-
-            if (!$exists) {
-                $why = "{$filePath} does not exist";
-                if (is_file($filePath)) {
-                    $why = "{$filePath} does not declare it";
-                    try {
-                        (static function (string $f): void { require_once $f; })($filePath);
-                    } catch (\Throwable $e) {
-                        BootDiagnostics::current()->skip('ClassDiscovery', "require_once failed for {$className} ({$filePath}): " . $e->getMessage(), $e);
-                        $why = 'load error: ' . $e->getMessage();
-                    }
-                }
-                if (!class_exists($className, false) && !interface_exists($className, false) && !trait_exists($className, false)) {
-                    // These two paths used to record nothing at all.
-                    if (!str_starts_with($why, 'load error')) {
-                        BootDiagnostics::current()->skip('ClassDiscovery', "Skipping {$className}: {$why}");
-                    }
-                    $drop($className, $why);
-                    continue;
-                }
-            }
-
-            try {
-                $named = [];
-                foreach ((new \ReflectionClass($className))->getAttributes() as $attribute) {
-                    $named[$attribute->getName()] = true;
-                }
-                foreach ($named as $name => $_) {
-                    $attributes[$name][] = $className;
-                }
-            } catch (\Throwable $e) {
-                BootDiagnostics::current()->skip('ClassDiscovery', "Reading the attributes of {$className} failed: " . $e->getMessage(), $e);
-                $drop($className, 'reflection failed: ' . $e->getMessage());
+            foreach ($named as $name) {
+                $attributes[$name][] = $className;
             }
         }
 
-        return [$attributes, $unloadable, $readFromTheFiles];
+        return [$attributes, $unloadable];
+    }
+
+    /**
+     * Loads one class and names its attributes, or says why it could not: the reason goes to
+     * the caller as well as to the boot diagnostics, which a console command never reads
+     * (orm:sync finished green over a resource whose file did not load).
+     *
+     * @return array{0: list<string>, 1: null}|array{0: null, 1: string} attribute names, or why the class could not be inspected
+     */
+    private static function inspect(string $className, string $filePath): array
+    {
+        try {
+            $exists = class_exists($className, true) || interface_exists($className, true) || trait_exists($className, true);
+        } catch (\Throwable $e) {
+            BootDiagnostics::current()->skip('ClassDiscovery', "Skipping {$className} (load error): " . $e->getMessage(), $e);
+
+            return [null, 'load error: ' . $e->getMessage()];
+        }
+
+        if (!$exists) {
+            $why = "{$filePath} does not exist";
+            if (is_file($filePath)) {
+                $why = "{$filePath} does not declare it";
+                try {
+                    (static function (string $f): void { require_once $f; })($filePath);
+                } catch (\Throwable $e) {
+                    BootDiagnostics::current()->skip('ClassDiscovery', "require_once failed for {$className} ({$filePath}): " . $e->getMessage(), $e);
+                    $why = 'load error: ' . $e->getMessage();
+                }
+            }
+            if (!class_exists($className, false) && !interface_exists($className, false) && !trait_exists($className, false)) {
+                // These two paths used to record nothing at all.
+                if (!str_starts_with($why, 'load error')) {
+                    BootDiagnostics::current()->skip('ClassDiscovery', "Skipping {$className}: {$why}");
+                }
+
+                return [null, $why];
+            }
+        }
+
+        try {
+            $named = [];
+            foreach ((new \ReflectionClass($className))->getAttributes() as $attribute) {
+                $named[$attribute->getName()] = true;
+            }
+
+            return [array_keys($named), null];
+        } catch (\Throwable $e) {
+            BootDiagnostics::current()->skip('ClassDiscovery', "Reading the attributes of {$className} failed: " . $e->getMessage(), $e);
+
+            return [null, 'reflection failed: ' . $e->getMessage()];
+        }
+    }
+
+    /**
+     * Tries again every class a stored scan could not load. False as soon as one loads now, is
+     * gone from the map, or fails for another reason: the stored scan no longer describes it.
+     *
+     * @param array<class-string, string> $classMap
+     * @param array<string, string> $unloadable class => why, as stored
+     * @param array<string, array{0: list<string>, 1: null}|array{0: null, 1: string}> $tried what each class tried here gave, for the scan that follows a false
+     */
+    private static function stillUnloadable(array $classMap, array $unloadable, array &$tried, bool &$readFromTheFiles): bool
+    {
+        $processStartedAt = self::processTreeStartedAt();
+        foreach ($unloadable as $className => $storedWhy) {
+            $filePath = $classMap[$className] ?? null;
+            if ($filePath === null) {
+                return false;
+            }
+            if (self::declaredFromAnOlderFile($className, $filePath, $processStartedAt)) {
+                $readFromTheFiles = false;
+            }
+            $tried[$className] = self::inspect($className, $filePath);
+            [, $why] = $tried[$className];
+            if ($why !== $storedWhy) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * The time before which a source was surely compiled from the bytes it holds now. A class
+     * the scan autoloads comes from OPcache when OPcache has its file, and OPcache may be
+     * behind the file: for good with validate_timestamps=0 (it never looks again, and
+     * server:reload does not reset it), for up to revalidate_freq seconds otherwise. A scan
+     * over a source written at or after this time may have reflected old bytecode, and is not
+     * stored.
+     */
+    private static function bytecodeIsCurrentBefore(int $scanStartedAt): int
+    {
+        $on = static fn (string $directive): bool => filter_var(ini_get($directive), \FILTER_VALIDATE_BOOLEAN);
+        if (!function_exists('opcache_get_status')
+            || !$on('opcache.enable')
+            || (in_array(\PHP_SAPI, ['cli', 'phpdbg'], true) && !$on('opcache.enable_cli'))
+        ) {
+            return \PHP_INT_MAX;
+        }
+
+        if ($on('opcache.validate_timestamps')) {
+            return $scanStartedAt - max(0, (int) ini_get('opcache.revalidate_freq'));
+        }
+
+        // Never revalidated: current only for a file not written since the cache began, which
+        // is no later than the start of the process tree that shares it.
+        $since = self::processTreeStartedAt() ?? 0;
+        $status = @opcache_get_status(false);
+        $statistics = is_array($status) ? ($status['opcache_statistics'] ?? null) : null;
+        $cacheStartedAt = is_array($statistics) ? ($statistics['start_time'] ?? null) : null;
+
+        return is_int($cacheStartedAt) ? min($since, $cacheStartedAt) : $since;
     }
 
     /**
@@ -294,6 +372,15 @@ final class DiscoveryAttributeIndex
         $startedAt = $_SERVER['REQUEST_TIME_FLOAT'] ?? $_SERVER['REQUEST_TIME'] ?? null;
 
         return is_int($startedAt) || is_float($startedAt) ? (int) floor($startedAt) : null;
+    }
+
+    /**
+     * Whether the class is already in memory and its file may have been written since.
+     */
+    private static function declaredFromAnOlderFile(string $className, string $filePath, ?int $processStartedAt): bool
+    {
+        return (class_exists($className, false) || interface_exists($className, false) || trait_exists($className, false))
+            && self::writtenSince($filePath, $processStartedAt);
     }
 
     /**
