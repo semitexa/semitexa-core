@@ -602,11 +602,14 @@ final class WritableDirectoryTest extends TestCase
             self::assertStringNotContainsString('chown', $written);
         }
 
-        $devices = WritableDirectory::rotationProblem(new ServerConfigurator($this->env('/dev/stdout', 'daily')));
+        // /dev/null, not /dev/stdout: where phpunit's stdout is a log file (the
+        // stack smoke) /dev/stdout resolves to that regular file, which rotation
+        // may use; /dev/null is a character device wherever the suite runs.
+        $devices = WritableDirectory::rotationProblem(new ServerConfigurator($this->env('/dev/null', 'daily')));
         self::assertNotNull($devices);
-        self::assertStringContainsString('/dev/stdout.<date>', $devices['message']);
-        self::assertSame(['/app/var/log', '/app/var/run'], array_keys(WritableDirectory::startPaths(new ServerConfigurator($this->env('/dev/stdout', 'daily')), '/app')), '/dev is never probed');
-        self::assertNull(WritableDirectory::rotationProblem(new ServerConfigurator($this->env('/dev/stdout', 'single'))));
+        self::assertStringContainsString('/dev/null.<date>', $devices['message']);
+        self::assertSame(['/app/var/log', '/app/var/run'], array_keys(WritableDirectory::startPaths(new ServerConfigurator($this->env('/dev/null', 'daily')), '/app')), '/dev is never probed');
+        self::assertNull(WritableDirectory::rotationProblem(new ServerConfigurator($this->env('/dev/null', 'single'))));
         self::assertNull(WritableDirectory::rotationProblem(new ServerConfigurator($this->env($fifo, 'single'))));
         self::assertNull(WritableDirectory::rotationProblem(new ServerConfigurator($this->env($this->root . '/logs/missing.log', 'daily'))));
     }
