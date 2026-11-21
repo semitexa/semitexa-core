@@ -19,25 +19,49 @@ namespace Semitexa\Core\Queue;
  * A TERM or INT here is passed to every role, which finishes the work in hand
  * (StopSignals) and exits; this returns when the last one has. A second one
  * is passed on too, and ends them at once.
+ *
+ * What a fork costs: a role started again runs the code this process loaded,
+ * not what is on disk now. So a HUP stops every role the way a TERM does and
+ * then returns with reloadAsked(), for the caller to start this process anew
+ * (worker:run replaces itself); and a role started again while a loaded file
+ * has changed is said, once for each set of changes.
  */
 final class WorkerSupervisor
 {
     /** @var array<int, int> pid => index in $slots */
     private array $running = [];
 
-    /** @var list<array{process: WorkerProcess, dueAt: float}> */
+    /** @var list<array{process: WorkerProcess, dueAt: float, starts: int, forkFailures: int}> */
     private array $slots = [];
 
     private bool $stopping = false;
 
+    private bool $reloading = false;
+
+    /** @var list<string>|null the changed files last said, so the same set is said once */
+    private ?array $saidChanged = null;
+
+    /** The longest a role that cannot be forked waits before the next try. */
+    private const FORK_BACKOFF_MAX = 60;
+
     /**
-     * @param \Closure(list<string>): int $run runs one command in the child just forked, and returns its exit code
-     * @param \Closure(string): void       $say one line for the operator
+     * @param \Closure(list<string>): int   $run          runs one command in the child just forked, and returns its exit code
+     * @param \Closure(string): void         $say          one line for the operator
+     * @param (\Closure(): list<string>)|null $changedFiles the files this process loaded that changed since (WorkerLoadedFiles)
+     * @param (\Closure(): int)|null          $fork         pcntl_fork(), unless a test says otherwise
      */
     public function __construct(
         private readonly \Closure $run,
         private readonly \Closure $say,
+        private readonly ?\Closure $changedFiles = null,
+        private readonly ?\Closure $fork = null,
     ) {
+    }
+
+    /** Whether supervise() returned for a HUP: every role has stopped, and the caller loads the code again. */
+    public function reloadAsked(): bool
+    {
+        return $this->reloading && !$this->stopping;
     }
 
     public static function isSupported(): bool
@@ -46,13 +70,13 @@ final class WorkerSupervisor
     }
 
     /**
-     * Until a TERM or INT, and then until every role has exited.
+     * Until a TERM, INT or HUP, and then until every role has exited.
      *
      * @param list<WorkerProcess> $processes
      */
     public function supervise(array $processes): int
     {
-        $signals = [SIGTERM, SIGINT, SIGCHLD];
+        $signals = [SIGTERM, SIGINT, SIGHUP, SIGCHLD];
         // Held, and read below one at a time: a child that exits between the
         // reaping and the wait is still seen, with no handler to race.
         $before = [];
@@ -61,14 +85,23 @@ final class WorkerSupervisor
         try {
             $this->slots = [];
             foreach ($processes as $process) {
-                $this->slots[] = ['process' => $process, 'dueAt' => 0.0];
+                $this->slots[] = ['process' => $process, 'dueAt' => 0.0, 'starts' => 0, 'forkFailures' => 0];
             }
             $this->running = [];
             $this->stopping = false;
+            $this->reloading = false;
+            $this->saidChanged = null;
+
+            // A connection open here would be every role's at once: two
+            // processes reading one socket take each other's answers.
+            $sockets = self::openSockets();
+            if ($sockets > 0 && $this->slots !== []) {
+                ($this->say)(sprintf('worker: this process holds %d open socket(s) before it forks; every role would share them. Open connections in the role, not while loading.', $sockets));
+            }
 
             while (true) {
                 $this->reap();
-                if ($this->stopping) {
+                if ($this->stopping || $this->reloading) {
                     if ($this->running === []) {
                         return 0;
                     }
@@ -81,6 +114,13 @@ final class WorkerSupervisor
                     $this->stopping = true;
                     foreach (array_keys($this->running) as $pid) {
                         posix_kill($pid, $signal);
+                    }
+                } elseif ($signal === SIGHUP && !$this->stopping && !$this->reloading) {
+                    // Once: a second HUP must not end at once the roles the first asked to finish.
+                    $this->reloading = true;
+                    ($this->say)('worker: HUP: every role finishes the work in hand, then the worker loads the code again');
+                    foreach (array_keys($this->running) as $pid) {
+                        posix_kill($pid, SIGTERM);
                     }
                 }
             }
@@ -98,7 +138,7 @@ final class WorkerSupervisor
             }
             $index = $this->running[$pid];
             unset($this->running[$pid]);
-            if ($this->stopping) {
+            if ($this->stopping || $this->reloading) {
                 continue;
             }
             $process = $this->slots[$index]['process'];
@@ -123,17 +163,68 @@ final class WorkerSupervisor
                 continue;
             }
             $process = $slot['process'];
-            $pid = pcntl_fork();
+            if ($slot['starts'] > 0) {
+                $this->sayChangedFiles($process);
+            }
+            $pid = $this->fork !== null ? ($this->fork)() : pcntl_fork();
             if ($pid === 0) {
                 $this->runAsChild($process);
             }
             if ($pid < 0) {
-                $this->slots[$index]['dueAt'] = $now + max(1, $process->pauseSeconds);
-                ($this->say)(sprintf('worker: %s could not be started (fork failed); again in %ds', implode(' ', $process->command), max(1, $process->pauseSeconds)));
+                // Out of processes or memory: asking again at once makes it
+                // worse. 1 s, 2, 4, ... up to a minute, until one succeeds.
+                $wait = min(self::FORK_BACKOFF_MAX, 2 ** min(6, $slot['forkFailures']));
+                $slot['forkFailures']++;
+                $slot['dueAt'] = $now + $wait;
+                $this->slots[$index] = $slot;
+                ($this->say)(sprintf('worker: %s could not be started (fork failed); again in %ds', implode(' ', $process->command), $wait));
                 continue;
             }
+            $slot['forkFailures'] = 0;
+            $slot['starts']++;
+            $this->slots[$index] = $slot;
             $this->running[$pid] = $index;
         }
+    }
+
+    /**
+     * A role started again is forked with the code loaded at the start. When
+     * that is no longer what is on disk, say so: nothing else would, and the
+     * role would go on running the old code after an edit or a deploy.
+     */
+    private function sayChangedFiles(WorkerProcess $process): void
+    {
+        if ($this->changedFiles === null) {
+            return;
+        }
+        $changed = ($this->changedFiles)();
+        if ($changed === [] || $changed === $this->saidChanged) {
+            $this->saidChanged = $changed === [] ? null : $this->saidChanged;
+
+            return;
+        }
+        $this->saidChanged = $changed;
+        ($this->say)(sprintf(
+            'worker: %d file(s) loaded when the worker started have changed since (%s%s): %s and every other role started again still run the code loaded then. Send HUP to this process (pid %d) or restart the worker to load them.',
+            count($changed),
+            implode(', ', array_slice($changed, 0, 3)),
+            count($changed) > 3 ? ', ...' : '',
+            implode(' ', $process->command),
+            getmypid(),
+        ));
+    }
+
+    /** Sockets this process has open, read from /proc; 0 where that cannot be read. */
+    private static function openSockets(): int
+    {
+        $count = 0;
+        foreach (glob('/proc/self/fd/*') ?: [] as $fd) {
+            if (str_starts_with((string) @readlink($fd), 'socket:')) {
+                $count++;
+            }
+        }
+
+        return $count;
     }
 
     private function runAsChild(WorkerProcess $process): never
@@ -160,7 +251,7 @@ final class WorkerSupervisor
     /** At least one: a role that is due now and could not be forked is tried again, not spun on. */
     private function secondsToNextStart(): int
     {
-        if ($this->stopping) {
+        if ($this->stopping || $this->reloading) {
             return 3600;
         }
         $live = array_flip($this->running);

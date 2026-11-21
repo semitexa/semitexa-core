@@ -47,6 +47,7 @@ final class WorkerSupervisorTest extends TestCase
         }
         @unlink($this->log);
         @unlink($this->log . '.err');
+        @unlink($this->log . '.watched.php');
     }
 
     #[Test]
@@ -210,14 +211,216 @@ final class WorkerSupervisorTest extends TestCase
         return proc_get_status($this->process)['running'];
     }
 
-    /** @param list<string> $lines */
-    private function supervise(string $mode, array $lines): void
+    /**
+     * The supervisor loads and forks, and nothing else: a connection it held
+     * would be every role's at once. worker:processes may open one to answer
+     * (the fixture's does), so it is asked in a child that takes it away.
+     */
+    #[Test]
+    public function what_worker_processes_opened_reaches_neither_the_supervisor_nor_a_role(): void
+    {
+        $this->supervise('command', ['5 work nats events', '5 work nats mail']);
+        $roles = $this->waitForStarts(2);
+
+        self::assertSame([], self::sockets($this->pid), 'the supervisor holds no connection');
+        foreach ($roles as $role) {
+            self::assertSame([], self::sockets($role['pid']), "{$role['command']} was forked with none");
+        }
+        self::assertStringContainsString("worker:processes: a source failed\n", $this->stderr(), 'the listing ran, and opened its socket');
+        self::assertStringNotContainsString('open socket', $this->stderr());
+    }
+
+    /** A boot that leaves a connection open would hand it to every role: it is said before the first fork. */
+    #[Test]
+    public function a_socket_held_when_the_roles_are_forked_is_said(): void
+    {
+        $this->supervise('supervisor', ['5 work a'], ['WK_SOCKET' => '1']);
+        $this->waitForStarts(1);
+
+        self::assertStringContainsString(
+            "worker: this process holds 2 open socket(s) before it forks; every role would share them. Open connections in the role, not while loading.\n",
+            $this->stderr(),
+        );
+    }
+
+    /**
+     * A role in a job that does not end is asked once and works on; the
+     * second TERM is passed on as well and ends it at once, as Ctrl-C twice
+     * does for one worker, and the supervisor still exits 0 with nothing left.
+     */
+    #[Test]
+    public function a_second_term_ends_a_role_that_is_still_in_its_job(): void
+    {
+        $this->supervise('supervisor', ['5 slow job', '5 work quick']);
+        $roles = $this->waitForStarts(2);
+        $slow = self::role($roles, 'slow job');
+
+        posix_kill($this->pid, SIGTERM);
+        $this->waitFor(fn (): bool => str_contains($this->logged(), "asked slow job pid={$slow['pid']}") && str_contains($this->logged(), 'stopped work quick'));
+        usleep(200_000);
+        self::assertTrue($this->running(), 'it waits for the job in hand');
+        self::assertTrue(self::alive($slow['pid']));
+
+        posix_kill($this->pid, SIGTERM);
+
+        self::assertSame(0, $this->waitForExit());
+        self::assertFalse(self::alive($slow['pid']), 'the role is gone with it');
+        self::assertCount(2, $this->started(), 'and nothing was started again');
+    }
+
+    /** Ctrl-C in a terminal: INT stops it as TERM does. */
+    #[Test]
+    public function an_int_stops_every_role_after_the_work_in_hand(): void
+    {
+        $this->supervise('supervisor', ['0 work a', '0 work b']);
+        $roles = $this->waitForStarts(2);
+
+        posix_kill($this->pid, SIGINT);
+
+        self::assertSame(0, $this->waitForExit());
+        foreach ($roles as $role) {
+            self::assertStringContainsString("stopped {$role['command']} pid={$role['pid']}", $this->logged());
+        }
+        self::assertCount(2, $this->started());
+    }
+
+    /**
+     * Out of processes or memory, fork fails. It is said, and tried again
+     * later each time (1 s, then 2), not at once and not after the role's own
+     * pause: asking faster makes it worse.
+     */
+    #[Test]
+    public function a_fork_that_fails_is_reported_and_tried_again_with_a_growing_wait(): void
+    {
+        $this->supervise('supervisor', ['30 work a'], ['WK_FORK_FAIL' => '2']);
+        $begun = microtime(true);
+        $roles = $this->waitForStarts(1);
+
+        self::assertGreaterThanOrEqual(2.5, microtime(true) - $begun, 'it waited 1 s and then 2 s');
+        self::assertSame(
+            "worker: work a could not be started (fork failed); again in 1s\nworker: work a could not be started (fork failed); again in 2s\n",
+            $this->stderr(),
+        );
+        self::assertSame($this->pid, $roles[0]['ppid']);
+    }
+
+    /**
+     * A forked role runs the code its parent loaded, so a role started again
+     * no longer reads an edit or a deploy from disk, as a php of its own did.
+     * HUP is how the worker is told to: every role finishes the work in hand,
+     * and the process starts anew, with the same pid (the container does not
+     * restart), command line and environment it was first given.
+     */
+    #[Test]
+    public function a_hup_stops_every_role_and_starts_the_process_anew_to_load_the_code_again(): void
+    {
+        $this->supervise('command', ['5 work nats events', '5 work nats mail'], [], ['-d', 'memory_limit=300M']);
+        $before = $this->waitForStarts(2);
+
+        posix_kill($this->pid, SIGHUP);
+        $this->waitFor(fn (): bool => count($this->started()) === 4);
+
+        $logged = $this->logged();
+        self::assertSame(
+            ["loaded pid={$this->pid} mem=300M put=", "loaded pid={$this->pid} mem=300M put="],
+            array_values(array_filter(explode("\n", $logged), static fn (string $line): bool => str_starts_with($line, 'loaded '))),
+            'loaded twice by the same pid, with the php options it had, and without what the first boot put in its environment',
+        );
+        foreach ($before as $role) {
+            self::assertStringContainsString("stopped {$role['command']} pid={$role['pid']}", $logged, 'it finished what it held first');
+            self::assertLessThan(strrpos($logged, 'loaded pid='), strpos($logged, "stopped {$role['command']} pid={$role['pid']}"), 'before the code was loaded again');
+        }
+        $after = array_slice($this->started(), 2);
+        self::assertCount(2, $after);
+        $pidsBefore = array_column($before, 'pid');
+        self::assertCount(2, $pidsBefore);
+        self::assertSame(['work nats events', 'work nats mail'], self::sorted(array_column($after, 'command')));
+        foreach ($after as $role) {
+            self::assertSame($this->pid, $role['ppid']);
+            self::assertNotContains($role['pid'], $pidsBefore);
+        }
+        self::assertStringContainsString("worker: HUP: every role finishes the work in hand, then the worker loads the code again\n", $this->stderr());
+
+        posix_kill($this->pid, SIGTERM);
+        self::assertSame(0, $this->waitForExit(), 'and it is still the worker: a TERM stops it');
+    }
+
+    /**
+     * Until a HUP or a restart, a role started again (it crashed, was killed,
+     * or is scheduler:plan, every minute) runs the old code. Nothing showed
+     * that: now the first such start after a change names the files, once.
+     */
+    #[Test]
+    public function a_role_started_again_after_a_loaded_file_changed_says_which_and_how_to_load_it(): void
+    {
+        $watched = $this->log . '.watched.php';
+        file_put_contents($watched, "<?php\n// one\n");
+        touch($watched, time() - 60);
+        $this->supervise('supervisor', ['0 work a'], ['WK_WATCH' => $watched]);
+        $this->waitForStarts(1);
+
+        posix_kill($this->started()[0]['pid'], SIGTERM);
+        $this->waitFor(fn (): bool => count($this->started()) === 2);
+        self::assertSame('', $this->stderr(), 'started again with nothing changed: nothing to say');
+
+        file_put_contents($watched, "<?php\n// two, edited\n");
+        posix_kill($this->started()[1]['pid'], SIGTERM);
+        $this->waitFor(fn (): bool => count($this->started()) === 3);
+
+        self::assertSame(
+            "worker: 1 file(s) loaded when the worker started have changed since ({$watched}): work a and every other role started again still run the code loaded then. Send HUP to this process (pid {$this->pid}) or restart the worker to load them.\n",
+            $this->stderr(),
+        );
+
+        posix_kill($this->started()[2]['pid'], SIGTERM);
+        $this->waitFor(fn (): bool => count($this->started()) === 4);
+        self::assertSame(1, substr_count($this->stderr(), 'have changed since'), 'the same change is said once, not at every start');
+    }
+
+    private static function alive(int $pid): bool
+    {
+        return @posix_kill($pid, 0);
+    }
+
+    /**
+     * @return list<string> what each open socket of $pid links to
+     */
+    private static function sockets(int $pid): array
+    {
+        $sockets = [];
+        foreach (glob("/proc/{$pid}/fd/*") ?: [] as $fd) {
+            $target = (string) @readlink($fd);
+            if (str_starts_with($target, 'socket:')) {
+                $sockets[] = $target;
+            }
+        }
+
+        return $sockets;
+    }
+
+    /**
+     * @param list<string>          $lines
+     * @param array<string, string> $env
+     * @param list<string>          $phpOptions
+     */
+    private function supervise(string $mode, array $lines, array $env = [], array $phpOptions = []): void
     {
         $autoload = dirname((string) (new \ReflectionClass(ClassLoader::class))->getFileName(), 2) . '/autoload.php';
         $fixture = dirname(__DIR__, 2) . '/Fixtures/Worker/supervise.php';
         // exec: the pid proc_open gives is the supervisor's, not a shell's.
-        $command = 'exec ' . implode(' ', array_map('escapeshellarg', [PHP_BINARY, $fixture, $autoload, $this->log, $mode, ...$lines]));
-        $process = proc_open($command, [['file', '/dev/null', 'r'], ['file', '/dev/null', 'w'], ['file', $this->log . '.err', 'w']], $pipes);
+        // Before it, every descriptor this test process holds beyond the
+        // standard three is closed (bash: sh cannot name one above 9): in the
+        // full suite PHPUnit has connections open, and a child inherits them,
+        // which is the very thing the supervisor reports.
+        $closeInherited = 'for fd in /proc/$$/fd/*; do fd=${fd##*/}; [ "$fd" -gt 2 ] && eval "exec $fd>&-"; done; ';
+        $command = $closeInherited . 'exec ' . implode(' ', array_map('escapeshellarg', [PHP_BINARY, ...$phpOptions, $fixture, $autoload, $this->log, $mode, ...$lines]));
+        $process = proc_open(
+            ['/bin/bash', '-c', $command],
+            [['file', '/dev/null', 'r'], ['file', '/dev/null', 'w'], ['file', $this->log . '.err', 'a']],
+            $pipes,
+            null,
+            [...getenv(), ...$env],
+        );
         self::assertIsResource($process);
         $this->process = $process;
         $this->pid = proc_get_status($process)['pid'];
@@ -242,7 +445,7 @@ final class WorkerSupervisorTest extends TestCase
     {
         $started = [];
         foreach (explode("\n", $this->logged()) as $line) {
-            if (preg_match('/^(?!stopped |loaded )(.+) pid=(\d+) ppid=(\d+) sid=(\d+)$/', $line, $m) !== 1) {
+            if (preg_match('/^(?!stopped |loaded |asked )(.+) pid=(\d+) ppid=(\d+) sid=(\d+)$/', $line, $m) !== 1) {
                 continue;
             }
             if ($command === null || $m[1] === $command) {

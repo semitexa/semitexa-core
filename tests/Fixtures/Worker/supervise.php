@@ -8,15 +8,25 @@ declare(strict_types=1);
  *
  * Every role writes "<command> pid=<pid> ppid=<ppid> sid=<sid>" to the log
  * when it starts. `work` stays up until a TERM and then writes "stopped";
- * `plan` exits 0; `broken` exits 3.
+ * `plan` exits 0; `broken` exits 3; `slow` is in a job that a TERM does not
+ * end: it writes "asked" and works on.
  *
  * Mode `supervisor` hands the lines to WorkerSupervisor. Mode `command` runs
  * worker:run in an application whose worker:processes prints the lines, or
- * fails when the first one is "fail".
+ * fails when the first one is "fail"; it opens a socket to answer, as a source
+ * that asks a database would.
+ *
+ * From the environment, for mode `supervisor`: WK_SOCKET=1 holds a socket open
+ * before the roles are forked; WK_FORK_FAIL=<n> makes the first n forks fail;
+ * WK_WATCH=<file> is loaded first and watched for changes (WorkerLoadedFiles).
+ * Every start of this script writes "loaded pid=<pid> mem=<memory_limit>
+ * put=<WK_PUT>" and then sets WK_PUT in its environment: a process started
+ * anew does not see it.
  */
 
 use Semitexa\Core\Application\Console\Command\WorkerRunCommand;
 use Semitexa\Core\Lifecycle\StopSignals;
+use Semitexa\Core\Queue\WorkerLoadedFiles;
 use Semitexa\Core\Queue\WorkerSupervisor;
 use Symfony\Component\Console\Application;
 use Symfony\Component\Console\Command\Command;
@@ -32,7 +42,8 @@ $log = $argv[2];
 $mode = $argv[3];
 $lines = array_slice($argv, 4);
 
-file_put_contents($log, 'loaded pid=' . getmypid() . "\n", FILE_APPEND);
+file_put_contents($log, sprintf("loaded pid=%d mem=%s put=%s\n", getmypid(), (string) ini_get('memory_limit'), (string) getenv('WK_PUT')), FILE_APPEND);
+putenv('WK_PUT=1');
 
 $role = static function (array $command) use ($log): int {
     $name = implode(' ', $command);
@@ -44,7 +55,13 @@ $role = static function (array $command) use ($log): int {
         return 3;
     }
     $stop = false;
-    StopSignals::install(static function () use (&$stop): void {
+    $slow = $command[0] === 'slow';
+    StopSignals::install(static function () use (&$stop, $slow, $log, $name): void {
+        if ($slow) {
+            file_put_contents($log, "asked {$name} pid=" . getmypid() . "\n", FILE_APPEND);
+
+            return;
+        }
         $stop = true;
     });
     while (!$stop) {
@@ -56,13 +73,35 @@ $role = static function (array $command) use ($log): int {
 };
 
 if ($mode === 'supervisor') {
-    $supervisor = new WorkerSupervisor($role, static function (string $line): void {
+    $say = static function (string $line): void {
         fwrite(STDERR, $line . "\n");
-    });
+    };
 
-    exit($supervisor->supervise(WorkerRunCommand::processes($lines, static function (string $line): void {
-        fwrite(STDERR, $line . "\n");
-    })));
+    $changed = null;
+    $watch = (string) getenv('WK_WATCH');
+    if ($watch !== '') {
+        require $watch;
+        $started = $_SERVER['REQUEST_TIME'] ?? null;
+        $changed = (new WorkerLoadedFiles([$watch], is_int($started) ? $started : time()))->changed(...);
+    }
+
+    $fork = null;
+    $failures = (int) getenv('WK_FORK_FAIL');
+    if ($failures > 0) {
+        $fork = static function () use (&$failures): int {
+            return $failures-- > 0 ? -1 : pcntl_fork();
+        };
+    }
+
+    $held = getenv('WK_SOCKET') === '1' ? stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, 0) : null;
+
+    $supervisor = new WorkerSupervisor($role, $say, $changed, $fork);
+    $code = $supervisor->supervise(WorkerRunCommand::processes($lines, $say));
+    if ($supervisor->reloadAsked()) {
+        WorkerRunCommand::replaceThisProcess();
+    }
+
+    exit($code);
 }
 
 $application = new Application();
@@ -77,6 +116,8 @@ $application->add(new class($lines) extends Command {
     {
         $errors = $output instanceof ConsoleOutputInterface ? $output->getErrorOutput() : $output;
         $errors->writeln('worker:processes: a source failed');
+        // Kept open to the end of this process, as a pooled connection is.
+        $GLOBALS['wkSourceConnection'] = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, 0);
         if (($this->lines[0] ?? '') === 'fail') {
             return Command::FAILURE;
         }
@@ -87,7 +128,7 @@ $application->add(new class($lines) extends Command {
         return Command::SUCCESS;
     }
 });
-foreach (['work', 'plan', 'broken', 'queue:work'] as $name) {
+foreach (['work', 'plan', 'broken', 'slow', 'queue:work'] as $name) {
     $application->add(new class($name, $role) extends Command {
         /** @param \Closure(list<string>): int $run */
         public function __construct(private readonly string $role, private readonly \Closure $run)

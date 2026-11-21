@@ -7,6 +7,7 @@ namespace Semitexa\Core\Application\Console\Command;
 use Semitexa\Core\Attribute\AsCommand;
 use Semitexa\Core\Console\BaseCommand;
 use Semitexa\Core\Queue\WorkerListingOutput;
+use Semitexa\Core\Queue\WorkerLoadedFiles;
 use Semitexa\Core\Queue\WorkerProcess;
 use Semitexa\Core\Queue\WorkerSupervisor;
 use Symfony\Component\Console\Application;
@@ -25,6 +26,12 @@ use Symfony\Component\Console\Output\OutputInterface;
  * This process only loads and forks. The listing is read in a child too, so
  * whatever a source opens to answer (a connection, say) is gone with it and
  * is never shared by the roles.
+ *
+ * A role started again runs the code loaded here, not what is on disk. HUP
+ * makes this process load it again: every role finishes the work in hand, as
+ * for docker stop, and the process replaces itself with a new one of the same
+ * command line and environment. Until then, a role started again while a
+ * loaded file has changed is named in the log (WorkerLoadedFiles).
  */
 #[AsCommand(name: 'worker:run', description: 'Run every process worker:processes lists, each restarted after its pause')]
 class WorkerRunCommand extends BaseCommand
@@ -68,6 +75,10 @@ class WorkerRunCommand extends BaseCommand
             $lines = ['5 queue:work'];
         }
 
+        // Before the roles: what they are forked with is what is loaded now.
+        $started = $_SERVER['REQUEST_TIME'] ?? null;
+        $loaded = new WorkerLoadedFiles(get_included_files(), is_int($started) ? $started : time(), $this->getProjectRoot());
+
         $processes = self::processes($lines, $say);
         if ($processes === []) {
             // Listed, and nothing to start (worker:processes refused a shared
@@ -76,7 +87,65 @@ class WorkerRunCommand extends BaseCommand
             $say('worker: worker:processes listed nothing to run; idle until server:restart');
         }
 
-        return (new WorkerSupervisor($run, $say))->supervise($processes);
+        $supervisor = new WorkerSupervisor($run, $say, $loaded->changed(...));
+        $code = $supervisor->supervise($processes);
+        if (!$supervisor->reloadAsked()) {
+            return $code;
+        }
+
+        self::replaceThisProcess();
+        // Still here: the container's restart policy loads the code again instead.
+        $say('worker: could not start worker:run again after HUP; exiting so the worker is restarted');
+
+        return Command::FAILURE;
+    }
+
+    /**
+     * This process again, from nothing: the same php, options and arguments
+     * (`php -d memory_limit=... vendor/bin/semitexa worker:run`), and the
+     * environment it was started with, not the one the boot added to: a value
+     * read from .env into the environment would otherwise outlive an edit of
+     * .env. The pid stays, so the container and its init see no exit.
+     * Returns only when it could not be done.
+     */
+    public static function replaceThisProcess(): void
+    {
+        $arguments = self::nulSeparated('/proc/self/cmdline');
+        if (count($arguments) < 2) {
+            $arguments = [PHP_BINARY];
+            foreach (is_array($_SERVER['argv'] ?? null) ? $_SERVER['argv'] : [] as $word) {
+                if (is_string($word)) {
+                    $arguments[] = $word;
+                }
+            }
+        }
+        array_shift($arguments);
+
+        $environment = [];
+        foreach (self::nulSeparated('/proc/self/environ') as $pair) {
+            [$name, $value] = explode('=', $pair, 2) + [1 => ''];
+            if ($name !== '') {
+                $environment[$name] = $value;
+            }
+        }
+
+        if ($environment === []) {
+            pcntl_exec(PHP_BINARY, $arguments);
+
+            return;
+        }
+        pcntl_exec(PHP_BINARY, $arguments, $environment);
+    }
+
+    /** @return list<string> */
+    private static function nulSeparated(string $path): array
+    {
+        $raw = @file_get_contents($path);
+        if (!is_string($raw) || $raw === '') {
+            return [];
+        }
+
+        return array_values(array_filter(explode("\0", $raw), static fn (string $part): bool => $part !== ''));
     }
 
     /**
