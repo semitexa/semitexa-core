@@ -6,6 +6,7 @@ namespace Semitexa\Core\Server;
 
 use Semitexa\Core\Attribute\AsDoctorCheck;
 use Semitexa\Core\Contract\DoctorCheckInterface;
+use Semitexa\Core\Environment;
 use Semitexa\Core\Support\DoctorResult;
 use Semitexa\Core\Support\ProjectRoot;
 
@@ -24,6 +25,11 @@ final class VarWritableDoctorCheck implements DoctorCheckInterface
     public function run(): DoctorResult
     {
         $root = ProjectRoot::get();
+        // Rotation on a log that is no regular file is refused at the start whoever runs it.
+        $rotation = WritableDirectory::rotationProblem(new ServerConfigurator(Environment::create()));
+        if ($rotation !== null) {
+            return DoctorResult::fail(ucfirst($rotation['message']) . ' The server refuses to start.', ucfirst($rotation['fix']));
+        }
         $paths = [];
         foreach (WritableDirectory::currentStartPaths() as $path => $open) {
             // Never created from here: made by a doctor run as root, a missing var/log would be
@@ -40,7 +46,11 @@ final class VarWritableDoctorCheck implements DoctorCheckInterface
      * those of `described`, its nearest existing parent. `open` is how an
      * existing file is opened, as {@see WritableDirectory::startPaths()} gives it.
      *
-     * @param list<array{path: string, chownTarget: string, open?: ?string, exists: bool, writable: bool, ownerUid: ?int, ownerGid: ?int, mode: ?int, described: string, blocked: bool}> $paths
+     * `special`: the Swoole log is a device, a FIFO or a link to a descriptor
+     * (/dev/stdout). Its owner is whoever made the pipe, no file is created
+     * in it, and no chown repairs it: only whether it opens is judged.
+     *
+     * @param list<array{path: string, chownTarget: string, open?: ?string, special?: bool, exists: bool, writable: bool, ownerUid: ?int, ownerGid: ?int, mode: ?int, described: string, blocked: bool}> $paths
      */
     public static function verdict(array $paths, int $processUid, int $processGid): DoctorResult
     {
@@ -50,7 +60,11 @@ final class VarWritableDoctorCheck implements DoctorCheckInterface
             $owner = ($p['ownerUid'] ?? '?') . ':' . ($p['ownerGid'] ?? '?')
                 . ', mode ' . ($p['mode'] === null ? '?' : sprintf('%04o', $p['mode']));
             $repair = WritableDirectory::repair($p['ownerUid'], $p['ownerGid'], $p['mode'], $processUid, $processGid, $p['chownTarget'], $p['described'], $p['blocked'], ($p['open'] ?? null) === 'a+');
-            $foreign = $p['ownerUid'] !== null && $p['ownerUid'] !== $processUid;
+            $special = $p['special'] ?? false;
+            if ($special) {
+                $repair = WritableDirectory::specialRepair($p['path'], $processUid);
+            }
+            $foreign = !$special && $p['ownerUid'] !== null && $p['ownerUid'] !== $processUid;
             if ($processUid === 0) {
                 // The write was tried, not read from the mode: what stops root (a read-only mount,
                 // a file where the directory has to be) stops the server's user too.

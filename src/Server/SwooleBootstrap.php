@@ -120,7 +120,7 @@ class SwooleBootstrap
         // fail, it hangs with every worker blocked inside Swoole's logger and writes nothing
         // (tk-root-owned-var-hangs-the-server). Before the hooks and before ErrorHandler, which
         // points error_log into the same directory.
-        $unwritable = WritableDirectory::refusalExitCode(WritableDirectory::startPaths($config), STDERR);
+        $unwritable = WritableDirectory::refusalExitCode(WritableDirectory::startPaths($config), STDERR, null, WritableDirectory::rotationProblem($config));
         if ($unwritable !== 0) {
             exit($unwritable);
         }

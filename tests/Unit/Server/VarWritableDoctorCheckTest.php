@@ -121,6 +121,24 @@ final class VarWritableDoctorCheckTest extends TestCase
         self::assertSame(self::FIX, $result->hint);
     }
 
+    /**
+     * tk-swoole-log-to-stdout-refused-at-start: the pipe behind /dev/stdout is
+     * owned by whoever started the container, and nothing is created in it.
+     */
+    #[Test]
+    public function a_special_swoole_log_is_judged_only_by_whether_it_opens(): void
+    {
+        $stdout = ['special' => true, 'open' => 'a+', 'chownTarget' => '/dev/stdout'] + $this->directory('/dev/stdout', true, 0, 0600);
+
+        self::assertSame('pass', VarWritableDoctorCheck::verdict([$stdout], 1000, 1000)->status->value);
+
+        $result = VarWritableDoctorCheck::verdict([['writable' => false] + $stdout], 1000, 1000);
+        self::assertSame('fail', $result->status->value);
+        self::assertStringStartsWith('/dev/stdout is not writable by uid 1000', $result->message);
+        self::assertSame(\Semitexa\Core\Server\WritableDirectory::specialRepair('/dev/stdout', 1000), $result->hint);
+        self::assertStringNotContainsString('chown -R', (string) $result->hint);
+    }
+
     /** An unwritable directory is the one to name, wherever it is in the list. */
     #[Test]
     public function not_writable_is_reported_before_a_foreign_owner(): void
