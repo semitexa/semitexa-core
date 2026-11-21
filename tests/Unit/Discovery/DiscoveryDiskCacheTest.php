@@ -354,6 +354,31 @@ final class DiscoveryDiskCacheTest extends TestCase
         self::assertCount(1, $this->storedClassMaps(), '--twig clears the templates only');
     }
 
+    /** Review semitexa-core#257: an unsearchable var/cache read as "nothing to clear", and the fallback never ran. */
+    #[Test]
+    public function cache_clear_reports_a_cache_it_cannot_search_instead_of_nothing_to_clear(): void
+    {
+        $this->source('Alpha', "final class Alpha\n{\n}\n");
+        $this->walk();
+        self::assertCount(1, $this->storedClassMaps(), 'the walk stored a classmap to clear');
+        // The suite runs as root, which searches any directory: the permission is the seam.
+        $command = new class extends CacheClearCommand {
+            protected function canSearch(string $directory): bool
+            {
+                return false;
+            }
+        };
+
+        $tester = new CommandTester($command);
+        $exit = $tester->execute(['--no-reload' => true]);
+        $display = (string) preg_replace('/\s+/', ' ', $tester->getDisplay());
+
+        self::assertSame(1, $exit, $display);
+        self::assertStringContainsString('Could not clear: var/cache/twig; var/cache/discovery; var/cache/resource-metadata.php', $display);
+        self::assertStringNotContainsString('Nothing to clear', $display);
+        self::assertCount(1, $this->storedClassMaps(), 'nothing was removed behind the refusal');
+    }
+
     #[Test]
     public function cache_clear_removes_a_link_and_leaves_what_it_points_at(): void
     {

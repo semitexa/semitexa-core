@@ -80,6 +80,17 @@ class CacheClearCommand extends BaseCommand
         $cleared = [];
         $failed = [];
 
+        // A var/cache this user cannot search hides what is in it: is_dir() is false for
+        // everything below, so its directories were skipped as absent ("Nothing to clear")
+        // and the fallback into the container never ran (review semitexa-core#257).
+        $unsearchable = is_dir($baseDir) && !$this->canSearch($baseDir);
+        if ($unsearchable) {
+            foreach ($dirsToClear as $subDir) {
+                $failed[] = 'var/cache/' . $subDir;
+            }
+            $dirsToClear = [];
+        }
+
         foreach ($dirsToClear as $subDir) {
             $path = $baseDir . '/' . $subDir;
             // is_dir() follows a link: a cache directory that is one would have the files of
@@ -102,7 +113,9 @@ class CacheClearCommand extends BaseCommand
             }
         }
 
-        if (!$twigOnly) {
+        if (!$twigOnly && $unsearchable) {
+            $failed[] = 'var/cache/resource-metadata.php';
+        } elseif (!$twigOnly) {
             $resourceMetadata = $baseDir . '/resource-metadata.php';
             if (is_file($resourceMetadata)) {
                 if (@unlink($resourceMetadata)) {
@@ -201,6 +214,12 @@ class CacheClearCommand extends BaseCommand
         }
         $io->error('Docker exec failed. Is the app container running? Try: docker compose exec app bin/semitexa cache:clear');
         return Command::FAILURE;
+    }
+
+    /** Whether this process may look inside $directory: its search (execute) permission. */
+    protected function canSearch(string $directory): bool
+    {
+        return is_executable($directory);
     }
 
     private function canRunViaDocker(string $root): bool
