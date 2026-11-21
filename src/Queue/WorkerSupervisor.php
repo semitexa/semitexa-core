@@ -111,8 +111,14 @@ final class WorkerSupervisor
 
                 $signal = pcntl_sigtimedwait($signals, $info, $this->secondsToNextStart());
                 if ($signal === SIGTERM || $signal === SIGINT) {
+                    // During a HUP's drain every role has had its TERM: this
+                    // one is the first request to stop, not the second, and
+                    // passing it on would end the jobs in hand at once
+                    // (StopSignals). It only turns the reload into a stop;
+                    // one more ends the roles at once, as always.
+                    $rolesAlreadyAsked = $this->reloading && !$this->stopping;
                     $this->stopping = true;
-                    foreach (array_keys($this->running) as $pid) {
+                    foreach ($rolesAlreadyAsked ? [] : array_keys($this->running) as $pid) {
                         posix_kill($pid, $signal);
                     }
                 } elseif ($signal === SIGHUP && !$this->stopping && !$this->reloading) {

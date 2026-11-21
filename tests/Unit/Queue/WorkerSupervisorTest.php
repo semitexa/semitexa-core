@@ -346,6 +346,32 @@ final class WorkerSupervisorTest extends TestCase
     }
 
     /**
+     * server:reload, then a deploy or docker stop a moment later. The HUP
+     * already sent every role its TERM; the supervisor passed the TERM that
+     * followed on as well, a role read it as the second one ("stop at once")
+     * and died in the middle of its job, which ran again after its lease.
+     * During the drain a TERM only means: stop, do not start again.
+     */
+    #[Test]
+    public function a_term_during_a_hups_drain_lets_the_job_in_hand_finish_and_then_stops(): void
+    {
+        $this->supervise('supervisor', ['5 job a', '5 job b']);
+        $roles = $this->waitForStarts(2);
+
+        posix_kill($this->pid, SIGHUP);
+        usleep(300_000);
+        posix_kill($this->pid, SIGTERM);
+
+        self::assertSame(0, $this->waitForExit());
+        $logged = $this->logged();
+        foreach ($roles as $role) {
+            self::assertStringContainsString("stopped {$role['command']} pid={$role['pid']}", $logged, 'the job in hand ran to its end');
+        }
+        self::assertSame(1, substr_count($logged, 'loaded pid='), 'asked to stop: the code is not loaded again');
+        self::assertCount(2, $this->started(), 'and no role is started again');
+    }
+
+    /**
      * Until a HUP or a restart, a role started again (it crashed, was killed,
      * or is scheduler:plan, every minute) runs the old code. Nothing showed
      * that: now the first such start after a change names the files, once.

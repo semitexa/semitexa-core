@@ -9,7 +9,8 @@ declare(strict_types=1);
  * Every role writes "<command> pid=<pid> ppid=<ppid> sid=<sid>" to the log
  * when it starts. `work` stays up until a TERM and then writes "stopped";
  * `plan` exits 0; `broken` exits 3; `slow` is in a job that a TERM does not
- * end: it writes "asked" and works on.
+ * end: it writes "asked" and works on; `job` holds a job that takes one more
+ * second after the TERM, and writes "stopped" when it is done.
  *
  * Mode `supervisor` hands the lines to WorkerSupervisor. Mode `command` runs
  * worker:run in an application whose worker:processes prints the lines, or
@@ -66,6 +67,13 @@ $role = static function (array $command) use ($log): int {
     });
     while (!$stop) {
         usleep(20_000);
+    }
+    if ($command[0] === 'job') {
+        // The job in hand: a signal that ends the process now loses it.
+        $until = microtime(true) + 1.0;
+        while (microtime(true) < $until) {
+            usleep(20_000);
+        }
     }
     file_put_contents($log, "stopped {$name} pid=" . getmypid() . "\n", FILE_APPEND);
 
@@ -128,7 +136,7 @@ $application->add(new class($lines) extends Command {
         return Command::SUCCESS;
     }
 });
-foreach (['work', 'plan', 'broken', 'slow', 'queue:work'] as $name) {
+foreach (['work', 'plan', 'broken', 'slow', 'job', 'queue:work'] as $name) {
     $application->add(new class($name, $role) extends Command {
         /** @param \Closure(list<string>): int $run */
         public function __construct(private readonly string $role, private readonly \Closure $run)
