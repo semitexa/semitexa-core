@@ -136,7 +136,15 @@ final class VarWritableDoctorCheckTest extends TestCase
         self::assertSame('fail', $result->status->value);
         self::assertStringStartsWith('/dev/stdout is not writable by uid 1000', $result->message);
         self::assertSame(\Semitexa\Core\Server\WritableDirectory::specialRepair('/dev/stdout', 1000), $result->hint);
+        self::assertStringContainsString('point SWOOLE_LOG_FILE', (string) $result->hint);
         self::assertStringNotContainsString('chown -R', (string) $result->hint);
+
+        // Root, and it does not open (a socket file): the advice is another path, not a search for a read-only mount.
+        $asRoot = VarWritableDoctorCheck::verdict([['writable' => false] + $stdout], 0, 0);
+        self::assertSame('fail', $asRoot->status->value);
+        self::assertStringStartsWith('/dev/stdout is not writable even by root', $asRoot->message);
+        self::assertSame(\Semitexa\Core\Server\WritableDirectory::specialRepair('/dev/stdout', 0), $asRoot->hint);
+        self::assertStringContainsString('point SWOOLE_LOG_FILE', (string) $asRoot->hint);
     }
 
     /** An unwritable directory is the one to name, wherever it is in the list. */

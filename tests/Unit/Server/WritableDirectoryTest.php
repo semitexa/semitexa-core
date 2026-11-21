@@ -408,8 +408,8 @@ final class WritableDirectoryTest extends TestCase
      * Review of core#253: opening a FIFO nobody reads for append blocks for
      * good, so the check that exists to prevent a silent hang would be one.
      * Run in a child with a time limit: without the guard this is exit 124.
-     * As the Swoole log it is opened, read and write as Swoole opens it, which
-     * no FIFO blocks (tk-swoole-log-to-stdout-refused-at-start).
+     * As the Swoole log it is judged by access(2), with no open at all
+     * (tk-swoole-log-to-stdout-refused-at-start, review of core#254).
      */
     #[Test]
     public function a_fifo_never_blocks_the_probe_whichever_kind_of_path_it_stands_for(): void
@@ -473,12 +473,65 @@ final class WritableDirectoryTest extends TestCase
         );
         $facts = WritableDirectory::facts($fifo, false, 'a+');
         self::assertTrue($facts['special']);
-        self::assertTrue($facts['writable'], 'opened read and write, with no reader on the other end');
+        self::assertTrue($facts['writable'], 'readable and writable, with no reader on the other end');
+        self::assertTrue(WritableDirectory::isNamedFifo($fifo));
+        self::assertFalse(WritableDirectory::isNamedFifo('/dev/null'));
+        self::assertFalse(WritableDirectory::isNamedFifo($this->root . '/logs'));
         self::assertFalse($facts['blocked']);
         self::assertSame($fifo, $facts['described']);
         self::assertNull(WritableDirectory::inspect($fifo, '/app', true, 'a+'));
         clearstatcache();
         self::assertSame('fifo', filetype($fifo), 'still a FIFO, nothing created over it');
+    }
+
+    /**
+     * Review of core#254: a collector that reads the FIFO once (`cat fifo`)
+     * waits in open() for the first writer. A probe that opens the FIFO is
+     * that writer, and its close is the end of file: the collector leaves
+     * before Swoole opens the log, and the log then fills the pipe and
+     * stalls the workers. So the probe never opens it. The reader here is
+     * released at the end by a real open, which also proves it was attached.
+     */
+    #[Test]
+    public function a_fifo_with_a_collector_attached_is_not_opened_so_the_collector_sees_no_end_of_file(): void
+    {
+        $fifo = $this->root . '/var/swoole.fifo';
+        $left = $this->root . '/var/collector-left';
+        self::assertTrue(posix_mkfifo($fifo, 0600));
+        exec('(cat ' . escapeshellarg($fifo) . ' > /dev/null; touch ' . escapeshellarg($left) . ') > /dev/null 2>&1 &');
+        usleep(300_000); // the collector is in open(), waiting for a writer
+        $stderr = $this->stream();
+
+        self::assertTrue(WritableDirectory::facts($fifo, false, 'a+')['writable']);
+        self::assertSame(0, WritableDirectory::refusalExitCode([$fifo => 'a+'], $stderr, $this->root));
+        usleep(500_000);
+        clearstatcache();
+        $leftAfterTheProbe = file_exists($left);
+
+        $writer = fopen($fifo, 'r+');
+        self::assertIsResource($writer);
+        fclose($writer);
+        for ($i = 0; $i < 50 && !file_exists($left); $i++) {
+            usleep(100_000);
+            clearstatcache();
+        }
+        self::assertTrue(file_exists($left), 'the collector was attached: a real open and close ends it');
+        self::assertFalse($leftAfterTheProbe, 'the probe opened the FIFO and its close sent the collector the end of file');
+    }
+
+    #[Test]
+    public function a_fifo_this_process_may_not_write_is_still_refused_by_its_own_name(): void
+    {
+        $root = WritableDirectory::processUid() === 0; // no mode stops root: for it the same FIFO is accepted
+        $fifo = $this->root . '/var/swoole.fifo';
+        self::assertTrue(posix_mkfifo($fifo, 0600));
+        foreach ([0400, 0200, 0000] as $mode) {
+            chmod($fifo, $mode);
+            $stderr = $this->stream();
+
+            self::assertSame($root ? 0 : 1, WritableDirectory::refusalExitCode([$fifo => 'a+'], $stderr, $this->root), sprintf('%04o', $mode));
+            self::assertStringContainsString($root ? '' : "[Semitexa] {$fifo} cannot be opened for reading and writing by this process", $this->written($stderr));
+        }
     }
 
     /**

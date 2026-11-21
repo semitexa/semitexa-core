@@ -74,7 +74,7 @@ final class VarWritableDoctorCheck implements DoctorCheckInterface
                             ? "{$p['path']} is not writable even by root (owner {$owner})"
                             : "{$p['path']} does not exist and even root cannot create it in {$p['described']} (owner {$owner})")
                         . ': the server refuses to start, because it would hang on its log file.',
-                        $p['blocked']
+                        $p['blocked'] || $special
                             ? $repair
                             : "No owner or mode stops root: look for a read-only mount or an immutable flag on {$p['described']}.",
                     );

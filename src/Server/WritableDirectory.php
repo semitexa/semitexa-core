@@ -128,9 +128,13 @@ final class WritableDirectory
      * The Swoole log may also be no regular file at all: /dev/stdout, the
      * normal way to log in a container, /dev/stderr, a FIFO a collector reads
      * (tk-swoole-log-to-stdout-refused-at-start). Under 'a+' such a path is
-     * `special` and is opened as itself, read and write, by
-     * {@see opensReadWrite()}: that open cannot block on a FIFO, and its
-     * directory (/dev) says nothing about it.
+     * `special` and is judged as itself, its directory (/dev) says nothing
+     * about it. A device or a link to a descriptor this process holds is
+     * opened, read and write, by {@see opensReadWrite()}. A FIFO with a name
+     * of its own is never opened, by access(2) alone ({@see isNamedFifo()}):
+     * the probe would be its first writer, and closing it would send the end
+     * of file to a collector that reads once (`cat fifo`), which would be
+     * gone before Swoole opens the log (review of core#254).
      *
      * A missing directory is created only when $create is set, and only the
      * server's start sets it: made by a diagnostic run as root it would be
@@ -156,7 +160,9 @@ final class WritableDirectory
         $blocked = false;
         $special = $open === 'a+' && self::isSpecial($path);
         if ($special) {
-            $writable = self::opensReadWrite($path);
+            $writable = self::isNamedFifo($path)
+                ? is_readable($path) && is_writable($path)
+                : self::opensReadWrite($path);
         } elseif ($open !== null && $exists) {
             $handle = is_file($path) ? @fopen($path, $open) : false;
             if ($handle !== false) {
@@ -200,14 +206,28 @@ final class WritableDirectory
     }
 
     /**
+     * A FIFO that has a path of its own, reached directly or through links.
+     * The pipe behind /dev/stdout is one to stat() too, but it has no name:
+     * PHP resolves it to "/proc/<pid>/fd/pipe:[123]", which is no file.
+     */
+    public static function isNamedFifo(string $path): bool
+    {
+        clearstatcache(true, $path);
+        $real = realpath($path);
+
+        return $real !== false && @filetype($real) === 'fifo';
+    }
+
+    /**
      * Whether open(2) for reading and writing, as Swoole opens its log, takes
      * $path. A shell does the open, with this process's own stdin, stdout and
      * stderr, because PHP cannot: fopen() resolves links itself, reads
      * /proc/self/fd/1 as "pipe:[123]" and answers "No such file" for the
      * /dev/stdout of every container, which Swoole opens without trouble
      * (measured on PHP 8.4, Swoole 6.2.5). With no descriptor redirected the
-     * child inherits those three, so /dev/stdout names the same pipe in it. O_RDWR never
-     * blocks on a FIFO on Linux, with or without a reader.
+     * child inherits those three, so /dev/stdout names the same pipe in it.
+     * This process holds that descriptor, so the shell's close ends nothing
+     * for a reader. Not for a named FIFO: {@see facts()} keeps those away.
      *
      * The shell prints nothing: the exit code is the answer. Its stderr goes
      * to /dev/null before the open, except when $path is that stderr
