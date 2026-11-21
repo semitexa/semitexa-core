@@ -388,6 +388,7 @@ final class WritableDirectoryTest extends TestCase
                 'mode' => 0664,
                 'described' => $logs,
                 'blocked' => true,
+                'special' => false,
             ],
             WritableDirectory::facts($logs, true),
         );
@@ -407,9 +408,11 @@ final class WritableDirectoryTest extends TestCase
      * Review of core#253: opening a FIFO nobody reads for append blocks for
      * good, so the check that exists to prevent a silent hang would be one.
      * Run in a child with a time limit: without the guard this is exit 124.
+     * As the Swoole log it is judged by access(2), with no open at all
+     * (tk-swoole-log-to-stdout-refused-at-start, review of core#254).
      */
     #[Test]
-    public function a_fifo_is_never_opened_whichever_kind_of_path_it_stands_for(): void
+    public function a_fifo_never_blocks_the_probe_whichever_kind_of_path_it_stands_for(): void
     {
         $fifo = $this->root . '/var/run';
         self::assertTrue(posix_mkfifo($fifo, 0600));
@@ -424,9 +427,246 @@ final class WritableDirectoryTest extends TestCase
         self::assertSame(0, $exit, 'the probe returned instead of blocking on the FIFO: ' . implode("\n", $output));
         self::assertSame(
             '{"directory":{"exists":true,"writable":false,"blocked":true},"file":{"exists":true,"writable":false,"blocked":false},'
-            . '"swoole log":{"exists":true,"writable":false,"blocked":false}}',
+            . '"swoole log":{"exists":true,"writable":true,"blocked":false}}',
             implode("\n", $output),
         );
+    }
+
+    /**
+     * tk-swoole-log-to-stdout-refused-at-start: SWOOLE_LOG_FILE=/dev/stdout is
+     * how a container logs. is_file() is false for it, so the start probed
+     * /dev, which uid 1000 cannot write, and refused. The child's stdout is a
+     * pipe, as a container's is: the case PHP's own fopen() cannot open.
+     */
+    #[Test]
+    public function the_stdout_of_a_container_is_probed_as_itself_and_accepted(): void
+    {
+        foreach (['/dev/stdout', '/dev/stderr'] as $device) {
+            self::assertSame(
+                [$device => 'a+', '/app/var/log' => null, '/app/var/run' => null],
+                WritableDirectory::startPaths(new ServerConfigurator($this->env($device, 'single')), '/app'),
+                $device . ' is the path, never /dev',
+            );
+        }
+        mkdir($this->root . '/var/run');
+        $class = (string) (new \ReflectionClass(WritableDirectory::class))->getFileName();
+        $code = 'require $argv[1]; echo "exit ", \\' . WritableDirectory::class . '::refusalExitCode('
+            . '["/dev/stdout" => "a+", "/dev/stderr" => "a+", $argv[2] => null], STDERR, "/app");';
+
+        exec('timeout 10 ' . escapeshellarg(PHP_BINARY) . ' -r ' . escapeshellarg($code) . ' ' . escapeshellarg($class) . ' ' . escapeshellarg($this->root . '/var/run') . ' 2>&1', $output, $exit);
+
+        self::assertSame('exit 0', implode("\n", $output), 'a pipe on stdout and stderr opens, and nothing is said');
+        self::assertSame(0, $exit);
+    }
+
+    #[Test]
+    public function a_fifo_at_the_log_path_is_probed_as_itself(): void
+    {
+        mkdir($this->root . '/logs');
+        $fifo = $this->root . '/logs/swoole.log';
+        self::assertTrue(posix_mkfifo($fifo, 0600));
+        self::assertTrue(WritableDirectory::isSpecial($fifo));
+
+        self::assertSame(
+            [$fifo => 'a+', '/app/var/log' => null, '/app/var/run' => null],
+            WritableDirectory::startPaths(new ServerConfigurator($this->env($fifo, 'single')), '/app'),
+        );
+        $facts = WritableDirectory::facts($fifo, false, 'a+');
+        self::assertTrue($facts['special']);
+        self::assertTrue($facts['writable'], 'readable and writable, with no reader on the other end');
+        self::assertTrue(WritableDirectory::isNamedFifo($fifo));
+        self::assertFalse(WritableDirectory::isNamedFifo('/dev/null'));
+        self::assertFalse(WritableDirectory::isNamedFifo($this->root . '/logs'));
+        self::assertFalse($facts['blocked']);
+        self::assertSame($fifo, $facts['described']);
+        self::assertNull(WritableDirectory::inspect($fifo, '/app', true, 'a+'));
+        clearstatcache();
+        self::assertSame('fifo', filetype($fifo), 'still a FIFO, nothing created over it');
+    }
+
+    /**
+     * Review of core#254: a collector that reads the FIFO once (`cat fifo`)
+     * waits in open() for the first writer. A probe that opens the FIFO is
+     * that writer, and its close is the end of file: the collector leaves
+     * before Swoole opens the log, and the log then fills the pipe and
+     * stalls the workers. So the probe never opens it. The reader here is
+     * released at the end by a real open, which also proves it was attached.
+     */
+    #[Test]
+    public function a_fifo_with_a_collector_attached_is_not_opened_so_the_collector_sees_no_end_of_file(): void
+    {
+        $fifo = $this->root . '/var/swoole.fifo';
+        self::assertTrue(posix_mkfifo($fifo, 0600));
+        $null = static fn (string $mode): array => ['file', '/dev/null', $mode];
+        $collector = proc_open(['cat', $fifo], [$null('r'), $null('w'), $null('w')], $pipes);
+        self::assertIsResource($collector);
+        $reading = static fn (): bool => proc_get_status($collector)['running'];
+        try {
+            usleep(300_000); // the collector is in open(), waiting for a writer
+            $stderr = $this->stream();
+
+            self::assertTrue(WritableDirectory::facts($fifo, false, 'a+')['writable']);
+            self::assertSame(0, WritableDirectory::refusalExitCode([$fifo => 'a+'], $stderr, $this->root));
+            usleep(500_000);
+            $leftAfterTheProbe = !$reading();
+
+            $writer = fopen($fifo, 'r+');
+            self::assertIsResource($writer);
+            fclose($writer);
+            for ($i = 0; $i < 50 && $reading(); $i++) {
+                usleep(100_000);
+            }
+            self::assertFalse($reading(), 'the collector was attached: a real open and close ends it');
+            self::assertFalse($leftAfterTheProbe, 'the probe opened the FIFO and its close sent the collector the end of file');
+        } finally {
+            // Whatever failed above, no collector is left blocked on a FIFO that tearDown removes.
+            if ($reading()) {
+                proc_terminate($collector, 9);
+            }
+            proc_close($collector);
+        }
+    }
+
+    #[Test]
+    public function a_fifo_this_process_may_not_write_is_still_refused_by_its_own_name(): void
+    {
+        $root = WritableDirectory::processUid() === 0; // no mode stops root: for it the same FIFO is accepted
+        $fifo = $this->root . '/var/swoole.fifo';
+        self::assertTrue(posix_mkfifo($fifo, 0600));
+        foreach ([0400, 0200, 0000] as $mode) {
+            chmod($fifo, $mode);
+            $stderr = $this->stream();
+
+            self::assertSame($root ? 0 : 1, WritableDirectory::refusalExitCode([$fifo => 'a+'], $stderr, $this->root), sprintf('%04o', $mode));
+            if ($root) {
+                self::assertSame('', $this->written($stderr));
+            } else {
+                self::assertStringContainsString("[Semitexa] {$fifo} cannot be opened for reading and writing by this process", $this->written($stderr));
+            }
+        }
+    }
+
+    /**
+     * A socket file opens for nobody, root included (ENXIO), so this holds
+     * under any uid.
+     */
+    #[Test]
+    public function a_special_file_that_does_not_open_is_refused_by_its_own_name(): void
+    {
+        $socket = $this->root . '/var/log.sock';
+        $server = stream_socket_server('unix://' . $socket);
+        self::assertIsResource($server);
+        self::assertSame([$socket => 'a+'], array_slice(WritableDirectory::startPaths(new ServerConfigurator($this->env($socket, 'single')), '/app'), 0, 1, true));
+        $stderr = $this->stream();
+
+        $exit = WritableDirectory::refusalExitCode([$socket => 'a+'], $stderr, $this->root);
+        fclose($server);
+
+        $written = $this->written($stderr);
+        self::assertSame(1, $exit);
+        self::assertStringContainsString("[Semitexa] {$socket} cannot be opened for reading and writing by this process (uid " . WritableDirectory::processUid() . ').', $written);
+        self::assertStringContainsString('fix: point SWOOLE_LOG_FILE at a path', $written);
+        self::assertStringContainsString($socket . ' is not a regular file', $written);
+        self::assertStringNotContainsString('chown -R', $written, 'nobody chowns a device or a pipe');
+        self::assertStringNotContainsString($this->root . "/var is not writable", $written, 'its directory is not the question');
+    }
+
+    /**
+     * With rotation on Swoole creates <log_file>.<date> beside the path and
+     * never opens the path: as uid 1000 with /dev/stdout it hung (6.2.5), as
+     * root the log went to a file in /dev instead of stdout. So it is refused
+     * whenever the path is special, here in a directory anyone can write.
+     */
+    #[Test]
+    public function with_rotation_a_special_log_path_is_refused_even_in_a_writable_directory(): void
+    {
+        mkdir($this->root . '/logs');
+        mkdir($this->root . '/var/log');
+        mkdir($this->root . '/var/run');
+        $fifo = $this->root . '/logs/swoole.log';
+        self::assertTrue(posix_mkfifo($fifo, 0600));
+
+        foreach (['daily', 'hourly', 'monthly', 'every-minute'] as $rotation) {
+            $config = new ServerConfigurator($this->env($fifo, $rotation));
+            $paths = WritableDirectory::startPaths($config, $this->root);
+            self::assertSame([$this->root . '/var/log', $this->root . '/var/run'], array_keys($paths), 'its directory is not the question');
+            $stderr = $this->stream();
+
+            self::assertSame(1, WritableDirectory::refusalExitCode($paths, $stderr, $this->root, WritableDirectory::rotationProblem($config)), $rotation);
+
+            $written = $this->written($stderr);
+            self::assertStringContainsString('THE SERVER WILL NOT START', $written);
+            self::assertStringContainsString("[Semitexa] rotation needs a regular file: {$fifo} is a device, a FIFO or a link to a descriptor", $written);
+            self::assertStringContainsString('SWOOLE_LOG_ROTATION=' . $rotation . ' Swoole creates ' . $fifo . '.<date>', $written);
+            self::assertStringContainsString("[Semitexa]   fix: set SWOOLE_LOG_ROTATION=single to log to {$fifo}", $written);
+            self::assertStringNotContainsString('chown', $written);
+        }
+
+        $devices = WritableDirectory::rotationProblem(new ServerConfigurator($this->env('/dev/stdout', 'daily')));
+        self::assertNotNull($devices);
+        self::assertStringContainsString('/dev/stdout.<date>', $devices['message']);
+        self::assertSame(['/app/var/log', '/app/var/run'], array_keys(WritableDirectory::startPaths(new ServerConfigurator($this->env('/dev/stdout', 'daily')), '/app')), '/dev is never probed');
+        self::assertNull(WritableDirectory::rotationProblem(new ServerConfigurator($this->env('/dev/stdout', 'single'))));
+        self::assertNull(WritableDirectory::rotationProblem(new ServerConfigurator($this->env($fifo, 'single'))));
+        self::assertNull(WritableDirectory::rotationProblem(new ServerConfigurator($this->env($this->root . '/logs/missing.log', 'daily'))));
+    }
+
+    /**
+     * The probe's shell says nothing: the exit code is the answer. A refused
+     * open still refuses, and for /dev/stderr it is that stderr that is
+     * opened, not the /dev/null the shell's own words go to.
+     */
+    #[Test]
+    public function the_probe_prints_nothing_and_a_refused_open_still_refuses(): void
+    {
+        $socket = $this->root . '/var/log.sock';
+        $server = stream_socket_server('unix://' . $socket);
+        self::assertIsResource($server);
+        $writeOnly = $this->root . '/var/stderr.log';
+        touch($writeOnly);
+        chmod($writeOnly, 0200);
+        $class = (string) (new \ReflectionClass(WritableDirectory::class))->getFileName();
+        $code = 'require $argv[1]; echo json_encode(\\' . WritableDirectory::class . '::opensReadWrite($argv[2]));';
+        $run = static function (string $path, string $stderr) use ($code, $class): string {
+            exec('timeout 10 ' . escapeshellarg(PHP_BINARY) . ' -r ' . escapeshellarg($code) . ' ' . escapeshellarg($class) . ' ' . escapeshellarg($path) . ' ' . $stderr, $output);
+
+            return implode("\n", $output);
+        };
+
+        self::assertSame('false', $run($socket, '2>&1'), 'refused, and not a word beside the answer');
+        self::assertSame('true', $run('/dev/stderr', '2>&1'), 'a pipe on stderr opens');
+        self::assertSame('true', $run('/dev/null', '2>&1'));
+        // stderr is a file opened for write alone, mode 0200: the read and write reopen is refused (root opens anything).
+        self::assertSame(WritableDirectory::processUid() === 0 ? 'true' : 'false', $run('/dev/stderr', '2>>' . escapeshellarg($writeOnly)));
+        self::assertSame(WritableDirectory::processUid() === 0 ? 'true' : 'false', $run($writeOnly, '2>>' . escapeshellarg($writeOnly)), 'the same file by its own name');
+        fclose($server);
+        chmod($writeOnly, 0600);
+        self::assertSame('', file_get_contents($writeOnly), 'nothing was written to the stderr under test');
+    }
+
+    #[Test]
+    public function the_default_regular_log_file_is_judged_as_before(): void
+    {
+        mkdir($this->root . '/var/log');
+        $file = $this->root . '/var/log/swoole.log';
+        $single = new ServerConfigurator($this->env($file, 'single'));
+        $daily = new ServerConfigurator($this->env($file, 'daily'));
+
+        self::assertSame($this->root . '/var/log', array_key_first(WritableDirectory::startPaths($single, '/app')), 'missing: its directory');
+        self::assertFalse(WritableDirectory::isSpecial($file), 'a missing path is not special');
+        touch($file);
+        self::assertFalse(WritableDirectory::isSpecial($file));
+        self::assertFalse(WritableDirectory::isSpecial(dirname($file)));
+        self::assertSame($file, array_key_first(WritableDirectory::startPaths($single, '/app')));
+        self::assertSame($this->root . '/var/log', array_key_first(WritableDirectory::startPaths($daily, '/app')));
+        self::assertNull(WritableDirectory::rotationProblem($daily));
+        self::assertSame(
+            ['exists' => true, 'writable' => true, 'described' => $file, 'blocked' => false, 'special' => false],
+            array_intersect_key(WritableDirectory::facts($file, false, 'a+'), ['exists' => 1, 'writable' => 1, 'blocked' => 1, 'special' => 1, 'described' => 1]),
+        );
+        self::assertFalse(WritableDirectory::facts($this->root . '/var/log', false, null)['special']);
+        // A directory at the log path is never opened as a file, single rotation or not.
+        self::assertSame($this->root . '/var', array_key_first(WritableDirectory::startPaths(new ServerConfigurator($this->env($this->root . '/var/log', 'single')), '/app')));
     }
 
     #[Test]

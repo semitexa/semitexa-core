@@ -19,6 +19,8 @@ use Semitexa\Core\Support\ProjectRoot;
  */
 final class WritableDirectory
 {
+    private const OPEN_READ_WRITE = 'if [ "$0" -ef /proc/self/fd/2 ]; then exec 4>&2 2>/dev/null 3<>/proc/self/fd/4; else exec 2>/dev/null 3<>"$0"; fi';
+
     /**
      * The decision, from the facts alone. Null when the process can write the
      * directory; otherwise one block naming the path, its owner and mode, the
@@ -123,6 +125,17 @@ final class WritableDirectory
      * this exists to prevent. Anything but a directory where a directory is required is
      * `blocked`, however writable: Swoole cannot create its log inside a file.
      *
+     * The Swoole log may also be no regular file at all: /dev/stdout, the
+     * normal way to log in a container, /dev/stderr, a FIFO a collector reads
+     * (tk-swoole-log-to-stdout-refused-at-start). Under 'a+' such a path is
+     * `special` and is judged as itself, its directory (/dev) says nothing
+     * about it. A device or a link to a descriptor this process holds is
+     * opened, read and write, by {@see opensReadWrite()}. A FIFO with a name
+     * of its own is never opened, by access(2) alone ({@see isNamedFifo()}):
+     * the probe would be its first writer, and closing it would send the end
+     * of file to a collector that reads once (`cat fifo`), which would be
+     * gone before Swoole opens the log (review of core#254).
+     *
      * A missing directory is created only when $create is set, and only the
      * server's start sets it: made by a diagnostic run as root it would be
      * root's, the very fault this looks for. Left missing, `writable` says
@@ -130,7 +143,7 @@ final class WritableDirectory
      * are that parent's, at `described`.
      *
      * @param 'a'|'a+'|null $open
-     * @return array{exists: bool, writable: bool, ownerUid: ?int, ownerGid: ?int, mode: ?int, described: string, blocked: bool}
+     * @return array{exists: bool, writable: bool, ownerUid: ?int, ownerGid: ?int, mode: ?int, described: string, blocked: bool, special: bool}
      */
     public static function facts(string $path, bool $create = false, ?string $open = null): array
     {
@@ -145,7 +158,12 @@ final class WritableDirectory
         }
         $writable = false;
         $blocked = false;
-        if ($open !== null && $exists) {
+        $special = $open === 'a+' && self::isSpecial($path);
+        if ($special) {
+            $writable = self::isNamedFifo($path)
+                ? is_readable($path) && is_writable($path)
+                : self::opensReadWrite($path);
+        } elseif ($open !== null && $exists) {
             $handle = is_file($path) ? @fopen($path, $open) : false;
             if ($handle !== false) {
                 $writable = true;
@@ -172,7 +190,63 @@ final class WritableDirectory
             'mode' => $perms === false ? null : $perms & 07777,
             'described' => $described,
             'blocked' => $blocked,
+            'special' => $special,
         ];
+    }
+
+    /**
+     * A path that exists and is neither a regular file nor a directory: a
+     * character device, a FIFO, a socket, or a link to one, as /dev/stdout is.
+     */
+    public static function isSpecial(string $path): bool
+    {
+        clearstatcache(true, $path);
+
+        return file_exists($path) && !is_file($path) && !is_dir($path);
+    }
+
+    /**
+     * A FIFO that has a path of its own, reached directly or through links.
+     * The pipe behind /dev/stdout is one to stat() too, but it has no name:
+     * PHP resolves it to "/proc/<pid>/fd/pipe:[123]", which is no file.
+     */
+    public static function isNamedFifo(string $path): bool
+    {
+        clearstatcache(true, $path);
+        $real = realpath($path);
+
+        return $real !== false && @filetype($real) === 'fifo';
+    }
+
+    /**
+     * Whether open(2) for reading and writing, as Swoole opens its log, takes
+     * $path. A shell does the open, with this process's own stdin, stdout and
+     * stderr, because PHP cannot: fopen() resolves links itself, reads
+     * /proc/self/fd/1 as "pipe:[123]" and answers "No such file" for the
+     * /dev/stdout of every container, which Swoole opens without trouble
+     * (measured on PHP 8.4, Swoole 6.2.5). With no descriptor redirected the
+     * child inherits those three, so /dev/stdout names the same pipe in it.
+     * This process holds that descriptor, so the shell's close ends nothing
+     * for a reader. Not for a named FIFO: {@see facts()} keeps those away.
+     *
+     * The shell prints nothing: the exit code is the answer. Its stderr goes
+     * to /dev/null before the open, except when $path is that stderr
+     * (/dev/stderr, or a file it was redirected to): then the descriptor is
+     * kept as 4 and opened through /proc/self/fd/4, the same reopen of the
+     * same file that /dev/stderr would have been.
+     */
+    public static function opensReadWrite(string $path): bool
+    {
+        $process = @proc_open(['/bin/sh', '-c', self::OPEN_READ_WRITE, $path], [], $pipes);
+
+        return is_resource($process) && proc_close($process) === 0;
+    }
+
+    /** The repair for a special path that does not open: no owner of a device or a pipe is the project's to change. */
+    public static function specialRepair(string $path, int $processUid): string
+    {
+        return 'point SWOOLE_LOG_FILE at a path uid ' . $processUid . ' can open for reading and writing, as Swoole opens its log: '
+            . $path . ' is not a regular file (a device, a FIFO or a link to a descriptor), so no chown is suggested.';
     }
 
     /**
@@ -185,6 +259,15 @@ final class WritableDirectory
     public static function inspect(string $directory, ?string $projectRoot = null, bool $create = false, ?string $open = null): ?string
     {
         $facts = self::facts($directory, $create, $open);
+        if ($facts['special'] && !$facts['writable']) {
+            $uid = self::processUid();
+
+            return implode("\n", [
+                "[Semitexa] {$directory} cannot be opened for reading and writing by this process (uid {$uid}).",
+                '[Semitexa]   ' . self::ownerLine('owner', $facts['ownerUid'], $facts['ownerGid'], $facts['mode']),
+                '[Semitexa]   fix: ' . self::specialRepair($directory, $uid),
+            ]);
+        }
 
         return self::problem(
             $directory,
@@ -221,7 +304,10 @@ final class WritableDirectory
      *   the directory has to take a new file. With SWOOLE_LOG_ROTATION=single
      *   and the file there, Swoole only opens that file and never makes a
      *   sibling (swoole-src v6.2 src/core/log.cc): the file is the path, and a
-     *   read-only directory around it is a valid setup;
+     *   read-only directory around it is a valid setup. So is a path that is
+     *   no regular file, /dev/stdout or a FIFO: it is the path, and /dev is
+     *   never the question. With rotation on such a path is no entry here:
+     *   {@see rotationProblem()} refuses it whatever its directory allows;
      * - error.log in var/log, by the same rule: PHP appends to an existing one;
      * - var/run, where the pid file is created.
      *
@@ -237,16 +323,43 @@ final class WritableDirectory
         $logFile = $config->logFilePath();
 
         $errorLog = $root . '/var/log/error.log';
-        $logIsFile = !$config->logRotation()->isEnabled() && is_file($logFile);
+        $logIsFile = !$config->logRotation()->isEnabled() && (is_file($logFile) || self::isSpecial($logFile));
         $errorLogIsFile = is_file($errorLog);
 
         $paths = [];
-        $paths[$logIsFile ? $logFile : dirname($logFile)] = $logIsFile ? 'a+' : null;
+        if (self::rotationProblem($config) === null) {
+            $paths[$logIsFile ? $logFile : dirname($logFile)] = $logIsFile ? 'a+' : null;
+        }
         // ??=: one file that is both logs keeps the stricter open, Swoole's.
         $paths[$errorLogIsFile ? $errorLog : dirname($errorLog)] ??= $errorLogIsFile ? 'a' : null;
         $paths[$root . '/var/run'] = null;
 
         return $paths;
+    }
+
+    /**
+     * Rotation on and a log path that is no regular file: refused whenever it
+     * is so, not only when the directory is unwritable. Swoole then never
+     * opens SWOOLE_LOG_FILE: it creates `<log_file>.<date>` beside it. As uid
+     * 1000 with /dev/stdout it hangs on /dev (measured on Swoole 6.2.5); as
+     * root it starts and the log goes to /dev/stdout.20261121, a file in /dev
+     * nobody reads, instead of stdout.
+     *
+     * @return array{message: string, fix: string}|null
+     */
+    public static function rotationProblem(ServerConfigurator $config): ?array
+    {
+        $logFile = $config->logFilePath();
+        $rotation = $config->logRotation();
+        if (!$rotation->isEnabled() || !self::isSpecial($logFile)) {
+            return null;
+        }
+
+        return [
+            'message' => 'rotation needs a regular file: ' . $logFile . ' is a device, a FIFO or a link to a descriptor, and with SWOOLE_LOG_ROTATION='
+                . $rotation->value . ' Swoole creates ' . $logFile . '.<date> beside it and never writes to ' . $logFile . ' itself.',
+            'fix' => 'set SWOOLE_LOG_ROTATION=single to log to ' . $logFile . ', or point SWOOLE_LOG_FILE at a regular file.',
+        ];
     }
 
     /**
@@ -267,10 +380,11 @@ final class WritableDirectory
      *
      * @param array<string, 'a'|'a+'|null> $paths as {@see startPaths()} returns them
      * @param resource $stderr
+     * @param array{message: string, fix: string}|null $rotation as {@see rotationProblem()} returns it: a refusal of its own
      */
-    public static function refusalExitCode(array $paths, $stderr, ?string $projectRoot = null): int
+    public static function refusalExitCode(array $paths, $stderr, ?string $projectRoot = null, ?array $rotation = null): int
     {
-        $problems = [];
+        $problems = $rotation === null ? [] : ['[Semitexa] ' . $rotation['message'] . "\n" . '[Semitexa]   fix: ' . $rotation['fix']];
         foreach ($paths as $path => $open) {
             $problem = self::inspect($path, $projectRoot, true, $open);
             if ($problem !== null) {
