@@ -496,27 +496,35 @@ final class WritableDirectoryTest extends TestCase
     public function a_fifo_with_a_collector_attached_is_not_opened_so_the_collector_sees_no_end_of_file(): void
     {
         $fifo = $this->root . '/var/swoole.fifo';
-        $left = $this->root . '/var/collector-left';
         self::assertTrue(posix_mkfifo($fifo, 0600));
-        exec('(cat ' . escapeshellarg($fifo) . ' > /dev/null; touch ' . escapeshellarg($left) . ') > /dev/null 2>&1 &');
-        usleep(300_000); // the collector is in open(), waiting for a writer
-        $stderr = $this->stream();
+        $null = static fn (string $mode): array => ['file', '/dev/null', $mode];
+        $collector = proc_open(['cat', $fifo], [$null('r'), $null('w'), $null('w')], $pipes);
+        self::assertIsResource($collector);
+        $reading = static fn (): bool => proc_get_status($collector)['running'];
+        try {
+            usleep(300_000); // the collector is in open(), waiting for a writer
+            $stderr = $this->stream();
 
-        self::assertTrue(WritableDirectory::facts($fifo, false, 'a+')['writable']);
-        self::assertSame(0, WritableDirectory::refusalExitCode([$fifo => 'a+'], $stderr, $this->root));
-        usleep(500_000);
-        clearstatcache();
-        $leftAfterTheProbe = file_exists($left);
+            self::assertTrue(WritableDirectory::facts($fifo, false, 'a+')['writable']);
+            self::assertSame(0, WritableDirectory::refusalExitCode([$fifo => 'a+'], $stderr, $this->root));
+            usleep(500_000);
+            $leftAfterTheProbe = !$reading();
 
-        $writer = fopen($fifo, 'r+');
-        self::assertIsResource($writer);
-        fclose($writer);
-        for ($i = 0; $i < 50 && !file_exists($left); $i++) {
-            usleep(100_000);
-            clearstatcache();
+            $writer = fopen($fifo, 'r+');
+            self::assertIsResource($writer);
+            fclose($writer);
+            for ($i = 0; $i < 50 && $reading(); $i++) {
+                usleep(100_000);
+            }
+            self::assertFalse($reading(), 'the collector was attached: a real open and close ends it');
+            self::assertFalse($leftAfterTheProbe, 'the probe opened the FIFO and its close sent the collector the end of file');
+        } finally {
+            // Whatever failed above, no collector is left blocked on a FIFO that tearDown removes.
+            if ($reading()) {
+                proc_terminate($collector, 9);
+            }
+            proc_close($collector);
         }
-        self::assertTrue(file_exists($left), 'the collector was attached: a real open and close ends it');
-        self::assertFalse($leftAfterTheProbe, 'the probe opened the FIFO and its close sent the collector the end of file');
     }
 
     #[Test]
@@ -530,7 +538,11 @@ final class WritableDirectoryTest extends TestCase
             $stderr = $this->stream();
 
             self::assertSame($root ? 0 : 1, WritableDirectory::refusalExitCode([$fifo => 'a+'], $stderr, $this->root), sprintf('%04o', $mode));
-            self::assertStringContainsString($root ? '' : "[Semitexa] {$fifo} cannot be opened for reading and writing by this process", $this->written($stderr));
+            if ($root) {
+                self::assertSame('', $this->written($stderr));
+            } else {
+                self::assertStringContainsString("[Semitexa] {$fifo} cannot be opened for reading and writing by this process", $this->written($stderr));
+            }
         }
     }
 
