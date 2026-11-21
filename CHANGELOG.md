@@ -23,16 +23,15 @@ next release tag. This file is machine-read by `update:changelog` and the OS
   started again while a loaded file has changed names the files in the log.
 
 ### Changed
-- **A worker that finds a valid discovery cache no longer reads every source
-  file to boot.** What discovery found (which class each file declares, which
-  classes carry which attribute) is kept in `var/cache/discovery` and checked
-  against the sources on every boot by each file's mtime, size and ctime: an
-  edited, new or removed file is still seen with nothing to clear. On a hit a
-  boot skips tokenising unchanged files and the scan that loads every class;
-  measured on 4 workers, boot after a reload 5.6 s to 1.0 s. On an empty cache
-  (a first boot, or the one after `cache:clear`) discovery reads every file
-  and loads every class as before, then stores the result. `cache:clear`
-  removes the cache; `cache:clear --twig` does not.
+- **A worker that finds a valid classmap cache no longer reads every source
+  file to learn what it declares.** The classmap discovery builds by walking
+  the sources is kept in `var/cache/discovery` and checked against them on
+  every boot by each file's mtime, size and ctime: an edited, new or removed
+  file is still seen with nothing to clear, and only changed files are read.
+  On an empty cache (a first boot, or the one after `cache:clear`) every file
+  is read as before, then the result is stored. Attribute lookups are not
+  cached: every process still loads the classes of the map to read them.
+  `cache:clear` removes the cache; `cache:clear --twig` does not.
 
 ## 2026.11.21.1434 — 2026-11-21
 

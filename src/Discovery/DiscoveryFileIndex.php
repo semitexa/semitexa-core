@@ -24,12 +24,18 @@ final class DiscoveryFileIndex
 {
     private const STATE = 'files';
 
-    /** @var array<array-key, mixed> path => [mtime, size, ctime, declared class or null] */
+    /**
+     * path => "mtime:size:ctime:class", the class empty when the file declares none. One string
+     * a file, not an array: 4400 small arrays read on every boot raised a worker's heap by a
+     * 2 MB chunk it never gave back.
+     *
+     * @var array<array-key, mixed>
+     */
     private array $known = [];
 
     private int $knownBuiltAt = 0;
 
-    /** @var array<string, array{0: int, 1: int, 2: int, 3: string|null}> */
+    /** @var array<string, string> in the same form; an unchanged file's entry is the known one, not a copy */
     private array $seen = [];
 
     private bool $reread = false;
@@ -57,7 +63,7 @@ final class DiscoveryFileIndex
             return self::declared($read($path));
         }
         if (isset($this->seen[$path])) {
-            return $this->seen[$path][3];
+            return self::classOf($this->seen[$path]);
         }
 
         try {
@@ -72,16 +78,12 @@ final class DiscoveryFileIndex
             return self::declared($read($path));
         }
 
+        $stat = $mtime . ':' . $size . ':' . $ctime . ':';
         $known = $this->known[$path] ?? null;
-        if (is_array($known)
-            && ($known[0] ?? null) === $mtime
-            && ($known[1] ?? null) === $size
-            && ($known[2] ?? null) === $ctime
-            && max($mtime, $ctime) < $this->knownBuiltAt
-            && array_key_exists(3, $known)
-            && ($known[3] === null || is_string($known[3]))
-        ) {
-            $class = $known[3];
+        if (is_string($known) && str_starts_with($known, $stat) && max($mtime, $ctime) < $this->knownBuiltAt) {
+            $this->seen[$path] = $known;
+
+            return self::classOf($known);
         } else {
             $class = $read($path);
             $this->reread = true;
@@ -92,9 +94,24 @@ final class DiscoveryFileIndex
             }
         }
 
-        $this->seen[$path] = [$mtime, $size, $ctime, $class];
+        $this->seen[$path] = $stat . $class;
 
         return $class;
+    }
+
+    /**
+     * Ends a finished walk: writes the table, and returns the classmap as the copy read back
+     * from its file in var/cache/discovery, which under OPcache is the one every worker shares.
+     * The map itself when there is nowhere to store it.
+     *
+     * @param array<class-string, string> $classMap
+     * @return array<class-string, string>
+     */
+    public function finish(array $classMap): array
+    {
+        $this->save();
+
+        return $this->store !== null ? $this->store->share('classmap', $classMap) : $classMap;
     }
 
     /**
@@ -111,6 +128,14 @@ final class DiscoveryFileIndex
         }
 
         $this->store->writeState(self::STATE, ['builtAt' => $this->startedAt, 'files' => $this->seen]);
+    }
+
+    /** A class name holds no colon, so the class is what follows the last one. */
+    private static function classOf(string $entry): ?string
+    {
+        $class = substr($entry, (int) strrpos($entry, ':') + 1);
+
+        return $class === '' ? null : $class;
     }
 
     private static function declared(string|false|null $read): ?string

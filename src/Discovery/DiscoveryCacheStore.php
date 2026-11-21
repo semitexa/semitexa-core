@@ -24,9 +24,12 @@ namespace Semitexa\Core\Discovery;
  *    by a running server would stay uncached, and on the heap, until the next restart.
  *
  * A STATE record is a small JSON file read into memory and dropped: the stat table a walk
- * compares the tree against, and the pointer saying which shared array answers for the current
- * sources. These change with every edit, so they are not PHP: a changed PHP file is one more
- * dead script in OPcache.
+ * compares the tree against. It changes with every edit, so it is not PHP: a changed PHP file
+ * is one more dead script in OPcache.
+ *
+ * Only what is read from the files themselves is kept here: the classmap, tokenised from the
+ * sources. What a process learns by loading classes (their attributes) depends on what that
+ * process had in memory and in OPcache, which no file's mtime describes, so it is not stored.
  *
  * Every write goes to a temp file renamed into place, so a reader sees the old file or the new
  * one. A store that cannot write is not an error: discovery then works as it did before, in
@@ -39,7 +42,7 @@ final class DiscoveryCacheStore
     public const RELATIVE_DIRECTORY = 'var/cache/discovery';
 
     /** Bump when the shape of a stored file changes: an old directory is then simply not read. */
-    private const FORMAT = 2;
+    private const FORMAT = 4;
 
     /** 2000-01-01: older than any server start, and not zero, which OPcache reads as "no time". */
     private const SETTLED_MTIME = 946684800;
@@ -79,7 +82,29 @@ final class DiscoveryCacheStore
      */
     public static function hashOf(array $data): string
     {
-        return hash('xxh128', serialize($data));
+        // Fed entry by entry: serialising a 4400-class map first is a 0.7 MB string on the
+        // heap of every booting worker, for a hash.
+        $hash = hash_init('xxh128');
+        self::feed($hash, $data);
+
+        return hash_final($hash);
+    }
+
+    /**
+     * @param array<array-key, mixed> $data
+     */
+    private static function feed(\HashContext $hash, array $data): void
+    {
+        foreach ($data as $key => $value) {
+            hash_update($hash, serialize($key));
+            if (is_array($value)) {
+                hash_update($hash, '[');
+                self::feed($hash, $value);
+                hash_update($hash, ']');
+                continue;
+            }
+            hash_update($hash, serialize($value));
+        }
     }
 
     /**
@@ -152,25 +177,6 @@ final class DiscoveryCacheStore
         }
 
         /** @var T $shared identical to $data, so of its type */
-        return $shared;
-    }
-
-    /**
-     * The shared array stored under $hash, or null when it is gone or is not what its name says.
-     *
-     * @return array<array-key, mixed>|null
-     */
-    public function load(string $name, string $hash): ?array
-    {
-        if (preg_match('/^[0-9a-f]{32}$/', $hash) !== 1) {
-            return null;
-        }
-
-        $shared = $this->includeArray($this->sharedFile($name, $hash));
-        if ($shared === null || self::hashOf($shared) !== $hash) {
-            return null;
-        }
-
         return $shared;
     }
 
