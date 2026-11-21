@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Semitexa\Core\Tests\Unit\Queue;
 
 use Composer\Autoload\ClassLoader;
+use PHPUnit\Framework\AssertionFailedError;
 use PHPUnit\Framework\Attributes\RequiresPhpExtension;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
@@ -346,6 +347,32 @@ final class WorkerSupervisorTest extends TestCase
     }
 
     /**
+     * REGRESSION (review, core#256). A worker started with an empty
+     * environment was started again with the two-argument pcntl_exec(), which
+     * hands on the environment as it is now: what the boot had put there
+     * (.env values) outlived the HUP. Empty is passed on as empty.
+     */
+    #[Test]
+    public function a_hup_starts_a_process_that_had_no_environment_with_none_again(): void
+    {
+        $this->supervise('supervisor', ['5 work a'], [], [], emptyEnvironment: true);
+        $this->waitForStarts(1);
+        self::assertSame('', (string) file_get_contents("/proc/{$this->pid}/environ"), 'it was started with no environment at all');
+
+        posix_kill($this->pid, SIGHUP);
+        $this->waitFor(fn (): bool => substr_count($this->logged(), 'loaded pid=') === 2);
+
+        self::assertSame(
+            ["loaded pid={$this->pid} mem=", "loaded pid={$this->pid} mem="],
+            array_map(
+                static fn (string $line): string => (string) preg_replace('/mem=\S+ put=$/', 'mem=', $line),
+                array_values(array_filter(explode("\n", $this->logged()), static fn (string $line): bool => str_starts_with($line, 'loaded '))),
+            ),
+            'the second start sees no WK_PUT either: put= is empty on both lines',
+        );
+    }
+
+    /**
      * server:reload, then a deploy or docker stop a moment later. The HUP
      * already sent every role its TERM; the supervisor passed the TERM that
      * followed on as well, a role read it as the second one ("stop at once")
@@ -409,13 +436,47 @@ final class WorkerSupervisorTest extends TestCase
     }
 
     /**
+     * REGRESSION (review, core#256). The helper returned [] when /proc/<pid>/fd
+     * could not be listed, and took a descriptor it could not read for "not a
+     * socket": both "holds no socket" assertions passed with nothing looked at.
+     */
+    #[Test]
+    public function the_socket_check_fails_when_it_cannot_look_at_the_process(): void
+    {
+        $gone = proc_open(['true'], [], $pipes);
+        self::assertIsResource($gone);
+        $pid = proc_get_status($gone)['pid'];
+        proc_close($gone);
+
+        try {
+            self::sockets($pid);
+        } catch (AssertionFailedError $e) {
+            self::assertStringContainsString("/proc/{$pid}/fd", $e->getMessage());
+
+            return;
+        }
+        self::fail("sockets() answered for pid {$pid}, which does not exist: it looked at nothing");
+    }
+
+    /**
+     * Fails when the descriptors cannot be listed, when none is found (the
+     * standard three are always open), or when one cannot be read: an answer
+     * of "no socket" has to come from having looked.
+     *
      * @return list<string> what each open socket of $pid links to
      */
     private static function sockets(int $pid): array
     {
+        $dir = "/proc/{$pid}/fd";
+        $fds = @scandir($dir);
+        self::assertIsArray($fds, "{$dir} cannot be listed: no such process, or not ours to read");
+        $fds = array_values(array_diff($fds, ['.', '..']));
+        self::assertNotSame([], $fds, "{$dir} lists no descriptor, and stdin, stdout and stderr are always open");
+
         $sockets = [];
-        foreach (glob("/proc/{$pid}/fd/*") ?: [] as $fd) {
-            $target = (string) @readlink($fd);
+        foreach ($fds as $fd) {
+            $target = @readlink("{$dir}/{$fd}");
+            self::assertIsString($target, "{$dir}/{$fd} cannot be read: it may be a socket");
             if (str_starts_with($target, 'socket:')) {
                 $sockets[] = $target;
             }
@@ -429,7 +490,7 @@ final class WorkerSupervisorTest extends TestCase
      * @param array<string, string> $env
      * @param list<string>          $phpOptions
      */
-    private function supervise(string $mode, array $lines, array $env = [], array $phpOptions = []): void
+    private function supervise(string $mode, array $lines, array $env = [], array $phpOptions = [], bool $emptyEnvironment = false): void
     {
         $autoload = dirname((string) (new \ReflectionClass(ClassLoader::class))->getFileName(), 2) . '/autoload.php';
         $fixture = dirname(__DIR__, 2) . '/Fixtures/Worker/supervise.php';
@@ -439,7 +500,9 @@ final class WorkerSupervisorTest extends TestCase
         // full suite PHPUnit has connections open, and a child inherits them,
         // which is the very thing the supervisor reports.
         $closeInherited = 'for fd in /proc/$$/fd/*; do fd=${fd##*/}; [ "$fd" -gt 2 ] && eval "exec $fd>&-"; done; ';
-        $command = $closeInherited . 'exec ' . implode(' ', array_map('escapeshellarg', [PHP_BINARY, ...$phpOptions, $fixture, $autoload, $this->log, $mode, ...$lines]));
+        // env -i: bash gives its child PWD and SHLVL whatever it was given itself.
+        $command = $closeInherited . 'exec ' . ($emptyEnvironment ? 'env -i ' : '')
+            . implode(' ', array_map('escapeshellarg', [PHP_BINARY, ...$phpOptions, $fixture, $autoload, $this->log, $mode, ...$lines]));
         $process = proc_open(
             ['/bin/bash', '-c', $command],
             [['file', '/dev/null', 'r'], ['file', '/dev/null', 'w'], ['file', $this->log . '.err', 'a']],

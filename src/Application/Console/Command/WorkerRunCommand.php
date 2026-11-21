@@ -110,7 +110,7 @@ class WorkerRunCommand extends BaseCommand
      */
     public static function replaceThisProcess(): void
     {
-        $arguments = self::nulSeparated('/proc/self/cmdline');
+        $arguments = self::nulSeparated('/proc/self/cmdline') ?? [];
         if (count($arguments) < 2) {
             $arguments = [PHP_BINARY];
             foreach (is_array($_SERVER['argv'] ?? null) ? $_SERVER['argv'] : [] as $word) {
@@ -121,28 +121,31 @@ class WorkerRunCommand extends BaseCommand
         }
         array_shift($arguments);
 
+        $pairs = self::nulSeparated('/proc/self/environ');
+        if ($pairs === null) {
+            // Not readable: the environment as it is now is the nearest there is.
+            pcntl_exec(PHP_BINARY, $arguments);
+
+            return;
+        }
+        // Read, and possibly empty: a process started with no environment is
+        // started again with none, not with what its boot put there.
         $environment = [];
-        foreach (self::nulSeparated('/proc/self/environ') as $pair) {
+        foreach ($pairs as $pair) {
             [$name, $value] = explode('=', $pair, 2) + [1 => ''];
             if ($name !== '') {
                 $environment[$name] = $value;
             }
         }
-
-        if ($environment === []) {
-            pcntl_exec(PHP_BINARY, $arguments);
-
-            return;
-        }
         pcntl_exec(PHP_BINARY, $arguments, $environment);
     }
 
-    /** @return list<string> */
-    private static function nulSeparated(string $path): array
+    /** @return list<string>|null null when the file could not be read; an empty file is an empty list */
+    private static function nulSeparated(string $path): ?array
     {
         $raw = @file_get_contents($path);
-        if (!is_string($raw) || $raw === '') {
-            return [];
+        if (!is_string($raw)) {
+            return null;
         }
 
         return array_values(array_filter(explode("\0", $raw), static fn (string $part): bool => $part !== ''));

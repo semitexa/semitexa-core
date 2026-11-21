@@ -26,11 +26,20 @@ final class WorkerLoadedFiles
      * loaded, so what is on disk is no proof of what this process holds: it is
      * kept with no hash and always reads as changed (as MasterLoadedFiles does).
      *
-     * @param list<string> $files         get_included_files()
-     * @param int          $bootStartedAt when this process began, before it loaded anything of the application
+     * The hash is of the file as it is when read, which is later than the
+     * time and size were: a file replaced in between would be kept with the
+     * replacement's hash, and changed() would then call the replacement
+     * unchanged while the roles run the original. So the file is looked at
+     * again after hashing, and one that is not the same file any more (time,
+     * change time, size or inode) is kept with no hash as well.
+     *
+     * @param list<string>                         $files         get_included_files()
+     * @param int                                  $bootStartedAt when this process began, before it loaded anything of the application
+     * @param (\Closure(string): (string|false))|null $hash          hashes one file; hash_file() unless a test says otherwise
      */
-    public function __construct(array $files, int $bootStartedAt, string $projectRoot = '')
+    public function __construct(array $files, int $bootStartedAt, string $projectRoot = '', ?\Closure $hash = null)
     {
+        $hash ??= static fn (string $file): string|false => @hash_file(self::HASH, $file);
         $var = $projectRoot === '' ? null : rtrim($projectRoot, '/') . '/var/';
         clearstatcache();
         foreach ($files as $file) {
@@ -43,8 +52,19 @@ final class WorkerLoadedFiles
                 $this->files[$file] = ['mtime' => 0, 'size' => 0, 'hash' => ''];
                 continue;
             }
-            $hash = $stat['mtime'] >= $bootStartedAt ? false : @hash_file(self::HASH, $file);
-            $this->files[$file] = ['mtime' => $stat['mtime'], 'size' => $stat['size'], 'hash' => is_string($hash) ? $hash : ''];
+            $hashed = $stat['mtime'] >= $bootStartedAt ? false : $hash($file);
+            if (is_string($hashed)) {
+                clearstatcache(true, $file);
+                $after = @stat($file);
+                $same = $after !== false
+                    && $after['mtime'] === $stat['mtime'] && $after['ctime'] === $stat['ctime']
+                    && $after['size'] === $stat['size'] && $after['ino'] === $stat['ino']
+                    && $after['mtime'] < $bootStartedAt;
+                if (!$same) {
+                    $hashed = false;
+                }
+            }
+            $this->files[$file] = ['mtime' => $stat['mtime'], 'size' => $stat['size'], 'hash' => is_string($hashed) ? $hashed : ''];
         }
     }
 
@@ -68,7 +88,7 @@ final class WorkerLoadedFiles
             if ($stat['mtime'] === $was['mtime'] && $stat['size'] === $was['size']) {
                 continue;
             }
-            if (@hash_file(self::HASH, $file) !== $was['hash']) {
+            if (@hash_file(self::HASH, $file) !== $was['hash']) { // the file itself, not the constructor's hasher
                 $changed[] = $file;
             }
         }
