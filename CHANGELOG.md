@@ -5,6 +5,19 @@ Changes to `semitexa/core` that a consuming application can notice. Sections are
 next release tag. This file is machine-read by `update:changelog` and the OS
 "What's new" surface — keep entries short and operator-facing.
 
+## Unreleased` collects changes until the
+next release tag. This file is machine-read by `update:changelog` and the OS
+"What's new" surface — keep entries short and operator-facing.
+
+### Changed
+- **A worker no longer reads every source file to boot.** What discovery found
+  (which class each file declares, which classes carry which attribute) is
+  kept in `var/cache/discovery` and checked against the sources on every boot
+  by mtime and size: an edited, new or removed file is still seen with nothing
+  to clear. Measured on 4 workers: boot after a reload 5.6 s to 1.1 s, a first
+  start 7.5 s to 1.6 s. `cache:clear` removes it; `cache:clear --twig` does not.
+  A worker now loads only the classes it uses, not every class of the map.
+
 ## Unreleased
 
 ### Added

@@ -47,7 +47,12 @@ use Symfony\Component\Process\Process;
 )]
 class CacheClearCommand extends BaseCommand
 {
-    private const CACHE_DIRS = ['twig'];
+    /**
+     * `discovery` is what ClassDiscovery stored of the classmap and the attribute scan. It
+     * checks that against the sources on every boot, so nothing has to clear it for an edit to
+     * show; clearing it is the way to make the next boot read every file again regardless.
+     */
+    private const CACHE_DIRS = ['twig', 'discovery'];
 
     protected function configure(): void
     {

@@ -85,7 +85,7 @@ class ClassDiscovery
 
     /**
      * Attribute lookups shared across instances, keyed by project root then by attribute cache
-     * key. Worth sharing separately from the classmap: {@see computeClassesWithAttribute()}
+     * key. Worth sharing separately from the classmap: {@see DiscoveryAttributeIndex}
      * autoloads and reflects over EVERY class in the map, which is the expensive half.
      *
      * @var array<string, array<string, list<class-string>>>
@@ -104,6 +104,28 @@ class ClassDiscovery
      */
     #[WorkerState('Unloadable classes keyed by project root; derived from code only.')]
     private static array $sharedUnloadable = [];
+
+    /**
+     * Which classes carry which attribute, keyed by project root: one scan of the map answers
+     * every lookup, where each lookup used to walk the whole map with reflection again
+     * (tk-discovery-registries-as-php-arrays). `attributes` is keyed by the attribute's name
+     * as the source writes it and lists its carriers in classmap order.
+     *
+     * `classMap` is the map the scan read. A lookup made with another one (a test that seeds
+     * its own) is answered from a scan of that one, never from this.
+     *
+     * Read-only by contract. Under OPcache both arrays are the immutable ones of a file in
+     * var/cache/discovery, shared by every worker; one write to either would copy it onto this
+     * worker's heap.
+     *
+     * @var array<string, array{classMap: array<class-string, string>, attributes: array<string, list<class-string>>}>
+     */
+    #[WorkerState('Attribute carriers keyed by project root; derived from code only.')]
+    private static array $sharedAttributeIndexes = [];
+
+    /** @var array<string, string> hash of the classmap a walk stored, by root: the attribute scan is stored for that map only */
+    #[WorkerState('Hash of the stored classmap keyed by project root.')]
+    private static array $storedClassMapHashes = [];
 
     private array $allowedNamespacePrefixes = [
         'Semitexa\\' => true,
@@ -207,7 +229,19 @@ class ClassDiscovery
             }
         }
 
-        $this->mergePsr4ClassCandidates($composerPsr4Map);
+        $store = DiscoveryCacheStore::forProjectRoot($projectRoot);
+        $fileIndex = new DiscoveryFileIndex($store);
+        $this->mergePsr4ClassCandidates($composerPsr4Map, $fileIndex);
+        $fileIndex->save();
+
+        unset(self::$storedClassMapHashes[$projectRoot]);
+        if ($store !== null) {
+            // The map just built is replaced by the copy read back from its file: under
+            // OPcache that one lives in shared memory, and the one on this heap is freed.
+            $hash = DiscoveryCacheStore::hashOf($this->classMap);
+            $this->classMap = $store->share('classmap', $this->classMap);
+            self::$storedClassMapHashes[$projectRoot] = $hash;
+        }
 
         self::$sharedClassMaps[$projectRoot] = $this->classMap;
     }
@@ -224,6 +258,8 @@ class ClassDiscovery
         self::$sharedClassMaps = [];
         self::$sharedAttributeCaches = [];
         self::$sharedUnloadable = [];
+        self::$sharedAttributeIndexes = [];
+        self::$storedClassMapHashes = [];
         // The gates go with them. A closed gate left behind by a completed production would
         // outlive the cache it guarded: the next caller finds the predicate false, finds a
         // gate, pops a closed channel (which returns at once), loops, and spins forever.
@@ -350,101 +386,64 @@ class ClassDiscovery
         $this->initialize();
 
         $projectRoot = ProjectRoot::get();
+        // First, because it is what notices a classmap other than the one the shared answers
+        // were read from, and drops them.
+        $index = $this->attributeIndex($projectRoot, $attributeClass);
+        if ($index === null) {
+            // A lookup made from inside the scan itself: nothing to answer from yet, and
+            // nothing to remember.
+            return [];
+        }
+
         if (isset(self::$sharedAttributeCaches[$projectRoot][$cacheKey])) {
             return $this->attributeCache[$cacheKey] = self::$sharedAttributeCaches[$projectRoot][$cacheKey];
         }
 
-        $this->runOncePerKey(
-            'attr:' . $cacheKey,
-            fn (): bool => isset($this->attributeCache[$cacheKey])
-                || isset(self::$sharedAttributeCaches[$projectRoot][$cacheKey]),
-            function () use ($attributeClass, $instanceof, $cacheKey, $projectRoot): void {
-                $computed = $this->computeClassesWithAttribute($attributeClass, $instanceof);
-                $this->attributeCache[$cacheKey] = $computed;
-                self::$sharedAttributeCaches[$projectRoot][$cacheKey] = $computed;
-            },
-        );
+        $carriers = DiscoveryAttributeIndex::carriersOf($index, $this->classMap, $attributeClass, $instanceof);
+        self::$sharedAttributeCaches[$projectRoot][$cacheKey] = $carriers;
 
-        // Woken by another instance's producer — take its answer instead of recomputing.
-        if (!isset($this->attributeCache[$cacheKey]) && isset(self::$sharedAttributeCaches[$projectRoot][$cacheKey])) {
-            $this->attributeCache[$cacheKey] = self::$sharedAttributeCaches[$projectRoot][$cacheKey];
-        }
-
-        return $this->attributeCache[$cacheKey] ?? [];
+        return $this->attributeCache[$cacheKey] = $carriers;
     }
 
     /**
-     * @return list<class-string>
+     * The attribute index of this instance's classmap: read from var/cache/discovery when the
+     * sources are the ones it was built from, scanned otherwise. Null only for a lookup that
+     * re-enters the scan on the coroutine running it.
+     *
+     * @return array<string, list<class-string>>|null
      */
-    private function computeClassesWithAttribute(string $attributeClass, bool $instanceof): array
+    private function attributeIndex(string $projectRoot, string $askedFor): ?array
     {
-        $reflectionFlags = $instanceof ? \ReflectionAttribute::IS_INSTANCEOF : 0;
-        $classes = [];
-        $root = ProjectRoot::get();
-        // Every drop lands here as well as in the boot diagnostics, which a
-        // console command never reads (orm:sync finished green over a resource
-        // whose file did not load).
-        $drop = static function (string $className, string $reason) use ($root): void {
-            self::$sharedUnloadable[$root][$className] = $reason;
-        };
+        $isCurrent = fn (): bool => isset(self::$sharedAttributeIndexes[$projectRoot])
+            && self::$sharedAttributeIndexes[$projectRoot]['classMap'] === $this->classMap;
 
-        $scanned = 0;
-        foreach ($this->classMap as $className => $filePath) {
-            // Same contract as the PSR-4 scan: between units, never inside one. Each
-            // iteration autoloads a class, which is file I/O and therefore uncancellable.
-            if ($this->shouldAbortScan()) {
-                throw new DiscoveryInterruptedException(sprintf(
-                    'Attribute discovery for %s stood down: the worker is draining (%d class(es) scanned).',
-                    $attributeClass,
-                    $scanned,
-                ), $scanned);
-            }
-            ++$scanned;
-
-            try {
-                $exists = class_exists($className, true) || interface_exists($className, true) || trait_exists($className, true);
-            } catch (\Throwable $e) {
-                BootDiagnostics::current()->skip('ClassDiscovery', "Skipping {$className} (load error): " . $e->getMessage(), $e);
-                $drop($className, 'load error: ' . $e->getMessage());
-                continue;
-            }
-
-            if (!$exists) {
-                $filePath = $this->classMap[$className];
-                $why = "{$filePath} does not exist";
-                if (is_file($filePath)) {
-                    $why = "{$filePath} does not declare it";
-                    try {
-                        (static function (string $f): void { require_once $f; })($filePath);
-                    } catch (\Throwable $e) {
-                        BootDiagnostics::current()->skip('ClassDiscovery', "require_once failed for {$className} ({$filePath}): " . $e->getMessage(), $e);
-                        $why = 'load error: ' . $e->getMessage();
-                    }
-                }
-                if (!class_exists($className, false) && !interface_exists($className, false) && !trait_exists($className, false)) {
-                    // These two paths used to record nothing at all.
-                    if (!str_starts_with($why, 'load error')) {
-                        BootDiagnostics::current()->skip('ClassDiscovery', "Skipping {$className}: {$why}");
-                    }
-                    $drop($className, $why);
-                    continue;
-                }
-            }
-
-            try {
-                $reflection = new \ReflectionClass($className);
-                $attrs = $reflection->getAttributes($attributeClass, $reflectionFlags);
-
-                if ($attrs) {
-                    $classes[] = $className;
-                }
-            } catch (\Throwable $e) {
-                BootDiagnostics::current()->skip('ClassDiscovery', "findClassesWithAttribute({$attributeClass}, instanceof={$instanceof}) failed for {$className}: " . $e->getMessage(), $e);
-                $drop($className, 'reflection failed: ' . $e->getMessage());
+        if (isset(self::$sharedAttributeIndexes[$projectRoot]) && !$isCurrent()) {
+            // Built from another classmap: its answers are not this instance's. The closed gate
+            // of that scan goes too, or the wait below would spin on it.
+            unset(self::$sharedAttributeIndexes[$projectRoot], self::$sharedAttributeCaches[$projectRoot]);
+            $gate = $projectRoot . "\0@attributes";
+            if (!isset(self::$coroutineGateOwners[$gate])) {
+                unset(self::$coroutineGates[$gate]);
             }
         }
 
-        return $classes;
+        $this->runOncePerKey(
+            '@attributes',
+            $isCurrent,
+            function () use ($projectRoot, $askedFor): void {
+                [$attributes, $unloadable] = DiscoveryAttributeIndex::readOrScan(
+                    $this->classMap,
+                    $projectRoot,
+                    self::$storedClassMapHashes[$projectRoot] ?? null,
+                    $askedFor,
+                    $this->shouldAbortScan(...),
+                );
+                self::$sharedUnloadable[$projectRoot] = $unloadable;
+                self::$sharedAttributeIndexes[$projectRoot] = ['classMap' => $this->classMap, 'attributes' => $attributes];
+            },
+        );
+
+        return $isCurrent() ? self::$sharedAttributeIndexes[$projectRoot]['attributes'] : null;
     }
 
     /**
@@ -599,7 +598,7 @@ class ClassDiscovery
     /**
      * @param array<string, list<string>|string> $psr4Map
      */
-    private function mergePsr4ClassCandidates(array $psr4Map): void
+    private function mergePsr4ClassCandidates(array $psr4Map, DiscoveryFileIndex $fileIndex): void
     {
         uksort($psr4Map, static fn (string $a, string $b): int => strlen($b) <=> strlen($a));
 
@@ -646,7 +645,7 @@ class ClassDiscovery
                     }
 
                     ++$scanned;
-                    $className = self::extractDeclaredClassName($fileInfo->getPathname());
+                    $className = $fileIndex->declaredClass($fileInfo, self::extractDeclaredClassName(...));
                     if ($className === null
                         || !$this->isNamespaceAllowed($className)
                         || $this->isRuntimeExcluded($className)
