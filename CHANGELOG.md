@@ -5,6 +5,23 @@ Changes to `semitexa/core` that a consuming application can notice. Sections are
 next release tag. This file is machine-read by `update:changelog` and the OS
 "What's new" surface — keep entries short and operator-facing.
 
+## Unreleased
+
+### Added
+- **`worker:run`, a new command: the worker's roles as forks of one process.**
+  It runs every line of `worker:processes`, each started again after its
+  pause. Nothing uses it yet: the scaffold's worker container, which starts a
+  `php` for each line, switches to it in the next semitexa/installer release.
+  Measured on a new project: five roles each loaded the framework for
+  themselves, about 74 MB of private memory a role (370 MB at rest); forked
+  from the one process that loaded it they add 3 to 6 MB each (about 95 MB in
+  all). Each role is still its own process, named `semitexa <command>`:
+  `kill <pid>` restarts one, and one that dies is reported and started again.
+  A role started again runs the code loaded when `worker:run` started, not
+  what is on disk: `kill -HUP` on `worker:run` makes every role finish the work
+  in hand and loads the code again without the process exiting, and a role
+  started again while a loaded file has changed names the files in the log.
+
 ## 2026.11.21.1434 — 2026-11-21
 
 ### Changed
