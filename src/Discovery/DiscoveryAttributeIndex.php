@@ -62,9 +62,12 @@ final class DiscoveryAttributeIndex
         }
 
         $startedAt = time();
-        [$attributes, $unloadable] = self::scan($classMap, $askedFor, $shouldAbort);
+        [$attributes, $unloadable, $readFromTheFiles] = self::scan($classMap, $askedFor, $shouldAbort);
 
-        if ($store !== null) {
+        // A scan that read an older class than the file now holds is right for this process,
+        // which runs that class, and wrong for the next one: stored, it would be found under
+        // the file's new mtime and answer for it until something cleared the cache.
+        if ($store !== null && $readFromTheFiles) {
             $payload = ['attributes' => $attributes, 'unloadable' => $unloadable];
             $shared = $store->share('attributes', $payload);
             $store->writeState('attributes', [
@@ -84,7 +87,11 @@ final class DiscoveryAttributeIndex
      * size, and what Composer installed (a parent class or an attribute outside the map).
      *
      * @param array<class-string, string> $classMap
-     * @return array{0: string, 1: int} the fingerprint, and the newest mtime among the sources
+     * ctime is there for the write mtime does not show: `cp -p`, `rsync -a`, tar and a Docker
+     * COPY all keep mtime, and a same-size edit under a kept mtime changes nothing else. No
+     * tool can set ctime, so every write moves it; a chmod moves it too and costs one scan.
+     *
+     * @return array{0: string, 1: int} the fingerprint, and the newest mtime or ctime among the sources
      */
     private static function sourceFingerprint(array $classMap, string $projectRoot, string $classMapHash): array
     {
@@ -100,8 +107,8 @@ final class DiscoveryAttributeIndex
                 hash_update($hash, "\0gone");
                 continue;
             }
-            hash_update($hash, "\0" . $stat['mtime'] . ':' . $stat['size']);
-            $newest = max($newest, $stat['mtime']);
+            hash_update($hash, "\0" . $stat['mtime'] . ':' . $stat['size'] . ':' . $stat['ctime']);
+            $newest = max($newest, $stat['mtime'], $stat['ctime']);
         }
 
         return [hash_final($hash), $newest];
@@ -187,9 +194,15 @@ final class DiscoveryAttributeIndex
     /**
      * One pass over the classmap: loads every class and records the attributes it names.
      *
+     * Reflection reads the class in memory, not the file. A class this process declared before
+     * the scan may be older than its file: a worker is forked from a master that loaded its
+     * lifecycle listeners when the server started, and server:reload respawns workers only. So
+     * the third value says whether every class read is the one its file holds now: false when
+     * a class declared beforehand has a file written since the process tree started.
+     *
      * @param array<class-string, string> $classMap
      * @param \Closure(): bool $shouldAbort
-     * @return array{0: array<string, list<class-string>>, 1: array<string, string>}
+     * @return array{0: array<string, list<class-string>>, 1: array<string, string>, 2: bool}
      */
     private static function scan(array $classMap, string $askedFor, \Closure $shouldAbort): array
     {
@@ -202,8 +215,18 @@ final class DiscoveryAttributeIndex
             $unloadable[$className] = $reason;
         };
 
+        $readFromTheFiles = true;
+        $processStartedAt = self::processTreeStartedAt();
+
         $scanned = 0;
         foreach ($classMap as $className => $filePath) {
+            if ($readFromTheFiles
+                && (class_exists($className, false) || interface_exists($className, false) || trait_exists($className, false))
+                && self::writtenSince($filePath, $processStartedAt)
+            ) {
+                $readFromTheFiles = false;
+            }
+
             // Same contract as the PSR-4 scan: between units, never inside one. Each
             // iteration autoloads a class, which is file I/O and therefore uncancellable.
             if ($shouldAbort()) {
@@ -258,6 +281,33 @@ final class DiscoveryAttributeIndex
             }
         }
 
-        return [$attributes, $unloadable];
+        return [$attributes, $unloadable, $readFromTheFiles];
+    }
+
+    /**
+     * When the oldest ancestor running this code started, in whole seconds: a forked worker
+     * inherits the master's request time, which is the moment the master began loading classes.
+     * Null when PHP does not say, and then no class declared beforehand can be trusted.
+     */
+    private static function processTreeStartedAt(): ?int
+    {
+        $startedAt = $_SERVER['REQUEST_TIME_FLOAT'] ?? $_SERVER['REQUEST_TIME'] ?? null;
+
+        return is_int($startedAt) || is_float($startedAt) ? (int) floor($startedAt) : null;
+    }
+
+    /**
+     * Whether the file may have been written after the process tree started. The second it
+     * started in counts: a file written in it may be older or newer than the class in memory.
+     */
+    private static function writtenSince(string $file, ?int $processStartedAt): bool
+    {
+        if ($processStartedAt === null) {
+            return true;
+        }
+        $stat = @stat($file);
+
+        // A file that is gone is not the one the class in memory came from either.
+        return $stat === false || max($stat['mtime'], $stat['ctime']) >= $processStartedAt;
     }
 }

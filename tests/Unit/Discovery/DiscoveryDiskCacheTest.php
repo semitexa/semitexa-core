@@ -70,20 +70,48 @@ final class DiscoveryDiskCacheTest extends TestCase
     public function an_unchanged_file_is_not_read_by_the_next_walk(): void
     {
         $file = $this->source('Alpha', "final class Alpha\n{\n}\n");
+        $this->aSecondLater();
         self::assertArrayHasKey($this->namespace . '\\Alpha', $this->walk());
 
-        // Another class of the same byte length under the same mtime: only reading the file
-        // could tell, and that is exactly what the next walk must not do.
+        // The table now says the file declares another class. The file is untouched, so only
+        // reading it could contradict the table, and that is what the next walk must not do.
+        $tables = glob($this->root . '/' . DiscoveryCacheStore::RELATIVE_DIRECTORY . '/*/files.json');
+        self::assertIsArray($tables);
+        self::assertCount(1, $tables, 'the walk remembered nothing');
+        $table = json_decode((string) file_get_contents($tables[0]), true);
+        self::assertIsArray($table);
+        self::assertIsArray($table['files'] ?? null);
+        // Keyed by the path the walk met the file under, which Composer's map spells its own way.
+        $keys = array_values(array_filter(array_keys($table['files']), static fn (int|string $path): bool => str_ends_with((string) $path, '/' . basename($file))));
+        self::assertCount(1, $keys, 'the file is not in the table');
+        self::assertIsArray($table['files'][$keys[0]]);
+        $table['files'][$keys[0]][3] = $this->namespace . '\\FromTheTable';
+        file_put_contents($tables[0], json_encode($table));
+
+        $classMap = $this->walk();
+        self::assertArrayHasKey($this->namespace . '\\FromTheTable', $classMap, 'the walk read a file that had not changed');
+        self::assertArrayNotHasKey($this->namespace . '\\Alpha', $classMap);
+    }
+
+    #[Test]
+    public function a_file_rewritten_under_the_same_mtime_and_size_is_read_again(): void
+    {
+        // What cp -p, rsync -a, tar and a Docker COPY do: the content changes, the mtime is the
+        // old one. Only ctime, which no tool can set, says the file was written.
+        $file = $this->source('Alpha', "final class Alpha\n{\n}\n");
         $mtime = (int) filemtime($file);
         $size = (int) filesize($file);
+        $this->aSecondLater();
+        self::assertArrayHasKey($this->namespace . '\\Alpha', $this->walk());
+
         file_put_contents($file, str_replace('Alpha', 'Omega', (string) file_get_contents($file)));
         touch($file, $mtime);
         clearstatcache();
-        self::assertSame($size, filesize($file));
+        self::assertSame([$mtime, $size], [filemtime($file), filesize($file)]);
 
         $classMap = $this->walk();
-        self::assertArrayHasKey($this->namespace . '\\Alpha', $classMap, 'the walk read a file whose mtime and size had not changed');
-        self::assertArrayNotHasKey($this->namespace . '\\Omega', $classMap);
+        self::assertArrayHasKey($this->namespace . '\\Omega', $classMap, 'same mtime, same size: the walk took the file for unchanged');
+        self::assertArrayNotHasKey($this->namespace . '\\Alpha', $classMap);
     }
 
     #[Test]
@@ -164,6 +192,7 @@ final class DiscoveryDiskCacheTest extends TestCase
         $this->source('Carrier', "#[Marker]\nfinal class Carrier\n{\n}\n");
         $this->source('Plain', "final class Plain\n{\n}\n");
         $marker = $this->namespace . '\\Marker';
+        $this->aSecondLater();
 
         $first = $this->inAFreshProcess($marker);
         self::assertSame([$this->namespace . '\\Carrier'], $first['found']);
@@ -219,6 +248,50 @@ final class DiscoveryDiskCacheTest extends TestCase
         clearstatcache();
 
         self::assertSame([], $this->inAFreshProcess($marker)['found']);
+    }
+
+    #[Test]
+    public function a_carrier_rewritten_under_the_same_mtime_and_size_is_scanned_again(): void
+    {
+        $file = $this->source('Carrier', "#[Marker]\nfinal class Carrier\n{\n}\n");
+        $mtime = (int) filemtime($file);
+        $size = (int) filesize($file);
+        $marker = $this->namespace . '\\Marker';
+        $this->aSecondLater();
+        self::assertSame([$this->namespace . '\\Carrier'], $this->inAFreshProcess($marker)['found']);
+
+        file_put_contents($file, str_replace('#[Marker]', '/*plain*/', (string) file_get_contents($file)));
+        touch($file, $mtime);
+        clearstatcache();
+        self::assertSame([$mtime, $size], [filemtime($file), filesize($file)]);
+
+        self::assertSame([], $this->inAFreshProcess($marker)['found'], 'same mtime, same size: the stored scan answered for a file written since');
+    }
+
+    #[Test]
+    public function a_scan_of_a_class_older_than_its_file_is_not_stored(): void
+    {
+        // A worker after server:reload: forked from a master that declared the class when the
+        // server started, scanning after the file gained an attribute. Reflection shows it the
+        // old class. Stored, that answer would sit under the file's new mtime, and a restart,
+        // which used to cure it, would read it back.
+        $file = $this->source('Carrier', "final class Carrier\n{\n}\n");
+        $marker = $this->namespace . '\\Marker';
+        $prelude = $this->root . '/declare-then-edit.php';
+        file_put_contents($prelude, '<?php require ' . var_export($file, true) . ';'
+            . ' file_put_contents(' . var_export($file, true) . ', ' . var_export($this->php("#[Marker]\nfinal class Carrier\n{\n}\n"), true) . ');'
+            . ' clearstatcache();'
+            // Past the second of the edit, so nothing but the age of the class can refuse the scan.
+            . ' time_sleep_until(floor(microtime(true)) + 1.2);');
+
+        $stale = $this->inAFreshProcess($marker, $prelude);
+        self::assertSame([], $stale['found'], 'that process runs the old class, and says so');
+
+        self::assertSame(
+            [$this->namespace . '\\Carrier'],
+            $this->inAFreshProcess($marker)['found'],
+            'the next process read what a process holding the old class had stored',
+        );
     }
 
     #[Test]
@@ -433,15 +506,18 @@ final class DiscoveryDiskCacheTest extends TestCase
     /**
      * @return array{found: list<string>, loaded: list<string>, unloadable: array<string, string>, warnings: int}
      */
-    private function inAFreshProcess(string $attribute): array
+    private function inAFreshProcess(string $attribute, string $prelude = ''): array
     {
         $loader = (new \ReflectionClass(\Composer\Autoload\ClassLoader::class))->getFileName();
         self::assertIsString($loader);
         $script = $this->root . '/lookup.php';
         file_put_contents($script, <<<'PHP'
             <?php
-            [, $autoload, $root, $attribute, $namespace] = $argv;
+            [, $autoload, $root, $attribute, $namespace, $prelude] = $argv;
             require $autoload;
+            if ($prelude !== '') {
+                require $prelude;
+            }
             (new ReflectionProperty(Semitexa\Core\Support\ProjectRoot::class, 'root'))->setValue(null, $root);
             $discovery = new Semitexa\Core\Discovery\ClassDiscovery();
             $found = $discovery->findClassesWithAttribute($attribute);
@@ -454,7 +530,7 @@ final class DiscoveryDiskCacheTest extends TestCase
             PHP);
 
         $command = implode(' ', array_map(escapeshellarg(...), [
-            \PHP_BINARY, $script, dirname($loader, 2) . '/autoload.php', $this->root, $attribute, $this->namespace . '\\',
+            \PHP_BINARY, $script, dirname($loader, 2) . '/autoload.php', $this->root, $attribute, $this->namespace . '\\', $prelude,
         ]));
         exec($command . ' 2>&1', $output, $exit);
         self::assertSame(0, $exit, implode("\n", $output));
@@ -478,6 +554,15 @@ final class DiscoveryDiskCacheTest extends TestCase
         clearstatcache();
 
         return $file;
+    }
+
+    /**
+     * Waits for the next second: mtime and ctime are in seconds, and discovery takes nothing
+     * written in the second it ran for settled.
+     */
+    private function aSecondLater(): void
+    {
+        time_sleep_until(floor(microtime(true)) + 1.05);
     }
 
     private function php(string $declaration): string

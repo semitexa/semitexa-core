@@ -39,7 +39,7 @@ final class DiscoveryCacheStore
     public const RELATIVE_DIRECTORY = 'var/cache/discovery';
 
     /** Bump when the shape of a stored file changes: an old directory is then simply not read. */
-    private const FORMAT = 1;
+    private const FORMAT = 2;
 
     /** 2000-01-01: older than any server start, and not zero, which OPcache reads as "no time". */
     private const SETTLED_MTIME = 946684800;
