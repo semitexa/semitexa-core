@@ -440,9 +440,38 @@ final class InjectionAnalyzer
         if (!enum_exists($enumClass) || !is_subclass_of($enumClass, \BackedEnum::class)) {
             return $default;
         }
+        // An environment value is always a string, and under strict types an
+        // int-backed enum's tryFrom() throws a TypeError on one: the container
+        // build died on a variable that was merely set. A whole number is read
+        // as that number; anything else is no case, like a misspelled string.
+        $value = $raw;
+        if ((string) (new \ReflectionEnum($enumClass))->getBackingType() === 'int') {
+            $value = $this->wholeNumber($raw);
+            if ($value === null) {
+                return $default;
+            }
+        }
         // Return the enum instance itself; the target property is enum-typed and
         // setValue() with the scalar ->value would raise a TypeError.
-        return $enumClass::tryFrom($raw) ?? $default;
+        return $enumClass::tryFrom($value) ?? $default;
+    }
+
+    /**
+     * A decimal whole number with an optional sign, surrounding whitespace
+     * ignored; null for anything else, a number past the int range included
+     * (a cast would turn it into PHP_INT_MAX, which may be a case).
+     */
+    private function wholeNumber(string $raw): ?int
+    {
+        $value = trim($raw);
+        if (preg_match('/^[+-]?\d+$/', $value) !== 1) {
+            return null;
+        }
+        // filter_var refuses a leading zero; "02" is still 2, as for an int property.
+        $value = preg_replace('/^([+-]?)0+(?=\d)/', '$1', $value) ?? $value;
+        $parsed = filter_var($value, FILTER_VALIDATE_INT, FILTER_NULL_ON_FAILURE);
+
+        return is_int($parsed) ? $parsed : null;
     }
 
     /**
