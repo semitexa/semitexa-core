@@ -50,6 +50,11 @@ final class DefaultTenantContextStore implements TenantContextStoreInterface
      * active, and a reset run inside a coroutine cannot reach the copy. So a
      * store built here asks the owner instead of reading a copy.
      *
+     * One reader per worker: naming a second replaces the first, and the one
+     * replaced is returned so it can be put back. While the reader answers a
+     * tenant, it is what tryGet() says outside a coroutine; this store's own
+     * set() and clear() there only matter when the reader answers none.
+     *
      * @param (\Closure(): ?TenantContextInterface)|null $reader null takes it away
      * @return (\Closure(): ?TenantContextInterface)|null the reader named before
      */
