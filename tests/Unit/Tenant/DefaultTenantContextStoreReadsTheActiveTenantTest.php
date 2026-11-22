@@ -27,6 +27,9 @@ final class DefaultTenantContextStoreReadsTheActiveTenantTest extends TestCase
      */
     private const TENANCY_KEY = 'semitexa.tenancy.tenant_context';
 
+    /** What the reader named in a test answers with. */
+    private ?TenantContextInterface $active = null;
+
     #[Test]
     public function it_reads_the_slot_the_tenancy_store_writes(): void
     {
@@ -83,6 +86,71 @@ final class DefaultTenantContextStoreReadsTheActiveTenantTest extends TestCase
         }
 
         self::assertTrue($held);
+    }
+
+    /**
+     * Outside a coroutine a tenant store may keep the tenant of a CLI run in
+     * a place of its own (semitexa/tenancy: a static). A store built bare
+     * asks it, so a request start that empties the slot hides nothing.
+     */
+    #[Test]
+    public function outside_a_coroutine_it_asks_the_named_reader_even_after_a_request_start(): void
+    {
+        $this->active = self::tenant('tenant-acme');
+        $cli = new \ReflectionProperty(CoroutineLocal::class, 'cliStore');
+        $cliBefore = $cli->getValue();
+        $readerBefore = DefaultTenantContextStore::readOutsideCoroutineFrom(
+            $this->activeTenant(...),
+        );
+        try {
+            // What Application::handleRequest() and the queue worker do first.
+            CoroutineLocal::beginRequest();
+            self::assertSame($this->active, (new DefaultTenantContextStore())->tryGet());
+
+            $this->active = self::tenant('tenant-globex');
+            self::assertSame($this->active, (new DefaultTenantContextStore())->tryGet());
+
+            // The reader has no tenant: the slot this store wrote itself answers.
+            $this->active = null;
+            self::assertNull((new DefaultTenantContextStore())->tryGet());
+            $own = self::tenant('tenant-own');
+            (new DefaultTenantContextStore())->set($own);
+            self::assertSame($own, (new DefaultTenantContextStore())->tryGet());
+        } finally {
+            DefaultTenantContextStore::readOutsideCoroutineFrom($readerBefore);
+            $cli->setValue(null, $cliBefore);
+        }
+    }
+
+    #[Test]
+    public function inside_a_coroutine_the_reader_is_not_asked(): void
+    {
+        $asked = false;
+        $seen = 'unset';
+        $readerBefore = DefaultTenantContextStore::readOutsideCoroutineFrom(
+            static function () use (&$asked): TenantContextInterface {
+                $asked = true;
+
+                return self::tenant('tenant-cli');
+            },
+        );
+        $hooks = \Swoole\Runtime::getHookFlags();
+        try {
+            \Swoole\Coroutine\run(static function () use (&$seen): void {
+                $seen = (new DefaultTenantContextStore())->tryGet();
+            });
+        } finally {
+            \Swoole\Coroutine::set(['hook_flags' => $hooks ?: SWOOLE_HOOK_ALL]);
+            DefaultTenantContextStore::readOutsideCoroutineFrom($readerBefore);
+        }
+
+        self::assertNull($seen, 'A request with no tenant must not inherit the CLI tenant.');
+        self::assertFalse($asked);
+    }
+
+    private function activeTenant(): ?TenantContextInterface
+    {
+        return $this->active;
     }
 
     private static function tenant(string $tenantId): TenantContextInterface
