@@ -62,7 +62,7 @@ final class DefaultTenantContextStoreReadsTheActiveTenantTest extends TestCase
                 });
             });
         } finally {
-            \Swoole\Runtime::setHookFlags($hooks);
+            \Swoole\Coroutine::set(['hook_flags' => $hooks ?: SWOOLE_HOOK_ALL]);
         }
 
         ksort($seen);
@@ -84,7 +84,7 @@ final class DefaultTenantContextStoreReadsTheActiveTenantTest extends TestCase
                 $held = CoroutineLocal::get(self::TENANCY_KEY) === $tenant;
             });
         } finally {
-            \Swoole\Runtime::setHookFlags($hooks);
+            \Swoole\Coroutine::set(['hook_flags' => $hooks ?: SWOOLE_HOOK_ALL]);
         }
 
         self::assertTrue($held);
