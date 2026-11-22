@@ -20,6 +20,13 @@ use Semitexa\Core\Pipeline\RequestPipelineContext;
  * A re-run of a live region is the request already counted, so it passes.
  * With several limits, a request refused by one is taken back from those
  * that had already counted it.
+ *
+ * Attributes are not inherited, and a payload with parts is a runtime
+ * subclass of the class that declares the limit (PayloadFactory), so every
+ * class the payload extends is read. Each limit found holds, the subclass's
+ * and the parent's alike: extending a payload never loosens its limit. A
+ * limit without a bucket counts under the class that declares it, so the
+ * runtime subclass and the plain payload share one count.
  */
 #[AsPipelineListener(phase: AuthCheck::class, priority: 2)]
 final class RateLimitListener implements PipelineListenerInterface
@@ -34,22 +41,24 @@ final class RateLimitListener implements PipelineListenerInterface
         }
 
         $counted = [];
-        foreach ((new \ReflectionClass($context->requestDto))->getAttributes(RateLimit::class) as $attribute) {
-            $limit = $attribute->newInstance();
-            $decision = $this->limiter->attempt(
-                $limit->bucket ?? $context->requestDto::class,
-                $limit->limit,
-                $limit->perSeconds,
-                $limit->by,
-            );
-            if (!$decision->allowed) {
-                foreach ($counted as $allowed) {
-                    $this->limiter->release($allowed);
-                }
+        for ($class = new \ReflectionClass($context->requestDto); $class !== false; $class = $class->getParentClass()) {
+            foreach ($class->getAttributes(RateLimit::class) as $attribute) {
+                $limit = $attribute->newInstance();
+                $decision = $this->limiter->attempt(
+                    $limit->bucket ?? $class->getName(),
+                    $limit->limit,
+                    $limit->perSeconds,
+                    $limit->by,
+                );
+                if (!$decision->allowed) {
+                    foreach ($counted as $allowed) {
+                        $this->limiter->release($allowed);
+                    }
 
-                throw new RateLimitException($decision->retryAfter, $decision->limit);
+                    throw new RateLimitException($decision->retryAfter, $decision->limit);
+                }
+                $counted[] = $decision;
             }
-            $counted[] = $decision;
         }
     }
 }
