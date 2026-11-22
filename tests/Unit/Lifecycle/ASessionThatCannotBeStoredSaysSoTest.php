@@ -33,17 +33,24 @@ final class ASessionThatCannotBeStoredSaysSoTest extends TestCase
     /** @var list<string> */
     private array $errors = [];
 
+    /** What the worker-wide "last logged" stamp held before the test; put back after it. */
+    private int $storeFullLoggedAtBefore = 0;
+
     protected function setUp(): void
     {
         $this->redisHostBefore = getenv('REDIS_HOST');
         putenv('REDIS_HOST=');
-        $this->forgetTheLastLogLine();
+        $stamp = $this->lastLogStamp()->getValue();
+        self::assertIsInt($stamp);
+        $this->storeFullLoggedAtBefore = $stamp;
+        $this->lastLogStamp()->setValue(null, 0);
     }
 
+    /** PHPUnit runs this after a failed assertion too. */
     protected function tearDown(): void
     {
         $this->redisHostBefore === false ? putenv('REDIS_HOST') : putenv('REDIS_HOST=' . $this->redisHostBefore);
-        $this->forgetTheLastLogLine();
+        $this->lastLogStamp()->setValue(null, $this->storeFullLoggedAtBefore);
     }
 
     #[Test]
@@ -169,8 +176,8 @@ final class ASessionThatCannotBeStoredSaysSoTest extends TestCase
         return new Request($method, $path, [], [], [], ['REQUEST_URI' => $path], []);
     }
 
-    private function forgetTheLastLogLine(): void
+    private function lastLogStamp(): \ReflectionProperty
     {
-        (new \ReflectionProperty(SessionPhase::class, 'storeFullLoggedAt'))->setValue(null, 0);
+        return new \ReflectionProperty(SessionPhase::class, 'storeFullLoggedAt');
     }
 }

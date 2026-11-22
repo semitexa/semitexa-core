@@ -115,6 +115,54 @@ final class SwooleTableSessionHandlerReclaimsRoomTest extends TestCase
         (new SwooleTableSessionHandler($table))->write($this->id('new', 0), ['user' => 1], 3600);
     }
 
+    /**
+     * Another worker refreshes a session after the reclaim scanned it as
+     * expired: the row now holds a session in use and must not be deleted.
+     */
+    #[Test]
+    public function a_row_refreshed_between_the_scan_and_the_delete_survives(): void
+    {
+        /** @var \ArrayObject<int, string> $refreshed */
+        $refreshed = new \ArrayObject();
+        // Plays the other worker: at the first delete of the reclaim, it
+        // rewrites a different expired row with a future expiry.
+        $table = new class (16, $refreshed) extends Table {
+            /** @param \ArrayObject<int, string> $refreshed */
+            public function __construct(int $size, private readonly \ArrayObject $refreshed)
+            {
+                parent::__construct($size);
+            }
+
+            public function delete(string $key): bool
+            {
+                if (count($this->refreshed) === 0) {
+                    foreach ($this as $other => $row) {
+                        if (is_string($other) && $other !== $key) {
+                            parent::set($other, ['data' => '{"user":"back"}', 'expires_at' => time() + 3600]);
+                            $this->refreshed->append($other);
+                            break;
+                        }
+                    }
+                }
+
+                return parent::delete($key);
+            }
+        };
+        $table->column('data', Table::TYPE_STRING, 256);
+        $table->column('expires_at', Table::TYPE_INT, 8);
+        $table->create();
+        $rows = $this->fillRaw($table, static fn (int $i): int => time() - 10);
+
+        $handler = new SwooleTableSessionHandler($table);
+        $handler->write($this->id('new', 0), ['user' => 0], 3600);
+
+        $kept = $refreshed->getArrayCopy();
+        self::assertCount(1, $kept, 'the reclaim ran and a row was refreshed under it');
+        self::assertSame(['user' => 'back'], $handler->read($kept[0]), 'the refreshed session is kept');
+        self::assertSame(['user' => 0], $handler->read($this->id('new', 0)));
+        self::assertLessThan($rows, $table->count(), 'the rows that stayed expired were still swept');
+    }
+
     #[Test]
     public function nothing_is_lost_while_there_is_room(): void
     {

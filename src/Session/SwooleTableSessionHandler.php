@@ -104,6 +104,7 @@ final class SwooleTableSessionHandler implements SessionHandlerInterface
     private function reclaimAndSet(\Swoole\Table $table, string $sessionId, array $row): bool
     {
         $now = time();
+        /** @var array<string, int> $expired expires_at by session id */
         $expired = [];
         /** @var array<string, int> $live expires_at by session id */
         $live = [];
@@ -115,15 +116,15 @@ final class SwooleTableSessionHandler implements SessionHandlerInterface
             $expires = $stored[self::COLUMN_EXPIRES] ?? 0;
             $expires = is_int($expires) ? $expires : 0;
             if ($expires > 0 && $expires < $now) {
-                $expired[] = $key;
+                $expired[$key] = $expires;
             } else {
                 // 0 never expires, so it is the last to be evicted.
                 $live[$key] = $expires > 0 ? $expires : PHP_INT_MAX;
             }
         }
 
-        foreach ($expired as $key) {
-            $table->delete($key);
+        foreach ($expired as $key => $scanned) {
+            $this->deleteIfUnchanged($table, (string) $key, $scanned);
         }
         if ($expired !== [] && @$table->set($sessionId, $row)) {
             return true;
@@ -131,10 +132,10 @@ final class SwooleTableSessionHandler implements SessionHandlerInterface
 
         asort($live);
         $batch = max(self::EVICTION_MIN_BATCH, count($live) >> self::EVICTION_SHIFT);
-        $victims = array_slice(array_keys($live), 0, $batch * self::EVICTION_ROUNDS);
-        foreach (array_chunk($victims, $batch) as $round) {
-            foreach ($round as $key) {
-                $table->delete((string) $key);
+        $victims = array_slice($live, 0, $batch * self::EVICTION_ROUNDS, true);
+        foreach (array_chunk($victims, $batch, true) as $round) {
+            foreach ($round as $key => $scanned) {
+                $this->deleteIfUnchanged($table, (string) $key, $scanned);
             }
             if (@$table->set($sessionId, $row)) {
                 return true;
@@ -142,6 +143,28 @@ final class SwooleTableSessionHandler implements SessionHandlerInterface
         }
 
         return false;
+    }
+
+    /**
+     * Deletes a row only while it still carries the expiry the scan saw:
+     * another worker may have refreshed that session since, and a session in
+     * use is not the one to drop.
+     *
+     * Not atomic. Swoole\Table has no compare-and-delete, so a refresh that
+     * lands between this read and the delete is still lost. Closing that gap
+     * takes a lock every session write would pay for; the re-read costs only
+     * the failure path, and leaves one session at risk for the length of two
+     * table calls, while the table is full.
+     */
+    private function deleteIfUnchanged(\Swoole\Table $table, string $key, int $scanned): void
+    {
+        $current = $table->get($key, self::COLUMN_EXPIRES);
+        if (!is_int($current)) {
+            return;
+        }
+        if (($current > 0 ? $current : PHP_INT_MAX) === $scanned) {
+            $table->delete($key);
+        }
     }
 
     public function destroy(string $sessionId): void
