@@ -27,11 +27,6 @@ final class DefaultTenantContextStoreReadsTheActiveTenantTest extends TestCase
      */
     private const TENANCY_KEY = 'semitexa.tenancy.tenant_context';
 
-    protected function tearDown(): void
-    {
-        CoroutineLocal::remove(self::TENANCY_KEY);
-    }
-
     #[Test]
     public function it_reads_the_slot_the_tenancy_store_writes(): void
     {
