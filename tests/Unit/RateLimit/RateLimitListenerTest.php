@@ -17,6 +17,7 @@ use Semitexa\Core\RateLimit\RateLimitListener;
 use Semitexa\Core\RateLimit\RateLimitStorage;
 use Semitexa\Core\RateLimit\RateLimitStoreInterface;
 use Semitexa\Core\Request;
+use Semitexa\Core\Tests\Unit\RateLimit\Fixture\LimitedPayloadChildRepeatingLimit;
 use Semitexa\Core\Tests\Unit\RateLimit\Fixture\LimitedPayloadChildWithOwnLimit;
 use Semitexa\Core\Tests\Unit\RateLimit\Fixture\LimitedPayloadPart;
 use Semitexa\Core\Tests\Unit\RateLimit\Fixture\LimitedPayloadWithParts;
@@ -34,6 +35,22 @@ final class RateLimitListenerTwoLimitsPayload
 
 final class RateLimitListenerTest extends TestCase
 {
+    /** @var array<string, class-string> PayloadFactory's wrapper cache as it was before the test. */
+    private array $wrapperCache = [];
+
+    protected function setUp(): void
+    {
+        /** @var array<string, class-string> $cache */
+        $cache = (new \ReflectionProperty(PayloadFactory::class, 'classCache'))->getValue();
+        $this->wrapperCache = $cache;
+    }
+
+    protected function tearDown(): void
+    {
+        // withPart() leaves a wrapper in the factory's static cache; a failed assertion must not keep it there.
+        (new \ReflectionProperty(PayloadFactory::class, 'classCache'))->setValue(null, $this->wrapperCache);
+    }
+
     #[Test]
     public function a_re_run_of_a_live_region_is_the_request_already_counted(): void
     {
@@ -134,6 +151,20 @@ final class RateLimitListenerTest extends TestCase
         $limiter = self::limiterOf($listener);
         $own = $limiter->attempt(LimitedPayloadChildWithOwnLimit::class, 5, 60, \Semitexa\Core\RateLimit\RateLimitKey::Ip);
         self::assertSame(3, $own->remaining, 'the one allowed request and this probe');
+    }
+
+    #[Test]
+    public function the_same_limit_on_a_parent_and_its_child_is_counted_once(): void
+    {
+        $listener = self::listener();
+
+        // Counted twice, a limit of 1 refused even the first request, and took both hits back: every request refused.
+        $listener->handle(self::context(reRun: false, payload: new LimitedPayloadChildRepeatingLimit()));
+
+        self::assertSame(4, self::refusedOfFive(static fn(): object => new LimitedPayloadChildRepeatingLimit()), 'one passes, then the limit holds');
+
+        $this->expectException(RateLimitException::class);
+        $listener->handle(self::context(reRun: false, payload: new LimitedPayloadChildRepeatingLimit()));
     }
 
     private static function withPart(): object

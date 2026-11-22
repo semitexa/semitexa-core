@@ -27,6 +27,10 @@ use Semitexa\Core\Pipeline\RequestPipelineContext;
  * and the parent's alike: extending a payload never loosens its limit. A
  * limit without a bucket counts under the class that declares it, so the
  * runtime subclass and the plain payload share one count.
+ *
+ * The same limit declared twice (same bucket, limit, window and kind of key,
+ * on a parent and its child, say) is one counter, and is counted once: hit
+ * twice by one request, a limit of 1 would refuse every request.
  */
 #[AsPipelineListener(phase: AuthCheck::class, priority: 2)]
 final class RateLimitListener implements PipelineListenerInterface
@@ -41,11 +45,19 @@ final class RateLimitListener implements PipelineListenerInterface
         }
 
         $counted = [];
+        $seen = [];
         for ($class = new \ReflectionClass($context->requestDto); $class !== false; $class = $class->getParentClass()) {
             foreach ($class->getAttributes(RateLimit::class) as $attribute) {
                 $limit = $attribute->newInstance();
+                $bucket = $limit->bucket ?? $class->getName();
+                // What RateLimiter::attempt() makes one counter of.
+                $counter = $bucket . '|' . $limit->limit . '|' . $limit->perSeconds . '|' . $limit->by->value;
+                if (isset($seen[$counter])) {
+                    continue;
+                }
+                $seen[$counter] = true;
                 $decision = $this->limiter->attempt(
-                    $limit->bucket ?? $class->getName(),
+                    $bucket,
                     $limit->limit,
                     $limit->perSeconds,
                     $limit->by,
