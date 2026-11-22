@@ -18,6 +18,7 @@ use Semitexa\Core\Session\Session;
 use Semitexa\Core\Session\SessionHandlerInterface;
 use Semitexa\Core\Session\SessionInterface;
 use Semitexa\Core\Session\SessionStoreFullException;
+use Semitexa\Core\Support\CoroutineLocal;
 use Semitexa\Core\Tenant\DefaultTenantContextStore;
 
 /**
@@ -36,8 +37,27 @@ final class ASessionThatCannotBeStoredSaysSoTest extends TestCase
     /** What the worker-wide "last logged" stamp held before the test; put back after it. */
     private int $storeFullLoggedAtBefore = 0;
 
+    /**
+     * The CoroutineLocal slots SessionPhase::execute() writes. Outside a
+     * coroutine they are one process-wide store, and this test never passes
+     * through Application::handleRequest(), which empties it: execute() binds
+     * the request's session for csrf_field() and, with tenancy off, clears the
+     * tenant. Measured by diffing the store around execute() + finalize();
+     * finalize() writes none.
+     */
+    private const SLOTS = ['core.csrf_session', DefaultTenantContextStore::CONTEXT_KEY];
+
+    /** @var array<string, mixed> what those slots held before the test; a slot that was empty has no entry */
+    private array $slotsBefore = [];
+
     protected function setUp(): void
     {
+        $this->slotsBefore = [];
+        foreach (self::SLOTS as $slot) {
+            if (CoroutineLocal::has($slot)) {
+                $this->slotsBefore[$slot] = CoroutineLocal::get($slot);
+            }
+        }
         $this->redisHostBefore = getenv('REDIS_HOST');
         putenv('REDIS_HOST=');
         $stamp = $this->lastLogStamp()->getValue();
@@ -51,6 +71,14 @@ final class ASessionThatCannotBeStoredSaysSoTest extends TestCase
     {
         $this->redisHostBefore === false ? putenv('REDIS_HOST') : putenv('REDIS_HOST=' . $this->redisHostBefore);
         $this->lastLogStamp()->setValue(null, $this->storeFullLoggedAtBefore);
+        // Put back, not cleared: a binding another test left is not ours to drop.
+        foreach (self::SLOTS as $slot) {
+            if (array_key_exists($slot, $this->slotsBefore)) {
+                CoroutineLocal::set($slot, $this->slotsBefore[$slot]);
+            } else {
+                CoroutineLocal::remove($slot);
+            }
+        }
     }
 
     #[Test]
