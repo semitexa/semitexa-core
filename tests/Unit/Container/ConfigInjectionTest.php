@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Tests\Unit\Container;
 
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Semitexa\Core\Attribute\Config;
@@ -18,7 +19,7 @@ use Semitexa\Core\Discovery\BootDiagnostics;
  */
 final class ConfigInjectionTest extends TestCase
 {
-    private const KEYS = ['SEMITEXA_CFG_TEST_INT', 'SEMITEXA_CFG_TEST_BOOL', 'SEMITEXA_CFG_TEST_MODE', 'SEMITEXA_CFG_TEST_RATIO', 'SEMITEXA_CFG_TEST_NAME'];
+    private const KEYS = ['SEMITEXA_CFG_TEST_INT', 'SEMITEXA_CFG_TEST_BOOL', 'SEMITEXA_CFG_TEST_MODE', 'SEMITEXA_CFG_TEST_RATIO', 'SEMITEXA_CFG_TEST_NAME', 'SEMITEXA_CFG_TEST_LEVEL'];
 
     /** @var array<string, string|false> what each key held before the test */
     private array $savedEnv = [];
@@ -111,6 +112,74 @@ final class ConfigInjectionTest extends TestCase
         self::assertSame(8, $this->inject()->int());
     }
 
+    /**
+     * An environment value is a string, and an int-backed enum's tryFrom()
+     * throws a TypeError on one under strict types: the container build died
+     * whenever the variable was set (tk-config-int-backed-enum-type-error).
+     */
+    #[Test]
+    #[DataProvider('wholeNumbersThatAreCases')]
+    public function an_int_backed_enum_reads_a_whole_number(string $raw, ConfigInjectionLevel $expected): void
+    {
+        putenv("SEMITEXA_CFG_TEST_LEVEL={$raw}");
+
+        self::assertSame($expected, $this->inject()->level());
+    }
+
+    /** @return iterable<string, array{string, ConfigInjectionLevel}> */
+    public static function wholeNumbersThatAreCases(): iterable
+    {
+        yield 'a case' => ['2', ConfigInjectionLevel::High];
+        yield 'whitespace around it' => [' 2 ', ConfigInjectionLevel::High];
+        yield 'a plus sign' => ['+2', ConfigInjectionLevel::High];
+        yield 'a minus sign' => ['-3', ConfigInjectionLevel::Negative];
+        yield 'zero padded' => ['02', ConfigInjectionLevel::High];
+    }
+
+    #[Test]
+    #[DataProvider('valuesThatAreNoIntCase')]
+    public function an_int_backed_enum_falls_back_to_the_default_like_a_string_backed_one(string $raw): void
+    {
+        putenv("SEMITEXA_CFG_TEST_LEVEL={$raw}");
+
+        self::assertSame(ConfigInjectionLevel::Low, $this->inject()->level());
+        self::assertSame(
+            [],
+            BootDiagnostics::current()->getWarnings(),
+            'a string-backed enum takes the default without a word; so does this one',
+        );
+    }
+
+    /** @return iterable<string, array{string}> */
+    public static function valuesThatAreNoIntCase(): iterable
+    {
+        yield 'an unknown number' => ['7'];
+        yield 'not a number' => ['high'];
+        yield 'an empty string' => [''];
+        yield 'a decimal' => ['2.0'];
+        yield 'a number with a tail' => ['2x'];
+        yield 'past the int range' => ['99999999999999999999'];
+    }
+
+    #[Test]
+    public function an_unset_int_backed_enum_keeps_its_default(): void
+    {
+        self::assertSame(ConfigInjectionLevel::Low, $this->inject()->level());
+    }
+
+    #[Test]
+    public function a_string_backed_enum_is_matched_as_written(): void
+    {
+        putenv('SEMITEXA_CFG_TEST_MODE= strict ');
+        self::assertSame(ConfigInjectionMode::Lenient, $this->inject()->mode(), 'not trimmed: unchanged');
+
+        putenv('SEMITEXA_CFG_TEST_MODE=');
+        self::assertSame(ConfigInjectionMode::Lenient, $this->inject()->mode());
+
+        putenv('SEMITEXA_CFG_TEST_MODE=strict');
+        self::assertSame(ConfigInjectionMode::Strict, $this->inject()->mode());
+    }
+
     private function inject(): ConfigInjectionTarget
     {
         $analyzer = (new \ReflectionClass(InjectionAnalyzer::class))->newInstanceWithoutConstructor();
@@ -147,10 +216,14 @@ final class ConfigInjectionTarget
     #[Config(default: 7)]
     protected int $constant;
 
+    #[Config(env: 'SEMITEXA_CFG_TEST_LEVEL', default: ConfigInjectionLevel::Low)]
+    protected ConfigInjectionLevel $level;
+
     public function int(): int { return $this->int; }
     public function bool(): bool { return $this->bool; }
     public function mode(): ConfigInjectionMode { return $this->mode; }
     public function ratio(): float { return $this->ratio; }
     public function name(): string { return $this->name; }
     public function constant(): int { return $this->constant; }
+    public function level(): ConfigInjectionLevel { return $this->level; }
 }
