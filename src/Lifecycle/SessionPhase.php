@@ -13,6 +13,7 @@ use Semitexa\Core\Cookie\CookieJarInterface;
 use Semitexa\Core\Csrf\CsrfField;
 use Semitexa\Core\Csrf\CsrfToken;
 use Semitexa\Core\Environment;
+use Semitexa\Core\Exception\ServiceUnavailableException;
 use Semitexa\Core\Http\SecureCookieMode;
 use Semitexa\Core\Http\SecureCookieSetting;
 use Semitexa\Core\Locale\DefaultLocaleContext;
@@ -26,6 +27,7 @@ use Semitexa\Core\Session\RedisSessionHandler;
 use Semitexa\Core\Session\Session;
 use Semitexa\Core\Session\SessionHandlerInterface;
 use Semitexa\Core\Session\SessionInterface;
+use Semitexa\Core\Session\SessionStoreFullException;
 use Semitexa\Core\Session\SwooleTableSessionHandler;
 use Semitexa\Core\Session\TransientSessionHandler;
 use Semitexa\Core\Tenant\TenantContextInterface;
@@ -44,6 +46,9 @@ final class SessionPhase
      */
     private static bool $refusedHttpsWarned = false;
     private static bool $unrecognisedSecureModeWarned = false;
+    /** When this worker last said the session table is full; said once a minute, not per request. */
+    private static int $storeFullLoggedAt = 0;
+    private const STORE_FULL_LOG_INTERVAL = 60;
 
     private SessionHandlerInterface $sessionHandler;
 
@@ -127,6 +132,10 @@ final class SessionPhase
             try {
                 $session->save();
                 $sessionPersisted = true;
+            } catch (SessionStoreFullException $e) {
+                // A full table is full for a second attempt too, and for every
+                // request until rows expire: no retry, and one log line a minute.
+                $this->logSessionStoreFull($e, $request);
             } catch (\Throwable $e) {
                 $this->logSessionPersistenceFailure($e, $request);
                 try {
@@ -176,6 +185,15 @@ final class SessionPhase
             }
         }
 
+        // A sign-in (or sign-out) regenerated the session and the new one was
+        // not stored: the handler's "you are signed in" would be followed by a
+        // next request that is not. Say it could not be done, retryably, in
+        // place of that answer. Other requests keep their response: an
+        // anonymous page is not worth failing because its session found no room.
+        if (!$sessionPersisted && $session->persists() && $session->wasRegenerated()) {
+            $response = $this->sessionNotStoredResponse($request);
+        }
+
         $lines = $cookieJar->getSetCookieLines();
         if ($lines !== []) {
             /** @var array<int|string, string> $lines */
@@ -183,6 +201,33 @@ final class SessionPhase
         }
 
         return $response;
+    }
+
+    /** The 503 of {@see ServiceUnavailableException}, built here because finalize() runs past the exception mapper. */
+    private function sessionNotStoredResponse(Request $request): HttpResponse
+    {
+        $failure = new ServiceUnavailableException('The session could not be stored, try again in a moment.');
+        $status = $failure->getStatusCode()->value;
+        $response = str_contains(strtolower($request->getHeader('Accept') ?? ''), 'json')
+            ? HttpResponse::json([
+                'error' => $failure->getErrorCode(),
+                'message' => $failure->getMessage(),
+                'context' => $failure->getErrorContext(),
+            ], $status)
+            : HttpResponse::text($failure->getMessage(), $status);
+
+        return $response->withHeaders($failure->headers());
+    }
+
+    private function logSessionStoreFull(SessionStoreFullException $e, Request $request): void
+    {
+        $now = time();
+        if ($now - self::$storeFullLoggedAt < self::STORE_FULL_LOG_INTERVAL) {
+            return;
+        }
+        self::$storeFullLoggedAt = $now;
+
+        $this->logSessionPersistenceFailure($e, $request);
     }
 
     private function createSessionHandler(): SessionHandlerInterface

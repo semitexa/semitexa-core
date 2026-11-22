@@ -20,6 +20,7 @@ final class Session implements SessionInterface
     private array $flashNext = [];
     /** The id regenerate() replaced; its stored data is destroyed on save(). */
     private ?string $retiredId = null;
+    private bool $regenerated = false;
 
     /**
      * #[SessionSegment] name per payload class. A class's attributes cannot
@@ -87,6 +88,7 @@ final class Session implements SessionInterface
         // must carry the id the browser presents next. Taken at save() it
         // left them on the old id, and the next request refused them.
         $this->retiredId ??= $this->id;
+        $this->regenerated = true;
         $this->id = $this->generateId();
         // The CSRF token must not survive a privilege change: under session fixation
         // an attacker who read the token before login would otherwise still hold a
@@ -94,6 +96,15 @@ final class Session implements SessionInterface
         // rendered later in this request, and the XSRF-TOKEN cookie emitted in
         // SessionPhase::finalize(), already carry the new value.
         $this->setPayload(CsrfToken::generate());
+    }
+
+    /**
+     * True once regenerate() ran in this request: a sign-in or sign-out whose
+     * result lives only in the session about to be saved.
+     */
+    public function wasRegenerated(): bool
+    {
+        return $this->regenerated;
     }
 
     public function flash(string $key, mixed $value): void
