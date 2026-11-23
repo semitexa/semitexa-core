@@ -101,6 +101,13 @@ use Semitexa\Core\Attribute\WorkerState;
  *     trait or from a base class that is not itself container-managed: its body
  *     is analysed in the scope of the trait or the base, where nothing says
  *     which services will carry it (reaching it needs PHPStan collectors);
+ *   - a destructuring assignment is read as a whole: when its right side reads
+ *     a parameter, every `$this` target in it is reported, also one that
+ *     receives a constant (`[$this->a, $this->b] = ['x', $param]`); assigning
+ *     the two separately is the workaround;
+ *   - a capture that no code can read is not reported: an arrow function whose
+ *     only use of the name is a nested arrow function's own parameter still
+ *     captures the method's parameter, but only reflection could reach it;
  *   - writes through another variable than `$this` and to static properties
  *     ({@see StaticStateLifetimeRule} owns those) are not inspected.
  *
@@ -127,6 +134,12 @@ final class WorkerServiceCallerStateRule implements Rule
     ];
 
     /**
+     * Mirrors the execution-scoped set of
+     * {@see \Semitexa\Core\Container\InjectionAnalyzer::collectExecutionScopedClasses()}:
+     * a class the container clones per request is one this rule leaves alone.
+     * The auth and slot handler attributes are named as strings because core
+     * does not depend on the packages that own them.
+     *
      * Resolved names only. A bare `ExecutionScoped` here would be the unsafe
      * direction: it would exempt a class carrying some other `#[\ExecutionScoped]`
      * that the container does not know and therefore still shares.
@@ -136,6 +149,8 @@ final class WorkerServiceCallerStateRule implements Rule
         AsPayloadHandler::class,
         AsEventListener::class,
         AsPipelineListener::class,
+        'Semitexa\\Auth\\Attribute\\AsAuthHandler',
+        'Semitexa\\Ssr\\Attribute\\AsSlotHandler',
     ];
 
     /** The container fills these; what they hold is its business, not a caller's. */
@@ -383,12 +398,18 @@ final class WorkerServiceCallerStateRule implements Rule
         if (!$target instanceof PropertyFetch
             || !$target->var instanceof Variable
             || $target->var->name !== 'this'
-            || !$target->name instanceof Node\Identifier
         ) {
             return [];
         }
 
-        return [[$target->name->toString(), $target->getStartLine()]];
+        // `$this->{'p'}` is `$this->p`; a name computed at run time stays unknown.
+        $name = match (true) {
+            $target->name instanceof Node\Identifier => $target->name->toString(),
+            $target->name instanceof Node\Scalar\String_ => $target->name->value,
+            default => null,
+        };
+
+        return $name === null ? [] : [[$name, $target->getStartLine()]];
     }
 
     /**

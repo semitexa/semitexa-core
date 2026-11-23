@@ -39,6 +39,9 @@ final class WorkerServiceCallerStateRuleTest extends RuleTestCase
         'CallerStateInitializeSetter',
         'CallerStateNestedClass',
         'CallerStateReadsAndScopes',
+        'CallerStateAuthHandler',
+        'CallerStateSlotHandler',
+        'CallerStateLiteralPropertyName',
     ];
 
     /** The one write every "same class, different marking" fixture holds. */
@@ -259,6 +262,33 @@ final class WorkerServiceCallerStateRuleTest extends RuleTestCase
     {
         self::assertFixtureHolds('CallerStateImpliedScoped', self::REMEMBER);
         self::assertSame([], $this->linesReportedIn('CallerStateImpliedScoped'));
+    }
+
+    /**
+     * InjectionAnalyzer puts auth and slot handlers in the execution-scoped set,
+     * so the same write that is reported on the plain service is not on them.
+     */
+    public function testAuthAndSlotHandlersAreExecutionScopedAndNotFlagged(): void
+    {
+        self::assertFixtureHolds('CallerStateAuthHandler', self::REMEMBER);
+        self::assertFixtureHolds('CallerStateAuthHandler', "#[AsService]\n#[\\Semitexa\\Auth\\Attribute\\AsAuthHandler]\nfinal class CallerStateAuthHandler");
+        self::assertSame([], $this->linesReportedIn('CallerStateAuthHandler'));
+
+        self::assertFixtureHolds('CallerStateSlotHandler', self::REMEMBER);
+        self::assertFixtureHolds('CallerStateSlotHandler', "#[AsService]\n#[\\Semitexa\\Ssr\\Attribute\\AsSlotHandler]\nfinal class CallerStateSlotHandler");
+        self::assertSame([], $this->linesReportedIn('CallerStateSlotHandler'));
+
+        self::assertContains(32, $this->linesReportedIn('CallerStateSharedMemo'), 'the plain service stays reported');
+    }
+
+    /**
+     * `$this->{'tenant'} = $tenant` on line 27 and `[$this->{'region'}] =
+     * [$region]` on line 32 are the properties they name; `$this->{$name}` on
+     * line 37 cannot be resolved and is skipped.
+     */
+    public function testAPropertyNamedByALiteralStringIsFlagged(): void
+    {
+        self::assertSame([27, 32], $this->linesReportedIn('CallerStateLiteralPropertyName'));
     }
 
     public function testAClassTheContainerDoesNotManageIsNotFlagged(): void
