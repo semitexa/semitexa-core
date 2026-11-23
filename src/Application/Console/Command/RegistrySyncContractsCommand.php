@@ -63,7 +63,12 @@ class RegistrySyncContractsCommand extends BaseCommand
             return count($d['implementations']) >= 2;
         });
 
-        $removed = RegistryContractResolverGenerator::removeGeneratedResolvers();
+        try {
+            $removed = RegistryContractResolverGenerator::removeGeneratedResolvers();
+        } catch (\RuntimeException $e) {
+            $io->error($e->getMessage());
+            return Command::FAILURE;
+        }
         $generatedFactories = RegistryContractResolverGenerator::generateAllFactories($multiImpl);
 
         $msg = count($generatedFactories) . ' factory(ies)';

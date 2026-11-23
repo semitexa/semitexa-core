@@ -110,36 +110,106 @@ final class TheRegistryAloneDecidesTest extends TestCase
     #[Test]
     public function sync_removes_the_resolvers_it_generated_and_keeps_everything_else(): void
     {
-        $cwd = getcwd();
-        $projectRoot = StaticState::snapshot(ProjectRoot::class);
-        $root = sys_get_temp_dir() . '/semitexa-registry-decides-' . bin2hex(random_bytes(6));
+        $root = self::scratchProject();
         $contracts = $root . '/' . CanonicalRegistryPaths::REGISTRY_CONTRACTS;
-        mkdir($contracts, 0777, true);
-        // composer.json and src/modules make a project root for ProjectRoot; without
-        // the second it walks up to the real project and the sync deletes its files.
+        file_put_contents($contracts . '/ClockResolver.php', self::generated(" * Resolver for App\\Clock.\n") . "final class ClockResolver {}\n");
+        file_put_contents($contracts . '/OwnResolver.php', "<?php\n\n/** Written by hand: ours. */\nfinal class OwnResolver {}\n");
+        file_put_contents($contracts . '/ChannelFactory.php', self::generated('') . "final class ChannelFactory {}\n");
+
+        try {
+            $removed = self::inProject($root, static fn (): array => RegistryContractResolverGenerator::removeGeneratedResolvers());
+            $left = array_map('basename', glob($contracts . '/*.php') ?: []);
+            sort($left);
+        } finally {
+            exec('rm -rf ' . escapeshellarg($root));
+        }
+
+        self::assertSame([CanonicalRegistryPaths::REGISTRY_CONTRACTS . '/ClockResolver.php'], $removed);
+        self::assertSame(['ChannelFactory.php', 'OwnResolver.php'], $left, 'a hand-written file and a generated factory stay');
+    }
+
+    /** A resolver it cannot read, or a generated one it cannot remove, fails the sync (review, semitexa-core#268). */
+    #[Test]
+    public function sync_stops_on_a_resolver_it_cannot_read_or_remove(): void
+    {
+        $root = self::scratchProject();
+        $contracts = $root . '/' . CanonicalRegistryPaths::REGISTRY_CONTRACTS;
+        try {
+            // Unreadable for root as well: a link to nothing.
+            symlink($root . '/gone.php', $contracts . '/LostResolver.php');
+            $unreadable = self::thrown(static fn (): array => self::inProject($root, static fn (): array => RegistryContractResolverGenerator::removeGeneratedResolvers()));
+            self::assertSame("Cannot read {$contracts}/LostResolver.php, so it cannot be told whether it is a generated resolver to remove.", $unreadable);
+            unlink($contracts . '/LostResolver.php');
+
+            file_put_contents($contracts . '/ClockResolver.php', self::generated(" * Resolver for App\\Clock.\n") . "final class ClockResolver {}\n");
+            chmod($contracts, 0555);
+            try {
+                $outcome = self::thrown(static fn (): array => self::inProject($root, static fn (): array => RegistryContractResolverGenerator::removeGeneratedResolvers()));
+                $mayDelete = is_writable($contracts);
+            } finally {
+                chmod($contracts, 0755);
+            }
+            // Root may delete in a directory at 0555: then the resolver is gone, as usual.
+            self::assertSame(
+                $mayDelete ? null : "Cannot remove {$contracts}/ClockResolver.php, a generated resolver the container no longer reads.",
+                $outcome,
+            );
+            self::assertSame(!$mayDelete, is_file($contracts . '/ClockResolver.php'));
+        } finally {
+            exec('rm -rf ' . escapeshellarg($root));
+        }
+    }
+
+    /** A scratch project ProjectRoot accepts: composer.json and src/modules, or it walks up to the real one. */
+    private static function scratchProject(): string
+    {
+        $root = sys_get_temp_dir() . '/semitexa-registry-decides-' . bin2hex(random_bytes(6));
+        mkdir($root . '/' . CanonicalRegistryPaths::REGISTRY_CONTRACTS, 0777, true);
         mkdir($root . '/src/modules', 0777, true);
         file_put_contents($root . '/composer.json', '{}');
-        $header = '/**' . "\n * " . RegistryContractResolverGenerator::GENERATED_HEADER . "\n";
-        file_put_contents($contracts . '/ClockResolver.php', "<?php\n\n" . $header . " * Resolver for App\\Clock.\n */\nfinal class ClockResolver {}\n");
-        file_put_contents($contracts . '/OwnResolver.php', "<?php\n\n/** Written by hand: ours. */\nfinal class OwnResolver {}\n");
-        file_put_contents($contracts . '/ChannelFactory.php', "<?php\n\n" . $header . " */\nfinal class ChannelFactory {}\n");
+
+        return $root;
+    }
+
+    /**
+     * Runs $fn with $root as the project root; nothing runs unless it is.
+     *
+     * @template T
+     * @param \Closure(): T $fn
+     * @return T
+     */
+    private static function inProject(string $root, \Closure $fn): mixed
+    {
+        $cwd = getcwd();
+        $projectRoot = StaticState::snapshot(ProjectRoot::class);
         chdir($root);
         ProjectRoot::reset();
         try {
-            // Nothing is removed unless the sync would work on this scratch project.
             self::assertSame(realpath($root), realpath(ProjectRoot::get()), 'the scratch directory is the project root');
-            $removed = RegistryContractResolverGenerator::removeGeneratedResolvers();
+
+            return $fn();
         } finally {
             if ($cwd !== false) {
                 chdir($cwd);
             }
             StaticState::restore($projectRoot);
         }
-        $left = array_map('basename', glob($contracts . '/*.php') ?: []);
-        sort($left);
-        exec('rm -rf ' . escapeshellarg($root));
+    }
 
-        self::assertSame([CanonicalRegistryPaths::REGISTRY_CONTRACTS . '/ClockResolver.php'], $removed);
-        self::assertSame(['ChannelFactory.php', 'OwnResolver.php'], $left, 'a hand-written file and a generated factory stay');
+    /** The message $fn throws as a RuntimeException, or null when it returns. */
+    private static function thrown(\Closure $fn): ?string
+    {
+        try {
+            $fn();
+        } catch (\RuntimeException $e) {
+            return $e->getMessage();
+        }
+
+        return null;
+    }
+
+    private static function generated(string $more): string
+    {
+        return "<?php\n\n/**\n * " . RegistryContractResolverGenerator::GENERATED_HEADER . "\n" . $more . " */\n";
     }
 }

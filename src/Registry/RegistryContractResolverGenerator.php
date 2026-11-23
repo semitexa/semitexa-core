@@ -32,6 +32,10 @@ class RegistryContractResolverGenerator
      * A file that does not is someone's own, and stays.
      *
      * @return list<string> the files removed, relative to the project root
+     *
+     * @throws \RuntimeException when a resolver cannot be read (it may be a
+     *                           generated one) or a generated one cannot be removed:
+     *                           a sync that left one behind must not report success
      */
     public static function removeGeneratedResolvers(): array
     {
@@ -39,13 +43,17 @@ class RegistryContractResolverGenerator
         $dir = $root . '/' . CanonicalRegistryPaths::REGISTRY_CONTRACTS;
         $removed = [];
         foreach (glob($dir . '/*Resolver.php') ?: [] as $file) {
-            $source = (string) @file_get_contents($file);
+            $source = @file_get_contents($file);
+            if ($source === false) {
+                throw new \RuntimeException("Cannot read {$file}, so it cannot be told whether it is a generated resolver to remove.");
+            }
             if (!str_contains($source, self::GENERATED_HEADER) || !str_contains($source, ' * Resolver for ')) {
                 continue;
             }
-            if (@unlink($file)) {
-                $removed[] = CanonicalRegistryPaths::REGISTRY_CONTRACTS . '/' . basename($file);
+            if (!@unlink($file)) {
+                throw new \RuntimeException("Cannot remove {$file}, a generated resolver the container no longer reads.");
             }
+            $removed[] = CanonicalRegistryPaths::REGISTRY_CONTRACTS . '/' . basename($file);
         }
         sort($removed);
 
