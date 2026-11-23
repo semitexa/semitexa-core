@@ -60,6 +60,7 @@ class ContractsListCommand extends BaseCommand
 
         $registry = new ServiceContractRegistry($this->classDiscovery, $this->moduleRegistry);
         $details = $registry->getContractDetails();
+        $decisions = $registry->getDecisions();
 
         if ($details === []) {
             if ($json) {
@@ -71,19 +72,20 @@ class ContractsListCommand extends BaseCommand
         }
 
         if ($json) {
-            $this->outputJson($output, $details);
+            $this->outputJson($output, $details, $decisions);
             return Command::SUCCESS;
         }
 
-        $this->outputTable($io, $details);
+        $this->outputTable($io, $details, $decisions);
         return Command::SUCCESS;
     }
 
     /**
-     * Human-readable table: Contract (interface) | Implementations | Active
+     * Human-readable table: Contract (interface) | Implementations | Active | Decided by
      * @param array<string, array{implementations: list<array{module: string, class: string}>, active: string}> $details
+     * @param array<string, array{decided_by: string, tied_with: list<array{module: string, class: string}>}> $decisions
      */
-    private function outputTable(SymfonyStyle $io, array $details): void
+    private function outputTable(SymfonyStyle $io, array $details, array $decisions): void
     {
         $rows = [];
         foreach ($details as $interface => $data) {
@@ -97,26 +99,37 @@ class ContractsListCommand extends BaseCommand
                 $implList[] = $item['module'] . ' → ' . $shortClass . $mark;
             }
 
+            $decidedBy = '';
+            if (isset($decisions[$interface])) {
+                $decidedBy = $decisions[$interface]['decided_by'];
+                foreach ($decisions[$interface]['tied_with'] as $tie) {
+                    $decidedBy .= "\ntied with " . $tie['module'] . ' → ' . $this->shortClass($tie['class']);
+                }
+            }
+
             $rows[] = [
                 $this->shortClass($interface),
                 implode("\n", $implList),
                 $this->shortClass($active),
+                $decidedBy,
             ];
         }
 
         $io->title('Service contracts (interface → implementations, active marked)');
         $io->table(
-            ['Contract (interface)', 'Implementations (module → class)', 'Active'],
+            ['Contract (interface)', 'Implementations (module → class)', 'Active', 'Decided by'],
             $rows
         );
-        $io->text('Resolution: module "extends" order (child module wins). Add #[SatisfiesServiceContract(of: Interface::class)] on implementation classes.');
+        $io->text('Resolution: a module that extends another (composer.json extra.semitexa-module.extends) wins over it, a project module wins over a package, any module wins over Core. Between modules nothing relates, the one found first wins: "discovery-order", which lint:di warns about between two project modules. Add #[SatisfiesServiceContract(of: Interface::class)] on implementation classes.');
     }
 
     /**
      * JSON output for AI agents and scripts: stable structure, easy to parse.
+     * decided_by is null for a contract with one implementation.
      * @param array<string, array{implementations: list<array{module: string, class: string}>, active: string}> $details
+     * @param array<string, array{decided_by: string, tied_with: list<array{module: string, class: string}>}> $decisions
      */
-    private function outputJson(OutputInterface $output, array $details): void
+    private function outputJson(OutputInterface $output, array $details, array $decisions): void
     {
         $out = [];
         foreach ($details as $interface => $data) {
@@ -124,6 +137,8 @@ class ContractsListCommand extends BaseCommand
                 'contract' => $interface,
                 'active' => $data['active'],
                 'implementations' => $data['implementations'],
+                'decided_by' => $decisions[$interface]['decided_by'] ?? null,
+                'tied_with' => $decisions[$interface]['tied_with'] ?? [],
             ];
         }
         $json = json_encode(['contracts' => $out], JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT);
