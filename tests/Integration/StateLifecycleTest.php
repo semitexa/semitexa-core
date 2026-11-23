@@ -9,7 +9,6 @@ use PHPUnit\Framework\TestCase;
 use Semitexa\Auth\Context\AuthContextStore;
 use Semitexa\Authorization\Application\Service\PayloadAccessPolicyResolver;
 use Semitexa\Core\Application;
-use Semitexa\Core\Container\ContainerFactory;
 use Semitexa\Core\Lifecycle\CurrentRequestStore;
 use Semitexa\Core\Lifecycle\PerRequestStateRegistry;
 use Semitexa\Core\Lifecycle\TestStateResetRegistry;
@@ -24,6 +23,7 @@ use Semitexa\Core\Tests\Fixtures\WebhookDemo\WebhookDemoEventStore;
 use Semitexa\Core\Tests\Fixtures\WebhookDemo\WebhookDemoServiceCapabilityStore;
 use Semitexa\Rbac\Application\Service\RbacDecisionCache;
 use Semitexa\Webhooks\Auth\Contract\WebhookReplayStoreInterface;
+use Semitexa\Webhooks\Auth\InMemoryWebhookReplayStore;
 
 /**
  * Lifecycle taxonomy tests.
@@ -53,7 +53,11 @@ final class StateLifecycleTest extends TestCase
     protected function setUp(): void
     {
         $this->app = new Application();
-        $this->replay = ContainerFactory::get()->get(WebhookReplayStoreInterface::class);
+        // The per-worker store these tests pin is the in-memory one. It is
+        // built here, not taken from the container: the default binding moves
+        // to the database store, which every worker shares and no test reset
+        // clears (tk-webhooks-replay-check-off-with-the-default-store).
+        $this->replay = new InMemoryWebhookReplayStore();
 
         // Force every store under test to self-register with its registry
         // (PerRequestStateRegistry or TestStateResetRegistry) before the
