@@ -84,7 +84,7 @@ Two combinations fail the container build, each with a message that names the cl
 - `#[InjectAsMutable]` on a worker-scoped class: the property would never be filled.
 - A worker-scoped class taking an execution-scoped service as a property: the shared instance would capture one execution's clone.
 
-The fix is the same for both: mark the consuming class `#[ExecutionScoped]`, or keep it worker-scoped, inject a worker-scoped service with `#[InjectAsReadonly]` and read the per-execution value from it at call time.
+The fix is the same for both, and it changes both the class and the property: mark the consuming class `#[ExecutionScoped]` and take the property with `#[InjectAsMutable]`; or keep the class worker-scoped, inject a worker-scoped service with `#[InjectAsReadonly]` and read the per-execution value from it at call time. Marking the class `#[ExecutionScoped]` while the property stays `#[InjectAsReadonly]` still fails the build.
 
 ## Lifecycle
 
