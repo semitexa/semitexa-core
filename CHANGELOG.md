@@ -5,7 +5,7 @@ Changes to `semitexa/core` that a consuming application can notice. Sections are
 next release tag. This file is machine-read by `update:changelog` and the OS
 "What's new" surface — keep entries short and operator-facing.
 
-## Unreleased
+## 2026.11.23.1215 — 2026-11-23
 
 ### Changed
 - **A session cookie is used only when the server issued its id and still holds
