@@ -38,8 +38,10 @@ final class ServiceContractRegistry
 
     /**
      * The ties between two different project modules, which lint:di warns about:
-     * the project's own code, whose winner nothing it declared decides.
-     * @var list<array{contract: class-string, active: class-string, active_module: string, other: class-string, other_module: string}>
+     * the project's own code, whose winner nothing it declared decides. cycle:
+     * one of the two has no place in the order, because its extends relations
+     * form a cycle.
+     * @var list<array{contract: class-string, active: class-string, active_module: string, other: class-string, other_module: string, cycle: bool}>
      */
     private array $projectModuleTies = [];
 
@@ -84,7 +86,7 @@ final class ServiceContractRegistry
     }
 
     /**
-     * @return list<array{contract: class-string, active: class-string, active_module: string, other: class-string, other_module: string}>
+     * @return list<array{contract: class-string, active: class-string, active_module: string, other: class-string, other_module: string, cycle: bool}>
      */
     public function getProjectModuleTies(): array
     {
@@ -220,6 +222,7 @@ final class ServiceContractRegistry
                         'active_module' => $activeModule,
                         'other' => $item['impl'],
                         'other_module' => $item['module'],
+                        'cycle' => !isset($ranked[$activeModule]) || !isset($ranked[$item['module']]),
                     ];
                 }
             }

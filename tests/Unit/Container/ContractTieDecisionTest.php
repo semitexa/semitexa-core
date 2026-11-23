@@ -99,7 +99,13 @@ final class ContractTieDecisionTest extends TestCase
             ['decided_by' => 'discovery-order', 'tied_with' => [['module' => 'Tenants', 'class' => TenantsTie::class], ['module' => 'Core', 'class' => CoreTie::class]]],
             $cycle->getDecisions()[TieContract::class],
         );
-        self::assertCount(1, $cycle->getProjectModuleTies());
+        // The relations exist already: the advice is to break the cycle (review, semitexa-core#269).
+        self::assertSame(
+            ['Contract ' . TieContract::class . ': ' . WebsiteTie::class . ' (module Website) and ' . TenantsTie::class . ' (module Tenants) tie, '
+                . 'because the extends relations of their modules form a cycle and neither has a place in the module order; ' . WebsiteTie::class . ' is active only by discovery order. '
+                . 'Break the cycle: remove extra.semitexa-module.extends from the composer.json of the module that should lose, then check contracts:list.'],
+            array_map(LintDiCommand::contractTieWarning(...), $cycle->getProjectModuleTies()),
+        );
 
         $oneModule = self::registry([['Website', 'local']], [WebsiteTie::class, WebsiteOtherTie::class]);
         self::assertSame(

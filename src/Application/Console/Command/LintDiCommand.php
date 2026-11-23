@@ -233,11 +233,19 @@ final class LintDiCommand extends BaseCommand
      * The warning for two project modules that tie on a contract. The module
      * that should win names the other in extra.semitexa-module.extends; a
      * module may have no composer.json yet, and extends one module at most.
+     * When their extends relations form a cycle, those already exist, and the
+     * cycle is what to undo (review, semitexa-core#269).
      *
-     * @param array{contract: string, active: string, active_module: string, other: string, other_module: string} $tie
+     * @param array{contract: string, active: string, active_module: string, other: string, other_module: string, cycle: bool} $tie
      */
     public static function contractTieWarning(array $tie): string
     {
+        if ($tie['cycle']) {
+            return "Contract {$tie['contract']}: {$tie['active']} (module {$tie['active_module']}) and {$tie['other']} (module {$tie['other_module']}) tie, "
+                . "because the extends relations of their modules form a cycle and neither has a place in the module order; {$tie['active']} is active only by discovery order. "
+                . 'Break the cycle: remove extra.semitexa-module.extends from the composer.json of the module that should lose, then check contracts:list.';
+        }
+
         return "Contract {$tie['contract']}: {$tie['active']} (module {$tie['active_module']}) and {$tie['other']} (module {$tie['other_module']}) are unrelated; "
             . "{$tie['active']} is active only by discovery order. Decide it in the composer.json of the module that should win (create one if it has none): "
             . "\"extra\": {\"semitexa-module\": {\"extends\": \"{$tie['other_module']}\"}} in module {$tie['active_module']} keeps {$tie['active']}; "
