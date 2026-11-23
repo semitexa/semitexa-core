@@ -40,6 +40,16 @@ final class CrossSiteReadTest extends TestCase
         yield 'own origin with its default port written out' => ['GET', ['Origin' => 'http://example.test:80', 'Host' => 'example.test'], false];
         yield 'own origin, the Host naming the default port' => ['GET', ['Origin' => 'http://example.test', 'Host' => 'example.test:80'], false];
         yield 'own origin in another case' => ['GET', ['Origin' => 'http://Example.TEST', 'Host' => 'example.test'], false];
+        yield 'own origin, the Host in another case' => ['GET', ['Origin' => 'http://example.test', 'Host' => 'Example.TEST'], false];
+        yield 'own origin, its scheme in capitals' => ['GET', ['Origin' => 'HTTP://example.test', 'Host' => 'example.test'], false];
+        yield 'own https origin with its default port written out' => ['GET', ['Origin' => 'https://example.test:443', 'Host' => 'example.test'], false, ['https' => 'on']];
+        yield 'https from a trusted proxy (loopback)' => ['GET', ['Origin' => 'https://app.example', 'Host' => 'app.example', 'X-Forwarded-Proto' => 'https'], false, ['remote_addr' => '127.0.0.1']];
+        yield 'https from a proxy that is not trusted reads as http' => ['GET', ['Origin' => 'https://app.example', 'Host' => 'app.example', 'X-Forwarded-Proto' => 'https'], true, ['remote_addr' => '172.18.0.5']];
+        yield 'IPv6, another port' => ['GET', ['Origin' => 'http://[::1]:3000', 'Host' => '[::1]'], true];
+        yield 'IPv6, own origin' => ['GET', ['Origin' => 'http://[::1]:9507', 'Host' => '[::1]:9507'], false];
+        yield 'a scheme other than http or https' => ['GET', ['Origin' => 'file://localhost', 'Host' => 'localhost'], true];
+        yield 'a Host with a user part' => ['GET', ['Origin' => 'http://evil.example', 'Host' => 'localhost@evil.example'], true];
+        yield 'a Host with a path' => ['GET', ['Origin' => 'http://localhost:9507', 'Host' => 'localhost:9507/'], true];
     }
 
     /**

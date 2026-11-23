@@ -49,7 +49,11 @@ final class CrossSiteRead
         if (!is_array($parts) || !isset($parts['scheme'], $parts['host'])) {
             return true; // `Origin: null` and the like: an opaque, foreign origin
         }
-        $own = parse_url('http://' . strtolower(trim((string) $request->getHeader('Host'))));
+        $hostHeader = strtolower(trim((string) $request->getHeader('Host')));
+        // A Host is a host and a port. parse_url() would read `localhost@evil.example`
+        // as a user and a host, and `localhost/x` as a host and a path; refused, as
+        // Request::getHost() refuses them (review, semitexa-core#266).
+        $own = preg_match('/[\s@\/\\\\?#]/', $hostHeader) === 1 ? false : parse_url('http://' . $hostHeader);
         if (!is_array($own) || ($own['host'] ?? '') === '') {
             return true; // no host of its own to compare with
         }
