@@ -101,7 +101,10 @@ class PayloadSerializer
         }
 
         $method = new \ReflectionMethod($dto, $setterName);
-        if ($method->getNumberOfRequiredParameters() !== 1) {
+        // Only what a caller could call itself, as PayloadHydrator decides: a
+        // queue message names the keys, and ReflectionMethod::invoke() would
+        // reach a private, protected or static set*() as readily as a public one.
+        if (!$method->isPublic() || $method->isStatic() || $method->getNumberOfRequiredParameters() !== 1) {
             return false;
         }
 

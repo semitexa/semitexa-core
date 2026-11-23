@@ -6,6 +6,7 @@ namespace Semitexa\Core\Tests\Unit\Queue;
 
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
+use Semitexa\Core\Discovery\HandlerRegistry;
 use Semitexa\Core\Container\ContainerFactory;
 use Semitexa\Core\Container\SemitexaContainer;
 use Semitexa\Core\Queue\HandlerExecution;
@@ -114,6 +115,12 @@ final class QueuedOriginTest extends TestCase
         $booted = $slot->getValue();
         $container = new SemitexaContainer();
         $container->set(OriginSeeingHandler::class, new OriginSeeingHandler());
+        // And, as a boot would, the handler registry naming it Queued for what
+        // the job carries: the worker runs only such a handler
+        // (tk-queue-worker-pre-validation-hydration-and-handle-bypass).
+        $handlers = new HandlerRegistry();
+        $handlers->register(\stdClass::class, \stdClass::class, ['class' => OriginSeeingHandler::class, 'execution' => 'queued', 'transport' => 'origin-spy', 'queue' => 'q', 'priority' => 0]);
+        $container->set(HandlerRegistry::class, $handlers);
         $slot->setValue(null, $container);
         try {
             $worker = (new \ReflectionClass(QueueWorker::class))->newInstanceWithoutConstructor();

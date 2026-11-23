@@ -4,6 +4,10 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Queue;
 
+use Psr\Container\ContainerInterface;
+use Semitexa\Core\Discovery\HandlerRegistry;
+use Semitexa\Core\Event\EventExecution;
+use Semitexa\Core\Event\EventListenerRegistry;
 use Semitexa\Core\Lifecycle\PerRequestStateRegistry;
 use Semitexa\Core\Log\FallbackErrorLogger;
 use Semitexa\Core\Queue\Message\QueuedEventListenerMessage;
@@ -234,10 +238,26 @@ class QueueWorker
         }
 
         try {
-            /** @var array<string, mixed> $eventPayload */
-            $eventPayload = $message->eventPayload;
-            $event = $this->hydrateDto($message->eventClass, $eventPayload);
             $container = ContainerFactory::get();
+            $refusal = self::refusalOfListenerMessage($message, self::listenersOf($container, $message->eventClass));
+        } catch (\Throwable $e) {
+            if ($e instanceof DeadLetterUnwritableException) {
+                throw $e;
+            }
+            $this->log("❌ Error preparing event listener: {$e->getMessage()}", 'error');
+            $this->retryOrDeadLetter($message, "could not prepare the listener: {$e->getMessage()}");
+            return;
+        }
+        // Not a job this boot may run: nothing of it is built, not even the
+        // event, and a retry would not make it one.
+        if ($refusal !== null) {
+            $this->log("⚠️  {$refusal}", 'warning');
+            $this->moveToDeadLetterQueue($message, $refusal);
+            $this->updateStats('failed');
+            return;
+        }
+
+        try {
             $listener = $container->get($message->listenerClass);
             if (!method_exists($listener, 'handle')) {
                 $this->log("⚠️  Listener {$message->listenerClass} has no handle() method", 'warning');
@@ -245,6 +265,9 @@ class QueueWorker
                 $this->updateStats('failed');
                 return;
             }
+            /** @var array<string, mixed> $eventPayload */
+            $eventPayload = $message->eventPayload;
+            $event = $this->hydrateDto($message->eventClass, $eventPayload);
         } catch (\Throwable $e) {
             if ($e instanceof DeadLetterUnwritableException) {
                 throw $e;
@@ -290,14 +313,27 @@ class QueueWorker
         }
 
         try {
-            /** @var array<string, mixed> $requestPayload */
-            $requestPayload = $message->requestPayload;
-            /** @var array<string, mixed> $responsePayload */
-            $responsePayload = $message->responsePayload;
-            $request = $this->hydrateDto($message->requestClass, $requestPayload);
-            $response = $this->hydrateDto($message->responseClass, $responsePayload);
-
             $container = ContainerFactory::get();
+            $registry = $container->has(HandlerRegistry::class) ? $container->get(HandlerRegistry::class) : null;
+            $refusal = self::refusalOfHandlerMessage($message, $registry instanceof HandlerRegistry ? $registry : null);
+        } catch (\Throwable $e) {
+            if ($e instanceof DeadLetterUnwritableException) {
+                throw $e;
+            }
+            $this->log("❌ Error processing payload: {$e->getMessage()}", 'error');
+            $this->retryOrDeadLetter($message, "could not prepare the handler: {$e->getMessage()}");
+            return;
+        }
+        // Not a job this boot may run: nothing of it is built, not the request
+        // or the response either, and a retry would not make it one.
+        if ($refusal !== null) {
+            $this->log("⚠️  {$refusal}", 'warning');
+            $this->moveToDeadLetterQueue($message, $refusal);
+            $this->updateStats('failed');
+            return;
+        }
+
+        try {
             // get() ALONE, deliberately — never a resolve() fallback.
             //
             // ServiceRegistrationPhase registers every discovered payload
@@ -319,6 +355,12 @@ class QueueWorker
                 $this->updateStats('failed');
                 return;
             }
+            /** @var array<string, mixed> $requestPayload */
+            $requestPayload = $message->requestPayload;
+            /** @var array<string, mixed> $responsePayload */
+            $responsePayload = $message->responsePayload;
+            $request = $this->hydrateDto($message->requestClass, $requestPayload);
+            $response = $this->hydrateDto($message->responseClass, $responsePayload);
         } catch (\Throwable $e) {
             if ($e instanceof DeadLetterUnwritableException) {
                 throw $e;
@@ -532,6 +574,79 @@ class QueueWorker
         file_put_contents($this->statsFile, json_encode($stats));
     }
 
+
+    /**
+     * Why this boot will not run a handler message, or null when it may. A
+     * message names classes; a broker, or whoever can write to it, chooses
+     * them. Only a handler discovery registered as Queued runs, and only for
+     * a request and a response it is registered for, which is what
+     * QueueDispatcher sends. Anything else (a sync handler, any other
+     * service with a handle(), a class that only looks like a DTO) is
+     * refused before anything is built.
+     */
+    private static function refusalOfHandlerMessage(QueuedHandlerMessage $message, ?HandlerRegistry $registry): ?string
+    {
+        $handler = $message->handlerClass;
+        if ($registry === null) {
+            return "handler {$handler} cannot be checked: no handler registry in this boot";
+        }
+        $meta = $registry->getHandlerByClass($handler);
+        if ($meta === null) {
+            return "handler {$handler} is not a discovered payload handler";
+        }
+        if ($meta['execution'] !== HandlerExecution::Queued->value) {
+            return "handler {$handler} does not run queued";
+        }
+        // Classes that exist only: an unknown name is refused without
+        // growing findHandlers()' memo by one entry per message.
+        if (!class_exists($message->requestClass) || !class_exists($message->responseClass)) {
+            return "handler {$handler}: request {$message->requestClass} or response {$message->responseClass} not found";
+        }
+        // An abstract class matches a handler registered for it, and new $class() then throws on every retry.
+        foreach ([$message->requestClass, $message->responseClass] as $class) {
+            if (!(new \ReflectionClass($class))->isInstantiable()) {
+                return "handler {$handler}: {$class} is not a class the worker can build";
+            }
+        }
+        foreach ($registry->findHandlers($message->requestClass, $message->responseClass) as $candidate) {
+            if ($candidate['class'] === $handler) {
+                return null;
+            }
+        }
+
+        return "handler {$handler} is not registered for {$message->requestClass} and {$message->responseClass}";
+    }
+
+    /**
+     * Why this boot will not run a listener message, or null when it may:
+     * only a listener registered as Queued for exactly the event class the
+     * message names, which is what EventDispatcher sends.
+     *
+     * @param array<array{class: string, event: string, execution: string, transport: mixed, queue: mixed, priority: int, maxRetries?: int, retryDelay?: int}> $listeners the event's registered listeners
+     */
+    private static function refusalOfListenerMessage(QueuedEventListenerMessage $message, array $listeners): ?string
+    {
+        foreach ($listeners as $meta) {
+            if ($meta['class'] === $message->listenerClass && $meta['execution'] === EventExecution::Queued->value) {
+                return null;
+            }
+        }
+
+        return "listener {$message->listenerClass} is not a queued listener of {$message->eventClass}";
+    }
+
+    /**
+     * The listeners registered for $eventClass. A plain lookup: the name a
+     * message carries is not autoloaded before it is found registered.
+     *
+     * @return array<array{class: string, event: string, execution: string, transport: mixed, queue: mixed, priority: int, maxRetries?: int, retryDelay?: int}>
+     */
+    private static function listenersOf(ContainerInterface $container, string $eventClass): array
+    {
+        $registry = $container->has(EventListenerRegistry::class) ? $container->get(EventListenerRegistry::class) : null;
+
+        return $registry instanceof EventListenerRegistry ? $registry->getListeners($eventClass) : [];
+    }
 
     /**
      * @param array<string, mixed> $payload
