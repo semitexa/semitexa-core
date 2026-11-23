@@ -17,6 +17,15 @@ next release tag. This file is machine-read by `update:changelog` and the OS
   the store no longer has (expired, or the in-memory table lost at a restart)
   gets a new cookie value instead of an empty session under the old one.
 
+### Fixed
+- **`CrossSiteRead` compares an `Origin` as scheme, host and port.** With no
+  `Sec-Fetch-Site`, a page on another port or scheme of the same host was taken
+  for the app's own when the `Host` header named no port: `http://localhost:3000`
+  could read a developer surface (the Observatory, the UI Workbench) served at
+  `Host: localhost`, and so could `https://` beside `http://`. A port left out
+  is now the scheme's default on both sides, so `Host: example.test:80` with
+  `Origin: http://example.test` is the same origin; it was refused before.
+
 ## 2026.11.23.0659 — 2026-11-23
 
 ### Added

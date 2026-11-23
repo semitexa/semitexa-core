@@ -16,7 +16,7 @@ use Semitexa\Core\Request;
  */
 final class CrossSiteReadTest extends TestCase
 {
-    /** @return iterable<string, array{string, array<string, string>, bool}> */
+    /** @return iterable<string, array{0: string, 1: array<string, string>, 2: bool, 3?: array<string, string>}> */
     public static function requests(): iterable
     {
         yield 'no browser headers (curl, a test)' => ['GET', [], false];
@@ -31,14 +31,26 @@ final class CrossSiteReadTest extends TestCase
         yield 'foreign origin without Sec-Fetch' => ['GET', ['Origin' => 'https://evil.example', 'Host' => '127.0.0.1:9507'], true];
         yield 'opaque origin' => ['GET', ['Origin' => 'null', 'Host' => '127.0.0.1:9507'], true];
         yield 'origin but no host to compare with' => ['GET', ['Origin' => 'http://127.0.0.1:9507'], true];
+        // An origin is scheme, host and port (tk-cross-site-read-origin-port-and-scheme, review semitexa-dev#307).
+        yield 'same host on another port, the Host naming none' => ['GET', ['Origin' => 'http://localhost:3000', 'Host' => 'localhost'], true];
+        yield 'same host on another port' => ['GET', ['Origin' => 'http://127.0.0.1:3000', 'Host' => '127.0.0.1:9507'], true];
+        yield 'same host on another scheme' => ['GET', ['Origin' => 'https://example.test', 'Host' => 'example.test'], true];
+        yield 'an https request from the http origin of its host' => ['GET', ['Origin' => 'http://example.test', 'Host' => 'example.test'], true, ['https' => 'on']];
+        yield 'own https origin' => ['GET', ['Origin' => 'https://example.test', 'Host' => 'example.test'], false, ['https' => 'on']];
+        yield 'own origin with its default port written out' => ['GET', ['Origin' => 'http://example.test:80', 'Host' => 'example.test'], false];
+        yield 'own origin, the Host naming the default port' => ['GET', ['Origin' => 'http://example.test', 'Host' => 'example.test:80'], false];
+        yield 'own origin in another case' => ['GET', ['Origin' => 'http://Example.TEST', 'Host' => 'example.test'], false];
     }
 
-    /** @param array<string, string> $headers */
+    /**
+     * @param array<string, string> $headers
+     * @param array<string, string> $server
+     */
     #[Test]
     #[DataProvider('requests')]
-    public function decides_whether_another_site_could_read_the_response(string $method, array $headers, bool $crossSite): void
+    public function decides_whether_another_site_could_read_the_response(string $method, array $headers, bool $crossSite, array $server = []): void
     {
-        $request = new Request($method, '/__ui/workbench', $headers, [], [], [], []);
+        $request = new Request($method, '/__ui/workbench', $headers, [], [], $server, []);
 
         self::assertSame($crossSite, CrossSiteRead::isCrossSiteRead($request));
     }

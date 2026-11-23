@@ -17,8 +17,10 @@ use Semitexa\Core\Request;
  *
  * A top-level GET navigation is not a read: following a link from docs, chat
  * or another local app opens the page, and the other site cannot see it. A
- * browser names a foreign caller in Sec-Fetch-Site; without that header, an
- * Origin that names another host (or is opaque, like `null`) gives it away.
+ * browser names a foreign caller in Sec-Fetch-Site. Without that header, an
+ * Origin that is not this request's own gives it away: another scheme, host
+ * or port (a port left out is the scheme's default), or an opaque one like
+ * `null`. `http://localhost:3000` is another origin than `Host: localhost`.
  */
 final class CrossSiteRead
 {
@@ -44,12 +46,27 @@ final class CrossSiteRead
             return false;
         }
         $parts = parse_url($origin);
-        if (!is_array($parts) || !isset($parts['host'])) {
+        if (!is_array($parts) || !isset($parts['scheme'], $parts['host'])) {
             return true; // `Origin: null` and the like: an opaque, foreign origin
         }
-        $originHost = strtolower($parts['host']) . (isset($parts['port']) ? ':' . $parts['port'] : '');
-        $host = strtolower(trim((string) $request->getHeader('Host')));
+        $own = parse_url('http://' . strtolower(trim((string) $request->getHeader('Host'))));
+        if (!is_array($own) || ($own['host'] ?? '') === '') {
+            return true; // no host of its own to compare with
+        }
+        $originScheme = strtolower($parts['scheme']);
+        $scheme = $request->getScheme();
 
-        return $host === '' || ($originHost !== $host && strtolower($parts['host']) !== $host);
+        return $originScheme !== $scheme
+            || strtolower($parts['host']) !== $own['host']
+            || ($parts['port'] ?? self::defaultPort($originScheme)) !== ($own['port'] ?? self::defaultPort($scheme));
+    }
+
+    private static function defaultPort(string $scheme): ?int
+    {
+        return match ($scheme) {
+            'http' => 80,
+            'https' => 443,
+            default => null,
+        };
     }
 }
