@@ -17,8 +17,10 @@ use Semitexa\Core\Attribute\InjectAsMutable;
 use Semitexa\Core\Attribute\SatisfiesServiceContract;
 use Semitexa\Core\Attribute\SatisfiesRepositoryContract;
 use Semitexa\Core\Container\ExecutionContextAwareContainerInterface;
+use Semitexa\Core\Container\ServiceContractRegistry;
 use Semitexa\Core\Discovery\AttributeDiscovery;
 use Semitexa\Core\Discovery\ClassDiscovery;
+use Semitexa\Core\ModuleRegistry;
 use Psr\Container\ContainerInterface;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Output\OutputInterface;
@@ -33,6 +35,9 @@ use Symfony\Component\Console\Style\SymfonyStyle;
  * - #[Config] on scalars only, #[InjectAs*] on class types only;
  * - #[InjectAsReadonly] never on an execution-scoped type, here and on commands,
  *   the edge objects PropertyInjector fills (tk-inject-from-context-attr).
+ *
+ * And it warns, without failing, when two project modules implement one
+ * contract with nothing relating them: the one found first is active.
  */
 #[AsCommand(name: 'lint:di', description: 'Verify DI injection rules on all container-managed classes')]
 final class LintDiCommand extends BaseCommand
@@ -48,6 +53,9 @@ final class LintDiCommand extends BaseCommand
 
     #[InjectAsReadonly]
     protected ContainerInterface $container;
+
+    #[InjectAsReadonly]
+    protected ModuleRegistry $moduleRegistry;
 
     private const CONTAINER_MANAGED_ATTRIBUTES = [
         AsService::class,
@@ -201,6 +209,14 @@ final class LintDiCommand extends BaseCommand
             $errors[] = "{$class}: could not be loaded, so lint:di cannot tell whether it is container-managed or a command: {$reason}";
         }
 
+        // Two project modules implementing one contract with nothing relating
+        // them: the one found first is active, and no line of the project says
+        // so (tk-contract-conflict-silent-between-unrelated-modules). A warning:
+        // the build is valid, the choice is only not the project's own.
+        foreach ((new ServiceContractRegistry($this->classDiscovery, $this->moduleRegistry))->getProjectModuleTies() as $tie) {
+            $io->warning(self::contractTieWarning($tie));
+        }
+
         if ($errors === []) {
             $io->success(sprintf('All %d container-managed classes pass DI lint.', $classesChecked));
             return self::SUCCESS;
@@ -211,6 +227,31 @@ final class LintDiCommand extends BaseCommand
         }
         $io->error(sprintf('%d error(s) found in %d classes.', count($errors), $classesChecked));
         return self::FAILURE;
+    }
+
+    /**
+     * The warning for two project modules that tie on a contract. The module
+     * that should win names the other in extra.semitexa-module.extends; a
+     * module may have no composer.json yet, and extends one module at most.
+     * When an extends cycle leaves a module with no place in the order, no
+     * extends advice holds until the cycle is gone, so the warning names the
+     * cycles and nothing else (review, semitexa-core#269).
+     *
+     * @param array{contract: string, active: string, active_module: string, other: string, other_module: string, cycles: list<string>} $tie
+     */
+    public static function contractTieWarning(array $tie): string
+    {
+        if ($tie['cycles'] !== []) {
+            return "Contract {$tie['contract']}: {$tie['active']} (module {$tie['active_module']}) and {$tie['other']} (module {$tie['other_module']}) tie, "
+                . 'because an extends cycle leaves a module with no place in the module order (' . implode('; ', $tie['cycles']) . '), so the module found first won. '
+                . 'Break each cycle in extra.semitexa-module.extends, then run lint:di again: if the two still tie, it says how to decide it.';
+        }
+
+        return "Contract {$tie['contract']}: {$tie['active']} (module {$tie['active_module']}) and {$tie['other']} (module {$tie['other_module']}) are unrelated; "
+            . "{$tie['active']} is active only by discovery order. Decide it in the composer.json of the module that should win (create one if it has none): "
+            . "\"extra\": {\"semitexa-module\": {\"extends\": \"{$tie['other_module']}\"}} in module {$tie['active_module']} keeps {$tie['active']}; "
+            . "\"extends\": \"{$tie['active_module']}\" in module {$tie['other_module']} makes {$tie['other']} active. "
+            . 'A module extends one other at most, so check contracts:list after the change.';
     }
 
     /**

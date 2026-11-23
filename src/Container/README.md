@@ -5,7 +5,7 @@ Semitexa uses a **custom DI container** (no PHP-DI). It is built once per worker
 ## Who gets into the container
 
 - **Services:** a class marked **#[AsService]** is registered under its own class name, one instance per worker. No interface is needed.
-- **Service contracts:** an implementation marked **#[SatisfiesServiceContract(of: SomeInterface::class)]** (or **#[SatisfiesRepositoryContract(of: ...)]** for a repository) is registered under the interface. The container reads them through `ServiceContractRegistry` (the same data `bin/semitexa contracts:list` prints). When several modules implement one interface, the module that `extends` the other wins. Classes in `Semitexa\Core\` are treated as module `Core`.
+- **Service contracts:** an implementation marked **#[SatisfiesServiceContract(of: SomeInterface::class)]** (or **#[SatisfiesRepositoryContract(of: ...)]** for a repository) is registered under the interface. The container reads them through `ServiceContractRegistry` (the same data `bin/semitexa contracts:list` prints). When several modules implement one interface, the registry alone picks the active one: a module that `extends` another (`extra.semitexa-module.extends` in its `composer.json`) wins over it, a project module wins over a package, and any module wins over Core. Between modules nothing relates, the one found first wins. `contracts:list` names what decided each contract (`decided_by`, `tied_with`), and `lint:di` warns about a tie between two project modules. Classes in `Semitexa\Core\` are treated as module `Core`.
 - **Handlers:** are **not** service contracts. They are discovered via **#[AsPayloadHandler(payload: ..., resource: ...)]** and registered automatically so the kernel can resolve them by concrete class when handling a route. Implement `TypedHandlerInterface`; do not put `#[SatisfiesServiceContract]` on handlers.
 - **Event and pipeline listeners:** are discovered via **#[AsEventListener(event: ...)]** and **#[AsPipelineListener]** on the listener class; no marker interface is involved.
 - **Classes a package declares:** an attribute that implements `ImpliesService` registers its carriers like `#[AsService]`. ORM repositories (`#[AsRepository]`), auth handlers and slot handlers are registered when their packages are installed.
@@ -37,7 +37,7 @@ This rule bans one specific use of the constructor — as a DI entry point on co
 - **After injection:** implement `InitializesAfterInjectionInterface` and the container calls `initialize()` once every injected property is set.
 - **Not allowed:** `__construct($dep1, $dep2)` on a class marked with `#[AsService]`, `#[AsPayloadHandler]`, `#[AsEventListener]`, `#[AsPipelineListener]`, `#[SatisfiesServiceContract]`, `#[SatisfiesRepositoryContract]`, or `#[AsRepository]`. Move those dependencies onto protected properties with the injection attribute that matches the scope.
 
-Generated resolvers are the one internal exception: the container instantiates them with their implementation list, not via property injection. Application code should not reproduce this pattern.
+Generated `Factory*` classes are the one internal exception: the container constructs them around its generic factory for the contract, not via property injection. Application code should not reproduce this pattern.
 
 Example (a handler; it is execution-scoped, so it may use all three attributes):
 
@@ -108,12 +108,12 @@ $handler = $requestScoped->get(MyHandler::class);        // execution-scoped: cl
 
 A class the container does not manage (a payload, a resource, a component) may take `ContainerInterface` with `#[InjectAsReadonly]` and read an execution-scoped service at the point of use: `RequestScopedContainer::forCurrentExecution($this->container)->get(Foo::class)`.
 
-## Resolvers and Factory*
+## Factory*
 
-- **Resolver (optional):** If `App\Registry\Contracts\{InterfaceShortName}Resolver` exists, the container uses it to get the active implementation; otherwise it uses the active implementation from the registry (module order).
+- **No resolver:** the container asks no `App\Registry\Contracts\{InterfaceShortName}Resolver` for the active implementation; the registry alone decides it (module order, above). `bin/semitexa registry:sync:contracts` removes the resolvers earlier versions generated. To change the winner, declare `extends`; to choose at runtime, use a Factory* interface.
 - **Factory*:** For contracts with a Factory* interface (e.g. `FactoryItemListProviderInterface`, in the namespace of the contract), the container binds it either to a generated factory class (`App\Registry\Contracts\{Name}Factory`, when present) or to a generic `ContractFactory` implementation. Each implementation names its key with `#[SatisfiesServiceContract(of: ..., factoryKey: SomeEnum::Case)]`. Inject the Factory* interface to use `getDefault()`, `get($key)`, `keys()`.
 
-See `docs/en/di/` in the `semitexa/docs` package for contracts, `contracts:list`, and resolver/factory conventions.
+See `docs/en/di/` in the `semitexa/docs` package for contracts, `contracts:list`, and factory conventions.
 
 ## Swoole
 

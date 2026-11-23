@@ -7,6 +7,22 @@ next release tag. This file is machine-read by `update:changelog` and the OS
 
 ## Unreleased
 
+### Added
+- **`contracts:list` says what decided each contract's active implementation,
+  and `lint:di` warns about a tie between two project modules.** For a contract
+  with two or more implementations, `decided_by` names what separated the active
+  one from its closest rival:
+  - `extends`: a declared relation, `extra.semitexa-module.extends`;
+  - `project-module`: a project module over a package;
+  - `core-default`: any module over Core;
+  - `discovery-order`: nothing relates them, so the module found first won.
+
+  `tied_with` lists the implementations it beat only by that order, and
+  `ServiceContractRegistry::getDecisions()` and `getProjectModuleTies()` carry
+  the same. Until now such a tie resolved silently. `lint:di` prints a warning,
+  without failing, when both tied modules are the project's own, naming both and
+  the `extends` that would decide it.
+
 ### Changed
 - **The service contract registry alone decides a contract's active
   implementation.** The container also asked a generated
