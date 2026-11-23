@@ -18,15 +18,17 @@ use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Style\SymfonyStyle;
 
 /**
- * Discover service contracts with 2+ implementations and generate resolver
- * classes in the canonical contracts directory. Single-implementation contracts
- * are not generated; the container binds those interfaces directly.
+ * Discover service contracts with 2+ implementations and generate the factory
+ * classes of those that have a Factory* interface, in the canonical contracts
+ * directory. The registry alone decides each contract's active implementation
+ * (d-20261123-di-registry-one-source): no resolver is written, and the generated
+ * ones a project still has are removed.
  */
 #[AsCommand(name: 'registry:sync:contracts', description: self::DESCRIPTION)]
 class RegistrySyncContractsCommand extends BaseCommand
 {
     private const CONTRACTS_PATH = CanonicalRegistryPaths::REGISTRY_CONTRACTS;
-    private const DESCRIPTION = 'Generate contract resolvers in ' . self::CONTRACTS_PATH . ' for interfaces with 2+ implementations.';
+    private const DESCRIPTION = 'Generate contract factories in ' . self::CONTRACTS_PATH . ' for interfaces with 2+ implementations, and remove generated resolvers.';
 
     #[InjectAsReadonly]
     protected ClassDiscovery $classDiscovery;
@@ -61,14 +63,15 @@ class RegistrySyncContractsCommand extends BaseCommand
             return count($d['implementations']) >= 2;
         });
 
-        $generated = RegistryContractResolverGenerator::generateAll($multiImpl);
+        $removed = RegistryContractResolverGenerator::removeGeneratedResolvers();
         $generatedFactories = RegistryContractResolverGenerator::generateAllFactories($multiImpl);
 
-        $msg = count($generated) . ' resolver(s)';
-        if (count($generatedFactories) > 0) {
-            $msg .= ', ' . count($generatedFactories) . ' factory(ies)';
+        $msg = count($generatedFactories) . ' factory(ies)';
+        if ($removed !== []) {
+            // The registry decides now: a resolver's getContract() was no longer read.
+            $msg .= ', ' . count($removed) . ' generated resolver(s) removed (' . implode(', ', array_map('basename', $removed)) . ')';
         }
-        $io->success('Registry contract resolvers synced: ' . $msg . ' in ' . self::CONTRACTS_PATH);
+        $io->success('Registry contracts synced: ' . $msg . ' in ' . self::CONTRACTS_PATH);
         return Command::SUCCESS;
     }
 

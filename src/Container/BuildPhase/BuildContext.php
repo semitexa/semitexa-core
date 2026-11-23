@@ -58,9 +58,6 @@ final class BuildContext
     /** @var array<class-string, true> */
     public array $executionScopedClasses = [];
 
-    /** @var array<class-string, class-string> interface => resolver class */
-    public array $interfaceToResolver = [];
-
     /** @var array<class-string, array<string, array{kind: string, type: class-string, optional?: bool}>> */
     public array $injections = [];
 
@@ -123,7 +120,6 @@ final class BuildContext
         $this->typeMap->populateFromBuildArrays(
             $this->idToClass,
             $this->executionScopedClasses,
-            $this->interfaceToResolver,
             $allImpls,
         );
         $this->injectionMap->injections = $this->injections;

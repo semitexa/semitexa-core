@@ -54,9 +54,6 @@ final class GraphBuilder
             if (interface_exists($id)) {
                 continue;
             }
-            if ($this->isResolverClass($class)) {
-                continue;
-            }
             $readonlyClasses[$class] = true;
         }
         $order = $this->topologicalOrder(array_keys($readonlyClasses), $injections, $resolveToClass);
@@ -104,37 +101,9 @@ final class GraphBuilder
     }
 
     /**
-     * Build resolver instances (generated registry resolvers with constructor injection).
-     *
-     * @param array<class-string, ContractDetail> $contractDetails
-     * @param IdToClassMap $idToClass
-     * @param ObjectMap $readonlyInstances (mutated in place)
-     * @param array<class-string, object> $executionScopedPrototypes
-     * @param InjectionsMap $injections
-     */
-    public function buildResolvers(
-        array $contractDetails,
-        array $idToClass,
-        array &$readonlyInstances,
-        array $executionScopedPrototypes,
-        array $injections,
-        ?InjectionAnalyzer $injectionAnalyzer = null,
-    ): void {
-        foreach ($contractDetails as $interface => $data) {
-            $resolverClass = $this->getResolverClassForContract($interface);
-            if ($resolverClass === null || !class_exists($resolverClass) || !isset($idToClass[$resolverClass])) {
-                continue;
-            }
-            $resolver = $this->createInstanceWithConstructor($resolverClass, $readonlyInstances, $executionScopedPrototypes, $idToClass, $injections, $injectionAnalyzer);
-            $readonlyInstances[$resolverClass] = $resolver;
-        }
-    }
-
-    /**
      * Build factory instances for contracts with 2+ implementations.
      *
      * @param array<class-string, ContractDetail> $contractDetails
-     * @param array<class-string, class-string> $interfaceToResolver
      * @param ObjectMap $readonlyInstances
      * @param ObjectMap $executionScopedPrototypes
      * @param FactoryMap $factories (mutated) Factory* interface => generated typed factory, else the generic one
@@ -144,7 +113,6 @@ final class GraphBuilder
      */
     public function buildFactories(
         array $contractDetails,
-        array $interfaceToResolver,
         array $readonlyInstances,
         array $executionScopedPrototypes,
         array &$factories,
@@ -171,21 +139,10 @@ final class GraphBuilder
             if ($factoryInterface === null || !interface_exists($factoryInterface)) {
                 continue;
             }
+            // The registry's active implementation, as get() gives it
+            // (d-20261123-di-registry-one-source).
             $active = $data['active'];
-            $defaultImpl = null;
-            $resolverClass = $interfaceToResolver[$baseInterface] ?? null;
-            if ($resolverClass !== null) {
-                $resolver = $readonlyInstances[$resolverClass] ?? null;
-                if ($resolver !== null && is_callable([$resolver, 'getContract'])) {
-                    $contract = $resolver->getContract();
-                    if (is_object($contract)) {
-                        $defaultImpl = $contract;
-                    }
-                }
-            }
-            if ($defaultImpl === null) {
-                $defaultImpl = $readonlyInstances[$active] ?? $executionScopedPrototypes[$active] ?? null;
-            }
+            $defaultImpl = $readonlyInstances[$active] ?? $executionScopedPrototypes[$active] ?? null;
             if ($defaultImpl === null) {
                 continue;
             }
@@ -536,89 +493,6 @@ final class GraphBuilder
     }
 
     /**
-     * Resolve constructor params from container and create instance; then set InjectAs* properties.
-     * Used for resolver classes (generated registry resolvers) that have constructor dependencies.
-     *
-     * @param class-string $class
-     * @param ObjectMap $readonlyInstances
-     * @param array<class-string, object> $executionScopedPrototypes
-     * @param IdToClassMap $idToClass
-     * @param InjectionsMap $injections
-     */
-    private function createInstanceWithConstructor(
-        string $class,
-        array $readonlyInstances,
-        array $executionScopedPrototypes,
-        array $idToClass,
-        array $injections,
-        ?InjectionAnalyzer $injectionAnalyzer = null,
-    ): object {
-        $ref = new ReflectionClass($class);
-        $ctor = $ref->getConstructor();
-        $args = [];
-        if ($ctor !== null) {
-            foreach ($ctor->getParameters() as $param) {
-                $type = $param->getType();
-                if (!$type instanceof ReflectionNamedType || $type->isBuiltin()) {
-                    if ($param->isDefaultValueAvailable()) {
-                        $args[] = $param->getDefaultValue();
-                        continue;
-                    }
-                    $typeLabel = $type !== null ? (string) $type : 'untyped';
-                    throw new ContainerException(sprintf(
-                        'Container cannot autowire %s::__construct($%s): a parameter of type "%s" is not a service — the container only autowires class-typed constructor parameters. '
-                        . 'Fix: give $%s a default value, or inject it as an #[InjectAsReadonly] property instead, or change its type to a registered #[AsService] class.',
-                        $class,
-                        $param->getName(),
-                        $typeLabel,
-                        $param->getName(),
-                    ));
-                }
-                $name = $type->getName();
-                $mappedClass = $idToClass[$name] ?? null;
-                $inst = $readonlyInstances[$name]
-                    ?? ($mappedClass !== null ? ($readonlyInstances[$mappedClass] ?? null) : null)
-                    ?? $executionScopedPrototypes[$name]
-                    ?? ($mappedClass !== null ? ($executionScopedPrototypes[$mappedClass] ?? null) : null);
-                if ($inst === null) {
-                    if ($param->isDefaultValueAvailable()) {
-                        $args[] = $param->getDefaultValue();
-                        continue;
-                    }
-                    throw new ContainerException(sprintf(
-                        'Container cannot build %s: its constructor dependency %s ($%s) is not a registered service. '
-                        . 'Fix: mark %s with #[AsService] (and ensure its module is active or it lives under the project src/), or provide it via a factory.',
-                        $class,
-                        $name,
-                        $param->getName(),
-                        $name,
-                    ));
-                }
-                $args[] = $inst;
-            }
-        }
-        $instance = $args !== [] ? $ref->newInstanceArgs($args) : $ref->newInstance();
-        if ($injectionAnalyzer !== null) {
-            $injectionAnalyzer->injectConfigProperties($instance, $class, $ref);
-        }
-        // Derive the scoped-class map from the prototypes so the
-        // ExecutionScoped-trap diagnostic works on this path too.
-        $this->injectPropertiesInto(
-            $instance,
-            $class,
-            $injections,
-            $readonlyInstances,
-            $idToClass,
-            array_fill_keys(array_keys($executionScopedPrototypes), true),
-        );
-        if (!$this->defersInitialization($instance, $injections)) {
-            $this->initializeAfterInjection($instance, $class);
-        }
-
-        return $instance;
-    }
-
-    /**
      * Run the one hook a container-managed class has for initialization.
      *
      * The constructor is not it: these objects are built with
@@ -800,26 +674,5 @@ final class GraphBuilder
     private function isExecutionContextType(string $typeName): bool
     {
         return in_array($typeName, SemitexaContainer::EXECUTION_CONTEXT_TYPES, true);
-    }
-
-    /**
-     * @param class-string $class
-     */
-    public function isResolverClass(string $class): bool
-    {
-        return str_contains($class, '\\Registry\\Contracts\\') && str_ends_with($class, 'Resolver');
-    }
-
-    public function getResolverClassForContract(string $interface): ?string
-    {
-        if (!interface_exists($interface)) {
-            return null;
-        }
-        $short = (new ReflectionClass($interface))->getShortName();
-        $resolverShort = preg_replace('/Interface$/', 'Resolver', $short);
-        if ($resolverShort === $short) {
-            $resolverShort = $short . 'Resolver';
-        }
-        return 'App\\Registry\\Contracts\\' . $resolverShort;
     }
 }

@@ -7,6 +7,19 @@ next release tag. This file is machine-read by `update:changelog` and the OS
 
 ## Unreleased
 
+### Changed
+- **The service contract registry alone decides a contract's active
+  implementation.** The container also asked a generated
+  `src/registry/Contracts/*Resolver.php` for it, in `get()` and for a factory's
+  default, while property injection followed the registry, so an edited
+  `getContract()` split the container and `contracts:list` showed neither side.
+  No edit survived anyway: `registry:sync:contracts` rewrote every resolver after
+  each composer install or update. Resolvers are no longer read, and
+  `registry:sync:contracts` no longer writes them: it removes the generated ones
+  it finds (a file without the generated header stays) and still generates the
+  factory classes. To choose between two implementations, declare the relation
+  (`extends`) in the module's `composer.json`.
+
 ### Fixed
 - **A queue worker runs only the jobs this boot queues.** A queue message names
   the classes the worker builds and runs, and whoever can write to the broker

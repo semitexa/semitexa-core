@@ -63,7 +63,7 @@ use Semitexa\Core\Attribute\WorkerState;
  *
  * WHY THE CONSTRUCTOR, AND ONLY IT. The container refuses a container-managed
  * class whose constructor takes parameters, and the one kind it does build
- * through a constructor, a generated resolver, is built once, when the
+ * through a constructor, a generated Factory* class, is built once, when the
  * container is. So no request reaches a constructor argument. No other method
  * is exempt by its name: the real hook,
  * InitializesAfterInjectionInterface::initialize(), takes no parameter and so

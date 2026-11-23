@@ -198,7 +198,7 @@ final class WorkerServiceCallerStateRuleTest extends RuleTestCase
 
     /**
      * The container refuses a constructor with parameters on a container-managed
-     * class and builds a generated resolver once, so no request reaches one.
+     * class and builds a generated Factory* class once, so no request reaches one.
      */
     public function testAnAssignmentInTheConstructorIsNotFlagged(): void
     {

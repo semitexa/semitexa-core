@@ -146,7 +146,6 @@ final class ContractFactoryExecutionScopedTest extends TestCase
                     ['module' => 'B', 'class' => FactoryFixtureWorkerChannel::class, 'factoryKey' => FactoryFixtureChannelKind::Worker],
                 ],
             ]],
-            [],
             $store->readonly,
             $store->prototypes,
             $factories,

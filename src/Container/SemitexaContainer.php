@@ -45,7 +45,7 @@ use ReflectionNamedType;
  *
  * Internal state is organized into three typed stores:
  * - InstanceStore: readonly instances, execution-scoped prototypes, factories
- * - TypeMap: contract bindings, registered classes, resolver mappings, scope detection
+ * - TypeMap: contract bindings, registered classes, scope detection
  * - InjectionMap: per-class property injection metadata
  */
 final class SemitexaContainer implements ContainerInterface, ExecutionContextAwareContainerInterface
@@ -274,36 +274,8 @@ final class SemitexaContainer implements ContainerInterface, ExecutionContextAwa
             return $this->instanceStore->factories[$id];
         }
 
-        // 3. Interface → resolver → active contract
-        $resolverClass = $this->typeMap->interfaceToResolver[$id] ?? null;
-        if ($resolverClass !== null) {
-            $resolver = $this->instanceStore->readonly[$resolverClass] ?? null;
-            if ($resolver !== null && method_exists($resolver, 'getContract')) {
-                $active = $resolver->getContract();
-                // Guarded rather than assumed: getContract() is reached through
-                // method_exists() on an untyped store entry, so nothing proves it
-                // returned an object. `clone` on a non-object fatals, and the
-                // class name below feeds the container's own error messages.
-                if (!is_object($active)) {
-                    throw new ContainerException(sprintf(
-                        'Container: resolver %s::getContract() returned %s, not an object, for "%s".',
-                        $resolverClass,
-                        get_debug_type($active),
-                        $id,
-                    ));
-                }
-                $activeClass = $active::class;
-                if (isset($this->instanceStore->prototypes[$activeClass])) {
-                    $clone = clone $active;
-                    $this->injectMutableProperties($clone, $activeClass);
-                    $this->initializeExecutionScoped($clone, $activeClass);
-                    return $clone;
-                }
-                return $active;
-            }
-        }
-
-        // 4. Resolve id to concrete class via TypeMap
+        // 3. Resolve id to concrete class via TypeMap. The registry alone
+        //    decides which implementation is active (d-20261123-di-registry-one-source).
         $class = $this->typeMap->resolveClass($id);
         if ($class !== null) {
             // Check readonly by concrete class (handles interface → concrete resolution)

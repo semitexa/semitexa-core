@@ -17,7 +17,6 @@ use Semitexa\Core\Container\BuildPhase\LocalModuleAutoloadPhase;
 use Semitexa\Core\Container\BuildPhase\ModuleDiscoveryPhase;
 use Semitexa\Core\Container\BuildPhase\ReadonlyBuildPhase;
 use Semitexa\Core\Container\BuildPhase\RegistryBuildPhase;
-use Semitexa\Core\Container\BuildPhase\ResolverBuildPhase;
 use Semitexa\Core\Container\BuildPhase\ScopeDetectionPhase;
 use Semitexa\Core\Container\BuildPhase\ServiceRegistrationPhase;
 use Semitexa\Core\Container\BuildPhase\ValidationPhase;
@@ -61,7 +60,6 @@ final class ContainerBootstrapper
             new CycleDetectionPhase($cycleDetector),
             new ReadonlyBuildPhase(),
             new ExecutionScopedBuildPhase(),
-            new ResolverBuildPhase(),
             new FactoryBuildPhase(),
             new ValidationPhase(),
         ];
