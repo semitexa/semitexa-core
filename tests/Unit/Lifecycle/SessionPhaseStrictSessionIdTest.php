@@ -17,6 +17,7 @@ use Semitexa\Core\Session\Session;
 use Semitexa\Core\Session\SessionHandlerInterface;
 use Semitexa\Core\Session\SessionInterface;
 use Semitexa\Core\Session\SwooleTableSessionHandler;
+use Semitexa\Core\Support\CoroutineLocal;
 use Semitexa\Core\Tenant\DefaultTenantContextStore;
 
 /**
@@ -35,8 +36,26 @@ final class SessionPhaseStrictSessionIdTest extends TestCase
 
     private string|false $redisHostBefore = false;
 
+    /**
+     * The CoroutineLocal slots SessionPhase::execute() writes: the session it
+     * binds for csrf_field() and, with tenancy off, the tenant it clears.
+     * Outside a coroutine they are one process-wide store, and this test never
+     * passes through Application::handleRequest(), which empties it (review,
+     * semitexa-core#265; as in ASessionThatCannotBeStoredSaysSoTest).
+     */
+    private const SLOTS = ['core.csrf_session', DefaultTenantContextStore::CONTEXT_KEY];
+
+    /** @var array<string, mixed> what those slots held before the test; a slot that was empty has no entry */
+    private array $slotsBefore = [];
+
     protected function setUp(): void
     {
+        $this->slotsBefore = [];
+        foreach (self::SLOTS as $slot) {
+            if (CoroutineLocal::has($slot)) {
+                $this->slotsBefore[$slot] = CoroutineLocal::get($slot);
+            }
+        }
         $this->redisHostBefore = getenv('REDIS_HOST');
         putenv('REDIS_HOST=');
     }
@@ -44,6 +63,14 @@ final class SessionPhaseStrictSessionIdTest extends TestCase
     protected function tearDown(): void
     {
         $this->redisHostBefore === false ? putenv('REDIS_HOST') : putenv('REDIS_HOST=' . $this->redisHostBefore);
+        // Put back, not cleared: a binding another test left is not ours to drop.
+        foreach (self::SLOTS as $slot) {
+            if (array_key_exists($slot, $this->slotsBefore)) {
+                CoroutineLocal::set($slot, $this->slotsBefore[$slot]);
+            } else {
+                CoroutineLocal::remove($slot);
+            }
+        }
     }
 
     /** @return iterable<string, array{string}> */
