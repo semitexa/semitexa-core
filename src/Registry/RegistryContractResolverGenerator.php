@@ -10,10 +10,12 @@ use Semitexa\Core\Contract\ContractFactoryInterface;
 use Semitexa\Core\Support\ProjectRoot;
 
 /**
- * Generates contract resolver classes in the canonical contracts directory when
- * an interface has 2+ implementations. Resolver receives all implementations via
- * constructor (DI) and exposes getContract() for the container to obtain the
- * chosen implementation.
+ * The registry alone decides a contract's active implementation
+ * (d-20261123-di-registry-one-source): the resolver classes this used to write in
+ * the canonical contracts directory are no longer written, and removeGeneratedResolvers()
+ * deletes the ones it wrote. An edit to their getContract() never survived the next
+ * sync, which runs after every composer install or update, and the container
+ * reached a resolver for one contract in fourteen.
  *
  * When a "Factory" interface exists (same namespace, name starts with "Factory",
  * e.g. FactoryItemListProviderInterface for ItemListProviderInterface), generates
@@ -21,33 +23,50 @@ use Semitexa\Core\Support\ProjectRoot;
  */
 class RegistryContractResolverGenerator
 {
+    /** The first line of every class this generator writes. */
+    public const GENERATED_HEADER = 'AUTO-GENERATED. Regenerate via: bin/semitexa registry:sync:contracts';
+
     /**
-     * Generate resolver classes for interfaces with multiple implementations.
+     * Delete the resolver classes this generator wrote: a file of the canonical
+     * contracts directory named *Resolver.php that carries the generated header.
+     * A file that does not is someone's own, and stays.
      *
-     * @param array<string, array{implementations: list<array{module: string, class: string}>, active: string}> $contractDetails from ServiceContractRegistry, filtered to count(implementations) >= 2
-     * @return list<array{interface: string, resolver: string}>
+     * @return list<string> the files removed, relative to the project root
+     *
+     * @throws \RuntimeException when the contracts directory cannot be listed, a
+     *                           resolver cannot be read (it may be a generated one),
+     *                           or a generated one cannot be removed: a sync that
+     *                           left one behind must not report success
      */
-    public static function generateAll(array $contractDetails): array
+    public static function removeGeneratedResolvers(): array
     {
         $root = ProjectRoot::get();
-        $outDir = $root . '/' . CanonicalRegistryPaths::REGISTRY_CONTRACTS;
-        if (!is_dir($outDir)) {
-            mkdir($outDir, 0755, true);
+        $dir = $root . '/' . CanonicalRegistryPaths::REGISTRY_CONTRACTS;
+        if (!is_dir($dir)) {
+            return [];
         }
-
-        $result = [];
-        foreach ($contractDetails as $interface => $data) {
-            $implementations = $data['implementations'] ?? [];
-            $active = $data['active'] ?? null;
-            if (count($implementations) < 2 || $active === null) {
+        // GLOB_ERR: an unreadable directory is an error, not an empty match.
+        $files = glob($dir . '/*Resolver.php', GLOB_ERR);
+        if ($files === false) {
+            throw new \RuntimeException("Cannot list {$dir}, so the generated resolvers in it cannot be found and removed.");
+        }
+        $removed = [];
+        foreach ($files as $file) {
+            $source = @file_get_contents($file);
+            if ($source === false) {
+                throw new \RuntimeException("Cannot read {$file}, so it cannot be told whether it is a generated resolver to remove.");
+            }
+            if (!str_contains($source, self::GENERATED_HEADER) || !str_contains($source, ' * Resolver for ')) {
                 continue;
             }
-            $resolverClass = self::writeResolverClass($root, $interface, $implementations, $active);
-            if ($resolverClass !== null) {
-                $result[] = ['interface' => $interface, 'resolver' => $resolverClass];
+            if (!@unlink($file)) {
+                throw new \RuntimeException("Cannot remove {$file}, a generated resolver the container no longer reads.");
             }
+            $removed[] = CanonicalRegistryPaths::REGISTRY_CONTRACTS . '/' . basename($file);
         }
-        return $result;
+        sort($removed);
+
+        return $removed;
     }
 
     /**
@@ -282,112 +301,6 @@ PHP;
 
 
     /**
-     * @param list<array{module: string, class: string}> $implementations
-     */
-    private static function writeResolverClass(string $root, string $interface, array $implementations, string $active): ?string
-    {
-        $implementations = self::inClassOrder($implementations);
-        try {
-            $ref = new ReflectionClass($interface);
-        } catch (\Throwable $e) {
-            return null;
-        }
-        $shortName = $ref->getShortName();
-        $resolverShortName = preg_replace('/Interface$/', 'Resolver', $shortName) ?? $shortName;
-        if ($resolverShortName === $shortName) {
-            $resolverShortName = $shortName . 'Resolver';
-        }
-        $outPath = $root . '/' . CanonicalRegistryPaths::REGISTRY_CONTRACTS . '/' . $resolverShortName . '.php';
-
-        /** @var array<string, string> $imports */
-        $imports = [];
-        $usedShortNames = self::namesTakenBy($resolverShortName);
-        $params = [];
-        foreach ($implementations as $impl) {
-            $implClass = $impl['class'];
-            $typeHint = self::addImport($implClass, $imports, $usedShortNames);
-            $paramName = self::uniqueParamName($implClass, array_map(
-                static fn(array $parameter): string => $parameter['name'],
-                $params,
-            ));
-            $params[] = [
-                'name' => $paramName,
-                'type' => $typeHint,
-            ];
-        }
-        $activeParamName = '';
-        foreach ($implementations as $i => $impl) {
-            if ($impl['class'] === $active) {
-                $activeParamName = $params[$i]['name'];
-                break;
-            }
-        }
-        if ($activeParamName === '') {
-            $activeParamName = $params[0]['name'];
-        }
-
-        $paramLines = [];
-        $unusedParamNames = [];
-        foreach ($params as $param) {
-            $paramLines[] = "        {$param['type']} \${$param['name']},";
-            if ($param['name'] !== $activeParamName) {
-                $unusedParamNames[] = $param['name'];
-            }
-        }
-        $paramsStr = implode("\n", $paramLines);
-        $paramsStr = rtrim($paramsStr, ',');
-
-        $unusedParamUsage = '';
-        if ($unusedParamNames !== []) {
-            $unusedList = implode(', ', array_map(
-                static fn(string $name): string => '$' . $name,
-                $unusedParamNames,
-            ));
-            $unusedParamUsage = "        \$unusedDependencies = [{$unusedList}];\n        unset(\$unusedDependencies);\n";
-        }
-
-        $interfaceTypeHint = self::addImport($interface, $imports, $usedShortNames);
-        $useBlock = self::formatUseBlock($imports);
-
-        $content = <<<PHP
-<?php
-
-declare(strict_types=1);
-
-namespace App\Registry\Contracts;
-
-{$useBlock}
-
-/**
- * AUTO-GENERATED. Regenerate via: bin/semitexa registry:sync:contracts
- * Resolver for {$interface}.
- *
- * By default, the active implementation is selected automatically by module 'extends' priority.
- * Override getContract() only if you need to resolve a conflict between competing modules manually.
- */
-final class {$resolverShortName}
-{
-    private {$interfaceTypeHint} \$contract;
-
-    public function __construct(
-{$paramsStr}
-    ) {
-        \$this->contract = \${$activeParamName};
-{$unusedParamUsage}    }
-
-    public function getContract(): {$interfaceTypeHint}
-    {
-        return \$this->contract;
-    }
-}
-
-PHP;
-
-        file_put_contents($outPath, $content);
-        return CanonicalRegistryPaths::REGISTRY_CONTRACTS_NAMESPACE . '\\' . $resolverShortName;
-    }
-
-    /**
      * The implementations by class name, never in discovery order: that order differs
      * between machines and filesystems, and the files followed it, so a fresh clone
      * came up with every committed resolver rewritten, its use lines, parameters and
@@ -402,21 +315,6 @@ PHP;
         usort($implementations, static fn (array $a, array $b): int => strcmp($a['class'], $b['class']));
 
         return $implementations;
-    }
-
-    private static function uniqueParamName(string $class, array $used): string
-    {
-        $ref = new ReflectionClass($class);
-        $short = $ref->getShortName();
-        $name = lcfirst($short);
-        $name = preg_replace('/[^a-zA-Z0-9_]/', '', $name) ?: 'impl';
-        $base = $name;
-        $i = 0;
-        while (in_array($name, $used, true)) {
-            $i++;
-            $name = $base . $i;
-        }
-        return $name;
     }
 
     /**

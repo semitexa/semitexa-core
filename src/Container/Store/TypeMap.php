@@ -19,9 +19,6 @@ final class TypeMap
     /** @var array<class-string, true> All registered concrete classes */
     public array $registeredClasses = [];
 
-    /** @var array<string, class-string> Interface → resolver class (dynamic resolution) */
-    public array $interfaceToResolver = [];
-
     /** @var array<class-string, true> Execution-scoped classes (cloned per request) */
     public array $executionScoped = [];
 
@@ -45,22 +42,18 @@ final class TypeMap
      *
      * @param array<string, class-string> $idToClass
      * @param array<class-string, true> $executionScopedClasses
-     * @param array<string, class-string> $interfaceToResolver
      * @param array<string, list<class-string>> $allContractImplementations
      */
     public function populateFromBuildArrays(
         array $idToClass,
         array $executionScopedClasses,
-        array $interfaceToResolver,
         array $allContractImplementations = [],
     ): void {
         $this->contractBindings = [];
         $this->registeredClasses = [];
-        $this->interfaceToResolver = [];
         $this->executionScoped = [];
         $this->allContractImplementations = [];
 
-        $this->interfaceToResolver = $interfaceToResolver;
         $this->executionScoped = $executionScopedClasses;
         $this->allContractImplementations = $allContractImplementations;
 
@@ -96,13 +89,12 @@ final class TypeMap
     }
 
     /**
-     * Check whether a service id is known (as concrete class, contract binding, or resolver).
+     * Check whether a service id is known (as concrete class or contract binding).
      */
     public function isKnown(string $id): bool
     {
         return isset($this->registeredClasses[$id])
-            || isset($this->contractBindings[$id])
-            || isset($this->interfaceToResolver[$id]);
+            || isset($this->contractBindings[$id]);
     }
 
     /**

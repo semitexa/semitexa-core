@@ -10,7 +10,7 @@ use Semitexa\Core\Container\GraphBuilder;
  * Builds contract factory instances for contracts with multiple implementations,
  * then injects factories into execution-scoped prototypes that use #[InjectAsFactory].
  *
- * Preconditions: context->contractDetails, interfaceToResolver, instanceStore (readonly + prototypes),
+ * Preconditions: context->contractDetails, instanceStore (readonly + prototypes),
  *                injections must be populated.
  * Postconditions: instanceStore->factories populated; factory references injected into prototypes.
  */
@@ -22,7 +22,6 @@ final class FactoryBuildPhase implements BuildPhaseInterface
 
         $graphBuilder->buildFactories(
             $context->contractDetails,
-            $context->interfaceToResolver,
             $context->instanceStore->readonly,
             $context->instanceStore->prototypes,
             $context->instanceStore->factories,
