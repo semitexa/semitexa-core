@@ -17,6 +17,23 @@ next release tag. This file is machine-read by `update:changelog` and the OS
   the store no longer has (expired, or the in-memory table lost at a restart)
   gets a new cookie value instead of an empty session under the old one.
 
+### Fixed
+- **`CrossSiteRead` compares an `Origin` as scheme, host and port.** With no
+  `Sec-Fetch-Site`, a page on another port or scheme of the same host was taken
+  for the app's own when the `Host` header named no port: `http://localhost:3000`
+  could read a developer surface (the Observatory, the UI Workbench) served at
+  `Host: localhost`, and so could `https://` beside `http://`. A port left out
+  is now the scheme's default on both sides, so `Host: example.test:80` with
+  `Origin: http://example.test` is the same origin; it was refused before.
+  Browsers send no `Sec-Fetch-*` to a plain-http host that is not localhost,
+  `127.0.0.1` or a `*.localhost` name (a LAN address, `myapp.test`), so there the
+  `Origin` is the only check. Behind a TLS-terminating proxy the request is
+  `https` only when a trusted `X-Forwarded-Proto` says so (`TRUSTED_PROXIES`;
+  loopback by default): from a proxy that is not listed, the requests of an
+  `https` page that carry an `Origin` (a fetch, a form POST) are refused, the
+  safe side. A `Host` that is more than a host and a port
+  (`localhost@evil.example`) is refused too.
+
 ## 2026.11.23.0659 — 2026-11-23
 
 ### Added
