@@ -10,6 +10,7 @@ use ReflectionProperty;
 use Semitexa\Core\Container\ContainerFactory;
 use Semitexa\Core\Container\SemitexaContainer;
 use Semitexa\Core\Event\EventDispatcher;
+use Semitexa\Core\Event\EventListenerRegistry;
 use Semitexa\Core\Queue\Message\QueuedEventListenerMessage;
 use Semitexa\Core\Queue\QueueTransportFactoryInterface;
 use Semitexa\Core\Queue\QueueTransportInterface;
@@ -37,6 +38,9 @@ final class QueuedEventListenerFailureTest extends TestCase
 
     private string $statsFile;
 
+    /** @var array<string, mixed> the live listener registry's own list, put back after the test */
+    private array $listenersBefore = [];
+
     protected function setUp(): void
     {
         $this->staticState = [
@@ -54,11 +58,22 @@ final class QueuedEventListenerFailureTest extends TestCase
         // The worker resolves listeners from the container, which is sealed
         // after boot; the fixture goes into its readonly store for this test.
         $this->store()->readonly[QueuedListenerFixture::class] = new QueuedListenerFixture();
+        // And, as a boot would, into the listener registry as the Queued listener
+        // of its events: the worker runs only such a listener
+        // (tk-queue-worker-pre-validation-hydration-and-handle-bypass).
+        $listeners = $this->listenersOfTheRegistry();
+        $this->listenersBefore = $listeners->getValue($this->listenerRegistry());
+        $registered = $this->listenersBefore;
+        foreach ([QueuedListenerEvent::class, QueuedListenerEventWithRequiredArgument::class] as $event) {
+            $registered[$event][] = ['class' => QueuedListenerFixture::class, 'event' => $event, 'execution' => 'queued', 'transport' => self::TRANSPORT, 'queue' => null, 'priority' => 0];
+        }
+        $listeners->setValue($this->listenerRegistry(), $registered);
     }
 
     protected function tearDown(): void
     {
         unset($this->store()->readonly[QueuedListenerFixture::class]);
+        $this->listenersOfTheRegistry()->setValue($this->listenerRegistry(), $this->listenersBefore);
         array_map([StaticState::class, 'restore'], $this->staticState);
         @unlink($this->statsFile);
     }
@@ -286,6 +301,20 @@ final class QueuedEventListenerFailureTest extends TestCase
         }
 
         return $worker;
+    }
+
+    private function listenerRegistry(): EventListenerRegistry
+    {
+        $registry = ContainerFactory::get()->get(EventListenerRegistry::class);
+        self::assertInstanceOf(EventListenerRegistry::class, $registry);
+        $registry->ensureBuilt();
+
+        return $registry;
+    }
+
+    private function listenersOfTheRegistry(): ReflectionProperty
+    {
+        return new ReflectionProperty(EventListenerRegistry::class, 'listenersByEvent');
     }
 
     private function store(): \Semitexa\Core\Container\Store\InstanceStore

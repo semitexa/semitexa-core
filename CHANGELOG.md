@@ -5,6 +5,22 @@ Changes to `semitexa/core` that a consuming application can notice. Sections are
 next release tag. This file is machine-read by `update:changelog` and the OS
 "What's new" surface — keep entries short and operator-facing.
 
+## Unreleased
+
+### Fixed
+- **A queue worker runs only the jobs this boot queues.** A queue message names
+  the classes the worker builds and runs, and whoever can write to the broker
+  chooses them. The worker built the request, response or event a message named
+  first, through `set*()` methods of any visibility, and then ran any container
+  service with a `handle()`: every synchronous payload handler, or a service that
+  is no listener at all. A handler message now runs only a handler discovery
+  registered as `Queued`, for the request and response classes it is registered
+  for, and an event message only a listener registered as `Queued` for exactly
+  that event class. Anything else goes to the dead letter before anything of it
+  is built. `PayloadSerializer::hydrate()` calls only public, non-static setters,
+  as `PayloadHydrator` does: a DTO that relied on a private or static `set*()`
+  to come back from a queue loses that field.
+
 ## 2026.11.23.1215 — 2026-11-23
 
 ### Changed
