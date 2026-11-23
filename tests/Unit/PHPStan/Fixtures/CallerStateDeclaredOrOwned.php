@@ -9,13 +9,14 @@ use Semitexa\Core\Attribute\Config;
 use Semitexa\Core\Attribute\InjectAsMutable;
 use Semitexa\Core\Attribute\InjectAsReadonly;
 use Semitexa\Core\Attribute\WorkerState;
+use Semitexa\Core\Contract\InitializesAfterInjectionInterface;
 
 /**
  * Fixture: what WorkerServiceCallerStateRule must leave alone on a
  * worker-shared service. Every property here is written from a parameter.
  */
 #[AsService]
-final class CallerStateDeclaredOrOwned
+final class CallerStateDeclaredOrOwned implements InitializesAfterInjectionInterface
 {
     /** ALLOWED: declared worker-wide, with the reason. */
     #[WorkerState('Registry keyed by name, filled at worker boot from discovery.')]
@@ -32,7 +33,7 @@ final class CallerStateDeclaredOrOwned
     #[Config('fixture.limit')]
     protected int $limit = 10;
 
-    /** ALLOWED: written only while the instance is being built. */
+    /** ALLOWED: written by the constructor, which no request reaches, and by the real initialize() hook. */
     private string $prefix = '';
 
     private string $suffix = '';
@@ -47,9 +48,9 @@ final class CallerStateDeclaredOrOwned
         $this->prefix = $prefix;
     }
 
-    public function initialize(string $suffix = ''): void
+    public function initialize(): void
     {
-        $this->suffix = $suffix;
+        $this->suffix = strtolower('SUFFIX');
     }
 
     public function register(string $name, object $entry): void
