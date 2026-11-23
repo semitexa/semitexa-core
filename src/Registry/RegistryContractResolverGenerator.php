@@ -33,16 +33,25 @@ class RegistryContractResolverGenerator
      *
      * @return list<string> the files removed, relative to the project root
      *
-     * @throws \RuntimeException when a resolver cannot be read (it may be a
-     *                           generated one) or a generated one cannot be removed:
-     *                           a sync that left one behind must not report success
+     * @throws \RuntimeException when the contracts directory cannot be listed, a
+     *                           resolver cannot be read (it may be a generated one),
+     *                           or a generated one cannot be removed: a sync that
+     *                           left one behind must not report success
      */
     public static function removeGeneratedResolvers(): array
     {
         $root = ProjectRoot::get();
         $dir = $root . '/' . CanonicalRegistryPaths::REGISTRY_CONTRACTS;
+        if (!is_dir($dir)) {
+            return [];
+        }
+        // GLOB_ERR: an unreadable directory is an error, not an empty match.
+        $files = glob($dir . '/*Resolver.php', GLOB_ERR);
+        if ($files === false) {
+            throw new \RuntimeException("Cannot list {$dir}, so the generated resolvers in it cannot be found and removed.");
+        }
         $removed = [];
-        foreach (glob($dir . '/*Resolver.php') ?: [] as $file) {
+        foreach ($files as $file) {
             $source = @file_get_contents($file);
             if ($source === false) {
                 throw new \RuntimeException("Cannot read {$file}, so it cannot be told whether it is a generated resolver to remove.");

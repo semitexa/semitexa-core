@@ -160,6 +160,29 @@ final class TheRegistryAloneDecidesTest extends TestCase
         }
     }
 
+    /** A contracts directory it cannot list fails the sync too: not an empty result (review, semitexa-core#268). */
+    #[Test]
+    public function sync_stops_on_a_contracts_directory_it_cannot_list(): void
+    {
+        $root = self::scratchProject();
+        $contracts = $root . '/' . CanonicalRegistryPaths::REGISTRY_CONTRACTS;
+        file_put_contents($contracts . '/ClockResolver.php', self::generated(" * Resolver for App\\Clock.\n") . "final class ClockResolver {}\n");
+        try {
+            chmod($contracts, 0111);
+            try {
+                $outcome = self::thrown(static fn (): array => self::inProject($root, static fn (): array => RegistryContractResolverGenerator::removeGeneratedResolvers()));
+                $mayList = is_readable($contracts);
+            } finally {
+                chmod($contracts, 0755);
+            }
+            // Root may list a directory at 0111: then the resolver is found and removed, as usual.
+            self::assertSame($mayList ? null : "Cannot list {$contracts}, so the generated resolvers in it cannot be found and removed.", $outcome);
+            self::assertSame(!$mayList, is_file($contracts . '/ClockResolver.php'));
+        } finally {
+            exec('rm -rf ' . escapeshellarg($root));
+        }
+    }
+
     /** A scratch project ProjectRoot accepts: composer.json and src/modules, or it walks up to the real one. */
     private static function scratchProject(): string
     {
