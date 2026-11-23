@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Semitexa\Core\Log;
 
 use Semitexa\Core\Attribute\SatisfiesServiceContract;
+use Semitexa\Core\Attribute\WorkerState;
 use Semitexa\Core\Attribute\InjectAsReadonly;
 use Semitexa\Core\Environment;
 use Semitexa\Core\Server\SwooleLogRetention;
@@ -42,6 +43,7 @@ final class AsyncJsonLogger implements LoggerInterface
      *
      * @var array<string, int>
      */
+    #[WorkerState('Byte counter per log file path: how much this worker appended since it last asked the filesystem; the paths come from LOG_FILE and LOG_CHANNELS, and only a length is kept, never what was logged.')]
     private array $bytesSinceSizeCheck = [];
 
     /**

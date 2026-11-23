@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Semitexa\Core\Event;
 
 use Semitexa\Core\Attribute\InjectAsReadonly;
+use Semitexa\Core\Attribute\WorkerState;
 use Semitexa\Core\Exception\ConfigurationException;
 use Semitexa\Core\Lifecycle\RequestContextSnapshot;
 use Semitexa\Core\Attribute\SatisfiesServiceContract;
@@ -37,6 +38,7 @@ final class EventDispatcher implements EventDispatcherInterface
      *
      * @var list<callable(object): void>
      */
+    #[WorkerState('Hooks a package wires once at worker boot (only LedgerBootstrap calls addPostDispatchHook()); a hook is code that receives each event as an argument, never data of a request.')]
     private array $postDispatchHooks = [];
 
     /**

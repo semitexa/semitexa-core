@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Semitexa\Core\Resource\Metadata;
 
 use Semitexa\Core\Attribute\AsService;
+use Semitexa\Core\Attribute\WorkerState;
 use Semitexa\Core\Attribute\InjectAsReadonly;
 use Semitexa\Core\Discovery\ClassDiscovery;
 use Semitexa\Core\Resource\Attribute\ResourceObject;
@@ -17,9 +18,11 @@ final class ResourceMetadataRegistry
     protected ResourceMetadataExtractor $extractor;
 
     /** @var array<class-string, ResourceObjectMetadata> */
+    #[WorkerState('Discovery registry: metadata of #[ResourceObject] classes keyed by class name, filled at worker boot from discovery or its cache file; derived from code only.')]
     private array $byClass = [];
 
     /** @var array<string, class-string> */
+    #[WorkerState('Discovery registry: resource type => class name, written together with $byClass at worker boot; derived from code only.')]
     private array $byType = [];
 
     private bool $built = false;
