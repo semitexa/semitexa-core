@@ -66,14 +66,12 @@ final class SessionPhase
         $request = $context->request;
 
         $cookieName = Environment::getEnvValue('SESSION_COOKIE_NAME') ?? 'semitexa_session';
-        $sessionId = $request->getCookie($cookieName, '');
-        $fromCookie = $sessionId !== '' && strlen($sessionId) === 32;
-        if (!$fromCookie) {
-            $sessionId = bin2hex(random_bytes(16));
-        }
+        $presentedId = $request->getCookie($cookieName, '');
         $sessionLifetime = (int) (Environment::getEnvValue('SESSION_LIFETIME') ?? '3600');
         try {
-            $session = new Session($sessionId, $this->sessionHandler, $cookieName, $sessionLifetime);
+            // Strict: the cookie's id is kept only when it is well formed and
+            // the store holds it; otherwise the session gets a fresh id.
+            $session = Session::open($presentedId, $this->sessionHandler, $cookieName, $sessionLifetime);
         } catch (\Throwable $e) {
             // A coroutine its server cancelled (an SSE stream whose browser left)
             // is not a store that cannot be read: it stops here, unlogged.
@@ -82,8 +80,15 @@ final class SessionPhase
             }
             // The store is unreadable (Redis down). Serve the request as a guest
             // on a session that persists nothing, rather than failing the page.
+            // Whether the store holds the id cannot be asked, and nothing of
+            // this session is saved or sent back, so a well-formed id is kept.
             $this->logSessionStoreUnreadable($e, $request);
-            $session = new Session($sessionId, new TransientSessionHandler(), $cookieName, $sessionLifetime);
+            $session = new Session(
+                Session::isWellFormedId($presentedId) ? $presentedId : Session::generateId(),
+                new TransientSessionHandler(),
+                $cookieName,
+                $sessionLifetime,
+            );
         }
 
         // Ensure a CSRF token exists on this session. Generated once, then stable
