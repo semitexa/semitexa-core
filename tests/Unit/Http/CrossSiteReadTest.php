@@ -16,6 +16,23 @@ use Semitexa\Core\Request;
  */
 final class CrossSiteReadTest extends TestCase
 {
+    private string|false $trustedProxiesBefore = false;
+
+    /**
+     * The proxy rows decide on loopback alone: TRUSTED_PROXIES is set empty, not
+     * unset, since an unset key is read from .env (review, semitexa-core#266).
+     */
+    protected function setUp(): void
+    {
+        $this->trustedProxiesBefore = getenv('TRUSTED_PROXIES');
+        putenv('TRUSTED_PROXIES=');
+    }
+
+    protected function tearDown(): void
+    {
+        $this->trustedProxiesBefore === false ? putenv('TRUSTED_PROXIES') : putenv('TRUSTED_PROXIES=' . $this->trustedProxiesBefore);
+    }
+
     /** @return iterable<string, array{0: string, 1: array<string, string>, 2: bool, 3?: array<string, string>}> */
     public static function requests(): iterable
     {
