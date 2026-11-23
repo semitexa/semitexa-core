@@ -11,7 +11,7 @@ use Semitexa\Core\Discovery\ClassDiscovery;
 use Semitexa\Core\ModuleRegistry;
 
 /**
- * Discovers service contracts from #[AsServiceContract(of: SomeInterface::class)]
+ * Discovers service contracts from #[SatisfiesServiceContract(of: SomeInterface::class)]
  * on implementation classes. When multiple modules provide an implementation for the same
  * interface, the one from the module that "extends" the other wins (module order by extends).
  */

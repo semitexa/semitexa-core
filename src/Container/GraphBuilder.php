@@ -737,16 +737,13 @@ final class GraphBuilder
     }
 
     /**
-     * The recurring footgun behind "No binding found": the requested type IS
-     * implemented, but the implementation is `#[ExecutionScoped]`, and
-     * execution-scoped services cannot be handed out as boot-time property
-     * injections (one frozen instance would smuggle per-request state across
-     * requests). Without this note the failure reads as a missing service and
-     * has historically been "fixed" by binding a worker-local in-memory
-     * substitute — which silently breaks cross-worker behavior (the collab
-     * draft-store regression), or by trial-and-error against a boot
-     * crash-loop (the calendar repository). Name the trap and the two
-     * sanctioned ways out at the exact point of failure.
+     * The note added to "No binding found" when the requested type IS
+     * implemented, but by an `#[ExecutionScoped]` class. Such a class is cloned
+     * per execution, so it cannot be a boot-time property of a class built once
+     * per worker: the shared instance would capture one execution's clone.
+     * Without the note the failure reads as a missing service. The text is read
+     * by application developers: it names their classes and the two fixes, and
+     * no framework class they cannot see.
      *
      * @param IdToClassMap $idToClass
      * @param array<class-string, true> $executionScopedClasses
@@ -770,16 +767,16 @@ final class GraphBuilder
             return '';
         }
 
-        return " NOTE: {$implementer} implements this type but is #[ExecutionScoped] — "
-            . 'execution-scoped services cannot be injected as boot-time properties into '
-            . 'container-built classes (one frozen instance would leak per-request state '
-            . 'across requests). Sanctioned ways out: (1) make the implementation a plain '
-            . 'singleton that resolves per-request state AT CALL TIME through a '
-            . 'coroutine-local seam (inject TenantContextStoreInterface and read tryGet() '
-            . 'per call — see CalendarEventDbRepository / FormCollabDraftDbRepository), or '
-            . "(2) drop #[ExecutionScoped] from {$implementer} if it holds no per-execution state. "
-            . 'A handler or listener is execution-scoped itself and takes it with #[InjectAsMutable]. Do NOT bind a worker-local in-memory substitute: it boots, then '
-            . 'silently breaks cross-worker behavior (the collab draft-store regression).';
+        return " NOTE: {$implementer} implements this type but is #[ExecutionScoped]: "
+            . 'the container clones it for every execution (request, command, job). '
+            . 'A class built once per worker cannot hold it in a property, because the '
+            . "instance all executions share would capture one execution's clone. Two fixes: "
+            . '(1) mark the class that declares this property #[ExecutionScoped] and take the '
+            . 'property with #[InjectAsMutable] (a handler or listener is execution-scoped already); '
+            . 'or (2) keep the class worker-scoped, inject a worker-scoped service with '
+            . '#[InjectAsReadonly] and read the per-execution value from it at call time. '
+            . 'Do not bind a worker-local in-memory substitute to get past this error: '
+            . 'it boots, then every worker keeps its own copy of the state.';
     }
 
     /**

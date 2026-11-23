@@ -65,7 +65,7 @@ class ContractsListCommand extends BaseCommand
             if ($json) {
                 $output->writeln('{"contracts":[]}');
             } else {
-                $io->text('No service contracts registered. Add #[AsServiceContract(of: Interface::class)] on implementation classes in modules.');
+                $io->text('No service contracts registered. Add #[SatisfiesServiceContract(of: Interface::class)] on implementation classes in modules.');
             }
             return Command::SUCCESS;
         }
@@ -109,7 +109,7 @@ class ContractsListCommand extends BaseCommand
             ['Contract (interface)', 'Implementations (module → class)', 'Active'],
             $rows
         );
-        $io->text('Resolution: module "extends" order (child module wins). Add #[AsServiceContract(of: Interface::class)] on implementation classes.');
+        $io->text('Resolution: module "extends" order (child module wins). Add #[SatisfiesServiceContract(of: Interface::class)] on implementation classes.');
     }
 
     /**
