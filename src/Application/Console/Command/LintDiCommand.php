@@ -233,17 +233,18 @@ final class LintDiCommand extends BaseCommand
      * The warning for two project modules that tie on a contract. The module
      * that should win names the other in extra.semitexa-module.extends; a
      * module may have no composer.json yet, and extends one module at most.
-     * When their extends relations form a cycle, those already exist, and the
-     * cycle is what to undo (review, semitexa-core#269).
+     * When an extends cycle leaves a module with no place in the order, no
+     * extends advice holds until the cycle is gone, so the warning names the
+     * cycles and nothing else (review, semitexa-core#269).
      *
-     * @param array{contract: string, active: string, active_module: string, other: string, other_module: string, cycle: bool} $tie
+     * @param array{contract: string, active: string, active_module: string, other: string, other_module: string, cycles: list<string>} $tie
      */
     public static function contractTieWarning(array $tie): string
     {
-        if ($tie['cycle']) {
+        if ($tie['cycles'] !== []) {
             return "Contract {$tie['contract']}: {$tie['active']} (module {$tie['active_module']}) and {$tie['other']} (module {$tie['other_module']}) tie, "
-                . "because the extends relations of their modules form a cycle and neither has a place in the module order; {$tie['active']} is active only by discovery order. "
-                . 'Break the cycle: remove extra.semitexa-module.extends from the composer.json of the module that should lose, then check contracts:list.';
+                . 'because an extends cycle leaves a module with no place in the module order (' . implode('; ', $tie['cycles']) . '), so the module found first won. '
+                . 'Break each cycle in extra.semitexa-module.extends, then run lint:di again: if the two still tie, it says how to decide it.';
         }
 
         return "Contract {$tie['contract']}: {$tie['active']} (module {$tie['active_module']}) and {$tie['other']} (module {$tie['other_module']}) are unrelated; "

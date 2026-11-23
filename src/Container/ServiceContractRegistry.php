@@ -38,10 +38,10 @@ final class ServiceContractRegistry
 
     /**
      * The ties between two different project modules, which lint:di warns about:
-     * the project's own code, whose winner nothing it declared decides. cycle:
-     * one of the two has no place in the order, because its extends relations
-     * form a cycle.
-     * @var list<array{contract: class-string, active: class-string, active_module: string, other: class-string, other_module: string, cycle: bool}>
+     * the project's own code, whose winner nothing it declared decides. cycles:
+     * the extends cycles that leave either of the two with no place in the
+     * order, each written from its first module by name.
+     * @var list<array{contract: class-string, active: class-string, active_module: string, other: class-string, other_module: string, cycles: list<string>}>
      */
     private array $projectModuleTies = [];
 
@@ -86,7 +86,7 @@ final class ServiceContractRegistry
     }
 
     /**
-     * @return list<array{contract: class-string, active: class-string, active_module: string, other: class-string, other_module: string, cycle: bool}>
+     * @return list<array{contract: class-string, active: class-string, active_module: string, other: class-string, other_module: string, cycles: list<string>}>
      */
     public function getProjectModuleTies(): array
     {
@@ -222,7 +222,7 @@ final class ServiceContractRegistry
                         'active_module' => $activeModule,
                         'other' => $item['impl'],
                         'other_module' => $item['module'],
-                        'cycle' => !isset($ranked[$activeModule]) || !isset($ranked[$item['module']]),
+                        'cycles' => self::cycles([$activeModule, $item['module']], $parents, $ranked),
                     ];
                 }
             }
@@ -233,6 +233,41 @@ final class ServiceContractRegistry
         if ($decidedBy !== null) {
             $this->decisions[$interface] = ['decided_by' => $decidedBy, 'tied_with' => array_values($tiedWith)];
         }
+    }
+
+    /**
+     * The extends cycles that leave any of $modules with no place in the order
+     * (a module stays out of it only while it is in a cycle, as each module
+     * extends one other at most), each from its first module by name:
+     * "Tenants → Website → Tenants".
+     *
+     * @param list<string> $modules
+     * @param array<string, string> $parents
+     * @param array<string, int> $ranked
+     * @return list<string>
+     */
+    private static function cycles(array $modules, array $parents, array $ranked): array
+    {
+        $cycles = [];
+        foreach ($modules as $module) {
+            if (isset($ranked[$module])) {
+                continue;
+            }
+            $members = [$module];
+            $next = $parents[$module] ?? null;
+            while ($next !== null && $next !== $module && count($members) <= count($parents)) {
+                $members[] = $next;
+                $next = $parents[$next] ?? null;
+            }
+            if ($next !== $module) {
+                continue;
+            }
+            $first = (int) array_search(min($members), $members, true);
+            $members = array_merge(array_slice($members, $first), array_slice($members, 0, $first));
+            $cycles[implode(' → ', [...$members, $members[0]])] = true;
+        }
+
+        return array_keys($cycles);
     }
 
     /**
