@@ -25,12 +25,14 @@ next release tag. This file is machine-read by `update:changelog` and the OS
   `Host: localhost`, and so could `https://` beside `http://`. A port left out
   is now the scheme's default on both sides, so `Host: example.test:80` with
   `Origin: http://example.test` is the same origin; it was refused before.
-  Browsers send no `Sec-Fetch-*` to a plain-http host other than localhost (a
-  LAN address, `myapp.test`), so there the `Origin` is the only check. Behind a
-  TLS-terminating proxy the request is `https` only when a trusted
-  `X-Forwarded-Proto` says so (`TRUSTED_PROXIES`; loopback by default): from a
-  proxy that is not listed, an `https` page is refused, the safe side. A `Host`
-  that is more than a host and a port (`localhost@evil.example`) is refused too.
+  Browsers send no `Sec-Fetch-*` to a plain-http host that is not localhost,
+  `127.0.0.1` or a `*.localhost` name (a LAN address, `myapp.test`), so there the
+  `Origin` is the only check. Behind a TLS-terminating proxy the request is
+  `https` only when a trusted `X-Forwarded-Proto` says so (`TRUSTED_PROXIES`;
+  loopback by default): from a proxy that is not listed, the requests of an
+  `https` page that carry an `Origin` (a fetch, a form POST) are refused, the
+  safe side. A `Host` that is more than a host and a port
+  (`localhost@evil.example`) is refused too.
 
 ## 2026.11.23.0659 — 2026-11-23
 
