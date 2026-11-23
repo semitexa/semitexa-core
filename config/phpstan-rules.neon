@@ -55,6 +55,7 @@ rules:
     - Semitexa\Core\PHPStan\Rules\ReadonlyInjectionOfExecutionScopedRule
     - Semitexa\Core\PHPStan\Rules\DiscoveryCallSiteRule
     - Semitexa\Core\PHPStan\Rules\WorkerServiceConnectionHandleRule
+    - Semitexa\Core\PHPStan\Rules\WorkerServiceCallerStateRule
 
     # --- Persistence: mappers and the models they map.
     - Semitexa\Core\PHPStan\Rules\NoOpMapperRule

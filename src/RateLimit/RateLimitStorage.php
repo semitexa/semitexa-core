@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Semitexa\Core\RateLimit;
 
 use Semitexa\Core\Attribute\AsService;
+use Semitexa\Core\Attribute\WorkerState;
 
 /**
  * The store this worker's limits count into. A server installs the shared
@@ -14,6 +15,7 @@ use Semitexa\Core\Attribute\AsService;
 #[AsService]
 final class RateLimitStorage
 {
+    #[WorkerState('The one store this worker counts into, installed at worker start by InstallRateLimitStoreListener; the store keys its counters itself, and no request chooses it.')]
     private ?RateLimitStoreInterface $store = null;
 
     public function store(): RateLimitStoreInterface
