@@ -5,6 +5,18 @@ Changes to `semitexa/core` that a consuming application can notice. Sections are
 next release tag. This file is machine-read by `update:changelog` and the OS
 "What's new" surface — keep entries short and operator-facing.
 
+## Unreleased
+
+### Changed
+- **A session cookie is used only when the server issued its id and still holds
+  the session.** Any 32-byte cookie value used to be taken as the session id,
+  stored under and sent back, so a client could choose the id a session lives
+  under (session fixation; sign-in and sign-out already replaced the id). The
+  id must now be 32 lowercase hex characters and present in the session store;
+  anything else gets a new id. Noticeable in one case: a browser whose session
+  the store no longer has (expired, or the in-memory table lost at a restart)
+  gets a new cookie value instead of an empty session under the old one.
+
 ## 2026.11.23.0659 — 2026-11-23
 
 ### Added

@@ -21,6 +21,15 @@ final class Session implements SessionInterface
     /** The id regenerate() replaced; its stored data is destroyed on save(). */
     private ?string $retiredId = null;
     private bool $regenerated = false;
+    /** Whether the store returned data for the id this session was built with. */
+    private bool $heldByStore;
+
+    /**
+     * The one shape a session id has: what {@see generateId()} mints, 32
+     * lowercase hex characters. `D` keeps `$` from matching before a trailing
+     * newline.
+     */
+    private const ID_PATTERN = '/^[0-9a-f]{32}$/D';
 
     /**
      * #[SessionSegment] name per payload class. A class's attributes cannot
@@ -39,8 +48,57 @@ final class Session implements SessionInterface
         private int $lifetimeSeconds = 3600,
     ) {
         $this->data = $handler->read($id);
+        $this->heldByStore = $this->data !== [];
         $this->flash = $this->data['__flash__'] ?? [];
         unset($this->data['__flash__']);
+    }
+
+    /**
+     * The session for an id a client presented (its cookie), in strict mode:
+     * the id is used only when it has the shape this class mints AND the store
+     * holds a session under it. Anything else gets a fresh server-made id, so a
+     * client cannot choose the id a session lives under (session fixation,
+     * CWE-384).
+     *
+     * "Holds" is the read this constructor does anyway: every saved session
+     * carries at least its `__flash__` key, so an empty read is an id the store
+     * does not know (never issued, expired, evicted). No second store call, and
+     * nothing is created for an unknown id.
+     *
+     * The fresh id is written by save() like any other, and the phase sends
+     * its cookie only after that write: a browser never holds an id the store
+     * has not seen.
+     *
+     * @throws \Throwable whatever the handler's read() throws (store unreadable)
+     */
+    public static function open(
+        string $presentedId,
+        SessionHandlerInterface $handler,
+        string $cookieName,
+        int $lifetimeSeconds = 3600,
+    ): self {
+        if (!self::isWellFormedId($presentedId)) {
+            return new self(self::generateId(), $handler, $cookieName, $lifetimeSeconds);
+        }
+
+        $session = new self($presentedId, $handler, $cookieName, $lifetimeSeconds);
+        if (!$session->heldByStore) {
+            $session->id = self::generateId();
+        }
+
+        return $session;
+    }
+
+    /** A new session id: 128 random bits as 32 lowercase hex characters. */
+    public static function generateId(): string
+    {
+        return bin2hex(random_bytes(16));
+    }
+
+    /** Whether $id has the shape {@see generateId()} produces. Says nothing about the store. */
+    public static function isWellFormedId(string $id): bool
+    {
+        return preg_match(self::ID_PATTERN, $id) === 1;
     }
 
     public function get(string $key, mixed $default = null): mixed
@@ -89,7 +147,7 @@ final class Session implements SessionInterface
         // left them on the old id, and the next request refused them.
         $this->retiredId ??= $this->id;
         $this->regenerated = true;
-        $this->id = $this->generateId();
+        $this->id = self::generateId();
         // The CSRF token must not survive a privilege change: under session fixation
         // an attacker who read the token before login would otherwise still hold a
         // valid one afterwards. Rotated here rather than in save() so anything
@@ -192,10 +250,5 @@ final class Session implements SessionInterface
             throw new \InvalidArgumentException("Session payload class {$payloadClass} must have #[SessionSegment('name')] attribute.");
         }
         return self::$segmentNames[$payloadClass] = $attrs[0]->newInstance()->segment;
-    }
-
-    private function generateId(): string
-    {
-        return bin2hex(random_bytes(16));
     }
 }

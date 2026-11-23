@@ -131,7 +131,9 @@ final class OutageSessionHandler implements SessionHandlerInterface
             throw new \RuntimeException('php_network_getaddresses: getaddrinfo for redis failed');
         }
 
-        return [];
+        // The store holds the visitor's session: an id it does not hold is
+        // not kept (SessionPhaseStrictSessionIdTest).
+        return ['__flash__' => []];
     }
 
     public function write(string $sessionId, array $data, int $lifetimeSeconds = 3600): void

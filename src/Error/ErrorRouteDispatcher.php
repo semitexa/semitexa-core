@@ -187,7 +187,7 @@ final class ErrorRouteDispatcher
         if (!$this->requestScopedContainer->holds(SessionInterface::class)) {
             $this->requestScopedContainer->set(
                 SessionInterface::class,
-                new Session(bin2hex(random_bytes(16)), new TransientSessionHandler(), 'semitexa_session'),
+                new Session(Session::generateId(), new TransientSessionHandler(), 'semitexa_session'),
             );
         }
     }
