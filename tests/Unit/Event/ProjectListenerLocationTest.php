@@ -26,6 +26,19 @@ final class ProjectListenerLocationTest extends TestCase
     private const OLDER = 'App\\Modules\\ListenerProbe\\Application\\Event\\DomainListener\\ProbeShippedListener';
     private const ELSEWHERE = 'App\\Modules\\ListenerProbe\\Application\\Service\\ProbeRefundedListener';
 
+    /** The process-wide collector as the test found it: BootDiagnostics::begin() replaces it. */
+    private ?BootDiagnostics $diagnosticsBefore = null;
+
+    protected function setUp(): void
+    {
+        $this->diagnosticsBefore = (new \ReflectionProperty(BootDiagnostics::class, 'current'))->getValue();
+    }
+
+    protected function tearDown(): void
+    {
+        (new \ReflectionProperty(BootDiagnostics::class, 'current'))->setValue(null, $this->diagnosticsBefore);
+    }
+
     public static function setUpBeforeClass(): void
     {
         // Project classes, declared the way a module under src/modules/ declares them.
@@ -72,8 +85,9 @@ final class ProjectListenerLocationTest extends TestCase
     public function a_registered_project_listener_raises_no_warning(): void
     {
         $diagnostics = BootDiagnostics::begin();
-        (new EventListenerRegistry($this->discoveryReturning([self::DOCUMENTED, self::OLDER]), new ModuleRegistry()))->ensureBuilt();
+        $registry = new EventListenerRegistry($this->discoveryReturning([self::DOCUMENTED, self::OLDER]), new ModuleRegistry());
 
+        self::assertSame([self::DOCUMENTED, self::OLDER], array_column($registry->getListeners(ProjectListenerProbeEvent::class), 'class'));
         self::assertSame([], $this->registryWarnings($diagnostics));
     }
 
