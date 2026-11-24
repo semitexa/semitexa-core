@@ -125,11 +125,15 @@ final class ASessionThatCannotBeStoredSaysSoTest extends TestCase
     public function a_full_store_is_logged_once_and_written_once_per_request(): void
     {
         $writes = new \ArrayObject();
-        [$phase] = $this->phase($this->fullStore($writes));
+        [$phase, $scope] = $this->phase($this->fullStore($writes));
 
         for ($i = 0; $i < 5; $i++) {
             $context = new RequestLifecycleContext($this->request('GET', '/'));
             $phase->execute($context);
+            // verify:accept-test-change a guest request that uses no session writes none now (AnUnusedGuestSessionIsNotStoredTest); these five use theirs, so the full store is still asked five times
+            $session = $scope->get(SessionInterface::class);
+            self::assertInstanceOf(Session::class, $session);
+            $session->set('cart', $i);
             $phase->finalize($context, new HttpResponse('the page'));
         }
 
