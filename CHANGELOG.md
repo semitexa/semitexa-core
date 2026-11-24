@@ -7,6 +7,21 @@ next release tag. This file is machine-read by `update:changelog` and the OS
 
 ## Unreleased
 
+### Security
+- **A guest request that does not use the session no longer creates one.** Every
+  response used to write a session row and send `semitexa_session` and
+  `XSRF-TOKEN`: an anonymous 404, a 401 of a webhook route, each probe of a
+  scanner. A flood of them filled the store, and on the Swoole table (4096 rows
+  by default) evicted the sessions of signed-in visitors. A session is now stored,
+  and its cookies sent, when the visitor presented one the store holds, when the
+  request wrote to it, or when it read its id or its CSRF token (`csrf_field()`,
+  `csrf_token()`). A stored session is still written on every request, so its
+  lifetime slides as before. To notice: a guest page with no form sets no
+  `XSRF-TOKEN` cookie, and a script's first POST from it carries no session
+  cookie, so it is not CSRF-checked, as any request without one. Update
+  `semitexa/ssr` together with this version: pages with deferred or live
+  components need its matching change.
+
 ### Fixed
 - **A project event listener in its module's `Application/Handler/DomainListener/`
   is registered.** The module-structure guide puts it there, but only

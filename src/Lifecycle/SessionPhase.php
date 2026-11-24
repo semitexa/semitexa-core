@@ -94,12 +94,9 @@ final class SessionPhase
         // Ensure a CSRF token exists on this session. Generated once, then stable
         // for the session lifetime. The matching XSRF-TOKEN cookie is emitted in
         // finalize() so browser JS can copy it into the X-CSRF-Token header.
-        /** @var CsrfToken $csrf */
-        $csrf = $session->getPayload(CsrfToken::class);
-        if ($csrf->getValue() === '') {
-            $csrf = CsrfToken::generate();
-            $session->setPayload($csrf);
-        }
+        // Not through getPayload()/setPayload(): seeding the token is not a use
+        // of the session (Session::isWorthStoring()).
+        $session->ensureCsrfToken();
 
         $this->requestScopedContainer->set(SessionInterface::class, $session);
         // {{ csrf_field() }} reads this request's token through the session.
@@ -133,7 +130,11 @@ final class SessionPhase
         // session, back once the store recovers, does not hold — but every
         // other cookie this request set (locale, a logout clearing one) is
         // still emitted below.
-        if ($session->persists()) {
+        //
+        // Nor is a session the visitor did not bring and the request did not
+        // use (Session::isWorthStoring()): no row, and so no cookie, for an
+        // anonymous error page or a machine route.
+        if ($session->persists() && $session->isWorthStoring()) {
             try {
                 $session->save();
                 $sessionPersisted = true;
