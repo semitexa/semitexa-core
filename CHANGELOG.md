@@ -5,6 +5,17 @@ Changes to `semitexa/core` that a consuming application can notice. Sections are
 next release tag. This file is machine-read by `update:changelog` and the OS
 "What's new" surface — keep entries short and operator-facing.
 
+## Unreleased
+
+### Fixed
+- **A project event listener in its module's `Application/Handler/DomainListener/`
+  is registered.** The module-structure guide puts it there, but only
+  `Event/DomainListener/` was read, so such a listener never ran and boot said
+  nothing. Both directories are read now, and an `#[AsEventListener]` class under
+  `App\` outside them is reported at boot instead of skipped. After the update
+  such listeners start running: check what they do before deploying. In strict
+  boot mode a misplaced listener now stops boot.
+
 ## 2026.11.23.1729 — 2026-11-23
 
 ### Added

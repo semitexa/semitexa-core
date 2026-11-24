@@ -49,6 +49,13 @@ final class EventListenerRegistry
             fn(string $class) => (str_starts_with($class, 'Semitexa\\') && $this->moduleRegistry->isClassActive($class))
                 || self::isProjectEventListeners($class)
         );
+        // A project listener outside the listener directories used to be
+        // skipped without a word: the event dispatched and nothing ran.
+        foreach ($classes as $class) {
+            if (str_starts_with($class, 'App\\') && !self::isProjectEventListeners($class)) {
+                BootDiagnostics::current()->invalidUsage('EventListenerRegistry', "Listener {$class} is not in a listener directory, so it is not registered: put it in its module's Application/Handler/DomainListener/.");
+            }
+        }
 
         foreach ($filtered as $className) {
             try {
@@ -140,10 +147,17 @@ final class EventListenerRegistry
         return $queued;
     }
 
+    /**
+     * A project listener lives in its module's Application/Handler/DomainListener/,
+     * where the module-structure guide and its allowlist put it and where the
+     * framework's own packages keep theirs. Event/DomainListener/ is still read
+     * for projects that followed the older layout.
+     */
     private static function isProjectEventListeners(string $class): bool
     {
         return str_starts_with($class, 'App\\') && (
-            str_contains($class, 'Event\\DomainListener\\')
+            str_contains($class, '\\Application\\Handler\\DomainListener\\')
+            || str_contains($class, 'Event\\DomainListener\\')
         );
     }
 }
