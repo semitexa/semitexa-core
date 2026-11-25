@@ -18,7 +18,11 @@ next release tag. This file is machine-read by `update:changelog` and the OS
   sends no session cookie. In Redis the check and the write are one script. On
   the Swoole table they are made under a lock all workers share, and so is every
   other change of that session's row (64 locks, created with the table before
-  the workers fork; a session write waits for another only on the same lock). A
+  the workers fork; a session write waits for another only on the same lock,
+  and the wait lets the worker's other coroutines run). A lock that does not
+  come in 0.1 s, because a worker died holding it, lets a sign-in's or a
+  sign-out's retirement of the id through and drops any other write of that
+  session, with a warning at most once a minute naming `server:restart`. A
   custom `SessionHandlerInterface` gets a read followed by a write: a sign-out
   that lands exactly between them is still written over; implementing
   `HeldSessionWriterInterface` closes that. To notice: a session that expired or

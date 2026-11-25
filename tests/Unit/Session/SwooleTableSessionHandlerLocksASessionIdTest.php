@@ -35,6 +35,75 @@ final class SwooleTableSessionHandlerLocksASessionIdTest extends TestCase
     /** What the handler waits for a lock before it goes on without it. */
     private const LOCK_WAIT_SECONDS = 0.1;
 
+    /** @var array{class: class-string, values: array<string, mixed>} the handler's warning throttle, which a lock that does not come moves */
+    private array $handlerState = ['class' => SwooleTableSessionHandler::class, 'values' => []];
+
+    protected function setUp(): void
+    {
+        $this->handlerState = StaticState::snapshot(SwooleTableSessionHandler::class);
+    }
+
+    protected function tearDown(): void
+    {
+        StaticState::restore($this->handlerState);
+    }
+
+    /**
+     * A worker that died holding a stripe: every change of a held session on
+     * it is dropped, so nothing written without the lock can put a retired
+     * session back, and the retirement itself still goes through, so sign-in
+     * and sign-out keep working.
+     */
+    #[Test]
+    public function without_its_lock_a_held_write_is_dropped_and_a_retirement_is_not(): void
+    {
+        $locks = SwooleSessionTableHolder::createLocks(1);
+        $handler = new SwooleTableSessionHandler($this->table(), $locks);
+        $id = str_repeat('e', 32);
+        $handler->write($id, self::SESSION, 600);
+        self::assertTrue(self::free($locks[0]), 'held by this test, as by a worker that died');
+        try {
+            self::assertFalse($handler->writeIfHeld($id, ['user_id' => 8, '__flash__' => []], 600, self::MARKER), 'a save is dropped');
+            self::assertSame(self::SESSION, $handler->read($id), 'and wrote nothing');
+            self::assertTrue($handler->writeIfHeld($id, self::MARKER, 10, self::MARKER), 'a retirement goes through');
+            self::assertSame(self::MARKER, $handler->read($id));
+            self::assertFalse($handler->writeIfHeld($id, self::SESSION, 600, self::MARKER), 'and nothing is written back over it');
+            self::assertSame(self::MARKER, $handler->read($id));
+        } finally {
+            $locks[0]->unlock();
+        }
+    }
+
+    /** CodeRabbit on semitexa-core#274: a timed wait blocked every coroutine of the worker. */
+    #[Test]
+    public function a_wait_in_a_coroutine_lets_the_workers_other_coroutines_run(): void
+    {
+        $locks = SwooleSessionTableHolder::createLocks(1);
+        $handler = new SwooleTableSessionHandler($this->table(), $locks);
+        self::assertTrue(self::free($locks[0]), 'held by this test, as by a worker that died');
+        $ticks = 0;
+        $done = false;
+        try {
+            \Swoole\Coroutine\run(static function () use ($handler, &$ticks, &$done): void {
+                \Swoole\Coroutine::create(static function () use ($handler, &$done): void {
+                    $handler->destroy(str_repeat('a', 32));
+                    $done = true;
+                });
+                \Swoole\Coroutine::create(static function () use (&$ticks, &$done): void {
+                    while (!$done) {
+                        $ticks++;
+                        \Swoole\Coroutine::sleep(0.005);
+                    }
+                });
+            });
+        } finally {
+            $locks[0]->unlock();
+        }
+
+        self::assertTrue($done);
+        self::assertGreaterThanOrEqual(5, $ticks, 'the other coroutine ran while the destroy waited (about 20 ticks of 5 ms in 0.1 s)');
+    }
+
     /**
      * Two processes on one id: one keeps saving the session it read (a
      * request in flight), the other signs out, again and again. Without the
@@ -284,8 +353,9 @@ final class SwooleTableSessionHandlerLocksASessionIdTest extends TestCase
             $own = $shared[crc32($id) % count($shared)];
             self::assertTrue(self::free($own));
             $waited = microtime(true);
-            self::assertTrue($handler->writeIfHeld($id, self::SESSION, 600, self::MARKER));
+            self::assertFalse($handler->writeIfHeld($id, ['user_id' => 9, '__flash__' => []], 600, self::MARKER), 'its stripe held, a held write is dropped');
             self::assertGreaterThanOrEqual(self::LOCK_WAIT_SECONDS * 0.9, microtime(true) - $waited);
+            self::assertSame(self::SESSION, $handler->read($id));
             $own->unlock();
         } finally {
             $table->setValue(null, $before[0]);

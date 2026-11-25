@@ -44,13 +44,16 @@ final class SwooleTableSessionHandler implements HeldSessionWriterInterface
      * A lock is held for a few table calls, so a wait this long means its
      * holder died with it (a worker killed inside those calls), or, once in a
      * while, that the holder was not scheduled for that long on a saturated
-     * CPU. The call then goes on without the lock: that id's stripe is back to
-     * a check and a write as two steps, until the server restarts (a dead
-     * holder) or for that one call (a slow one), and a warning says so at most
-     * once a minute per worker. Waiting for ever would stop every worker on
-     * its next session instead.
+     * CPU. A write that retires the id then goes on without the lock, and any
+     * other change of a held session is dropped ({@see writeIfHeld()}): a
+     * stripe whose holder died keeps sign-in and sign-out working, and never
+     * lets a stale write put a retired session back. A warning says so at
+     * most once a minute per worker. Waiting for ever would stop every worker
+     * on its next session instead.
      */
     private const LOCK_WAIT_SECONDS = 0.1;
+    /** Between two tries of a held stripe; a sleep, so a coroutine gives way. */
+    private const LOCK_RETRY_SECONDS = 0.001;
     private const LOCK_WARNING_INTERVAL_SECONDS = 60;
 
     private static int $lockWarnedAt = 0;
@@ -134,8 +137,10 @@ final class SwooleTableSessionHandler implements HeldSessionWriterInterface
      * the read, and then nothing is written, or after the write, and then the
      * marker replaces it. No coroutine switches inside.
      *
-     * Two steps again only without locks (a private table given none), and
-     * for one call whose lock did not come in {@see LOCK_WAIT_SECONDS}.
+     * Two steps again only without locks (a private table given none, the
+     * CLI: one process). A call whose lock did not come in
+     * {@see LOCK_WAIT_SECONDS} writes only when it retires the id ($data is
+     * $unless, the marker), and otherwise answers false: not written.
      *
      * The set() is on a key the get() just found, so it needs no room and
      * nothing is reclaimed for it.
@@ -158,6 +163,14 @@ final class SwooleTableSessionHandler implements HeldSessionWriterInterface
 
         $lock = $this->lock($sessionId);
         try {
+            // Without its lock, only a write that retires the id goes on: a
+            // worker that read a signed-in session must not write it back over
+            // a sign-out it cannot see coming. Two retirements racing write the
+            // same marker. The dropped write reads as a retired id to Session,
+            // which sends that response no cookie.
+            if ($lock === false && $data !== $unless) {
+                return false;
+            }
             $row = $table->get($sessionId);
             if (!is_array($row)) {
                 return false;
@@ -174,17 +187,26 @@ final class SwooleTableSessionHandler implements HeldSessionWriterInterface
 
             return @$table->set($sessionId, $new);
         } finally {
-            $lock?->unlock();
+            self::release($lock);
         }
     }
 
     /**
-     * The lock of $sessionId's stripe, taken; null when there are no locks or
-     * this one did not come in time. The caller unlocks it, in a finally, and
-     * takes no second one before that: the mutex is not re-entrant, and two
-     * held in different orders by two workers never come back.
+     * The lock of $sessionId's stripe, taken; null when there are no locks to
+     * take (a private table given none, the CLI), false when this one did not
+     * come in {@see LOCK_WAIT_SECONDS}. The caller releases it
+     * ({@see release()}), in a finally, and takes no second one before that:
+     * the mutex is not re-entrant, and two held in different orders by two
+     * workers never come back.
+     *
+     * The wait does not block the worker: a held stripe is tried again after
+     * a sleep that, in a coroutine, lets the worker's other coroutines run. A
+     * holder runs table calls only, so the second try nearly always gets it;
+     * only a holder that died with it (a worker killed inside those calls)
+     * makes a caller wait the whole time, and then it is said, at most once a
+     * minute per worker.
      */
-    private function lock(string $sessionId): ?\Swoole\Lock
+    private function lock(string $sessionId): \Swoole\Lock|false|null
     {
         $locks = $this->table !== null ? ($this->locks ?? []) : SwooleSessionTableHolder::getLocks();
         if ($locks === []) {
@@ -193,24 +215,41 @@ final class SwooleTableSessionHandler implements HeldSessionWriterInterface
         $stripe = crc32($sessionId) % count($locks);
         $lock = $locks[$stripe];
 
-        // @phpstan-ignore arguments.count (Swoole 6.1 gave lock() its timeout; the stubs are 5.1's, whose lockwait() is gone)
-        if ($lock->lock(LOCK_EX, self::LOCK_WAIT_SECONDS)) {
-            return $lock;
-        }
+        $deadline = microtime(true) + self::LOCK_WAIT_SECONDS;
+        $inCoroutine = \Swoole\Coroutine::getCid() > 0;
+        do {
+            // @phpstan-ignore arguments.count (Swoole 6.1 gave lock() its operation; the stubs are 5.1's)
+            if ($lock->lock(LOCK_EX | LOCK_NB)) {
+                return $lock;
+            }
+            if ($inCoroutine) {
+                \Swoole\Coroutine::sleep(self::LOCK_RETRY_SECONDS);
+            } else {
+                usleep((int) (self::LOCK_RETRY_SECONDS * 1_000_000));
+            }
+        } while (microtime(true) < $deadline);
 
         // Nothing is held here, so the logger may do what it likes.
         $now = time();
         if ($now - self::$lockWarnedAt >= self::LOCK_WARNING_INTERVAL_SECONDS) {
             self::$lockWarnedAt = $now;
             StaticLoggerBridge::warning('session', sprintf(
-                'Session lock stripe %d did not come in %.1f s; this write runs without it. '
+                'Session lock stripe %d did not come in %.1f s: a write that retires a session id goes on '
+                . 'without it, any other change of a held session is dropped. '
                 . 'If this repeats, a worker died holding it: run server:restart.',
                 $stripe,
                 self::LOCK_WAIT_SECONDS,
             ), ['stripe' => $stripe]);
         }
 
-        return null;
+        return false;
+    }
+
+    private static function release(\Swoole\Lock|false|null $lock): void
+    {
+        if ($lock instanceof \Swoole\Lock) {
+            $lock->unlock();
+        }
     }
 
     /**
@@ -226,7 +265,7 @@ final class SwooleTableSessionHandler implements HeldSessionWriterInterface
             // the false is handled by the caller.
             return @$table->set($sessionId, $row);
         } finally {
-            $lock?->unlock();
+            self::release($lock);
         }
     }
 
@@ -297,7 +336,7 @@ final class SwooleTableSessionHandler implements HeldSessionWriterInterface
                 $table->delete($key);
             }
         } finally {
-            $lock?->unlock();
+            self::release($lock);
         }
     }
 
@@ -312,7 +351,7 @@ final class SwooleTableSessionHandler implements HeldSessionWriterInterface
         try {
             $table->delete($sessionId);
         } finally {
-            $lock?->unlock();
+            self::release($lock);
         }
     }
 }
