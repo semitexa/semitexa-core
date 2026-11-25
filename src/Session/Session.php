@@ -18,8 +18,14 @@ final class Session implements SessionInterface
     private array $data = [];
     private array $flash = [];
     private array $flashNext = [];
-    /** The id regenerate() replaced; its stored data is destroyed on save(). */
+    /**
+     * The id regenerate() replaced. On save() its stored data is replaced by a
+     * short-lived marker ({@see RETIRED_MARKER}) when the store held it, and
+     * destroyed otherwise.
+     */
     private ?string $retiredId = null;
+    /** Whether the id this session was built with is one regenerate() retired moments ago. */
+    private bool $openedOnRetiredId = false;
     private bool $regenerated = false;
     /** Whether the store returned data for the id this session was built with. */
     private bool $heldByStore;
@@ -39,6 +45,29 @@ final class Session implements SessionInterface
     private const ID_PATTERN = '/^[0-9a-f]{32}$/D';
 
     /**
+     * What the store holds under an id regenerate() retired, for
+     * {@see RETIRED_ID_GRACE_SECONDS}: this and nothing else. It says "this id
+     * was replaced a moment ago". It carries none of the session's data and
+     * does not name the id that replaced it, so whoever knew the id from
+     * before a sign-in learns and reaches nothing through it (CWE-384). A
+     * saved session always carries `__flash__`, so no session equals it.
+     */
+    private const RETIRED_MARKER = ['__retired__' => 1];
+
+    /**
+     * How long a retired id stays marked. A browser sends the old cookie only
+     * on requests that left before it processed the sign-in's response (a
+     * poll, a stream reconnecting), so the marker has to outlive one such
+     * request's way to a worker: a slow mobile round trip plus a queue, not a
+     * session. Ten seconds covers that. Kept short because a browser that
+     * never received the new cookie gets no cookie in answer to the old one
+     * while the marker lives, and so stays a guest that cannot start a session
+     * for that long. The marker costs nothing more: it replaces the old row in
+     * place, and it is the first row the Swoole table reclaims.
+     */
+    public const RETIRED_ID_GRACE_SECONDS = 10;
+
+    /**
      * #[SessionSegment] name per payload class. A class's attributes cannot
      * change inside a worker, so the reflection runs once per class rather
      * than on every getPayload()/setPayload() (several per request).
@@ -55,6 +84,11 @@ final class Session implements SessionInterface
         private int $lifetimeSeconds = 3600,
     ) {
         $this->data = $handler->read($id);
+        if ($this->data === self::RETIRED_MARKER) {
+            // Not a session: nothing is read from it, and nothing is held.
+            $this->openedOnRetiredId = true;
+            $this->data = [];
+        }
         $this->heldByStore = $this->data !== [];
         $this->flash = $this->data['__flash__'] ?? [];
         unset($this->data['__flash__']);
@@ -75,6 +109,10 @@ final class Session implements SessionInterface
      * The fresh id is written by save() like any other, and the phase sends
      * its cookie only after that write: a browser never holds an id the store
      * has not seen.
+     *
+     * An id regenerate() retired a moment ago is not held either: its session
+     * starts empty under a fresh id, and {@see wasOpenedOnRetiredId()} tells
+     * the phase to leave the browser's cookies alone.
      *
      * @throws \Throwable whatever the handler's read() throws (store unreadable)
      */
@@ -243,11 +281,44 @@ final class Session implements SessionInterface
         $data['__flash__'] = $this->flashNext;
 
         if ($this->retiredId !== null) {
-            $this->handler->destroy($this->retiredId);
+            $this->retire($this->retiredId);
             $this->retiredId = null;
         }
 
         $this->handler->write($this->id, $data, $this->lifetimeSeconds);
+    }
+
+    /**
+     * Takes the data of the id regenerate() replaced out of the store.
+     *
+     * An id the store held is one a browser holds, and requests it sent before
+     * it received the new cookie are still on their way. Destroyed at once,
+     * the id was unknown to them, their response expired "the unknown cookie",
+     * and when that response reached the browser after the sign-in's, it
+     * dropped the new session cookie: signed out a moment after signing in.
+     * So the id is marked for a few seconds instead, and a request presenting
+     * a marked id is answered without any session cookie.
+     *
+     * The marker is written with the store's own expiry, so it is gone by
+     * itself. An id the store did not hold was never sent to a browser:
+     * nothing to mark.
+     */
+    private function retire(string $retiredId): void
+    {
+        if (!$this->heldByStore) {
+            $this->handler->destroy($retiredId);
+
+            return;
+        }
+
+        try {
+            $this->handler->write($retiredId, self::RETIRED_MARKER, self::RETIRED_ID_GRACE_SECONDS);
+        } catch (SessionStoreFullException) {
+            // The row was evicted since this request read it and the table has
+            // no room: the old data is gone either way, and the marker is not
+            // worth failing the sign-in.
+            $this->handler->destroy($retiredId);
+        }
     }
 
     /**
@@ -292,6 +363,21 @@ final class Session implements SessionInterface
     public function isWorthStoring(): bool
     {
         return $this->heldByStore || $this->used;
+    }
+
+    /**
+     * True when the request presented an id that regenerate() retired within
+     * the last {@see RETIRED_ID_GRACE_SECONDS}: a request that left the
+     * browser before the sign-in's response arrived. It is served as a guest
+     * on an empty session, and the phase neither stores that session nor sends
+     * any session cookie for it, so its response cannot replace the cookie the
+     * sign-in set.
+     *
+     * @internal for SessionPhase
+     */
+    public function wasOpenedOnRetiredId(): bool
+    {
+        return $this->openedOnRetiredId;
     }
 
     /**

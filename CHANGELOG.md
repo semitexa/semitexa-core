@@ -5,6 +5,23 @@ Changes to `semitexa/core` that a consuming application can notice. Sections are
 next release tag. This file is machine-read by `update:changelog` and the OS
 "What's new" surface — keep entries short and operator-facing.
 
+## Unreleased
+
+### Fixed
+- **A request sent just before a sign-in no longer signs the visitor out.**
+  `regenerate()` deleted the old session id at once, so a poll or a reconnecting
+  stream that left the browser with the old cookie and was answered after the
+  sign-in found an id the store did not know. Its response expired that cookie
+  (before 2026.11.25.1338: set a guest's), and in the browser that replaced the
+  signed-in one. The old id is now kept for 10 seconds
+  (`Session::RETIRED_ID_GRACE_SECONDS`) as a marker without data, and a request
+  that presents it is served as a guest and sent no session cookie and no
+  `XSRF-TOKEN`; what it writes to its session is not stored. The marker does not
+  lead to the new session: the id from before a sign-in still opens nothing. To
+  notice: for those 10 seconds the store holds one more key per sign-in or
+  sign-out (`{"__retired__":1}`), and a sign-in whose handler runs on the old
+  cookie in that time answers 503 with `Retry-After`.
+
 ## 2026.11.25.1338 — 2026-11-25
 
 ### Security

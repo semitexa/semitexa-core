@@ -134,7 +134,16 @@ final class SessionPhase
         // Nor is a session the visitor did not bring and the request did not
         // use (Session::isWorthStoring()): no row, and so no cookie, for an
         // anonymous error page or a machine route.
-        if ($session->persists() && $session->isWorthStoring()) {
+        //
+        // Nor is the session of a request that presented an id a sign-in
+        // retired a moment ago (Session::wasOpenedOnRetiredId()): it left the
+        // browser before the new cookie arrived there, and may be answered
+        // after it. Whatever cookie it were sent (a fresh session's when it
+        // wrote something, an expiry when it did not) would replace the
+        // signed-in one. So it is sent none, and with no cookie to find it by,
+        // what it wrote is not stored: a row nobody could reach.
+        $retiredId = $session->wasOpenedOnRetiredId();
+        if (!$retiredId && $session->persists() && $session->isWorthStoring()) {
             try {
                 $session->save();
                 $sessionPersisted = true;
@@ -181,7 +190,9 @@ final class SessionPhase
         // until the cookie runs out; without the cookie it is a guest's first
         // request again. No row is written for this. Not during a store outage
         // (a transient session): the cookie may be good once the store is back.
-        if (!$sessionPersisted && $session->persists() && !$session->isWorthStoring()) {
+        // Nor for an id retired a moment ago: the browser already holds, or is
+        // about to receive, the cookie that replaced it.
+        if (!$sessionPersisted && !$retiredId && $session->persists() && !$session->isWorthStoring()) {
             $cookieName = $session->getCookieName();
             $expired = ['maxAge' => 0, 'expires' => time() - 3600] + $this->sessionCookieOptions($request);
             if ($request->getCookie($cookieName, '') !== '') {
