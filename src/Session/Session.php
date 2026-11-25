@@ -266,6 +266,19 @@ final class Session implements SessionInterface
     }
 
     /**
+     * The session's CSRF token for comparing with a submitted one, '' when it
+     * has none. Not a use, unlike getPayload(CsrfToken::class): a check sends
+     * the token nowhere, and a refused POST is no reason to store a session
+     * (a POST with an invented cookie and no token left a row per request).
+     *
+     * @internal for CsrfListener
+     */
+    public function csrfTokenForCheck(): string
+    {
+        return $this->hydratePayload(CsrfToken::class)->getValue();
+    }
+
+    /**
      * Whether the end of the request should write this session and send its
      * cookies: the store already holds it (so its lifetime keeps sliding), or
      * this request used it (see {@see $used}). False for the session of a

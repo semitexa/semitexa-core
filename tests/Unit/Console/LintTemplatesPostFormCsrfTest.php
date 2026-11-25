@@ -46,6 +46,26 @@ final class LintTemplatesPostFormCsrfTest extends TestCase
             "<form method=\"post\"><input type=\"hidden\" name=\"_csrf_old\" value=\"x\"><input data-name=\"_csrf\"></form>",
             [1],
         ];
+        yield 'only an input is submitted: a meta, a button or a select of that name is not the token' => [
+            "<form method=\"post\"><meta name=\"_csrf\" content=\"{{ csrf_token() }}\"></form>\n"
+            . "<form method=\"post\"><button name=\"_csrf\" value=\"x\">Go</button></form>\n"
+            . "<form method=\"post\"><select name=\"_csrf\"></select></form>\n"
+            . "<form method=\"post\"><INPUT value=\"{{ csrf_token() }}\" NAME=\"_csrf\" type=\"hidden\"></form>",
+            [1, 2, 3],
+        ];
+        yield 'a button with formmethod="post" makes a GET form a POST form' => [
+            "<form method=\"get\" action=\"/items\"><button formmethod=\"post\" formaction=\"/items/delete\">Delete</button></form>\n"
+            . "<form action=\"/items\"><input type=\"submit\" FORMMETHOD='POST' value=\"Delete\"></form>\n"
+            . "<form action=\"/items\"><button formmethod=\"{{ m }}\">Go</button></form>\n"
+            . "<form method=\"get\"><button formmethod=\"post\">Delete</button>{{ csrf_field() }}</form>\n"
+            . "<form method=\"get\"><button formmethod=\"get\">Search</button><button data-formmethod=\"post\">x</button></form>",
+            [1, 2, 3],
+        ];
+        yield 'a formmethod button that posts to another site carries no token; one that posts here does' => [
+            "<form action=\"/items\"><button formmethod=\"post\" formaction=\"https://pay.example.com/\">Pay</button></form>\n"
+            . "<form action=\"https://pay.example.com/\" method=\"post\"><button formmethod=\"post\" formaction=\"/items/delete\">Delete</button></form>",
+            [2],
+        ];
         yield 'csrf_token() alone, in an attribute a script reads, is not submitted' => [
             "<form method=\"post\" data-token=\"{{ csrf_token() }}\"><button>Go</button></form>",
             [1],
@@ -137,8 +157,10 @@ final class LintTemplatesPostFormCsrfTest extends TestCase
     public function a_method_that_is_an_expression_is_said_to_be_one(): void
     {
         self::assertSame(
-            [[1, true], [2, false]],
-            LintTemplatesCommand::tokenlessPostForms("<form method=\"{{ m }}\"></form>\n<form method=\"post\"></form>"),
+            [[1, true], [2, false], [3, false]],
+            LintTemplatesCommand::tokenlessPostForms(
+                "<form method=\"{{ m }}\"></form>\n<form method=\"post\"></form>\n<form method=\"{{ m }}\"><button formmethod=\"post\">Go</button></form>",
+            ),
         );
     }
 
@@ -147,7 +169,7 @@ final class LintTemplatesPostFormCsrfTest extends TestCase
     public function the_rule_names_what_it_accepts(): void
     {
         self::assertSame('_csrf', CsrfField::NAME);
-        foreach (['{{ csrf_field() }}', '"_csrf"', '{{ csrf_token() }}', 'X-CSRF-Token', 'GET form', 'without a method', 'another site', '{% verbatim %}'] as $said) {
+        foreach (['{{ csrf_field() }}', 'directly inside the form', 'included template or a macro', '<input> named "_csrf"', 'formmethod="post"', '{{ csrf_token() }}', 'X-CSRF-Token', 'GET form', 'without a method', 'another site', '{% verbatim %}'] as $said) {
             self::assertStringContainsString($said, LintTemplatesCommand::CSRF_RULE);
         }
     }

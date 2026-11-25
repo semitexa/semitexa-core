@@ -18,19 +18,23 @@ next release tag. This file is machine-read by `update:changelog` and the OS
   `csrf_token()`). A stored session is still written on every request, so its
   lifetime slides as before. To notice: a guest page with no form sets no
   `XSRF-TOKEN` cookie, and a script's first POST from it carries no session
-  cookie, so it is not CSRF-checked, as any request without one. Update
-  `semitexa/ssr` together with this version: pages with deferred or live
-  components need its matching change.
+  cookie, so it is not CSRF-checked, as any request without one. A POST refused
+  by the CSRF check stores no session either. Composer installs this version only
+  with a `semitexa/ssr` newer than 2026.11.25.0522 (a `conflict`): on an older
+  one, a guest's page with deferred or live components would lose its stream's
+  session.
 
 ### Changed
 - **`lint:templates` refuses a POST form without a CSRF token.** Such a form works
   for a new guest, who has no session yet and is not checked, and answers 403 for
   every visitor who has one. With guest sessions created only on use, a page no
   longer shows this by itself, so the lint does, as an error. A form passes with
-  `{{ csrf_field() }}` inside it, or a hidden input named `_csrf`. Not checked: a
-  GET form, a form without a method, a form whose action is another site's
-  absolute URL, markup in a comment or `{% verbatim %}`. A method written as a
-  Twig expression counts as POST. After the update, run `bin/semitexa
+  `{{ csrf_field() }}` directly inside it, or an `<input>` named `_csrf`; a field
+  printed by an included template or a macro is not seen. Not checked: a GET
+  form, a form without a method, a form whose action is another site's absolute
+  URL, markup in a comment or `{% verbatim %}`. A method written as a Twig
+  expression counts as POST, and so does a button with `formmethod="post"`.
+  After the update, run `bin/semitexa
   lint:templates` and add the field where it reports one.
 
 ## 2026.11.25.0522 — 2026-11-25

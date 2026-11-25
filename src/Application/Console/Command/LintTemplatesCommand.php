@@ -38,9 +38,11 @@ class LintTemplatesCommand extends BaseCommand
     public const RATIONALE = 'Why: templates resolve through canonical subdirectories (pages, layouts, partials, components, deferred); a legacy themes/ directory or an invented one is a layout nobody else looks for. Policy since 2026-04-30; no incident on record. A POST form without csrf_field() works for a new guest, who has no session yet and is not CSRF-checked, and answers 403 for every visitor who has one: since 2026-11-25 a guest gets a session only once a request uses it, so the page no longer catches this by itself (idea-anonymous-error-responses-mint-session-cookies).';
 
     /** What a POST form must hold, and what is not checked: one wording for the error and the tests. */
-    public const CSRF_RULE = 'Put {{ csrf_field() }} inside the form, or a hidden input named "' . CsrfField::NAME . '" holding {{ csrf_token() }}. '
+    public const CSRF_RULE = 'Put {{ csrf_field() }} directly inside the form, or an <input> named "' . CsrfField::NAME . '" holding {{ csrf_token() }}: '
+        . 'a field printed by an included template or a macro is not seen here. '
         . 'Without it the form works for a new guest, who has no session yet and is not checked, and is refused with 403 for every visitor who has one. '
         . 'A form sent by script with the X-CSRF-Token header needs the field too: without the script it is posted as it stands. '
+        . 'A button or input with formmethod="post" makes its form a POST form. '
         . 'Not checked: a GET form, a form without a method, a form whose action is an absolute URL of another site (it must not carry the token), '
         . 'and markup inside a comment or {% verbatim %}.';
 
@@ -362,15 +364,16 @@ class LintTemplatesCommand extends BaseCommand
      *
      * A form is checked when its method is POST, in any case and quoting, or a
      * Twig expression (`method="{{ form.method|default('POST') }}"` can be
-     * POST). The token is what CsrfListener reads from the body: the field
-     * csrf_field() prints, or an input named CsrfField::NAME written by hand.
+     * POST), or when a button or input in it says formmethod="post". The token
+     * is what CsrfListener reads from the body: the field csrf_field() prints,
+     * or an `<input>` named CsrfField::NAME written by hand.
      * The X-CSRF-Token header is sent by script and is not in the markup.
      *
      * A form reaches to its `</form>`, or to the next `<form>` or the end of
      * the template when it has none: a token outside it is not submitted.
      *
-     * @return list<array{int, bool}>|null [line, whether the method is a Twig
-     *                                     expression]; null when the regex
+     * @return list<array{int, bool}>|null [line, whether POST comes only from a
+     *                                     Twig expression]; null when the regex
      *                                     engine gave up
      */
     public static function tokenlessPostForms(string $source): ?array
@@ -387,30 +390,63 @@ class LintTemplatesCommand extends BaseCommand
 
         $found = [];
         foreach ($tags as $i => $tag) {
-            $method = self::attribute($tag[1][0], 'method');
-            $methodIsExpression = $method !== null && (str_contains($method, '{{') || str_contains($method, '{%'));
-            if ($method === null || (!$methodIsExpression && strtolower(trim($method)) !== 'post')) {
-                continue;
-            }
-            // Another site's form must not carry this site's token.
-            $action = trim(self::attribute($tag[1][0], 'action') ?? '');
-            if (preg_match('~\A(?:https?:)?//~i', $action) === 1) {
-                continue;
-            }
-
             $from = $tag[0][1] + strlen($tag[0][0]);
             $next = isset($tags[$i + 1]) ? $tags[$i + 1][0][1] : strlen($markup);
             $close = stripos($markup, '</form', $from);
             $body = substr($markup, $from, min($close === false ? $next : $close, $next) - $from);
+            if (preg_match_all('/<(input|button)\b(' . $attributes . ')>/is', $body, $controls, PREG_SET_ORDER) === false) {
+                return null;
+            }
 
-            $presentsToken = preg_match('/\bcsrf_field\s*\(/', $body) === 1
-                || preg_match('/(?<![\w-])name\s*=\s*(["\']?)' . preg_quote(CsrfField::NAME, '/') . '\1(?=[\s>\/]|\z)/i', $body) === 1;
+            // What the form posts with: its own method, or the formmethod of a
+            // button or input in it, which overrides the form's for that submit.
+            $action = self::attribute($tag[1][0], 'action');
+            $posts = [];
+            if (self::canBePost(self::attribute($tag[1][0], 'method'), $isExpression)) {
+                $posts[] = [$action, $isExpression];
+            }
+            foreach ($controls as $control) {
+                if (self::canBePost(self::attribute($control[2], 'formmethod'), $isExpression)) {
+                    $posts[] = [self::attribute($control[2], 'formaction') ?? $action, $isExpression];
+                }
+            }
+            // Another site's form must not carry this site's token.
+            $posts = array_values(array_filter(
+                $posts,
+                static fn (array $post): bool => preg_match('~\A(?:https?:)?//~i', trim($post[0] ?? '')) !== 1,
+            ));
+            if ($posts === []) {
+                continue;
+            }
+
+            $presentsToken = preg_match('/\bcsrf_field\s*\(/', $body) === 1;
+            foreach ($controls as $control) {
+                // Only an input is submitted: <meta name="_csrf"> in a form is not.
+                $presentsToken = $presentsToken
+                    || (strtolower($control[1]) === 'input' && self::attribute($control[2], 'name') === CsrfField::NAME);
+            }
             if (!$presentsToken) {
-                $found[] = [substr_count($markup, "\n", 0, $tag[0][1]) + 1, $methodIsExpression];
+                $found[] = [
+                    substr_count($markup, "\n", 0, $tag[0][1]) + 1,
+                    array_filter($posts, static fn (array $post): bool => !$post[1]) === [],
+                ];
             }
         }
 
         return $found;
+    }
+
+    /**
+     * Whether a method or formmethod value can make the browser POST: the
+     * literal, in any case, or a Twig expression, which can print it.
+     *
+     * @param-out bool $isExpression
+     */
+    private static function canBePost(?string $method, ?bool &$isExpression = null): bool
+    {
+        $isExpression = $method !== null && (str_contains($method, '{{') || str_contains($method, '{%'));
+
+        return $isExpression || ($method !== null && strtolower(trim($method)) === 'post');
     }
 
     /** The value of an attribute of an opening tag, quotes removed; null when the tag has none. */

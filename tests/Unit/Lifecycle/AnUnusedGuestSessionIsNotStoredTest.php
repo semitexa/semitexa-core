@@ -258,8 +258,10 @@ final class AnUnusedGuestSessionIsNotStoredTest extends TestCase
 
     /**
      * The forgery this must not open: a POST carrying a session cookie and no
-     * token is refused whether or not the store knows the cookie, and the
-     * refusal's own response then carries a session whose token a retry can use.
+     * token is refused whether or not the store knows the cookie. The check
+     * compares the token and sends it nowhere, so it is not a use: a refused
+     * POST with a cookie the store does not know leaves no session behind
+     * (review of 39b472b: it stored one per request).
      */
     #[Test]
     #[DataProvider('presentedCookies')]
@@ -282,8 +284,35 @@ final class AnUnusedGuestSessionIsNotStoredTest extends TestCase
         }
 
         $cookies = $this->cookies($phase->finalize($context, new HttpResponse('forbidden', 403)));
-        self::assertSame(1, $table->count());
-        self::assertNotSame('', $cookies['XSRF-TOKEN'] ?? '');
+        // verify:accept-test-change the refusal no longer stores a session for an unknown cookie (review: a row per forged POST); a stored one is still written, as on every request
+        self::assertSame($stored ? 1 : 0, $table->count());
+        self::assertSame($stored ? ['semitexa_session', 'XSRF-TOKEN'] : [], array_keys($cookies));
+        if ($stored) {
+            self::assertSame($cookie, $cookies['semitexa_session']);
+            self::assertSame('the-real-token', $cookies['XSRF-TOKEN'], 'the stored session keeps its token');
+        }
+    }
+
+    /** With a token too, as long as it is not the session's: what a script holding an old XSRF-TOKEN cookie sends. */
+    #[Test]
+    public function a_refused_post_with_a_wrong_token_stores_nothing(): void
+    {
+        $table = $this->table();
+        [$phase, $scope] = $this->phase($table);
+        $request = $this->request('x', 'POST', ['X-CSRF-Token' => 'not-the-token']);
+        $context = new RequestLifecycleContext($request);
+        $phase->execute($context);
+
+        try {
+            $this->csrfCheck($request, $this->session($scope));
+            self::fail('a POST with a wrong token went through');
+        } catch (AccessDeniedException $e) {
+            self::assertSame('CSRF validation failed.', $e->getMessage());
+        }
+        $response = $phase->finalize($context, new HttpResponse('forbidden', 403));
+
+        self::assertSame(0, $table->count());
+        self::assertSame([], $this->cookies($response));
     }
 
     /** @return iterable<string, array{string, bool}> */

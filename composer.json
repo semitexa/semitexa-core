@@ -18,6 +18,9 @@
         "symfony/console": "^7.3",
         "symfony/process": "^7.3"
     },
+    "conflict": {
+        "semitexa/ssr": "<=2026.11.25.0522"
+    },
     "suggest": {
         "ext-curl": "Outbound HTTP (HttpClientInterface, CurlHttpClient): without it the first outbound request throws. The Semitexa image has it."
     },
