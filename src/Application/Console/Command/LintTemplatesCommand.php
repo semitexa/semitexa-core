@@ -51,6 +51,13 @@ class LintTemplatesCommand extends BaseCommand
     /** Added to the error when the form posts here without a token and to an absolute URL too. */
     public const CSRF_SPLIT = 'This form also posts to an absolute URL, which is taken for another site: split it in two, a token placed in it would be sent to the other site as well. ';
 
+    /** A whole Twig construct: a quote or a > inside it ends neither an attribute value nor a tag. */
+    private const TWIG = '\{\{.*?\}\}|\{%.*?%\}|\{#.*?#\}';
+
+    /** The inside of a quoted attribute value: it keeps the Twig in it whole, so `"{{ path("a") }}"` is one value. */
+    private const DOUBLE_QUOTED = '(?>' . self::TWIG . '|[^"])*+';
+    private const SINGLE_QUOTED = '(?>' . self::TWIG . '|[^\'])*+';
+
     private const CANONICAL_SUBDIRS = ['pages', 'layouts', 'partials', 'components', 'deferred'];
 
     private const SUGGESTED_RENAMES = [
@@ -410,7 +417,7 @@ class LintTemplatesCommand extends BaseCommand
             return null;
         }
         // A tag ends at the first > outside a quoted value and outside Twig: `{% if a > b %}` is inside it.
-        $attributes = '(?:\{\{.*?\}\}|\{%.*?%\}|"[^"]*"|\'[^\']*\'|[^>"\'])*';
+        $attributes = '(?:' . self::TWIG . '|"' . self::DOUBLE_QUOTED . '"|\'' . self::SINGLE_QUOTED . '\'|[^>"\'])*';
         if (preg_match_all('/<form\b(' . $attributes . ')>/is', $markup, $tags, PREG_OFFSET_CAPTURE | PREG_SET_ORDER) === false) {
             return null;
         }
@@ -444,7 +451,10 @@ class LintTemplatesCommand extends BaseCommand
                 // Only an input is submitted: <meta name="_csrf"> in a form is not.
                 $presentsToken = $presentsToken || ($element === 'input' && ($own['name'] ?? null) === CsrfField::NAME);
                 $type = strtolower(trim($own['type'] ?? ''));
-                $isSubmit = $element === 'button' ? !in_array($type, ['button', 'reset'], true) : in_array($type, ['submit', 'image'], true);
+                // A type written as a Twig expression can print submit.
+                $isSubmit = $element === 'button'
+                    ? !in_array($type, ['button', 'reset'], true)
+                    : in_array($type, ['submit', 'image'], true) || str_contains($type, '{{') || str_contains($type, '{%');
                 if ($isSubmit && (isset($own['formmethod']) || isset($own['formaction']))) {
                     $submits[] = [$own['formmethod'] ?? $method, $own['formaction'] ?? $action];
                 }
@@ -469,7 +479,7 @@ class LintTemplatesCommand extends BaseCommand
 
             // csrf_field() prints the field only as a Twig output expression; in the text of the page it is words.
             $twigString = '\'(?:[^\'\\\\]|\\\\.)*\'|"(?:[^"\\\\]|\\\\.)*"';
-            if (preg_match_all('/\{\{((?:' . $twigString . '|[^\'"])*?)\}\}/s', $body, $outputs) === false) {
+            if (preg_match_all('/\{[{%]((?:' . $twigString . '|[^\'"])*?)[}%]\}/s', $body, $outputs) === false) {
                 return null;
             }
             foreach ($outputs[1] as $expression) {
@@ -512,8 +522,8 @@ class LintTemplatesCommand extends BaseCommand
     private static function attributes(string $tag): ?array
     {
         $found = preg_match_all(
-            '/\{\{.*?\}\}|\{%.*?%\}'
-            . '|([^\s"\'<>\/=]+)(?:\s*=\s*(?:"([^"]*)"|\'([^\']*)\'|((?:\{\{.*?\}\}|[^\s"\'>])+)))?/s',
+            '/' . self::TWIG
+            . '|([^\s"\'<>\/=]+)(?:\s*=\s*(?:"(' . self::DOUBLE_QUOTED . ')"|\'(' . self::SINGLE_QUOTED . ')\'|((?:\{\{.*?\}\}|[^\s"\'>])+)))?/s',
             $tag,
             $matches,
             PREG_SET_ORDER | PREG_UNMATCHED_AS_NULL,

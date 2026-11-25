@@ -110,6 +110,30 @@ final class LintTemplatesPostFormCsrfTest extends TestCase
             . "<form method=\"post\" action=\"https://pay.example.com/\"><button title=\"type='button'\" formaction=\"/orders/delete\">Go</button></form>",
             [1, 3, 4, 7],
         ];
+        yield 'a quoted value keeps the Twig inside it whole, quotes and all' => [
+            "<form action=\"{{ path(\"method\") }}\" method=\"post\"></form>\n"
+            . "<form method=\"post\"><input value=\"{{ old(\"name\") }}\" name=\"_csrf\"></form>\n"
+            . "<form action='{{ path('method') }}' method='post'></form>\n"
+            . "<form class=\"{% if a > b %}wide{% endif %}\" action=\"{{ path(\"x\") }}\" method=\"post\"><input value=\"{{ old(\"name\") }}\" name=\"email\"></form>",
+            [1, 3, 4],
+        ];
+        yield 'a control whose type is a Twig expression can be a submit control' => [
+            "<form method=\"get\"><input type=\"{{ t }}\" formmethod=\"post\"></form>\n"
+            . "<form method=\"post\" action=\"https://pay.example.com/\"><input type=\"{{ t }}\" formaction=\"/orders/delete\"></form>",
+            [1, 2],
+        ];
+        yield 'csrf_field() in a Twig tag, printed later, is the field; in a Twig comment it is not' => [
+            "<form method=\"post\">{% set f = csrf_field() %}{{ f }}</form>\n"
+            . "<form method=\"post\">{# {% set f = csrf_field() %} #}</form>\n"
+            . "<form method=\"post\">{% set f = 'csrf_field()' %}{{ f }}</form>",
+            [2, 3],
+        ];
+        yield 'of a repeated attribute the first counts, as in the browser' => [
+            "<form method=\"post\" method=\"get\"></form>\n"
+            . "<form method=\"get\" method=\"post\"></form>\n"
+            . "<form method=\"post\"><input name=\"email\" name=\"_csrf\"></form>",
+            [1, 3],
+        ];
         yield 'csrf_token() alone, in an attribute a script reads, is not submitted' => [
             "<form method=\"post\" data-token=\"{{ csrf_token() }}\"><button>Go</button></form>",
             [1],
