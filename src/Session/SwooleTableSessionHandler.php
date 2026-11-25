@@ -323,12 +323,20 @@ final class SwooleTableSessionHandler implements HeldSessionWriterInterface
      * Deletes a row only while it still carries the expiry the caller saw:
      * another worker may have refreshed that session since, and a session in
      * use is not the one to drop. The re-read and the delete are under the
-     * row's lock, so a refresh lands before both or after both.
+     * row's lock, so a refresh lands before both or after both, and without
+     * the lock nothing is deleted.
      */
     private function deleteIfUnchanged(\Swoole\Table $table, string $key, int $scanned): void
     {
         $lock = $this->lock($key);
         try {
+            // Not without its lock: a holder that is only slow may be writing
+            // the marker that retires this id, and the delete would take the
+            // marker away (CodeRabbit on semitexa-core#274). The row stays;
+            // a full table then answers this write as full.
+            if ($lock === false) {
+                return;
+            }
             $current = $table->get($key, self::COLUMN_EXPIRES);
             if (!is_int($current)) {
                 return;

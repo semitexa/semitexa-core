@@ -10,6 +10,7 @@ use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Semitexa\Core\Log\LoggerInterface;
 use Semitexa\Core\Log\StaticLoggerBridge;
+use Semitexa\Core\Session\SessionStoreFullException;
 use Semitexa\Core\Session\SwooleSessionTableHolder;
 use Semitexa\Core\Session\SwooleTableSessionHandler;
 use Semitexa\Core\Tests\Support\StaticState;
@@ -270,6 +271,51 @@ final class SwooleTableSessionHandlerLocksASessionIdTest extends TestCase
         self::assertTrue(self::free($locks[0]), 'the lock is free');
         $locks[0]->unlock();
         self::assertSame(self::SESSION, $handler->read($id), 'and the session is as it was');
+    }
+
+    /**
+     * CodeRabbit on semitexa-core#274: a reclaim whose lock did not come read
+     * the expiry and deleted the row anyway, so a marker a slow holder was
+     * writing could be taken away. Without its lock a row is left as it is.
+     */
+    #[Test]
+    public function a_reclaim_without_the_lock_of_a_row_leaves_it(): void
+    {
+        $table = $this->table();
+        $locks = SwooleSessionTableHolder::createLocks(2);
+        $handler = new SwooleTableSessionHandler($table, $locks);
+        // Every row on stripe 1, which a holder keeps; the new id on stripe 0.
+        $rows = [];
+        for ($i = 0; $i < 4000 && count($rows) < 2000; $i++) {
+            $key = sprintf('%032x', $i);
+            if (crc32($key) % 2 !== 1) {
+                continue;
+            }
+            if (!@$table->set($key, ['data' => '{"__retired__":1}', 'expires_at' => time() + 1000 + $i])) {
+                break;
+            }
+            $rows[] = $key;
+        }
+        $new = '';
+        for ($i = 0xf0000; $new === ''; $i++) {
+            $new = crc32(sprintf('%032x', $i)) % 2 === 0 ? sprintf('%032x', $i) : '';
+        }
+        self::assertNotSame([], $rows);
+        self::assertTrue(self::free($locks[1]), 'held by this test, as by a slow holder');
+        $thrown = null;
+        try {
+            $handler->write($new, self::SESSION, 600);
+        } catch (SessionStoreFullException $e) {
+            $thrown = $e;
+        } finally {
+            $locks[1]->unlock();
+        }
+
+        self::assertInstanceOf(SessionStoreFullException::class, $thrown, 'no row could be taken, so the table is full');
+        self::assertSame(count($rows), $table->count(), 'no row was deleted');
+        foreach ($rows as $key) {
+            self::assertSame(['__retired__' => 1], $handler->read($key));
+        }
     }
 
     /** A full table: the write evicts rows of other ids, each under its own lock, one at a time. */

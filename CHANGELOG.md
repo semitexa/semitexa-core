@@ -20,8 +20,9 @@ next release tag. This file is machine-read by `update:changelog` and the OS
   other change of that session's row (64 locks, created with the table before
   the workers fork; a session write waits for another only on the same lock,
   and the wait lets the worker's other coroutines run). A lock that does not
-  come in 0.1 s changes nothing of a session a browser holds: the save is lost,
-  and a sign-in or a sign-out is answered "try again". If a worker died holding
+  come in 0.1 s (its holder is slow, or died) changes nothing of a session a
+  browser holds and deletes no row to make room: the save is lost, a sign-in or
+  a sign-out is answered "try again", and a full table stays full. If a worker died holding
   it, that lasts for 1 in 64 session ids until the server restarts, with a
   warning at most once a minute naming `server:restart`. A
   custom `SessionHandlerInterface` gets a read followed by a write: a sign-out
