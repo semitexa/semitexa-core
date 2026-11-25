@@ -134,10 +134,19 @@ final class SessionPhase
         // Nor is a session the visitor did not bring and the request did not
         // use (Session::isWorthStoring()): no row, and so no cookie, for an
         // anonymous error page or a machine route.
-        if ($session->persists() && $session->isWorthStoring()) {
+        //
+        // Nor is the session of a request whose id a sign-in or a sign-out
+        // retired (Session::isOnRetiredId()), before the request opened it
+        // or, as save() finds out, while it ran. The request left the browser
+        // before the new cookie arrived there, and may be answered after it.
+        // Whatever cookie it were sent (its old id again, a fresh session's
+        // when it wrote something, an expiry when it did not) would replace
+        // the one the other request set. So it is sent none, and with no
+        // cookie to find it by, what it wrote is not stored.
+        if (!$session->isOnRetiredId() && $session->persists() && $session->isWorthStoring()) {
             try {
                 $session->save();
-                $sessionPersisted = true;
+                $sessionPersisted = !$session->isOnRetiredId();
             } catch (SessionStoreFullException $e) {
                 // A full table is full for a second attempt too, and for every
                 // request until rows expire: no retry, and one log line a minute.
@@ -148,12 +157,14 @@ final class SessionPhase
                     $this->sessionHandler = $this->createSessionHandler();
                     $session->setHandler($this->sessionHandler);
                     $session->save();
-                    $sessionPersisted = true;
+                    $sessionPersisted = !$session->isOnRetiredId();
                 } catch (\Throwable $retryError) {
                     $this->logSessionPersistenceFailure($retryError, $request);
                 }
             }
         }
+
+        $retiredId = $session->isOnRetiredId();
 
         if ($sessionPersisted) {
             $cookieName = $session->getCookieName();
@@ -181,7 +192,9 @@ final class SessionPhase
         // until the cookie runs out; without the cookie it is a guest's first
         // request again. No row is written for this. Not during a store outage
         // (a transient session): the cookie may be good once the store is back.
-        if (!$sessionPersisted && $session->persists() && !$session->isWorthStoring()) {
+        // Nor for an id retired a moment ago: the browser already holds, or is
+        // about to receive, the cookie that replaced it.
+        if (!$sessionPersisted && !$retiredId && $session->persists() && !$session->isWorthStoring()) {
             $cookieName = $session->getCookieName();
             $expired = ['maxAge' => 0, 'expires' => time() - 3600] + $this->sessionCookieOptions($request);
             if ($request->getCookie($cookieName, '') !== '') {

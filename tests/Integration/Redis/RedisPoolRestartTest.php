@@ -8,8 +8,8 @@ use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Predis\Client;
 use Semitexa\Core\Redis\RedisConnectionPool;
+use Semitexa\Core\Tests\Support\RequiresRedis;
 use Swoole\Coroutine;
-use Semitexa\Core\Environment;
 
 /**
  * After Redis restarts, every connection waiting in the pool is dead.
@@ -21,6 +21,9 @@ use Semitexa\Core\Environment;
  */
 final class RedisPoolRestartTest extends TestCase
 {
+    // verify:accept-test-change reachableRedisHost() and redisConfig() moved, unchanged, into this trait, shared with the session handler's Redis test; every assertion stayed
+    use RequiresRedis;
+
     #[Test]
     public function the_first_call_after_a_restart_succeeds_and_the_breaker_stays_closed(): void
     {
@@ -121,42 +124,5 @@ final class RedisPoolRestartTest extends TestCase
 
         self::assertInstanceOf(\Predis\Connection\ConnectionException::class, $failure);
         self::assertSame(1, $runs);
-    }
-
-    // verify:accept-test-change the Redis reachability guard moved, unchanged, into this helper shared by both tests; every assertion stayed and one test was added
-    private static function reachableRedisHost(): string
-    {
-        // Not configured is a skip; configured and silent fails: a skip there
-        // left a stack that could not reach its Redis green over these checks.
-        // Read as the application reads it (RedisSharedPool::fromEnvironment):
-        // a REDIS_HOST only in .env is configured, not unset.
-        $host = Environment::getEnvValue('REDIS_HOST');
-        if ($host === null || $host === '') {
-            self::markTestSkipped('REDIS_HOST not configured — the test requires real Redis');
-        }
-        $probe = @fsockopen($host, (int) Environment::getEnvValue('REDIS_PORT', '6379'), $errno, $errstr, 1.0);
-        if ($probe === false) {
-            self::fail("REDIS_HOST={$host} is configured, but nothing answers on its port: {$errstr}");
-        }
-        fclose($probe);
-
-        return $host;
-    }
-
-    /**
-     * The connection as the application makes it (RedisSharedPool::fromEnvironment):
-     * scheme, host, port and password, so a protected or non-default Redis
-     * configured in .env is reached the same way.
-     *
-     * @return array{scheme: string, host: string, port: int, password: string}
-     */
-    private static function redisConfig(string $host): array
-    {
-        return [
-            'scheme' => Environment::getEnvValue('REDIS_SCHEME', 'tcp') ?? 'tcp',
-            'host' => $host,
-            'port' => (int) Environment::getEnvValue('REDIS_PORT', '6379'),
-            'password' => Environment::getEnvValue('REDIS_PASSWORD') ?? '',
-        ];
     }
 }

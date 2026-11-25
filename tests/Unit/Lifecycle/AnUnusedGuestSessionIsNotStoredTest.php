@@ -315,7 +315,8 @@ final class AnUnusedGuestSessionIsNotStoredTest extends TestCase
         $newId = $cookies['semitexa_session'] ?? '';
         self::assertTrue(Session::isWellFormedId($newId));
         self::assertNotSame(self::KNOWN, $newId);
-        self::assertFalse($table->exists(self::KNOWN), 'the id from before the sign-in is gone');
+        // verify:accept-test-change the id from before the sign-in is no longer deleted at once: it stays a few seconds as a marker without data (tk-session-regenerate-race-signs-out)
+        self::assertSame('{"__retired__":1}', $table->get(self::KNOWN, 'data'), 'the session from before the sign-in is gone: its id is only marked as retired');
         self::assertTrue($table->exists($newId));
         self::assertArrayHasKey('XSRF-TOKEN', $cookies);
         self::assertNotSame('', $cookies['XSRF-TOKEN']);

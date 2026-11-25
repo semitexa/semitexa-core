@@ -5,6 +5,48 @@ Changes to `semitexa/core` that a consuming application can notice. Sections are
 next release tag. This file is machine-read by `update:changelog` and the OS
 "What's new" surface — keep entries short and operator-facing.
 
+## Unreleased
+
+### Security
+- **A sign-out is no longer undone by a request that was on its way.** A
+  request that had read the session before a sign-out (or a sign-in) saved, and
+  finished after it, wrote the old session back under the old id with a full
+  lifetime and sent that cookie again: after a sign-out the signed-in session
+  was back for anyone holding the old cookie, and after a sign-in the visitor
+  was signed out. A session id a browser holds is now written only while the
+  store still holds a session under it; otherwise the request stores nothing and
+  sends no session cookie. In Redis the check and the write are one script. On
+  the Swoole table they are made under a lock all workers share, and so is every
+  other change of that session's row (64 locks, created with the table before
+  the workers fork; a session write waits for another only on the same lock,
+  and the wait lets the worker's other coroutines run). A lock that does not
+  come in 0.1 s (its holder is slow, or died) changes nothing of a session a
+  browser holds and deletes no row to make room: the save is lost, a sign-in or
+  a sign-out is answered "try again", and a full table stays full. If a worker died holding
+  it, that lasts for 1 in 64 session ids until the server restarts, with a
+  warning at most once a minute naming `server:restart`. A
+  custom `SessionHandlerInterface` gets a read followed by a write: a sign-out
+  that lands exactly between them is still written over; implementing
+  `HeldSessionWriterInterface` closes that. To notice: a session that expired or
+  was evicted while its request ran is no longer started again by that request.
+
+### Fixed
+- **A request sent just before a sign-in no longer signs the visitor out.**
+  `regenerate()` deleted the old session id at once, so a poll or a reconnecting
+  stream that left the browser with the old cookie and was answered after the
+  sign-in found an id the store did not know. Its response expired that cookie
+  (before 2026.11.25.1338: set a guest's), and in the browser that replaced the
+  signed-in one. The old id is now kept for 10 seconds
+  (`Session::RETIRED_ID_GRACE_SECONDS`) as a marker without data, and a request
+  that presents it is served as a guest and sent no session cookie and no
+  `XSRF-TOKEN`; what it writes to its session is not stored. The marker does not
+  lead to the new session: the id from before a sign-in still opens nothing. To
+  notice: for those 10 seconds the store holds one more key per sign-in or
+  sign-out (`{"__retired__":1}`), and a sign-in whose handler runs on a retired
+  id, or beside another sign-in on the same session, answers 503 with
+  `Retry-After`. On a full Swoole table the sign-in no longer evicts its own
+  marker.
+
 ## 2026.11.25.1338 — 2026-11-25
 
 ### Security
