@@ -30,7 +30,7 @@ use Symfony\Component\Console\Style\SymfonyStyle;
  */
 #[AsCommand(
     name: 'lint:templates',
-    description: 'Validate template directory conventions across all modules.',
+    description: 'Validate template directory conventions across all modules, and refuse a POST form without a CSRF token.',
 )]
 class LintTemplatesCommand extends BaseCommand
 {
@@ -81,7 +81,7 @@ class LintTemplatesCommand extends BaseCommand
     protected function configure(): void
     {
         $this->setName('lint:templates')
-            ->setDescription('Validate template directory conventions across all modules.')
+            ->setDescription('Validate template directory conventions across all modules, and refuse a POST form without a CSRF token.')
             ->addOption('strict', null, InputOption::VALUE_NONE, 'Exit with failure code on warnings too')
             ->addOption('json', null, InputOption::VALUE_NONE, 'Output as JSON');
     }
