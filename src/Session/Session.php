@@ -57,8 +57,12 @@ final class Session implements SessionInterface
      * does not name the id that replaced it, so whoever knew the id from
      * before a sign-in learns and reaches nothing through it (CWE-384). A
      * saved session always carries `__flash__`, so no session equals it.
+     *
+     * Public for the stores: a store that makes room by evicting rows leaves
+     * a marker alone ({@see SwooleTableSessionHandler}), as it leaves by
+     * itself within seconds and its id is one a browser may still present.
      */
-    private const RETIRED_MARKER = ['__retired__' => 1];
+    public const RETIRED_MARKER = ['__retired__' => 1];
 
     /**
      * How long a retired id stays marked. A browser sends the old cookie only

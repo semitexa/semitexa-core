@@ -84,13 +84,13 @@ final class SwooleTableSessionHandler implements HeldSessionWriterInterface
         }
 
         $expires = (int) ($row[self::COLUMN_EXPIRES] ?? 0);
+        $raw = $row[self::COLUMN_DATA] ?? '';
         if ($expires > 0 && $expires < time()) {
             // Only the row that was read: one written since is another session.
-            $this->deleteIfUnchanged($table, $sessionId, $expires);
+            $this->deleteIfUnchanged($table, $sessionId, $expires, self::fingerprint($raw));
             return [];
         }
 
-        $raw = $row[self::COLUMN_DATA] ?? '';
         if ($raw === '') {
             return [];
         }
@@ -246,6 +246,18 @@ final class SwooleTableSessionHandler implements HeldSessionWriterInterface
         return false;
     }
 
+    /** What a row's data column holds, short: compared, not stored. */
+    private static function fingerprint(mixed $data): string
+    {
+        return hash('xxh3', is_string($data) ? $data : '');
+    }
+
+    /** The retirement marker as a row holds it: written by writeIfHeld() with the same flags. */
+    private static function markerRow(): string
+    {
+        return json_encode(Session::RETIRED_MARKER, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
+    }
+
     private static function release(\Swoole\Lock|false|null $lock): void
     {
         if ($lock instanceof \Swoole\Lock) {
@@ -278,10 +290,11 @@ final class SwooleTableSessionHandler implements HeldSessionWriterInterface
     private function reclaimAndSet(\Swoole\Table $table, string $sessionId, array $row): bool
     {
         $now = time();
-        /** @var array<string, int> $expired expires_at by session id */
+        /** @var array<string, array{int, string}> $expired [expires_at, data fingerprint] by session id */
         $expired = [];
-        /** @var array<string, int> $live expires_at by session id */
+        /** @var array<string, array{int, string}> $live [expires_at, data fingerprint] by session id */
         $live = [];
+        $marker = self::markerRow();
         // Keys are collected first: rows are not deleted under the iterator.
         foreach ($table as $key => $stored) {
             if (!is_string($key) || !is_array($stored)) {
@@ -289,27 +302,35 @@ final class SwooleTableSessionHandler implements HeldSessionWriterInterface
             }
             $expires = $stored[self::COLUMN_EXPIRES] ?? 0;
             $expires = is_int($expires) ? $expires : 0;
+            $data = $stored[self::COLUMN_DATA] ?? '';
             if ($expires > 0 && $expires < $now) {
-                $expired[$key] = $expires;
-            } else {
+                $expired[$key] = [$expires, self::fingerprint($data)];
+                continue;
+            }
+            // A live marker is never a victim. It is the soonest to expire, so
+            // it was the first one taken, and its id, still in a browser that
+            // has not seen the new cookie, then read as unknown: the response
+            // expired that cookie (CodeRabbit on semitexa-core#274). It leaves
+            // by itself within seconds.
+            if ($data !== $marker) {
                 // 0 never expires, so it is the last to be evicted.
-                $live[$key] = $expires > 0 ? $expires : PHP_INT_MAX;
+                $live[$key] = [$expires > 0 ? $expires : PHP_INT_MAX, self::fingerprint($data)];
             }
         }
 
-        foreach ($expired as $key => $scanned) {
-            $this->deleteIfUnchanged($table, (string) $key, $scanned);
+        foreach ($expired as $key => [$scanned, $fingerprint]) {
+            $this->deleteIfUnchanged($table, (string) $key, $scanned, $fingerprint);
         }
         if ($expired !== [] && $this->set($table, $sessionId, $row)) {
             return true;
         }
 
-        asort($live);
+        uasort($live, static fn (array $a, array $b): int => $a[0] <=> $b[0]);
         $batch = max(self::EVICTION_MIN_BATCH, count($live) >> self::EVICTION_SHIFT);
         $victims = array_slice($live, 0, $batch * self::EVICTION_ROUNDS, true);
         foreach (array_chunk($victims, $batch, true) as $round) {
-            foreach ($round as $key => $scanned) {
-                $this->deleteIfUnchanged($table, (string) $key, $scanned);
+            foreach ($round as $key => [$scanned, $fingerprint]) {
+                $this->deleteIfUnchanged($table, (string) $key, $scanned, $fingerprint);
             }
             if ($this->set($table, $sessionId, $row)) {
                 return true;
@@ -320,13 +341,14 @@ final class SwooleTableSessionHandler implements HeldSessionWriterInterface
     }
 
     /**
-     * Deletes a row only while it still carries the expiry the caller saw:
-     * another worker may have refreshed that session since, and a session in
+     * Deletes a row only while it still carries the expiry and the data the
+     * caller saw: another worker may have refreshed that session since, or
+     * written a marker under its id, and a session in
      * use is not the one to drop. The re-read and the delete are under the
      * row's lock, so a refresh lands before both or after both, and without
      * the lock nothing is deleted.
      */
-    private function deleteIfUnchanged(\Swoole\Table $table, string $key, int $scanned): void
+    private function deleteIfUnchanged(\Swoole\Table $table, string $key, int $scanned, string $fingerprint): void
     {
         $lock = $this->lock($key);
         try {
@@ -337,11 +359,16 @@ final class SwooleTableSessionHandler implements HeldSessionWriterInterface
             if ($lock === false) {
                 return;
             }
-            $current = $table->get($key, self::COLUMN_EXPIRES);
-            if (!is_int($current)) {
+            $current = $table->get($key);
+            if (!is_array($current) || !is_int($current[self::COLUMN_EXPIRES] ?? null)) {
                 return;
             }
-            if (($current > 0 ? $current : PHP_INT_MAX) === $scanned) {
+            $expires = $current[self::COLUMN_EXPIRES];
+            // The data too: a row replaced since the scan with the same expiry
+            // (a marker written in the same second the session would have
+            // run out) is another row, and stays.
+            if (($expires > 0 ? $expires : PHP_INT_MAX) === $scanned
+                && self::fingerprint($current[self::COLUMN_DATA] ?? '') === $fingerprint) {
                 $table->delete($key);
             }
         } finally {

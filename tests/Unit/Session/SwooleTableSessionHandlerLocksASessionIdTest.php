@@ -294,13 +294,14 @@ final class SwooleTableSessionHandlerLocksASessionIdTest extends TestCase
         $locks = SwooleSessionTableHolder::createLocks(2);
         $handler = new SwooleTableSessionHandler($table, $locks);
         // Every row on stripe 1, which a holder keeps; the new id on stripe 0.
+        // Sessions, not markers: a marker is never evicted, lock or no lock.
         $rows = [];
         for ($i = 0; $i < 4000 && count($rows) < 2000; $i++) {
             $key = sprintf('%032x', $i);
             if (crc32($key) % 2 !== 1) {
                 continue;
             }
-            if (!@$table->set($key, ['data' => '{"__retired__":1}', 'expires_at' => time() + 1000 + $i])) {
+            if (!@$table->set($key, ['data' => '{"n":1,"__flash__":[]}', 'expires_at' => time() + 1000 + $i])) {
                 break;
             }
             $rows[] = $key;
@@ -323,8 +324,65 @@ final class SwooleTableSessionHandlerLocksASessionIdTest extends TestCase
         self::assertInstanceOf(SessionStoreFullException::class, $thrown, 'no row could be taken, so the table is full');
         self::assertSame(count($rows), $table->count(), 'no row was deleted');
         foreach ($rows as $key) {
-            self::assertSame(['__retired__' => 1], $handler->read($key));
+            self::assertSame(['n' => 1, '__flash__' => []], $handler->read($key));
         }
+    }
+
+    /**
+     * CodeRabbit on semitexa-core#274: the rows that expire soonest are the
+     * 10-second retirement markers, so a full table evicted them first, and
+     * a browser still holding the retired id was then answered as unknown.
+     */
+    #[Test]
+    public function a_full_table_evicts_sessions_and_leaves_every_marker(): void
+    {
+        $table = $this->table();
+        $handler = new SwooleTableSessionHandler($table, SwooleSessionTableHolder::createLocks(4));
+        $markers = [];
+        $sessions = [];
+        for ($i = 0; $i < 4000; $i++) {
+            $key = sprintf('%032x', $i);
+            $marker = $i % 2 === 0;
+            $row = $marker
+                ? ['data' => '{"__retired__":1}', 'expires_at' => time() + 10]
+                : ['data' => '{"n":1,"__flash__":[]}', 'expires_at' => time() + 1000 + $i];
+            if (!@$table->set($key, $row)) {
+                break;
+            }
+            $marker ? $markers[] = $key : $sessions[] = $key;
+        }
+        self::assertNotSame([], $markers);
+        self::assertNotSame([], $sessions);
+
+        $handler->write(sprintf('%032x', 0xf0000), self::SESSION, 600);
+
+        self::assertSame(self::SESSION, $handler->read(sprintf('%032x', 0xf0000)), 'room was made');
+        foreach ($markers as $key) {
+            self::assertSame(['__retired__' => 1], $handler->read($key), "marker {$key} is still there");
+        }
+        $evicted = count(array_filter($sessions, static fn (string $key): bool => !$table->exist($key)));
+        self::assertGreaterThan(0, $evicted, 'the room came from sessions');
+    }
+
+    /** A row replaced since the scan with the same expiry is another row: the reclaim leaves it. */
+    #[Test]
+    public function a_row_replaced_with_the_same_expiry_is_not_deleted(): void
+    {
+        $table = $this->table();
+        $handler = new SwooleTableSessionHandler($table, SwooleSessionTableHolder::createLocks(4));
+        $id = str_repeat('d', 32);
+        $expires = time() + 10;
+        $table->set($id, ['data' => '{"n":1,"__flash__":[]}', 'expires_at' => $expires]);
+        $scanned = hash('xxh3', '{"n":1,"__flash__":[]}');
+        // The marker lands in the same second, between the scan and the delete.
+        $table->set($id, ['data' => '{"__retired__":1}', 'expires_at' => $expires]);
+
+        $delete = new \ReflectionMethod(SwooleTableSessionHandler::class, 'deleteIfUnchanged');
+        $delete->invoke($handler, $table, $id, $expires, $scanned);
+        self::assertSame(['__retired__' => 1], $handler->read($id), 'the marker stays');
+
+        $delete->invoke($handler, $table, $id, $expires, hash('xxh3', '{"__retired__":1}'));
+        self::assertFalse($table->exist($id), 'the row it did scan is deleted');
     }
 
     /** A full table: the write evicts rows of other ids, each under its own lock, one at a time. */
