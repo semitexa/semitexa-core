@@ -19,7 +19,9 @@ next release tag. This file is machine-read by `update:changelog` and the OS
   lifetime slides as before. To notice: a guest page with no form sets no
   `XSRF-TOKEN` cookie, and a script's first POST from it carries no session
   cookie, so it is not CSRF-checked, as any request without one. A POST refused
-  by the CSRF check stores no session either. Composer installs this version only
+  by the CSRF check stores no session either. A session cookie the store no
+  longer knows (expired, evicted, lost with a restart of the store) is expired
+  in the browser, with its `XSRF-TOKEN`, unless the request starts a new session. Composer installs this version only
   with a `semitexa/ssr` newer than 2026.11.25.0522 (a `conflict`): on an older
   one, a guest's page with deferred or live components would lose its stream's
   session.

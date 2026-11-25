@@ -157,26 +157,7 @@ final class SessionPhase
 
         if ($sessionPersisted) {
             $cookieName = $session->getCookieName();
-            $sessionLifetime = (int) (Environment::getEnvValue('SESSION_LIFETIME') ?? '3600');
-            $isHttps = $request->getScheme() === 'https';
-
-            // Optional parent-domain scope (e.g. ".example.com") so ONE session is
-            // shared across sibling hosts of the same site — a public apex and an
-            // authenticated subdomain, say. Unset (the default) keeps the cookie
-            // host-only, so each host has its own isolated session. Applied to
-            // both the session and the XSRF cookie so the CSRF double-submit
-            // stays consistent across those hosts too.
-            $cookieDomain = (string) (Environment::getEnvValue('SESSION_COOKIE_DOMAIN') ?? '');
-            $secure = $this->cookieSecureFlag($request, $isHttps);
-            $baseOptions = [
-                'path' => '/',
-                'secure' => $secure,
-                'sameSite' => 'lax',
-                'maxAge' => $sessionLifetime,
-            ];
-            if ($cookieDomain !== '') {
-                $baseOptions['domain'] = $cookieDomain;
-            }
+            $baseOptions = $this->sessionCookieOptions($request);
 
             $cookieJar->set($cookieName, $session->getSessionIdForCookie(), ['httpOnly' => true] + $baseOptions);
 
@@ -188,6 +169,26 @@ final class SessionPhase
             $csrf = $session->getPayload(CsrfToken::class);
             if ($csrf->getValue() !== '') {
                 $cookieJar->set('XSRF-TOKEN', $csrf->getValue(), ['httpOnly' => false] + $baseOptions);
+            }
+        }
+
+        // The request presented a session cookie the store does not know
+        // (expired, evicted, lost with a restart of the store, invented) and
+        // did nothing that makes a session worth storing: tell the browser to
+        // drop it, and the XSRF-TOKEN that came with it. Kept, every POST a
+        // script sends from that browser carries a session cookie, so it is
+        // CSRF-checked against a session that is new each time, and refused
+        // until the cookie runs out; without the cookie it is a guest's first
+        // request again. No row is written for this. Not during a store outage
+        // (a transient session): the cookie may be good once the store is back.
+        if (!$sessionPersisted && $session->persists() && !$session->isWorthStoring()) {
+            $cookieName = $session->getCookieName();
+            $expired = ['maxAge' => 0, 'expires' => time() - 3600] + $this->sessionCookieOptions($request);
+            if ($request->getCookie($cookieName, '') !== '') {
+                $cookieJar->set($cookieName, '', ['httpOnly' => true] + $expired);
+                if ($request->getCookie('XSRF-TOKEN', '') !== '') {
+                    $cookieJar->set('XSRF-TOKEN', '', ['httpOnly' => false] + $expired);
+                }
             }
         }
 
@@ -207,6 +208,35 @@ final class SessionPhase
         }
 
         return $response;
+    }
+
+    /**
+     * The attributes the session cookie and the XSRF-TOKEN cookie share,
+     * whether they are set or expired: a browser drops a cookie only when the
+     * expiring one names the same path and domain.
+     *
+     * @return array{path: string, secure: bool, sameSite: 'lax', maxAge: int, domain?: string}
+     */
+    private function sessionCookieOptions(Request $request): array
+    {
+        // Optional parent-domain scope (e.g. ".example.com") so ONE session is
+        // shared across sibling hosts of the same site — a public apex and an
+        // authenticated subdomain, say. Unset (the default) keeps the cookie
+        // host-only, so each host has its own isolated session. Applied to
+        // both the session and the XSRF cookie so the CSRF double-submit
+        // stays consistent across those hosts too.
+        $cookieDomain = (string) (Environment::getEnvValue('SESSION_COOKIE_DOMAIN') ?? '');
+        $options = [
+            'path' => '/',
+            'secure' => $this->cookieSecureFlag($request, $request->getScheme() === 'https'),
+            'sameSite' => 'lax',
+            'maxAge' => (int) (Environment::getEnvValue('SESSION_LIFETIME') ?? '3600'),
+        ];
+        if ($cookieDomain !== '') {
+            $options['domain'] = $cookieDomain;
+        }
+
+        return $options;
     }
 
     /** The 503 of {@see ServiceUnavailableException}, built here because finalize() runs past the exception mapper. */

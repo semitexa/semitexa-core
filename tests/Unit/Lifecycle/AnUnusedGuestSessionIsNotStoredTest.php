@@ -105,19 +105,100 @@ final class AnUnusedGuestSessionIsNotStoredTest extends TestCase
         self::assertSame([], $this->cookies($response));
     }
 
-    /** An id the store does not know (expired, evicted, invented) is nothing the visitor brought. */
+    /**
+     * An id the store does not know (expired, evicted, lost with a restart,
+     * invented) is nothing the visitor brought: no row. And the browser is told
+     * to drop it. Kept, every POST a script sends carries a session cookie, is
+     * checked against a session that is new each time, and is refused until
+     * the cookie runs out (review of 4814e54: the refusal used to store a
+     * session, which healed it, and no longer does).
+     */
     #[Test]
-    public function an_unknown_cookie_on_an_untouched_request_writes_no_row_either(): void
+    public function an_unknown_cookie_on_an_untouched_request_is_expired_and_writes_no_row(): void
     {
         $table = $this->table();
         [$phase] = $this->phase($table);
-        $context = new RequestLifecycleContext($this->request(self::KNOWN));
+        $context = new RequestLifecycleContext($this->request(self::KNOWN, 'GET', [], ['XSRF-TOKEN' => 'the-token-of-the-lost-session']));
 
         $phase->execute($context);
         $response = $phase->finalize($context, new HttpResponse('ok'));
 
         self::assertSame(0, $table->count());
-        self::assertSame([], $this->cookies($response));
+        $lines = $this->cookieLines($response);
+        self::assertCount(2, $lines);
+        self::assertMatchesRegularExpression('/^semitexa_session=; Expires=\w{3}, \d\d \w{3} \d{4} [\d:]{8} GMT; Max-Age=0; Path=\/; HttpOnly; SameSite=lax$/', $lines[0]);
+        self::assertMatchesRegularExpression('/^XSRF-TOKEN=; Expires=\w{3}, \d\d \w{3} \d{4} [\d:]{8} GMT; Max-Age=0; Path=\/; SameSite=lax$/', $lines[1]);
+        preg_match('/Expires=([^;]+)/', $lines[0], $m);
+        self::assertLessThan(time(), strtotime($m[1] ?? ''), 'a date in the past');
+    }
+
+    /** The browser drops a cookie only when the expiring one names the domain it was set with. */
+    #[Test]
+    public function the_expiring_cookie_carries_the_attributes_the_cookie_was_set_with(): void
+    {
+        $domainBefore = getenv('SESSION_COOKIE_DOMAIN');
+        $secureBefore = getenv('SESSION_COOKIE_SECURE');
+        putenv('SESSION_COOKIE_DOMAIN=.example.com');
+        putenv('SESSION_COOKIE_SECURE=always');
+        try {
+            $table = $this->table();
+
+            [$phase, $scope] = $this->phase($table);
+            $set = new RequestLifecycleContext($this->request());
+            $phase->execute($set);
+            $this->session($scope)->set('cart', 1);
+            $setLine = $this->cookieLines($phase->finalize($set, new HttpResponse('ok')))[0] ?? '';
+
+            [$phase] = $this->phase($table);
+            $stale = new RequestLifecycleContext($this->request(self::KNOWN));
+            $phase->execute($stale);
+            $lines = $this->cookieLines($phase->finalize($stale, new HttpResponse('ok')));
+        } finally {
+            putenv($domainBefore === false ? 'SESSION_COOKIE_DOMAIN' : 'SESSION_COOKIE_DOMAIN=' . $domainBefore);
+            putenv($secureBefore === false ? 'SESSION_COOKIE_SECURE' : 'SESSION_COOKIE_SECURE=' . $secureBefore);
+        }
+
+        self::assertStringEndsWith('Path=/; Domain=.example.com; Secure; HttpOnly; SameSite=lax', $setLine);
+        self::assertCount(1, $lines, 'the request carried no XSRF-TOKEN, so none is expired');
+        self::assertStringStartsWith('semitexa_session=; Expires=', $lines[0]);
+        self::assertStringEndsWith('Max-Age=0; Path=/; Domain=.example.com; Secure; HttpOnly; SameSite=lax', $lines[0]);
+    }
+
+    /** A request that uses the session gets a fresh one in place of the unknown cookie, as before. */
+    #[Test]
+    public function an_unknown_cookie_on_a_page_that_renders_the_csrf_field_gets_a_fresh_session_not_an_expiry(): void
+    {
+        $table = $this->table();
+        [$phase, $scope] = $this->phase($table);
+        $context = new RequestLifecycleContext($this->request(self::KNOWN, 'GET', [], ['XSRF-TOKEN' => 'the-token-of-the-lost-session']));
+
+        $phase->execute($context);
+        $rendered = CsrfField::token();
+        $response = $phase->finalize($context, new HttpResponse('<form>'));
+
+        $cookies = $this->cookies($response);
+        self::assertCount(2, $this->cookieLines($response));
+        self::assertStringNotContainsString('Max-Age=0', implode("\n", $this->cookieLines($response)));
+        self::assertTrue(Session::isWellFormedId($cookies['semitexa_session'] ?? ''));
+        self::assertNotSame(self::KNOWN, $cookies['semitexa_session']);
+        self::assertSame($this->session($scope)->getSessionIdForCookie(), $cookies['semitexa_session']);
+        self::assertSame($rendered, $cookies['XSRF-TOKEN'] ?? null);
+        self::assertSame(1, $table->count());
+        self::assertTrue($table->exists($cookies['semitexa_session']));
+    }
+
+    /** With no cookie presented there is nothing to expire. */
+    #[Test]
+    public function a_request_without_a_session_cookie_is_sent_no_expiry(): void
+    {
+        $table = $this->table();
+        [$phase] = $this->phase($table);
+        $context = new RequestLifecycleContext($this->request('', 'GET', [], ['XSRF-TOKEN' => 'left-over']));
+
+        $phase->execute($context);
+
+        self::assertSame([], $this->cookieLines($phase->finalize($context, new HttpResponse('ok'))));
+        self::assertSame(0, $table->count());
     }
 
     #[Test]
@@ -286,7 +367,10 @@ final class AnUnusedGuestSessionIsNotStoredTest extends TestCase
         $cookies = $this->cookies($phase->finalize($context, new HttpResponse('forbidden', 403)));
         // verify:accept-test-change the refusal no longer stores a session for an unknown cookie (review: a row per forged POST); a stored one is still written, as on every request
         self::assertSame($stored ? 1 : 0, $table->count());
-        self::assertSame($stored ? ['semitexa_session', 'XSRF-TOKEN'] : [], array_keys($cookies));
+        self::assertSame($stored ? ['semitexa_session', 'XSRF-TOKEN'] : ['semitexa_session'], array_keys($cookies));
+        if (!$stored) {
+            self::assertSame('', $cookies['semitexa_session'], 'the unknown cookie is expired: the retry is a guest request');
+        }
         if ($stored) {
             self::assertSame($cookie, $cookies['semitexa_session']);
             self::assertSame('the-real-token', $cookies['XSRF-TOKEN'], 'the stored session keeps its token');
@@ -312,7 +396,9 @@ final class AnUnusedGuestSessionIsNotStoredTest extends TestCase
         $response = $phase->finalize($context, new HttpResponse('forbidden', 403));
 
         self::assertSame(0, $table->count());
-        self::assertSame([], $this->cookies($response));
+        // verify:accept-test-change the refusal now expires the unknown cookie (stale-cookie fix); it still stores nothing
+        self::assertSame(['semitexa_session' => ''], $this->cookies($response));
+        self::assertStringContainsString('Max-Age=0', $this->cookieLines($response)[0]);
     }
 
     /** @return iterable<string, array{string, bool}> */
@@ -383,6 +469,12 @@ final class AnUnusedGuestSessionIsNotStoredTest extends TestCase
         return $session;
     }
 
+    /** @return list<string> the Set-Cookie lines of the response */
+    private function cookieLines(HttpResponse $response): array
+    {
+        return array_values(array_filter((array) ($response->getHeaders()['Set-Cookie'] ?? []), 'is_string'));
+    }
+
     /** @return array<string, string> the cookies the response sets, by name */
     private function cookies(HttpResponse $response): array
     {
@@ -417,10 +509,13 @@ final class AnUnusedGuestSessionIsNotStoredTest extends TestCase
         return [$phase, $scope];
     }
 
-    /** @param array<string, string> $headers */
-    private function request(string $sessionCookie = '', string $method = 'GET', array $headers = []): Request
+    /**
+     * @param array<string, string> $headers
+     * @param array<string, string> $otherCookies
+     */
+    private function request(string $sessionCookie = '', string $method = 'GET', array $headers = [], array $otherCookies = []): Request
     {
-        return new Request($method, '/', $headers, [], [], ['REQUEST_URI' => '/'], $sessionCookie === '' ? [] : ['semitexa_session' => $sessionCookie]);
+        return new Request($method, '/', $headers, [], [], ['REQUEST_URI' => '/'], ($sessionCookie === '' ? [] : ['semitexa_session' => $sessionCookie]) + $otherCookies);
     }
 }
 
