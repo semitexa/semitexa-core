@@ -20,12 +20,18 @@ final class Session implements SessionInterface
     private array $flashNext = [];
     /**
      * The id regenerate() replaced. On save() its stored data is replaced by a
-     * short-lived marker ({@see RETIRED_MARKER}) when the store held it, and
-     * destroyed otherwise.
+     * short-lived marker ({@see RETIRED_MARKER}) when the store holds it, and
+     * destroyed when it never did.
      */
     private ?string $retiredId = null;
     /** Whether the id this session was built with is one regenerate() retired moments ago. */
     private bool $openedOnRetiredId = false;
+    /**
+     * Whether save() found that the id this session was built with is no
+     * longer a session in the store: another request retired it (or it ran
+     * out) while this one was on its way.
+     */
+    private bool $retiredMeanwhile = false;
     private bool $regenerated = false;
     /** Whether the store returned data for the id this session was built with. */
     private bool $heldByStore;
@@ -111,7 +117,7 @@ final class Session implements SessionInterface
      * has not seen.
      *
      * An id regenerate() retired a moment ago is not held either: its session
-     * starts empty under a fresh id, and {@see wasOpenedOnRetiredId()} tells
+     * starts empty under a fresh id, and {@see isOnRetiredId()} tells
      * the phase to leave the browser's cookies alone.
      *
      * @throws \Throwable whatever the handler's read() throws (store unreadable)
@@ -275,50 +281,101 @@ final class Session implements SessionInterface
         $this->data[$segment] = PayloadSerializer::toArray($payload);
     }
 
+    /**
+     * Writes the session, unless the id it was opened with stopped being a
+     * session while this request ran.
+     *
+     * An id the store held is one a browser holds, and this request is not
+     * the only one that presented it. A sign-in or a sign-out that saved
+     * between this request's read and this save has retired the id, and a
+     * blind write here put the old session back under it with a full
+     * lifetime: after a sign-in the visitor was signed out again (the old
+     * cookie was re-sent with it), and after a sign-out the signed-in session
+     * was back for whoever held the old cookie. So a held id is written, and
+     * retired, only while the store still holds a session under it
+     * ({@see writeWhileHeld()}). When it does not, nothing is written, and
+     * {@see isOnRetiredId()} says so to the phase.
+     *
+     * An id the store never held was never sent to a browser: no other
+     * request can have it, and it is written as it is.
+     */
     public function save(): void
     {
+        if ($this->retiredMeanwhile) {
+            return;
+        }
+
         $data = $this->data;
         $data['__flash__'] = $this->flashNext;
 
-        if ($this->retiredId !== null) {
-            $this->retire($this->retiredId);
-            $this->retiredId = null;
-        }
-
-        $this->handler->write($this->id, $data, $this->lifetimeSeconds);
-    }
-
-    /**
-     * Takes the data of the id regenerate() replaced out of the store.
-     *
-     * An id the store held is one a browser holds, and requests it sent before
-     * it received the new cookie are still on their way. Destroyed at once,
-     * the id was unknown to them, their response expired "the unknown cookie",
-     * and when that response reached the browser after the sign-in's, it
-     * dropped the new session cookie: signed out a moment after signing in.
-     * So the id is marked for a few seconds instead, and a request presenting
-     * a marked id is answered without any session cookie.
-     *
-     * The marker is written with the store's own expiry, so it is gone by
-     * itself. An id the store did not hold was never sent to a browser:
-     * nothing to mark.
-     */
-    private function retire(string $retiredId): void
-    {
         if (!$this->heldByStore) {
-            $this->handler->destroy($retiredId);
+            if ($this->retiredId !== null) {
+                $this->handler->destroy($this->retiredId);
+                $this->retiredId = null;
+            }
+            $this->handler->write($this->id, $data, $this->lifetimeSeconds);
 
             return;
         }
 
-        try {
-            $this->handler->write($retiredId, self::RETIRED_MARKER, self::RETIRED_ID_GRACE_SECONDS);
-        } catch (SessionStoreFullException) {
-            // The row was evicted since this request read it and the table has
-            // no room: the old data is gone either way, and the marker is not
-            // worth failing the sign-in.
-            $this->handler->destroy($retiredId);
+        /** @var array<string, mixed> $data */
+        if ($this->retiredId === null) {
+            $this->retiredMeanwhile = !$this->writeWhileHeld($this->id, $data, $this->lifetimeSeconds);
+
+            return;
         }
+
+        // The new id first, the marker after. The other way round, a full
+        // Swoole table made room for the new id by deleting the row that
+        // expires soonest: the marker just written. And a new id that finds
+        // no room now leaves the old session as it was.
+        $this->handler->write($this->id, $data, $this->lifetimeSeconds);
+        if (!$this->writeWhileHeld($this->retiredId, self::RETIRED_MARKER, self::RETIRED_ID_GRACE_SECONDS)) {
+            // Another request retired the id first: this one came second, and
+            // its session is built on data that request has already replaced.
+            // (An old id that ran out, or that a full table evicted to make
+            // room for the write above, reads the same: the phase answers a
+            // sign-in with "try again", and the retry starts clean.)
+            $this->handler->destroy($this->id);
+            $this->retiredMeanwhile = true;
+
+            return;
+        }
+        $this->retiredId = null;
+    }
+
+    /**
+     * Writes $data under $id when the store still holds a session under it:
+     * not when the id is gone, and not when it is marked as retired. Both
+     * writes of an id a browser holds go through here: the session's own
+     * data, and the marker that retires it.
+     *
+     * Retiring marks the id instead of deleting it because requests the
+     * browser sent before it received the new cookie are still on their way.
+     * Deleted, the id was unknown to them, their response expired "the
+     * unknown cookie", and reaching the browser after the sign-in's, that
+     * dropped the new session cookie. The marker is written with the store's
+     * own expiry, so it is gone by itself.
+     *
+     * One step where the store has one ({@see HeldSessionWriterInterface}:
+     * a script in Redis). Elsewhere a read and then a write, and a retirement
+     * that lands between the two is written over.
+     *
+     * @param array<string, mixed> $data
+     */
+    private function writeWhileHeld(string $id, array $data, int $lifetimeSeconds): bool
+    {
+        if ($this->handler instanceof HeldSessionWriterInterface) {
+            return $this->handler->writeIfHeld($id, $data, $lifetimeSeconds, self::RETIRED_MARKER);
+        }
+
+        $held = $this->handler->read($id);
+        if ($held === [] || $held === self::RETIRED_MARKER) {
+            return false;
+        }
+        $this->handler->write($id, $data, $lifetimeSeconds);
+
+        return true;
     }
 
     /**
@@ -366,18 +423,22 @@ final class Session implements SessionInterface
     }
 
     /**
-     * True when the request presented an id that regenerate() retired within
-     * the last {@see RETIRED_ID_GRACE_SECONDS}: a request that left the
-     * browser before the sign-in's response arrived. It is served as a guest
-     * on an empty session, and the phase neither stores that session nor sends
-     * any session cookie for it, so its response cannot replace the cookie the
-     * sign-in set.
+     * True when the id the request presented is one another request retired.
+     *
+     * Either it was already marked when this request opened it (within the
+     * last {@see RETIRED_ID_GRACE_SECONDS}: the request left the browser
+     * before the sign-in's response arrived), and it was served as a guest on
+     * an empty session. Or it was a session then and is none by the time of
+     * save(): the request was served with what it read, and save() wrote
+     * nothing. Both ways the phase sends no session cookie, so this response
+     * cannot replace the cookie the other request set, and nothing of this
+     * session is in the store.
      *
      * @internal for SessionPhase
      */
-    public function wasOpenedOnRetiredId(): bool
+    public function isOnRetiredId(): bool
     {
-        return $this->openedOnRetiredId;
+        return $this->openedOnRetiredId || $this->retiredMeanwhile;
     }
 
     /**

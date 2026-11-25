@@ -13,7 +13,7 @@ namespace Semitexa\Core\Session;
  * number of them. A write that still finds no room throws. All of this runs
  * only when set() fails; a write that fits costs what it did before.
  */
-final class SwooleTableSessionHandler implements SessionHandlerInterface
+final class SwooleTableSessionHandler implements HeldSessionWriterInterface
 {
     private const COLUMN_DATA = 'data';
     private const COLUMN_EXPIRES = 'expires_at';
@@ -94,6 +94,46 @@ final class SwooleTableSessionHandler implements SessionHandlerInterface
                 $table->count(),
             ));
         }
+    }
+
+    /**
+     * Not atomic: Swoole\Table has no compare-and-set, and its row lock is not
+     * offered to PHP. No coroutine switches between the get() and the set(), so
+     * the gap is open only to another worker process, for the length of two
+     * table calls: an id retired in exactly that gap is written over. Closing
+     * it takes a lock shared by all workers around every session write.
+     *
+     * The set() is on a key the get() just found, so it needs no room and
+     * nothing is reclaimed for it.
+     */
+    public function writeIfHeld(string $sessionId, array $data, int $lifetimeSeconds, array $unless): bool
+    {
+        $table = $this->table ?? SwooleSessionTableHolder::getTable();
+        if ($table === null) {
+            return false;
+        }
+
+        $row = $table->get($sessionId);
+        if (!is_array($row)) {
+            return false;
+        }
+        $expires = $row[self::COLUMN_EXPIRES] ?? 0;
+        if (is_int($expires) && $expires > 0 && $expires < time()) {
+            return false;
+        }
+        $raw = $row[self::COLUMN_DATA] ?? '';
+        $held = is_string($raw) && $raw !== '' ? json_decode($raw, true) : null;
+        if (!is_array($held) || $held === [] || $held === $unless) {
+            return false;
+        }
+
+        return @$table->set($sessionId, [
+            self::COLUMN_DATA => json_encode(
+                $data,
+                JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE
+            ),
+            self::COLUMN_EXPIRES => $lifetimeSeconds > 0 ? time() + $lifetimeSeconds : 0,
+        ]);
     }
 
     /**

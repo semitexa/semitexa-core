@@ -135,18 +135,18 @@ final class SessionPhase
         // use (Session::isWorthStoring()): no row, and so no cookie, for an
         // anonymous error page or a machine route.
         //
-        // Nor is the session of a request that presented an id a sign-in
-        // retired a moment ago (Session::wasOpenedOnRetiredId()): it left the
-        // browser before the new cookie arrived there, and may be answered
-        // after it. Whatever cookie it were sent (a fresh session's when it
-        // wrote something, an expiry when it did not) would replace the
-        // signed-in one. So it is sent none, and with no cookie to find it by,
-        // what it wrote is not stored: a row nobody could reach.
-        $retiredId = $session->wasOpenedOnRetiredId();
-        if (!$retiredId && $session->persists() && $session->isWorthStoring()) {
+        // Nor is the session of a request whose id a sign-in or a sign-out
+        // retired (Session::isOnRetiredId()), before the request opened it
+        // or, as save() finds out, while it ran. The request left the browser
+        // before the new cookie arrived there, and may be answered after it.
+        // Whatever cookie it were sent (its old id again, a fresh session's
+        // when it wrote something, an expiry when it did not) would replace
+        // the one the other request set. So it is sent none, and with no
+        // cookie to find it by, what it wrote is not stored.
+        if (!$session->isOnRetiredId() && $session->persists() && $session->isWorthStoring()) {
             try {
                 $session->save();
-                $sessionPersisted = true;
+                $sessionPersisted = !$session->isOnRetiredId();
             } catch (SessionStoreFullException $e) {
                 // A full table is full for a second attempt too, and for every
                 // request until rows expire: no retry, and one log line a minute.
@@ -157,12 +157,14 @@ final class SessionPhase
                     $this->sessionHandler = $this->createSessionHandler();
                     $session->setHandler($this->sessionHandler);
                     $session->save();
-                    $sessionPersisted = true;
+                    $sessionPersisted = !$session->isOnRetiredId();
                 } catch (\Throwable $retryError) {
                     $this->logSessionPersistenceFailure($retryError, $request);
                 }
             }
         }
+
+        $retiredId = $session->isOnRetiredId();
 
         if ($sessionPersisted) {
             $cookieName = $session->getCookieName();

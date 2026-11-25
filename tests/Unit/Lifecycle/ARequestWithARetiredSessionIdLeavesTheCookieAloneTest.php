@@ -35,6 +35,10 @@ use Semitexa\Core\Tenant\DefaultTenantContextStore;
  * presents a marked id is sent no session cookie. The marker is not a way
  * into the new session: the tests below read the stored row and what the old
  * id opens.
+ *
+ * And the request that opened the session before the sign-in (or sign-out)
+ * saved, and saves after it, no longer writes the old session back over the
+ * marker (tk-session-inflight-request-rewrites-a-retired-session).
  */
 final class ARequestWithARetiredSessionIdLeavesTheCookieAloneTest extends TestCase
 {
@@ -173,7 +177,7 @@ final class ARequestWithARetiredSessionIdLeavesTheCookieAloneTest extends TestCa
         [$phase, $scope] = $this->phase($table);
         $late = new RequestLifecycleContext($this->request(self::BEFORE_SIGN_IN, ['XSRF-TOKEN' => 'the-token-from-before']));
         $phase->execute($late);
-        self::assertFalse($this->session($scope)->wasOpenedOnRetiredId());
+        self::assertFalse($this->session($scope)->isOnRetiredId());
         $lines = $this->cookieLines($phase->finalize($late, new HttpResponse('ok')));
 
         self::assertCount(2, $lines);
@@ -199,7 +203,7 @@ final class ARequestWithARetiredSessionIdLeavesTheCookieAloneTest extends TestCa
         $phase->execute(new RequestLifecycleContext($this->request(self::BEFORE_SIGN_IN)));
         $session = $this->session($scope);
 
-        self::assertTrue($session->wasOpenedOnRetiredId());
+        self::assertTrue($session->isOnRetiredId());
         self::assertNull($session->get('user_id'));
         self::assertFalse($session->has('user_id'));
         self::assertNull($session->get('__retired__'), 'the marker is not session data');
@@ -248,16 +252,152 @@ final class ARequestWithARetiredSessionIdLeavesTheCookieAloneTest extends TestCa
     }
 
     /**
+     * The other interleaving (tk-session-inflight-request-rewrites-a-retired-session):
+     * the request opened the session BEFORE the sign-in saved, and finalizes
+     * after it. Its save() used to write the old session back over the marker,
+     * with a full lifetime, and the phase re-sent the old cookie.
+     */
+    #[Test]
+    public function a_request_in_flight_across_a_sign_in_does_not_put_the_old_session_back(): void
+    {
+        $table = $this->table();
+        $this->store($table, '{"seen_before_sign_in":true,"__csrf__":{"value":"before"},"__flash__":[]}');
+        [$pollPhase, $pollScope] = $this->phase($table);
+        $poll = new RequestLifecycleContext($this->request(self::BEFORE_SIGN_IN));
+        $pollPhase->execute($poll);
+        $pollSession = $this->session($pollScope);
+        self::assertTrue($pollSession->get('seen_before_sign_in'), 'opened while the id was a session');
+
+        [$newId] = $this->signIn($table);
+        $newRow = $table->get($newId);
+        $marker = $table->get(self::BEFORE_SIGN_IN);
+
+        $pollSession->set('polled', true);
+        $response = $pollPhase->finalize($poll, new HttpResponse('{"new":0}', 200, ['Content-Type' => 'application/json']));
+
+        self::assertSame(['Content-Type' => 'application/json'], $response->getHeaders(), 'no Set-Cookie: the old id is not sent again');
+        self::assertIsArray($marker);
+        self::assertSame('{"__retired__":1}', $marker['data']);
+        self::assertSame($marker, $table->get(self::BEFORE_SIGN_IN), 'the marker is as the sign-in left it, expiry included');
+        self::assertSame($newRow, $table->get($newId));
+        self::assertSame(2, $table->count());
+    }
+
+    /**
+     * The same across a sign-out, where it mattered most: the signed-in
+     * session came back under the old id, for anyone holding that cookie.
+     */
+    #[Test]
+    public function a_request_in_flight_across_a_sign_out_does_not_bring_the_signed_in_session_back(): void
+    {
+        $table = $this->table();
+        $this->store($table, '{"user_id":7,"__csrf__":{"value":"before"},"__flash__":[]}');
+        [$pollPhase, $pollScope] = $this->phase($table);
+        $poll = new RequestLifecycleContext($this->request(self::BEFORE_SIGN_IN));
+        $pollPhase->execute($poll);
+        self::assertSame(7, $this->session($pollScope)->get('user_id'));
+
+        [$outPhase, $outScope] = $this->phase($table);
+        $out = new RequestLifecycleContext($this->request(self::BEFORE_SIGN_IN));
+        $outPhase->execute($out);
+        $this->session($outScope)->clear();
+        $this->session($outScope)->regenerate();
+        $guestId = $this->cookies($outPhase->finalize($out, new HttpResponse('signed out')))['semitexa_session'] ?? '';
+        self::assertTrue(Session::isWellFormedId($guestId));
+
+        $response = $pollPhase->finalize($poll, new HttpResponse('ok', 200, ['Content-Type' => 'text/plain']));
+
+        self::assertSame(['Content-Type' => 'text/plain'], $response->getHeaders());
+        self::assertSame('{"__retired__":1}', $table->get(self::BEFORE_SIGN_IN, 'data'));
+        self::assertLessThanOrEqual(time() + Session::RETIRED_ID_GRACE_SECONDS, $table->get(self::BEFORE_SIGN_IN, 'expires_at'));
+        self::assertSame(2, $table->count(), 'the marker and the guest session of the sign-out: the signed-in one is nowhere');
+        $guest = $table->get($guestId, 'data');
+        self::assertIsString($guest);
+        self::assertStringContainsString('"__flash__":[]', $guest);
+        self::assertStringNotContainsString('user_id', $guest);
+
+        // Whoever still holds the old cookie is a guest.
+        [$phase, $scope] = $this->phase($table);
+        $phase->execute(new RequestLifecycleContext($this->request(self::BEFORE_SIGN_IN)));
+        self::assertNull($this->session($scope)->get('user_id'));
+        self::assertTrue($this->session($scope)->isOnRetiredId());
+    }
+
+    /** Two sign-ins on one session: the one that saves second stores nothing and is told to retry. */
+    #[Test]
+    public function a_sign_in_in_flight_across_another_is_told_to_retry_and_stores_nothing(): void
+    {
+        $table = $this->table();
+        $this->store($table, '{"__csrf__":{"value":"before"},"__flash__":[]}');
+        [$secondPhase, $secondScope] = $this->phase($table);
+        $second = new RequestLifecycleContext($this->request(self::BEFORE_SIGN_IN));
+        $secondPhase->execute($second);
+
+        [$newId] = $this->signIn($table);
+
+        $session = $this->session($secondScope);
+        $session->regenerate();
+        $session->set('user_id', 8);
+        $response = $secondPhase->finalize($second, HttpResponse::redirect('/dashboard'));
+
+        self::assertSame(503, $response->getStatusCode());
+        self::assertSame('1', $response->getHeaders()['Retry-After'] ?? null);
+        self::assertArrayNotHasKey('Set-Cookie', $response->getHeaders());
+        self::assertSame(2, $table->count(), 'the first sign-in\'s session and the marker');
+        self::assertTrue($table->exists($newId));
+        self::assertFalse($table->exists($session->getSessionIdForCookie()));
+    }
+
+    /**
+     * A full table. The new id's write makes room by deleting the rows that
+     * expire soonest, and the marker, written first, was the soonest of all:
+     * the sign-in deleted its own marker (15 of 20 runs on a table this size).
+     * Twenty sign-ins, each on a table filled to the last row.
+     */
+    #[Test]
+    public function a_sign_in_on_a_full_table_keeps_its_marker(): void
+    {
+        for ($run = 0; $run < 20; $run++) {
+            $table = new \Swoole\Table(16);
+            $table->column('data', \Swoole\Table::TYPE_STRING, 1024);
+            $table->column('expires_at', \Swoole\Table::TYPE_INT);
+            $table->create();
+            // Saved by the page with the sign-in form a moment ago: no row expires later.
+            $table->set(self::BEFORE_SIGN_IN, ['data' => '{"__csrf__":{"value":"before"},"__flash__":[]}', 'expires_at' => time() + 7200]);
+            for ($i = 0, $refused = 0; $refused < 50; $i++) {
+                $filled = @$table->set(md5("filler-{$run}-{$i}"), ['data' => '{"__flash__":[]}', 'expires_at' => time() + 3600 + $i]);
+                $refused = $filled ? 0 : $refused + 1;
+            }
+            $rows = $table->count();
+            self::assertGreaterThanOrEqual(16, $rows);
+
+            [$phase, $scope] = $this->phase($table);
+            $context = new RequestLifecycleContext($this->request(self::BEFORE_SIGN_IN));
+            $phase->execute($context);
+            $this->session($scope)->regenerate();
+            $this->session($scope)->set('user_id', 7);
+            $newId = $this->cookies($phase->finalize($context, new HttpResponse('signed in')))['semitexa_session'] ?? '';
+
+            self::assertTrue($table->exists($newId), "run {$run}: the new session is stored");
+            self::assertSame('{"__retired__":1}', $table->get(self::BEFORE_SIGN_IN, 'data'), "run {$run}: and the old id is still marked");
+        }
+    }
+
+    private function store(\Swoole\Table $table, string $data): void
+    {
+        $table->set(self::BEFORE_SIGN_IN, ['data' => $data, 'expires_at' => time() + 600]);
+    }
+
+    /**
      * A sign-in on a session the store holds: user 7 under a new id.
      *
      * @return array{string, string} the new session id and its CSRF token
      */
     private function signIn(\Swoole\Table $table): array
     {
-        $table->set(self::BEFORE_SIGN_IN, [
-            'data' => '{"seen_before_sign_in":true,"__csrf__":{"value":"before"},"__flash__":[]}',
-            'expires_at' => time() + 600,
-        ]);
+        if (!$table->exists(self::BEFORE_SIGN_IN)) {
+            $this->store($table, '{"seen_before_sign_in":true,"__csrf__":{"value":"before"},"__flash__":[]}');
+        }
         [$phase, $scope] = $this->phase($table);
         $context = new RequestLifecycleContext($this->request(self::BEFORE_SIGN_IN));
         $phase->execute($context);

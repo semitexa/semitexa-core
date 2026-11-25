@@ -7,6 +7,21 @@ next release tag. This file is machine-read by `update:changelog` and the OS
 
 ## Unreleased
 
+### Security
+- **A sign-out is no longer undone by a request that was on its way.** A
+  request that had read the session before a sign-out (or a sign-in) saved, and
+  finished after it, wrote the old session back under the old id with a full
+  lifetime and sent that cookie again: after a sign-out the signed-in session
+  was back for anyone holding the old cookie, and after a sign-in the visitor
+  was signed out. A session id a browser holds is now written only while the
+  store still holds a session under it; otherwise the request stores nothing and
+  sends no session cookie. In Redis the check and the write are one script. On
+  the Swoole table they are two calls: a sign-out in another worker that lands
+  exactly between them is still written over. A custom `SessionHandlerInterface`
+  gets a read followed by a write, with the same gap; implementing
+  `HeldSessionWriterInterface` closes it. To notice: a session that expired or
+  was evicted while its request ran is no longer started again by that request.
+
 ### Fixed
 - **A request sent just before a sign-in no longer signs the visitor out.**
   `regenerate()` deleted the old session id at once, so a poll or a reconnecting
@@ -19,8 +34,10 @@ next release tag. This file is machine-read by `update:changelog` and the OS
   `XSRF-TOKEN`; what it writes to its session is not stored. The marker does not
   lead to the new session: the id from before a sign-in still opens nothing. To
   notice: for those 10 seconds the store holds one more key per sign-in or
-  sign-out (`{"__retired__":1}`), and a sign-in whose handler runs on the old
-  cookie in that time answers 503 with `Retry-After`.
+  sign-out (`{"__retired__":1}`), and a sign-in whose handler runs on a retired
+  id, or beside another sign-in on the same session, answers 503 with
+  `Retry-After`. On a full Swoole table the sign-in no longer evicts its own
+  marker.
 
 ## 2026.11.25.1338 — 2026-11-25
 

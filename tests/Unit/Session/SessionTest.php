@@ -87,8 +87,9 @@ final class SessionTest extends TestCase
         $session->save();
 
         self::assertSame(10, Session::RETIRED_ID_GRACE_SECONDS);
+        // The new id is written first, the marker after it.
         self::assertSame(
-            ['dddddddddddddddddddddddddddddddd' => Session::RETIRED_ID_GRACE_SECONDS, $session->getId() => 1800],
+            [$session->getId() => 1800, 'dddddddddddddddddddddddddddddddd' => Session::RETIRED_ID_GRACE_SECONDS],
             $handler->lifetimes,
         );
     }
@@ -102,24 +103,132 @@ final class SessionTest extends TestCase
 
         $session = Session::open('eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', $handler, 'semitexa_session');
 
-        self::assertFalse($session->wasOpenedOnRetiredId());
+        self::assertFalse($session->isOnRetiredId());
         self::assertSame('eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', $session->getSessionIdForCookie());
         self::assertTrue($session->isWorthStoring());
     }
 
-    /** A table with no room for the marker (the old row was evicted meanwhile) does not fail the sign-in. */
+    // verify:accept-test-change was a_marker_the_store_has_no_room_for_is_dropped_and_the_session_is_saved: the marker is now written after the new id and only over the row it retires, so it needs no room; what a full store refuses is the new id, and that case is this test
     #[Test]
-    public function a_marker_the_store_has_no_room_for_is_dropped_and_the_session_is_saved(): void
+    public function a_new_id_the_store_has_no_room_for_leaves_the_old_session_as_it_was(): void
     {
         $handler = new InMemorySessionHandler();
         $handler->store['ffffffffffffffffffffffffffffffff'] = ['user_id' => 7, '__flash__' => []];
-        $handler->refuses = 'ffffffffffffffffffffffffffffffff';
+        $handler->full = true;
 
         $session = new Session('ffffffffffffffffffffffffffffffff', $handler, 'semitexa_session');
         $session->regenerate();
+        try {
+            $session->save();
+            self::fail('the full store was not reported');
+        } catch (\Semitexa\Core\Session\SessionStoreFullException) {
+        }
+
+        self::assertSame(['ffffffffffffffffffffffffffffffff' => ['user_id' => 7, '__flash__' => []]], $handler->store);
+    }
+
+    /**
+     * tk-session-inflight-request-rewrites-a-retired-session, on a handler
+     * without a one-step conditional write (the read-then-write path).
+     *
+     * @return iterable<string, array{\Closure(Session): void}>
+     */
+    public static function retirements(): iterable
+    {
+        yield 'a sign-out' => [static function (Session $s): void {
+            $s->clear();
+            $s->regenerate();
+        }];
+        yield 'a sign-in' => [static function (Session $s): void {
+            $s->set('user_id', 8);
+            $s->regenerate();
+        }];
+    }
+
+    /** @param \Closure(Session): void $retire */
+    #[Test]
+    #[\PHPUnit\Framework\Attributes\DataProvider('retirements')]
+    public function a_request_that_opened_the_session_before_it_was_retired_does_not_write_it_back(\Closure $retire): void
+    {
+        $id = '11111111111111111111111111111111';
+        $handler = new InMemorySessionHandler();
+        $handler->store[$id] = ['user_id' => 7, '__flash__' => []];
+
+        $poll = Session::open($id, $handler, 'semitexa_session');
+        $other = Session::open($id, $handler, 'semitexa_session');
+        $retire($other);
+        $other->save();
+        self::assertFalse($other->isOnRetiredId());
+        $afterTheOther = $handler->store;
+
+        self::assertSame(7, $poll->get('user_id'), 'the request in flight keeps what it read');
+        $poll->set('seen', true);
+        $poll->save();
+
+        self::assertTrue($poll->isOnRetiredId());
+        self::assertSame($afterTheOther, $handler->store, 'it wrote nothing');
+        self::assertSame(['__retired__' => 1], $handler->store[$id]);
+        self::assertSame(Session::RETIRED_ID_GRACE_SECONDS, $handler->lifetimes[$id], 'the marker keeps its own lifetime');
+        $late = Session::open($id, $handler, 'semitexa_session');
+        self::assertNull($late->get('user_id'), 'the old id opens nothing');
+        self::assertNotSame($id, $late->getSessionIdForCookie());
+
+        $poll->save();
+        self::assertSame($afterTheOther, $handler->store, 'nor does a second save()');
+    }
+
+    /** Two requests regenerate the same session: the second finds the id retired and leaves nothing of its own. */
+    #[Test]
+    public function the_second_of_two_requests_that_regenerate_one_session_stores_nothing(): void
+    {
+        $id = '22222222222222222222222222222222';
+        $handler = new InMemorySessionHandler();
+        $handler->store[$id] = ['user_id' => 7, '__flash__' => []];
+
+        $second = Session::open($id, $handler, 'semitexa_session');
+        $first = Session::open($id, $handler, 'semitexa_session');
+        $first->clear();
+        $first->regenerate();
+        $first->save();
+        $second->regenerate();
+        $second->save();
+
+        self::assertTrue($second->isOnRetiredId());
+        self::assertSame([$id, $first->getSessionIdForCookie()], array_keys($handler->store));
+        self::assertArrayNotHasKey('user_id', $handler->store[$first->getSessionIdForCookie()]);
+    }
+
+    /** A session that ran out while the request was on its way is not started again under the old id. */
+    #[Test]
+    public function a_session_that_is_gone_by_the_time_of_save_is_not_written_back(): void
+    {
+        $id = '33333333333333333333333333333333';
+        $handler = new InMemorySessionHandler();
+        $handler->store[$id] = ['user_id' => 7, '__flash__' => []];
+
+        $session = Session::open($id, $handler, 'semitexa_session');
+        $handler->destroy($id);
         $session->save();
 
-        self::assertSame([$session->getId()], array_keys($handler->store));
+        self::assertTrue($session->isOnRetiredId());
+        self::assertSame([], $handler->store);
+    }
+
+    /** What every request of a signed-in visitor does: the held session is written, and its lifetime slides. */
+    #[Test]
+    public function a_session_the_store_still_holds_is_written_as_before(): void
+    {
+        $id = '44444444444444444444444444444444';
+        $handler = new InMemorySessionHandler();
+        $handler->store[$id] = ['user_id' => 7, '__flash__' => []];
+
+        $session = Session::open($id, $handler, 'semitexa_session', 1800);
+        $session->set('cart', 3);
+        $session->save();
+
+        self::assertFalse($session->isOnRetiredId());
+        self::assertSame(['user_id' => 7, 'cart' => 3, '__flash__' => []], $handler->store[$id]);
+        self::assertSame(1800, $handler->lifetimes[$id]);
     }
 }
 
@@ -131,8 +240,8 @@ final class InMemorySessionHandler implements SessionHandlerInterface
     /** @var array<string, int> the lifetime of the last write, by session id */
     public array $lifetimes = [];
 
-    /** An id whose write finds the store full. */
-    public ?string $refuses = null;
+    /** Whether a write of an id the store does not hold finds it full. */
+    public bool $full = false;
 
     public function read(string $sessionId): array
     {
@@ -141,7 +250,7 @@ final class InMemorySessionHandler implements SessionHandlerInterface
 
     public function write(string $sessionId, array $data, int $lifetimeSeconds = 3600): void
     {
-        if ($sessionId === $this->refuses) {
+        if ($this->full && !isset($this->store[$sessionId])) {
             throw new \Semitexa\Core\Session\SessionStoreFullException('full');
         }
         $this->store[$sessionId] = $data;
