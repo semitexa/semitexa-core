@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Semitexa\Core\Session;
 
+use Semitexa\Core\Log\StaticLoggerBridge;
+
 /**
  * Reads/writes session data to Swoole Table. Used by Session when Redis is not configured.
  *
@@ -40,12 +42,18 @@ final class SwooleTableSessionHandler implements HeldSessionWriterInterface
     private const EVICTION_ROUNDS = 4;
     /**
      * A lock is held for a few table calls, so a wait this long means its
-     * holder died with it (a worker killed inside those calls). The call then
-     * goes on without the lock: that id's stripe is back to a check and a
-     * write as two steps, until the server restarts. Waiting for ever would
-     * stop every worker on its next session instead.
+     * holder died with it (a worker killed inside those calls), or, once in a
+     * while, that the holder was not scheduled for that long on a saturated
+     * CPU. The call then goes on without the lock: that id's stripe is back to
+     * a check and a write as two steps, until the server restarts (a dead
+     * holder) or for that one call (a slow one), and a warning says so at most
+     * once a minute per worker. Waiting for ever would stop every worker on
+     * its next session instead.
      */
     private const LOCK_WAIT_SECONDS = 0.1;
+    private const LOCK_WARNING_INTERVAL_SECONDS = 60;
+
+    private static int $lockWarnedAt = 0;
 
     /**
      * @param \Swoole\Table|null $table A private table (tests); the server's shared one when null.
@@ -182,10 +190,27 @@ final class SwooleTableSessionHandler implements HeldSessionWriterInterface
         if ($locks === []) {
             return null;
         }
-        $lock = $locks[crc32($sessionId) % count($locks)];
+        $stripe = crc32($sessionId) % count($locks);
+        $lock = $locks[$stripe];
 
         // @phpstan-ignore arguments.count (Swoole 6.1 gave lock() its timeout; the stubs are 5.1's, whose lockwait() is gone)
-        return $lock->lock(LOCK_EX, self::LOCK_WAIT_SECONDS) ? $lock : null;
+        if ($lock->lock(LOCK_EX, self::LOCK_WAIT_SECONDS)) {
+            return $lock;
+        }
+
+        // Nothing is held here, so the logger may do what it likes.
+        $now = time();
+        if ($now - self::$lockWarnedAt >= self::LOCK_WARNING_INTERVAL_SECONDS) {
+            self::$lockWarnedAt = $now;
+            StaticLoggerBridge::warning('session', sprintf(
+                'Session lock stripe %d did not come in %.1f s; this write runs without it. '
+                . 'If this repeats, a worker died holding it: run server:restart.',
+                $stripe,
+                self::LOCK_WAIT_SECONDS,
+            ), ['stripe' => $stripe]);
+        }
+
+        return null;
     }
 
     /**

@@ -5,10 +5,14 @@ declare(strict_types=1);
 namespace Semitexa\Core\Tests\Unit\Session;
 
 use PHPUnit\Framework\Attributes\DataProvider;
+use PHPUnit\Framework\Attributes\RequiresPhpExtension;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
+use Semitexa\Core\Log\LoggerInterface;
+use Semitexa\Core\Log\StaticLoggerBridge;
 use Semitexa\Core\Session\SwooleSessionTableHolder;
 use Semitexa\Core\Session\SwooleTableSessionHandler;
+use Semitexa\Core\Tests\Support\StaticState;
 use Swoole\Atomic;
 use Swoole\Lock;
 use Swoole\Table;
@@ -21,6 +25,9 @@ use Swoole\Table;
  *
  * Every test runs on a private table and private locks, never the server's.
  */
+#[RequiresPhpExtension('swoole')]
+#[RequiresPhpExtension('pcntl')]
+#[RequiresPhpExtension('posix')]
 final class SwooleTableSessionHandlerLocksASessionIdTest extends TestCase
 {
     private const MARKER = ['__retired__' => 1];
@@ -141,6 +148,43 @@ final class SwooleTableSessionHandlerLocksASessionIdTest extends TestCase
         self::assertGreaterThanOrEqual(self::LOCK_WAIT_SECONDS * 0.9, microtime(true) - $waited, 'held elsewhere, it is waited for');
     }
 
+    /** A lock that does not come is said, once a minute per worker, not on every write. */
+    #[Test]
+    public function a_lock_that_does_not_come_is_said_once_a_minute(): void
+    {
+        $logger = new class implements LoggerInterface {
+            /** @var list<array{string, array<string, mixed>}> */
+            public array $warnings = [];
+
+            public function error(string $message, array $context = []): void {}
+            public function critical(string $message, array $context = []): void {}
+            public function warning(string $message, array $context = []): void { $this->warnings[] = [$message, $context]; }
+            public function info(string $message, array $context = []): void {}
+            public function notice(string $message, array $context = []): void {}
+            public function debug(string $message, array $context = []): void {}
+        };
+        $loggerState = StaticState::snapshot(StaticLoggerBridge::class);
+        $handlerState = StaticState::snapshot(SwooleTableSessionHandler::class);
+        StaticLoggerBridge::set($logger);
+        (new \ReflectionProperty(SwooleTableSessionHandler::class, 'lockWarnedAt'))->setValue(null, 0);
+        $locks = SwooleSessionTableHolder::createLocks(1);
+        $handler = new SwooleTableSessionHandler($this->table(), $locks);
+        try {
+            self::assertTrue(self::free($locks[0]), 'held by this test, as by a worker that died');
+            $handler->write(str_repeat('c', 32), self::SESSION, 600);
+            $handler->write(str_repeat('d', 32), self::SESSION, 600);
+            $locks[0]->unlock();
+        } finally {
+            StaticState::restore($handlerState);
+            StaticState::restore($loggerState);
+        }
+
+        self::assertCount(1, $logger->warnings, 'two writes without the lock, one warning');
+        self::assertStringContainsString('server:restart', $logger->warnings[0][0]);
+        self::assertSame(0, $logger->warnings[0][1]['stripe'] ?? null);
+        self::assertSame(self::SESSION, $handler->read(str_repeat('d', 32)), 'the write still went through');
+    }
+
     #[Test]
     public function a_held_write_that_cannot_be_encoded_gives_no_lock_away(): void
     {
@@ -178,8 +222,9 @@ final class SwooleTableSessionHandlerLocksASessionIdTest extends TestCase
             $handler->write(sprintf('%032x', 0xf0000 + $i), self::SESSION, 3600);
         }
 
-        // A lock taken twice (two at a time on one stripe) would have waited.
-        self::assertLessThan(self::LOCK_WAIT_SECONDS, microtime(true) - $started, 'no lock was waited for');
+        // A lock taken twice (two at a time on one stripe) would wait once per
+        // write, 10 waits; half of that leaves room for a stalled runner.
+        self::assertLessThan(5 * self::LOCK_WAIT_SECONDS, microtime(true) - $started, 'no lock was waited for');
         for ($i = 0; $i < 10; $i++) {
             self::assertSame(self::SESSION, $handler->read(sprintf('%032x', 0xf0000 + $i)));
         }
