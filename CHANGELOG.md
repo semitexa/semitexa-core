@@ -22,6 +22,17 @@ next release tag. This file is machine-read by `update:changelog` and the OS
   `semitexa/ssr` together with this version: pages with deferred or live
   components need its matching change.
 
+### Changed
+- **`lint:templates` refuses a POST form without a CSRF token.** Such a form works
+  for a new guest, who has no session yet and is not checked, and answers 403 for
+  every visitor who has one. With guest sessions created only on use, a page no
+  longer shows this by itself, so the lint does, as an error. A form passes with
+  `{{ csrf_field() }}` inside it, or a hidden input named `_csrf`. Not checked: a
+  GET form, a form without a method, a form whose action is another site's
+  absolute URL, markup in a comment or `{% verbatim %}`. A method written as a
+  Twig expression counts as POST. After the update, run `bin/semitexa
+  lint:templates` and add the field where it reports one.
+
 ## 2026.11.25.0522 — 2026-11-25
 
 ### Fixed

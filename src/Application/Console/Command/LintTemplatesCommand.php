@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Semitexa\Core\Application\Console\Command;
 
 use Semitexa\Core\Console\BaseCommand;
+use Semitexa\Core\Csrf\CsrfField;
 use Semitexa\Core\Attribute\AsCommand;
 use Semitexa\Core\Attribute\InjectAsReadonly;
 use Semitexa\Core\ModuleRegistry;
@@ -20,6 +21,7 @@ use Symfony\Component\Console\Style\SymfonyStyle;
  *
  * Errors (always blocking in --strict mode, blocks CI):
  *   - Legacy `themes/` directory inside Application/View/ (must migrate to templates/layouts/)
+ *   - A POST form that carries no CSRF token ({@see postFormsWithoutCsrfToken()})
  *
  * Warnings (informational; blocking only with --strict):
  *   - Non-canonical subdirectory names inside templates/
@@ -33,7 +35,14 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 class LintTemplatesCommand extends BaseCommand
 {
     /** Why this check exists, and what taught us; ai:verify prints it when the lint fails. */
-    public const RATIONALE = 'Why: templates resolve through canonical subdirectories (pages, layouts, partials, components, deferred); a legacy themes/ directory or an invented one is a layout nobody else looks for. Policy since 2026-04-30; no incident on record.';
+    public const RATIONALE = 'Why: templates resolve through canonical subdirectories (pages, layouts, partials, components, deferred); a legacy themes/ directory or an invented one is a layout nobody else looks for. Policy since 2026-04-30; no incident on record. A POST form without csrf_field() works for a new guest, who has no session yet and is not CSRF-checked, and answers 403 for every visitor who has one: since 2026-11-25 a guest gets a session only once a request uses it, so the page no longer catches this by itself (idea-anonymous-error-responses-mint-session-cookies).';
+
+    /** What a POST form must hold, and what is not checked: one wording for the error and the tests. */
+    public const CSRF_RULE = 'Put {{ csrf_field() }} inside the form, or a hidden input named "' . CsrfField::NAME . '" holding {{ csrf_token() }}. '
+        . 'Without it the form works for a new guest, who has no session yet and is not checked, and is refused with 403 for every visitor who has one. '
+        . 'A form sent by script with the X-CSRF-Token header needs the field too: without the script it is posted as it stands. '
+        . 'Not checked: a GET form, a form without a method, a form whose action is an absolute URL of another site (it must not carry the token), '
+        . 'and markup inside a comment or {% verbatim %}.';
 
     private const CANONICAL_SUBDIRS = ['pages', 'layouts', 'partials', 'components', 'deferred'];
 
@@ -179,6 +188,34 @@ class LintTemplatesCommand extends BaseCommand
             ];
         }
 
+        // Errors: the operator's decision of 2026-11-25 (d-20261125-guest-sessions-option-c).
+        $formsUnreadable = [];
+        $formsUnanalysed = [];
+        foreach (self::postFormsWithoutCsrfToken($templatesDir, $formsUnreadable, $formsUnanalysed) as [$file, $line, $methodIsExpression]) {
+            $errors[] = [
+                'module'  => $module,
+                'path'    => $this->relativePath($file, $projectRoot),
+                'message' => "POST form without a CSRF token, line {$line}. "
+                    . ($methodIsExpression ? 'Its method is a Twig expression, which can be POST; if it can be GET too, print the field only for POST. ' : '')
+                    . self::CSRF_RULE,
+            ];
+        }
+        // A template the include check could not read or analyse is already an error above.
+        foreach (array_diff($formsUnreadable, $unreadable) as $file) {
+            $errors[] = [
+                'module'  => $module,
+                'path'    => $this->relativePath($file, $projectRoot),
+                'message' => 'Cannot be read, so its forms were not checked. Make it readable.',
+            ];
+        }
+        foreach (array_diff($formsUnanalysed, $unanalysed) as $file) {
+            $errors[] = [
+                'module'  => $module,
+                'path'    => $this->relativePath($file, $projectRoot),
+                'message' => 'Too large for the regex engine (pcre.backtrack_limit), so its forms were not checked. Split it, or raise the limit.',
+            ];
+        }
+
         foreach (glob($templatesDir . '/*', GLOB_ONLYDIR) ?: [] as $subdir) {
             $name = basename($subdir);
             if (in_array($name, self::CANONICAL_SUBDIRS, true)) {
@@ -281,6 +318,130 @@ class LintTemplatesCommand extends BaseCommand
         }
 
         return array_values(array_unique($names));
+    }
+
+    /**
+     * The POST forms of the HTML templates under $dir that present no CSRF
+     * token ({@see CSRF_RULE}).
+     *
+     * @param list<string> $unreadable filled with the HTML templates that could not be read
+     * @param list<string> $unanalysed filled with those the regex engine gave up on (backtrack limit)
+     * @return list<array{string, int, bool}> [file, line of the <form>, whether its method is a Twig expression]
+     */
+    public static function postFormsWithoutCsrfToken(string $dir, array &$unreadable = [], array &$unanalysed = []): array
+    {
+        $found = [];
+        $files = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($dir, \FilesystemIterator::SKIP_DOTS));
+        /** @var \SplFileInfo $file */
+        foreach ($files as $file) {
+            $path = $file->getPathname();
+            if (!str_ends_with($path, '.twig') || self::escapingOf($path) !== 'html') {
+                continue;
+            }
+            $source = @file_get_contents($path);
+            if ($source === false) {
+                $unreadable[] = $path;
+                continue;
+            }
+            $forms = self::tokenlessPostForms($source);
+            if ($forms === null) {
+                $unanalysed[] = $path;
+                continue;
+            }
+            foreach ($forms as [$line, $methodIsExpression]) {
+                $found[] = [$path, $line, $methodIsExpression];
+            }
+        }
+
+        return $found;
+    }
+
+    /**
+     * The POST forms of one template that present no token, by the line of
+     * their `<form>`.
+     *
+     * A form is checked when its method is POST, in any case and quoting, or a
+     * Twig expression (`method="{{ form.method|default('POST') }}"` can be
+     * POST). The token is what CsrfListener reads from the body: the field
+     * csrf_field() prints, or an input named CsrfField::NAME written by hand.
+     * The X-CSRF-Token header is sent by script and is not in the markup.
+     *
+     * A form reaches to its `</form>`, or to the next `<form>` or the end of
+     * the template when it has none: a token outside it is not submitted.
+     *
+     * @return list<array{int, bool}>|null [line, whether the method is a Twig
+     *                                     expression]; null when the regex
+     *                                     engine gave up
+     */
+    public static function tokenlessPostForms(string $source): ?array
+    {
+        $markup = self::withoutCommentsAndVerbatim($source);
+        if ($markup === null) {
+            return null;
+        }
+        // A tag ends at the first > outside a quoted value and outside Twig: `{% if a > b %}` is inside it.
+        $attributes = '(?:\{\{.*?\}\}|\{%.*?%\}|"[^"]*"|\'[^\']*\'|[^>"\'])*';
+        if (preg_match_all('/<form\b(' . $attributes . ')>/is', $markup, $tags, PREG_OFFSET_CAPTURE | PREG_SET_ORDER) === false) {
+            return null;
+        }
+
+        $found = [];
+        foreach ($tags as $i => $tag) {
+            $method = self::attribute($tag[1][0], 'method');
+            $methodIsExpression = $method !== null && (str_contains($method, '{{') || str_contains($method, '{%'));
+            if ($method === null || (!$methodIsExpression && strtolower(trim($method)) !== 'post')) {
+                continue;
+            }
+            // Another site's form must not carry this site's token.
+            $action = trim(self::attribute($tag[1][0], 'action') ?? '');
+            if (preg_match('~\A(?:https?:)?//~i', $action) === 1) {
+                continue;
+            }
+
+            $from = $tag[0][1] + strlen($tag[0][0]);
+            $next = isset($tags[$i + 1]) ? $tags[$i + 1][0][1] : strlen($markup);
+            $close = stripos($markup, '</form', $from);
+            $body = substr($markup, $from, min($close === false ? $next : $close, $next) - $from);
+
+            $presentsToken = preg_match('/\bcsrf_field\s*\(/', $body) === 1
+                || preg_match('/(?<![\w-])name\s*=\s*(["\']?)' . preg_quote(CsrfField::NAME, '/') . '\1(?=[\s>\/]|\z)/i', $body) === 1;
+            if (!$presentsToken) {
+                $found[] = [substr_count($markup, "\n", 0, $tag[0][1]) + 1, $methodIsExpression];
+            }
+        }
+
+        return $found;
+    }
+
+    /** The value of an attribute of an opening tag, quotes removed; null when the tag has none. */
+    private static function attribute(string $attributes, string $name): ?string
+    {
+        if (preg_match('/(?<![\w-])' . $name . '\s*=\s*(?:"([^"]*)"|\'([^\']*)\'|([^\s"\'>]+))/is', $attributes, $m) !== 1) {
+            return null;
+        }
+
+        return $m[1] !== '' ? $m[1] : (($m[2] ?? '') !== '' ? $m[2] : ($m[3] ?? ''));
+    }
+
+    /**
+     * The template with its Twig comments, its HTML comments and the inside of
+     * its verbatim blocks blanked, line for line: a `<form>` there is text, not
+     * a form, and Twig runs nothing inside verbatim. As in includedNames(), a
+     * comment delimiter inside a Twig string opens no comment.
+     */
+    private static function withoutCommentsAndVerbatim(string $source): ?string
+    {
+        $string = '\'(?:[^\'\\\\]|\\\\.)*\'|"(?:[^"\\\\]|\\\\.)*"';
+        $blank = static fn (string $text): string => preg_replace('/[^\n]/', ' ', $text) ?? '';
+
+        return preg_replace_callback(
+            '/\{#.*?#\}'
+            . '|\{%[-~]?\s*(verbatim|raw)\s*[-~]?%\}.*?\{%[-~]?\s*end\1\s*[-~]?%\}'
+            . '|<!--.*?-->'
+            . '|\{[{%](?:' . $string . '|[^\'"])*?[}%]\}/s',
+            static fn (array $m): string => str_starts_with($m[0], '{{') || (str_starts_with($m[0], '{%') && ($m[1] ?? '') === '') ? $m[0] : $blank($m[0]),
+            $source,
+        );
     }
 
     /** The strategy ModuleTemplateCatalog's 'autoescape' => 'name' gives a template of this name. */
