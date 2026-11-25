@@ -23,6 +23,13 @@ final class Session implements SessionInterface
     private bool $regenerated = false;
     /** Whether the store returned data for the id this session was built with. */
     private bool $heldByStore;
+    /**
+     * Whether this request gave the session something to keep or showed it to
+     * the client: a write, or a read of its id or its CSRF token. A session
+     * the store does not hold and nothing used is not worth a row
+     * ({@see isWorthStoring()}).
+     */
+    private bool $used = false;
 
     /**
      * The one shape a session id has: what {@see generateId()} mints, 32
@@ -108,6 +115,7 @@ final class Session implements SessionInterface
 
     public function set(string $key, mixed $value): void
     {
+        $this->used = true;
         $this->data[$key] = $value;
     }
 
@@ -118,6 +126,7 @@ final class Session implements SessionInterface
 
     public function remove(string $key): void
     {
+        $this->used = true;
         unset($this->data[$key]);
     }
 
@@ -129,13 +138,21 @@ final class Session implements SessionInterface
 
     public function clear(): void
     {
+        $this->used = true;
         $this->data = [];
         $this->flash = [];
         $this->flashNext = [];
     }
 
+    /**
+     * Counts as use: whoever asks for the id binds something to it (a signed
+     * UI context, a state key), and that holds only when the browser is sent
+     * the same id. The phase reads it through getSessionIdForCookie().
+     */
     public function getId(): string
     {
+        $this->used = true;
+
         return $this->id;
     }
 
@@ -147,6 +164,7 @@ final class Session implements SessionInterface
         // left them on the old id, and the next request refused them.
         $this->retiredId ??= $this->id;
         $this->regenerated = true;
+        $this->used = true;
         $this->id = self::generateId();
         // The CSRF token must not survive a privilege change: under session fixation
         // an attacker who read the token before login would otherwise still hold a
@@ -167,6 +185,7 @@ final class Session implements SessionInterface
 
     public function flash(string $key, mixed $value): void
     {
+        $this->used = true;
         $this->flashNext[$key] = $value;
     }
 
@@ -184,6 +203,23 @@ final class Session implements SessionInterface
      */
     public function getPayload(string $payloadClass): object
     {
+        // A CSRF token that was read is on its way to the client, in a form
+        // field or a header: the session it belongs to has to exist when it
+        // comes back.
+        if ($payloadClass === CsrfToken::class) {
+            $this->used = true;
+        }
+
+        return $this->hydratePayload($payloadClass);
+    }
+
+    /**
+     * @template T of object
+     * @param class-string<T> $payloadClass
+     * @return T
+     */
+    private function hydratePayload(string $payloadClass): object
+    {
         $segment = $this->getSegmentName($payloadClass);
         $arr = $this->data[$segment] ?? [];
         $dto = new $payloadClass();
@@ -196,6 +232,7 @@ final class Session implements SessionInterface
 
     public function setPayload(object $payload): void
     {
+        $this->used = true;
         $segment = $this->getSegmentName($payload::class);
         $this->data[$segment] = PayloadSerializer::toArray($payload);
     }
@@ -211,6 +248,50 @@ final class Session implements SessionInterface
         }
 
         $this->handler->write($this->id, $data, $this->lifetimeSeconds);
+    }
+
+    /**
+     * Gives the session its CSRF token when it has none, without that counting
+     * as use: every session has a token, and one nobody read is no reason to
+     * store the session.
+     *
+     * @internal for SessionPhase
+     */
+    public function ensureCsrfToken(): void
+    {
+        if ($this->hydratePayload(CsrfToken::class)->getValue() !== '') {
+            return;
+        }
+        $this->data[$this->getSegmentName(CsrfToken::class)] = PayloadSerializer::toArray(CsrfToken::generate());
+    }
+
+    /**
+     * The session's CSRF token for comparing with a submitted one, '' when it
+     * has none. Not a use, unlike getPayload(CsrfToken::class): a check sends
+     * the token nowhere, and a refused POST is no reason to store a session
+     * (a POST with an invented cookie and no token left a row per request).
+     *
+     * @internal for CsrfListener
+     */
+    public function csrfTokenForCheck(): string
+    {
+        return $this->hydratePayload(CsrfToken::class)->getValue();
+    }
+
+    /**
+     * Whether the end of the request should write this session and send its
+     * cookies: the store already holds it (so its lifetime keeps sliding), or
+     * this request used it (see {@see $used}). False for the session of a
+     * visitor who presented none and whose request touched none: an error
+     * page, a machine route, a page without a form. Stored, each of those was
+     * a row per request for whoever asked, and on the Swoole table a flood of
+     * them evicted the sessions of signed-in visitors.
+     *
+     * save() itself stays unconditional.
+     */
+    public function isWorthStoring(): bool
+    {
+        return $this->heldByStore || $this->used;
     }
 
     /**

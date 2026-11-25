@@ -85,9 +85,11 @@ final class CsrfListener implements PipelineListenerInterface
             throw new ServiceUnavailableException();
         }
 
-        /** @var CsrfToken $token */
-        $token = $this->session->getPayload(CsrfToken::class);
-        $expected = $token->getValue();
+        // Compared, not sent anywhere: on the framework's session this read
+        // does not count as a use of it, so a refused POST stores no session.
+        $expected = $this->session instanceof Session
+            ? $this->session->csrfTokenForCheck()
+            : $this->session->getPayload(CsrfToken::class)->getValue();
         if ($expected === '') {
             throw new AccessDeniedException('CSRF validation failed: no token in session.');
         }

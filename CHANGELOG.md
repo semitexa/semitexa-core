@@ -5,6 +5,44 @@ Changes to `semitexa/core` that a consuming application can notice. Sections are
 next release tag. This file is machine-read by `update:changelog` and the OS
 "What's new" surface — keep entries short and operator-facing.
 
+## Unreleased
+
+### Security
+- **A guest request that does not use the session no longer creates one.** Every
+  response used to write a session row and send `semitexa_session` and
+  `XSRF-TOKEN`: an anonymous 404, a 401 of a webhook route, each probe of a
+  scanner. A flood of them filled the store, and on the Swoole table (4096 rows
+  by default) evicted the sessions of signed-in visitors. A session is now stored,
+  and its cookies sent, when the visitor presented one the store holds, when the
+  request wrote to it, or when it read its id or its CSRF token (`csrf_field()`,
+  `csrf_token()`). A stored session is still written on every request, so its
+  lifetime slides as before. To notice: a guest page with no form sets no
+  `XSRF-TOKEN` cookie, and a script's first POST from it carries no session
+  cookie, so it is not CSRF-checked, as any request without one. A POST refused
+  by the CSRF check stores no session either. A session cookie the store no
+  longer knows (expired, evicted, lost with a restart of the store) is expired
+  in the browser, with its `XSRF-TOKEN`, unless the request starts a new session. Composer installs this version only
+  with a `semitexa/ssr` newer than 2026.11.25.0522 (a `conflict`): on an older
+  one, a guest's page with deferred or live components would lose its stream's
+  session.
+
+### Changed
+- **`lint:templates` refuses a POST form without a CSRF token.** Such a form works
+  for a new guest, who has no session yet and is not checked, and answers 403 for
+  every visitor who has one. With guest sessions created only on use, a page no
+  longer shows this by itself, so the lint does, as an error. A form passes with
+  `{{ csrf_field() }}` directly inside it, or an `<input>` named `_csrf`; a field
+  printed by an included template, a macro or a `{% set %}` variable is not seen. Not checked: a GET
+  form, a form without a method, a form that posts to an absolute URL written in
+  the template (`http://`, `https://`, `//`), markup in a comment or
+  `{% verbatim %}`. A literal absolute URL is taken for another site: a form that
+  posts to this app uses a path, or a Twig expression, which is checked. A method
+  written as a Twig expression counts as POST, and so does a button with
+  `formmethod="post"`; a submit button with its own `formaction` posts there
+  with the form's method.
+  After the update, run `bin/semitexa
+  lint:templates` and add the field where it reports one.
+
 ## 2026.11.25.0522 — 2026-11-25
 
 ### Fixed
