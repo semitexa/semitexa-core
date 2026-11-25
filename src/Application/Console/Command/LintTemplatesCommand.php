@@ -42,9 +42,14 @@ class LintTemplatesCommand extends BaseCommand
         . 'a field printed by an included template or a macro is not seen here. '
         . 'Without it the form works for a new guest, who has no session yet and is not checked, and is refused with 403 for every visitor who has one. '
         . 'A form sent by script with the X-CSRF-Token header needs the field too: without the script it is posted as it stands. '
-        . 'A button or input with formmethod="post" makes its form a POST form. '
-        . 'Not checked: a GET form, a form without a method, a form whose action is an absolute URL of another site (it must not carry the token), '
-        . 'and markup inside a comment or {% verbatim %}.';
+        . 'A button or input with formmethod="post" makes its form a POST form, and a submit button with its own formaction posts there with the form\'s method. '
+        . 'Not checked: a GET form, a form without a method, a form that posts to an absolute URL written in the template (http://, https:// or //), '
+        . 'and markup inside a comment or {% verbatim %}. '
+        . 'A literal absolute URL is taken for another site, whose form must not carry the token: one template is rendered for every host that serves the app, so the lint has no origin to compare with. '
+        . 'A form that posts to this app uses a path, or a Twig expression, which is checked.';
+
+    /** Added to the error when the form posts here without a token and to an absolute URL too. */
+    public const CSRF_SPLIT = 'This form also posts to an absolute URL, which is taken for another site: split it in two, a token placed in it would be sent to the other site as well. ';
 
     private const CANONICAL_SUBDIRS = ['pages', 'layouts', 'partials', 'components', 'deferred'];
 
@@ -193,13 +198,11 @@ class LintTemplatesCommand extends BaseCommand
         // Errors: the operator's decision of 2026-11-25 (d-20261125-guest-sessions-option-c).
         $formsUnreadable = [];
         $formsUnanalysed = [];
-        foreach (self::postFormsWithoutCsrfToken($templatesDir, $formsUnreadable, $formsUnanalysed) as [$file, $line, $methodIsExpression]) {
+        foreach (self::postFormsWithoutCsrfToken($templatesDir, $formsUnreadable, $formsUnanalysed) as [$file, $line, $methodIsExpression, $postsElsewhereToo]) {
             $errors[] = [
                 'module'  => $module,
                 'path'    => $this->relativePath($file, $projectRoot),
-                'message' => "POST form without a CSRF token, line {$line}. "
-                    . ($methodIsExpression ? 'Its method is a Twig expression, which can be POST; if it can be GET too, print the field only for POST. ' : '')
-                    . self::CSRF_RULE,
+                'message' => self::postFormMessage($line, $methodIsExpression, $postsElsewhereToo),
             ];
         }
         // A template the include check could not read or analyse is already an error above.
@@ -328,7 +331,8 @@ class LintTemplatesCommand extends BaseCommand
      *
      * @param list<string> $unreadable filled with the HTML templates that could not be read
      * @param list<string> $unanalysed filled with those the regex engine gave up on (backtrack limit)
-     * @return list<array{string, int, bool}> [file, line of the <form>, whether its method is a Twig expression]
+     * @return list<array{string, int, bool, bool}> [file, line of the <form>, whether its method is a Twig expression,
+     *                                              whether it posts to an absolute URL too]
      */
     public static function postFormsWithoutCsrfToken(string $dir, array &$unreadable = [], array &$unanalysed = []): array
     {
@@ -350,31 +354,54 @@ class LintTemplatesCommand extends BaseCommand
                 $unanalysed[] = $path;
                 continue;
             }
-            foreach ($forms as [$line, $methodIsExpression]) {
-                $found[] = [$path, $line, $methodIsExpression];
+            foreach ($forms as [$line, $methodIsExpression, $postsElsewhereToo]) {
+                $found[] = [$path, $line, $methodIsExpression, $postsElsewhereToo];
             }
         }
 
         return $found;
     }
 
+    /** The error for one form of {@see tokenlessPostForms()}. */
+    public static function postFormMessage(int $line, bool $methodIsExpression, bool $postsElsewhereToo): string
+    {
+        return "POST form without a CSRF token, line {$line}. "
+            . ($methodIsExpression ? 'Its method is a Twig expression, which can be POST; if it can be GET too, print the field only for POST. ' : '')
+            . ($postsElsewhereToo ? self::CSRF_SPLIT : '')
+            . self::CSRF_RULE;
+    }
+
     /**
      * The POST forms of one template that present no token, by the line of
      * their `<form>`.
      *
-     * A form is checked when its method is POST, in any case and quoting, or a
-     * Twig expression (`method="{{ form.method|default('POST') }}"` can be
-     * POST), or when a button or input in it says formmethod="post". The token
-     * is what CsrfListener reads from the body: the field csrf_field() prints,
-     * or an `<input>` named CsrfField::NAME written by hand.
+     * A form is checked when one of its submits can POST to this app. A submit
+     * is the form's own method and action, or those of a submit control in it
+     * (a `<button>` that is not type="button" or type="reset", an `<input>` of
+     * type submit or image): its formmethod, or else the form's method, with
+     * its formaction, or else the form's action. A method is POST as the
+     * literal, in any case and quoting, or as a Twig expression
+     * (`method="{{ form.method|default('POST') }}"` can be POST).
+     *
+     * An action written in the template as an absolute URL (`http://`,
+     * `https://`, `//`) is taken for another site, whose form must not carry
+     * the token: one template is rendered for every host that serves the app,
+     * so there is no origin here to compare it with. A form that posts to this
+     * app uses a path, or a Twig expression, and both are checked.
+     *
+     * The token is what CsrfListener reads from the body: the field a Twig
+     * output expression prints with csrf_field() (`{{ csrf_field() }}`; the
+     * words in the text of the page are not one), or an `<input>` named
+     * CsrfField::NAME written by hand.
      * The X-CSRF-Token header is sent by script and is not in the markup.
      *
      * A form reaches to its `</form>`, or to the next `<form>` or the end of
      * the template when it has none: a token outside it is not submitted.
      *
-     * @return list<array{int, bool}>|null [line, whether POST comes only from a
-     *                                     Twig expression]; null when the regex
-     *                                     engine gave up
+     * @return list<array{int, bool, bool}>|null [line, whether POST comes only from a
+     *                                           Twig expression, whether the form posts
+     *                                           to an absolute URL too]; null when the
+     *                                           regex engine gave up
      */
     public static function tokenlessPostForms(string $source): ?array
     {
@@ -398,37 +425,62 @@ class LintTemplatesCommand extends BaseCommand
                 return null;
             }
 
-            // What the form posts with: its own method, or the formmethod of a
-            // button or input in it, which overrides the form's for that submit.
-            $action = self::attribute($tag[1][0], 'action');
-            $posts = [];
-            if (self::canBePost(self::attribute($tag[1][0], 'method'), $isExpression)) {
-                $posts[] = [$action, $isExpression];
+            // Every submit of the form: its own method and action, and those of
+            // each submit control, which overrides either for that submit only.
+            $form = self::attributes($tag[1][0]);
+            if ($form === null) {
+                return null;
             }
+            $method = $form['method'] ?? null;
+            $action = $form['action'] ?? null;
+            $submits = [[$method, $action]];
+            $presentsToken = false;
             foreach ($controls as $control) {
-                if (self::canBePost(self::attribute($control[2], 'formmethod'), $isExpression)) {
-                    $posts[] = [self::attribute($control[2], 'formaction') ?? $action, $isExpression];
+                $own = self::attributes($control[2]);
+                if ($own === null) {
+                    return null;
+                }
+                $element = strtolower($control[1]);
+                // Only an input is submitted: <meta name="_csrf"> in a form is not.
+                $presentsToken = $presentsToken || ($element === 'input' && ($own['name'] ?? null) === CsrfField::NAME);
+                $type = strtolower(trim($own['type'] ?? ''));
+                $isSubmit = $element === 'button' ? !in_array($type, ['button', 'reset'], true) : in_array($type, ['submit', 'image'], true);
+                if ($isSubmit && (isset($own['formmethod']) || isset($own['formaction']))) {
+                    $submits[] = [$own['formmethod'] ?? $method, $own['formaction'] ?? $action];
                 }
             }
-            // Another site's form must not carry this site's token.
-            $posts = array_values(array_filter(
-                $posts,
-                static fn (array $post): bool => preg_match('~\A(?:https?:)?//~i', trim($post[0] ?? '')) !== 1,
-            ));
-            if ($posts === []) {
+
+            $postsHere = [];
+            $postsElsewhere = false;
+            foreach ($submits as [$submitMethod, $submitAction]) {
+                if (!self::canBePost($submitMethod, $isExpression)) {
+                    continue;
+                }
+                // A literal absolute URL is taken for another site, which must not get this site's token.
+                if (preg_match('~\A(?:https?:)?//~i', trim($submitAction ?? '')) === 1) {
+                    $postsElsewhere = true;
+                } else {
+                    $postsHere[] = $isExpression;
+                }
+            }
+            if ($postsHere === []) {
                 continue;
             }
 
-            $presentsToken = preg_match('/\bcsrf_field\s*\(/', $body) === 1;
-            foreach ($controls as $control) {
-                // Only an input is submitted: <meta name="_csrf"> in a form is not.
+            // csrf_field() prints the field only as a Twig output expression; in the text of the page it is words.
+            $twigString = '\'(?:[^\'\\\\]|\\\\.)*\'|"(?:[^"\\\\]|\\\\.)*"';
+            if (preg_match_all('/\{\{((?:' . $twigString . '|[^\'"])*?)\}\}/s', $body, $outputs) === false) {
+                return null;
+            }
+            foreach ($outputs[1] as $expression) {
                 $presentsToken = $presentsToken
-                    || (strtolower($control[1]) === 'input' && self::attribute($control[2], 'name') === CsrfField::NAME);
+                    || preg_match('/\bcsrf_field\s*\(/', preg_replace('/' . $twigString . '/s', "''", $expression) ?? '') === 1;
             }
             if (!$presentsToken) {
                 $found[] = [
                     substr_count($markup, "\n", 0, $tag[0][1]) + 1,
-                    array_filter($posts, static fn (array $post): bool => !$post[1]) === [],
+                    !in_array(false, $postsHere, true),
+                    $postsElsewhere,
                 ];
             }
         }
@@ -449,14 +501,34 @@ class LintTemplatesCommand extends BaseCommand
         return $isExpression || ($method !== null && strtolower(trim($method)) === 'post');
     }
 
-    /** The value of an attribute of an opening tag, quotes removed; null when the tag has none. */
-    private static function attribute(string $attributes, string $name): ?string
+    /**
+     * The attributes of an opening tag, by lowercased name, quotes removed; an
+     * attribute without a value is ''. Whole attributes are read one after
+     * another, so a name inside another attribute's quoted value is not one,
+     * and the first of a repeated name wins, as in the browser.
+     *
+     * @return array<string, string>|null null when the regex engine gave up
+     */
+    private static function attributes(string $tag): ?array
     {
-        if (preg_match('/(?<![\w-])' . $name . '\s*=\s*(?:"([^"]*)"|\'([^\']*)\'|([^\s"\'>]+))/is', $attributes, $m) !== 1) {
+        $found = preg_match_all(
+            '/\{\{.*?\}\}|\{%.*?%\}'
+            . '|([^\s"\'<>\/=]+)(?:\s*=\s*(?:"([^"]*)"|\'([^\']*)\'|((?:\{\{.*?\}\}|[^\s"\'>])+)))?/s',
+            $tag,
+            $matches,
+            PREG_SET_ORDER | PREG_UNMATCHED_AS_NULL,
+        );
+        if ($found === false) {
             return null;
         }
+        $attributes = [];
+        foreach ($matches as $m) {
+            if (($m[1] ?? null) !== null) {
+                $attributes[strtolower($m[1])] ??= $m[2] ?? $m[3] ?? $m[4] ?? '';
+            }
+        }
 
-        return $m[1] !== '' ? $m[1] : (($m[2] ?? '') !== '' ? $m[2] : ($m[3] ?? ''));
+        return $attributes;
     }
 
     /**

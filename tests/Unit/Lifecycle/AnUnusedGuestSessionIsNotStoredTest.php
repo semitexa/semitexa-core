@@ -95,8 +95,8 @@ final class AnUnusedGuestSessionIsNotStoredTest extends TestCase
 
         $phase->execute($context);
         $session = $this->session($scope);
-        $session->get('user_id');
-        $session->has('user_id');
+        self::assertNull($session->get('user_id'));
+        self::assertFalse($session->has('user_id'));
         $session->getFlash('notice');
         $session->getPayload(UnusedSessionProbe::class);
         $response = $phase->finalize($context, new HttpResponse('ok'));
@@ -290,7 +290,8 @@ final class AnUnusedGuestSessionIsNotStoredTest extends TestCase
         $row = $table->get(self::KNOWN);
         self::assertIsArray($row);
         self::assertGreaterThan($soon + 60, $row['expires_at'], 'the row was written again with a full lifetime');
-        self::assertStringContainsString('"user_id":7', (string) $row['data']);
+        self::assertIsString($row['data']);
+        self::assertStringContainsString('"user_id":7', $row['data']);
         $cookies = $this->cookies($response);
         self::assertSame(self::KNOWN, $cookies['semitexa_session'] ?? null, 'and the cookie is renewed with it');
         self::assertNotSame('', $cookies['XSRF-TOKEN'] ?? '');
@@ -480,7 +481,7 @@ final class AnUnusedGuestSessionIsNotStoredTest extends TestCase
     {
         $cookies = [];
         foreach ((array) ($response->getHeaders()['Set-Cookie'] ?? []) as $line) {
-            if (is_string($line) && preg_match('/^([^=]+)=([^;]*)/', $line, $m) === 1) {
+            if (preg_match('/^([^=]+)=([^;]*)/', $line, $m) === 1) {
                 $cookies[$m[1]] = rawurldecode($m[2]);
             }
         }

@@ -104,16 +104,22 @@ final class ASessionThatCannotBeStoredSaysSoTest extends TestCase
         self::assertStringNotContainsString('semitexa_session=', $cookies, 'no cookie for a session that is not stored');
     }
 
+    // verify:accept-test-change was an_anonymous_page_is_still_served: a GET that uses no session stores none now, so it never reached the full store (review semitexa-core#272); this one uses its session, and the name says what is left to prove
     #[Test]
-    public function an_anonymous_page_is_still_served(): void
+    public function a_page_whose_session_found_no_room_is_still_served_without_a_session_cookie(): void
     {
-        [$phase, $scope] = $this->phase($this->fullStore());
+        $writes = new \ArrayObject();
+        [$phase, $scope] = $this->phase($this->fullStore($writes));
         $context = new RequestLifecycleContext($this->request('GET', '/'));
         $phase->execute($context);
+        $session = $scope->get(SessionInterface::class);
+        self::assertInstanceOf(Session::class, $session);
+        $session->set('cart', 1);
         $this->setALocaleCookie($scope);
 
         $response = $phase->finalize($context, new HttpResponse('the page'));
 
+        self::assertCount(1, $writes, 'the full store was asked, once');
         self::assertSame(200, $response->getStatusCode());
         self::assertSame('the page', $response->getContent());
         $cookies = implode("\n", (array) ($response->getHeaders()['Set-Cookie'] ?? []));

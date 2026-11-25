@@ -33,9 +33,13 @@ next release tag. This file is machine-read by `update:changelog` and the OS
   longer shows this by itself, so the lint does, as an error. A form passes with
   `{{ csrf_field() }}` directly inside it, or an `<input>` named `_csrf`; a field
   printed by an included template or a macro is not seen. Not checked: a GET
-  form, a form without a method, a form whose action is another site's absolute
-  URL, markup in a comment or `{% verbatim %}`. A method written as a Twig
-  expression counts as POST, and so does a button with `formmethod="post"`.
+  form, a form without a method, a form that posts to an absolute URL written in
+  the template (`http://`, `https://`, `//`), markup in a comment or
+  `{% verbatim %}`. A literal absolute URL is taken for another site: a form that
+  posts to this app uses a path, or a Twig expression, which is checked. A method
+  written as a Twig expression counts as POST, and so does a button with
+  `formmethod="post"`; a submit button with its own `formaction` posts there
+  with the form's method.
   After the update, run `bin/semitexa
   lint:templates` and add the field where it reports one.
 
