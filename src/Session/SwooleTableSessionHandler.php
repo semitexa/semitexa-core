@@ -12,6 +12,14 @@ namespace Semitexa\Core\Session;
  * expired rows are deleted first, then the rows that expire soonest, a bounded
  * number of them. A write that still finds no room throws. All of this runs
  * only when set() fails; a write that fits costs what it did before.
+ *
+ * Every change of a row (a write, a held write, a delete, an eviction) is made
+ * under a lock on that row's session id, shared by all workers
+ * ({@see SwooleSessionTableHolder::getLocks()}): the check and the write of
+ * {@see writeIfHeld()} are one step for every other worker. Held for table
+ * calls only, with nothing that lets another coroutine run, one lock at a
+ * time, never two. Without locks (a private table given none, the CLI) the
+ * calls run as they are: one process, and nothing to wait for.
  */
 final class SwooleTableSessionHandler implements HeldSessionWriterInterface
 {
@@ -30,10 +38,25 @@ final class SwooleTableSessionHandler implements HeldSessionWriterInterface
      * the new key hashes to. Four rounds bound the eviction at 1/8 of the table.
      */
     private const EVICTION_ROUNDS = 4;
+    /**
+     * A lock is held for a few table calls, so a wait this long means its
+     * holder died with it (a worker killed inside those calls). The call then
+     * goes on without the lock: that id's stripe is back to a check and a
+     * write as two steps, until the server restarts. Waiting for ever would
+     * stop every worker on its next session instead.
+     */
+    private const LOCK_WAIT_SECONDS = 0.1;
 
-    /** @param \Swoole\Table|null $table A private table (tests); the server's shared one when null. */
-    public function __construct(private readonly ?\Swoole\Table $table = null)
-    {
+    /**
+     * @param \Swoole\Table|null $table A private table (tests); the server's shared one when null.
+     * @param list<\Swoole\Lock>|null $locks The locks of a private table
+     *        ({@see SwooleSessionTableHolder::createLocks()}); none when null. Not
+     *        used with the server's table, which has its own.
+     */
+    public function __construct(
+        private readonly ?\Swoole\Table $table = null,
+        private readonly ?array $locks = null,
+    ) {
     }
 
     public function read(string $sessionId): array
@@ -50,7 +73,8 @@ final class SwooleTableSessionHandler implements HeldSessionWriterInterface
 
         $expires = (int) ($row[self::COLUMN_EXPIRES] ?? 0);
         if ($expires > 0 && $expires < time()) {
-            $table->delete($sessionId);
+            // Only the row that was read: one written since is another session.
+            $this->deleteIfUnchanged($table, $sessionId, $expires);
             return [];
         }
 
@@ -81,9 +105,7 @@ final class SwooleTableSessionHandler implements HeldSessionWriterInterface
             self::COLUMN_EXPIRES => $expires,
         ];
 
-        // Silenced: a full table answers false AND raises a warning, and the
-        // false is handled right here.
-        if (@$table->set($sessionId, $row)) {
+        if ($this->set($table, $sessionId, $row)) {
             return;
         }
 
@@ -97,11 +119,15 @@ final class SwooleTableSessionHandler implements HeldSessionWriterInterface
     }
 
     /**
-     * Not atomic: Swoole\Table has no compare-and-set, and its row lock is not
-     * offered to PHP. No coroutine switches between the get() and the set(), so
-     * the gap is open only to another worker process, for the length of two
-     * table calls: an id retired in exactly that gap is written over. Closing
-     * it takes a lock shared by all workers around every session write.
+     * One step for every worker of the server: the row is read, checked and
+     * written under the lock of its id, and so is every other change of that
+     * row ({@see write()}, {@see destroy()}, the deletes of a reclaim, another
+     * writeIfHeld()). An id retired in another worker is either retired before
+     * the read, and then nothing is written, or after the write, and then the
+     * marker replaces it. No coroutine switches inside.
+     *
+     * Two steps again only without locks (a private table given none), and
+     * for one call whose lock did not come in {@see LOCK_WAIT_SECONDS}.
      *
      * The set() is on a key the get() just found, so it needs no room and
      * nothing is reclaimed for it.
@@ -113,27 +139,70 @@ final class SwooleTableSessionHandler implements HeldSessionWriterInterface
             return false;
         }
 
-        $row = $table->get($sessionId);
-        if (!is_array($row)) {
-            return false;
-        }
-        $expires = $row[self::COLUMN_EXPIRES] ?? 0;
-        if (is_int($expires) && $expires > 0 && $expires < time()) {
-            return false;
-        }
-        $raw = $row[self::COLUMN_DATA] ?? '';
-        $held = is_string($raw) && $raw !== '' ? json_decode($raw, true) : null;
-        if (!is_array($held) || $held === [] || $held === $unless) {
-            return false;
-        }
-
-        return @$table->set($sessionId, [
+        // Encoded before the lock: it can throw, and it is not a table call.
+        $new = [
             self::COLUMN_DATA => json_encode(
                 $data,
                 JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE
             ),
             self::COLUMN_EXPIRES => $lifetimeSeconds > 0 ? time() + $lifetimeSeconds : 0,
-        ]);
+        ];
+
+        $lock = $this->lock($sessionId);
+        try {
+            $row = $table->get($sessionId);
+            if (!is_array($row)) {
+                return false;
+            }
+            $expires = $row[self::COLUMN_EXPIRES] ?? 0;
+            if (is_int($expires) && $expires > 0 && $expires < time()) {
+                return false;
+            }
+            $raw = $row[self::COLUMN_DATA] ?? '';
+            $held = is_string($raw) && $raw !== '' ? json_decode($raw, true) : null;
+            if (!is_array($held) || $held === [] || $held === $unless) {
+                return false;
+            }
+
+            return @$table->set($sessionId, $new);
+        } finally {
+            $lock?->unlock();
+        }
+    }
+
+    /**
+     * The lock of $sessionId's stripe, taken; null when there are no locks or
+     * this one did not come in time. The caller unlocks it, in a finally, and
+     * takes no second one before that: the mutex is not re-entrant, and two
+     * held in different orders by two workers never come back.
+     */
+    private function lock(string $sessionId): ?\Swoole\Lock
+    {
+        $locks = $this->table !== null ? ($this->locks ?? []) : SwooleSessionTableHolder::getLocks();
+        if ($locks === []) {
+            return null;
+        }
+        $lock = $locks[crc32($sessionId) % count($locks)];
+
+        // @phpstan-ignore arguments.count (Swoole 6.1 gave lock() its timeout; the stubs are 5.1's, whose lockwait() is gone)
+        return $lock->lock(LOCK_EX, self::LOCK_WAIT_SECONDS) ? $lock : null;
+    }
+
+    /**
+     * set() under the lock of its id.
+     *
+     * @param array{data: string, expires_at: int} $row
+     */
+    private function set(\Swoole\Table $table, string $sessionId, array $row): bool
+    {
+        $lock = $this->lock($sessionId);
+        try {
+            // Silenced: a full table answers false AND raises a warning, and
+            // the false is handled by the caller.
+            return @$table->set($sessionId, $row);
+        } finally {
+            $lock?->unlock();
+        }
     }
 
     /**
@@ -166,7 +235,7 @@ final class SwooleTableSessionHandler implements HeldSessionWriterInterface
         foreach ($expired as $key => $scanned) {
             $this->deleteIfUnchanged($table, (string) $key, $scanned);
         }
-        if ($expired !== [] && @$table->set($sessionId, $row)) {
+        if ($expired !== [] && $this->set($table, $sessionId, $row)) {
             return true;
         }
 
@@ -177,7 +246,7 @@ final class SwooleTableSessionHandler implements HeldSessionWriterInterface
             foreach ($round as $key => $scanned) {
                 $this->deleteIfUnchanged($table, (string) $key, $scanned);
             }
-            if (@$table->set($sessionId, $row)) {
+            if ($this->set($table, $sessionId, $row)) {
                 return true;
             }
         }
@@ -186,32 +255,39 @@ final class SwooleTableSessionHandler implements HeldSessionWriterInterface
     }
 
     /**
-     * Deletes a row only while it still carries the expiry the scan saw:
+     * Deletes a row only while it still carries the expiry the caller saw:
      * another worker may have refreshed that session since, and a session in
-     * use is not the one to drop.
-     *
-     * Not atomic. Swoole\Table has no compare-and-delete, so a refresh that
-     * lands between this read and the delete is still lost. Closing that gap
-     * takes a lock every session write would pay for; the re-read costs only
-     * the failure path, and leaves one session at risk for the length of two
-     * table calls, while the table is full.
+     * use is not the one to drop. The re-read and the delete are under the
+     * row's lock, so a refresh lands before both or after both.
      */
     private function deleteIfUnchanged(\Swoole\Table $table, string $key, int $scanned): void
     {
-        $current = $table->get($key, self::COLUMN_EXPIRES);
-        if (!is_int($current)) {
-            return;
-        }
-        if (($current > 0 ? $current : PHP_INT_MAX) === $scanned) {
-            $table->delete($key);
+        $lock = $this->lock($key);
+        try {
+            $current = $table->get($key, self::COLUMN_EXPIRES);
+            if (!is_int($current)) {
+                return;
+            }
+            if (($current > 0 ? $current : PHP_INT_MAX) === $scanned) {
+                $table->delete($key);
+            }
+        } finally {
+            $lock?->unlock();
         }
     }
 
     public function destroy(string $sessionId): void
     {
         $table = $this->table ?? SwooleSessionTableHolder::getTable();
-        if ($table !== null) {
+        if ($table === null) {
+            return;
+        }
+
+        $lock = $this->lock($sessionId);
+        try {
             $table->delete($sessionId);
+        } finally {
+            $lock?->unlock();
         }
     }
 }

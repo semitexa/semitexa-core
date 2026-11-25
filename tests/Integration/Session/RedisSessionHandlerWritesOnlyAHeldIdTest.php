@@ -64,7 +64,9 @@ final class RedisSessionHandlerWritesOnlyAHeldIdTest extends TestCase
 
         self::assertFalse($wrote);
         self::assertSame('{"__retired__":1}', $this->redis()->get(self::PREFIX . $id));
-        self::assertLessThanOrEqual(10, $this->redis()->ttl(self::PREFIX . $id), 'and it still runs out in its own time');
+        $ttl = $this->redis()->ttl(self::PREFIX . $id);
+        self::assertGreaterThan(0, $ttl, 'it still has an expiry (-1 is a key that never runs out)');
+        self::assertLessThanOrEqual(10, $ttl, 'and it still runs out in its own time');
     }
 
     #[Test]

@@ -214,6 +214,29 @@ final class SessionTest extends TestCase
         self::assertSame([], $handler->store);
     }
 
+    /**
+     * A session opened on a retired id is sent no cookie, so save() called on
+     * it (the phase does not) leaves no row under the fresh id nobody holds,
+     * also when its handler signed someone in.
+     */
+    #[Test]
+    public function a_session_opened_on_a_retired_id_saves_nothing(): void
+    {
+        $id = '55555555555555555555555555555555';
+        $handler = new InMemorySessionHandler();
+        $handler->store[$id] = ['__retired__' => 1];
+
+        $session = Session::open($id, $handler, 'semitexa_session');
+        self::assertTrue($session->isOnRetiredId());
+        $session->set('cart', 3);
+        $session->save();
+        $session->set('user_id', 7);
+        $session->regenerate();
+        $session->save();
+
+        self::assertSame([$id => ['__retired__' => 1]], $handler->store);
+    }
+
     /** What every request of a signed-in visitor does: the held session is written, and its lifetime slides. */
     #[Test]
     public function a_session_the_store_still_holds_is_written_as_before(): void

@@ -1,0 +1,267 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Semitexa\Core\Tests\Unit\Session;
+
+use PHPUnit\Framework\Attributes\DataProvider;
+use PHPUnit\Framework\Attributes\Test;
+use PHPUnit\Framework\TestCase;
+use Semitexa\Core\Session\SwooleSessionTableHolder;
+use Semitexa\Core\Session\SwooleTableSessionHandler;
+use Swoole\Atomic;
+use Swoole\Lock;
+use Swoole\Table;
+
+/**
+ * tk-session-inflight-request-rewrites-a-retired-session, on the Swoole table:
+ * writeIfHeld() was a get() and then a set(), and a sign-out in another worker
+ * that landed between the two was written over. Every change of a row is now
+ * made under a lock on its session id that all workers share.
+ *
+ * Every test runs on a private table and private locks, never the server's.
+ */
+final class SwooleTableSessionHandlerLocksASessionIdTest extends TestCase
+{
+    private const MARKER = ['__retired__' => 1];
+    private const SESSION = ['user_id' => 7, '__flash__' => []];
+    /** What the handler waits for a lock before it goes on without it. */
+    private const LOCK_WAIT_SECONDS = 0.1;
+
+    /**
+     * Two processes on one id: one keeps saving the session it read (a
+     * request in flight), the other signs out, again and again. Without the
+     * lock about three sign-outs in four were written over here.
+     */
+    #[Test]
+    public function a_sign_out_in_one_process_is_never_written_over_by_a_save_in_another(): void
+    {
+        $table = $this->table();
+        $handler = new SwooleTableSessionHandler($table, SwooleSessionTableHolder::createLocks());
+        $id = str_repeat('a', 32);
+        $stop = new Atomic(0);
+        $saved = new Atomic(0);
+        $handler->write($id, self::SESSION, 600);
+
+        $pid = pcntl_fork();
+        if ($pid < 0) {
+            self::fail('fork failed');
+        }
+        if ($pid === 0) {
+            // The request in flight. Killed, not exited: this is a copy of
+            // the test runner, and it must not finish the run a second time.
+            try {
+                $until = microtime(true) + 20;
+                while ($stop->get() === 0 && microtime(true) < $until) {
+                    if ($handler->writeIfHeld($id, self::SESSION, 600, self::MARKER)) {
+                        $saved->add(1);
+                    }
+                }
+            } finally {
+                posix_kill(posix_getpid(), SIGKILL);
+            }
+        }
+
+        $writtenBack = 0;
+        $refused = 0;
+        try {
+            $until = microtime(true) + 10;
+            while ($saved->get() === 0 && microtime(true) < $until) {
+                usleep(1000);
+            }
+            $savedBefore = $saved->get();
+            for ($round = 0; $round < 20000; $round++) {
+                $handler->write($id, self::SESSION, 600);
+                if ($round % 256 === 0) {
+                    // Room for the other process on a machine with one core.
+                    usleep(200);
+                }
+                if (!$handler->writeIfHeld($id, self::MARKER, 10, self::MARKER)) {
+                    $refused++;
+                }
+                for ($look = 0; $look < 20; $look++) {
+                    if ($table->get($id, 'data') !== '{"__retired__":1}') {
+                        $writtenBack++;
+                        break;
+                    }
+                }
+            }
+        } finally {
+            $stop->set(1);
+            pcntl_waitpid($pid, $status);
+        }
+
+        self::assertGreaterThan(0, $savedBefore, 'the other process was saving before the first sign-out');
+        self::assertGreaterThan($savedBefore, $saved->get(), 'and between the sign-outs');
+        self::assertSame(0, $refused, 'a held session is always retired');
+        self::assertSame(0, $writtenBack, 'and stays retired');
+    }
+
+    /** @return iterable<string, array{\Closure(SwooleTableSessionHandler, string): mixed}> */
+    public static function changes(): iterable
+    {
+        yield 'a write' => [static fn (SwooleTableSessionHandler $h, string $id) => $h->write($id, self::SESSION, 600)];
+        yield 'a held write' => [static fn (SwooleTableSessionHandler $h, string $id) => $h->writeIfHeld($id, self::SESSION, 600, self::MARKER)];
+        yield 'a destroy' => [static fn (SwooleTableSessionHandler $h, string $id) => $h->destroy($id)];
+    }
+
+    /**
+     * The lock is the one of the id's stripe, and it is asked for: held by
+     * someone else, the call waits for it. (It then goes on without it: a
+     * holder that died must not stop every worker for good.)
+     *
+     * @param \Closure(SwooleTableSessionHandler, string): mixed $change
+     */
+    #[Test]
+    #[DataProvider('changes')]
+    public function a_change_waits_for_the_lock_of_its_id(\Closure $change): void
+    {
+        $table = $this->table();
+        $locks = SwooleSessionTableHolder::createLocks(8);
+        $handler = new SwooleTableSessionHandler($table, $locks);
+        $id = str_repeat('b', 32);
+        $handler->write($id, self::SESSION, 600);
+        $own = crc32($id) % 8;
+
+        // Every other stripe held: none of them is asked for.
+        foreach ($locks as $stripe => $lock) {
+            if ($stripe !== $own) {
+                self::assertTrue(self::free($lock));
+            }
+        }
+        self::assertTrue(self::free($locks[$own]), 'the stripe of the id is free before the change');
+        $locks[$own]->unlock();
+        $change($handler, $id);
+        self::assertTrue(self::free($locks[$own]), 'and is given back after it');
+
+        // Now the id's own stripe is held (by this test, just above).
+        $handler->write($id, self::SESSION, 600);
+        $waited = microtime(true);
+        $change($handler, $id);
+        self::assertGreaterThanOrEqual(self::LOCK_WAIT_SECONDS * 0.9, microtime(true) - $waited, 'held elsewhere, it is waited for');
+    }
+
+    #[Test]
+    public function a_held_write_that_cannot_be_encoded_gives_no_lock_away(): void
+    {
+        $locks = SwooleSessionTableHolder::createLocks(1);
+        $handler = new SwooleTableSessionHandler($this->table(), $locks);
+        $id = str_repeat('c', 32);
+        $handler->write($id, self::SESSION, 600);
+
+        try {
+            $handler->writeIfHeld($id, ['broken' => NAN], 600, self::MARKER);
+            self::fail('NAN is not JSON');
+        } catch (\JsonException) {
+        }
+
+        self::assertTrue(self::free($locks[0]), 'the lock is free');
+        $locks[0]->unlock();
+        self::assertSame(self::SESSION, $handler->read($id), 'and the session is as it was');
+    }
+
+    /** A full table: the write evicts rows of other ids, each under its own lock, one at a time. */
+    #[Test]
+    public function a_write_that_reclaims_room_leaves_every_lock_free(): void
+    {
+        $table = $this->table();
+        $locks = SwooleSessionTableHolder::createLocks(4);
+        $handler = new SwooleTableSessionHandler($table, $locks);
+        for ($i = 0; $i < 2000; $i++) {
+            if (!@$table->set(sprintf('%032x', $i), ['data' => '{"n":1}', 'expires_at' => time() + 1000 + $i])) {
+                break;
+            }
+        }
+        $started = microtime(true);
+
+        for ($i = 0; $i < 10; $i++) {
+            $handler->write(sprintf('%032x', 0xf0000 + $i), self::SESSION, 3600);
+        }
+
+        // A lock taken twice (two at a time on one stripe) would have waited.
+        self::assertLessThan(self::LOCK_WAIT_SECONDS, microtime(true) - $started, 'no lock was waited for');
+        for ($i = 0; $i < 10; $i++) {
+            self::assertSame(self::SESSION, $handler->read(sprintf('%032x', 0xf0000 + $i)));
+        }
+        foreach ($locks as $lock) {
+            self::assertTrue(self::free($lock));
+        }
+    }
+
+    #[Test]
+    public function an_expired_row_is_deleted_by_a_read_under_its_lock(): void
+    {
+        $table = $this->table();
+        $locks = SwooleSessionTableHolder::createLocks(1);
+        $handler = new SwooleTableSessionHandler($table, $locks);
+        $id = str_repeat('d', 32);
+        $table->set($id, ['data' => '{"user_id":7}', 'expires_at' => time() - 5]);
+
+        self::assertSame([], $handler->read($id));
+
+        self::assertFalse($table->exists($id));
+        self::assertTrue(self::free($locks[0]), 'the lock is free');
+    }
+
+    /** No locks at all (a private table given none; the CLI): the handler works as it did. */
+    #[Test]
+    public function without_locks_every_call_still_works(): void
+    {
+        $handler = new SwooleTableSessionHandler($this->table());
+        $id = str_repeat('e', 32);
+
+        $handler->write($id, self::SESSION, 600);
+        self::assertTrue($handler->writeIfHeld($id, ['user_id' => 8, '__flash__' => []], 600, self::MARKER));
+        self::assertSame(['user_id' => 8, '__flash__' => []], $handler->read($id));
+        self::assertTrue($handler->writeIfHeld($id, self::MARKER, 10, self::MARKER));
+        self::assertFalse($handler->writeIfHeld($id, self::SESSION, 600, self::MARKER));
+        $handler->destroy($id);
+        self::assertSame([], $handler->read($id));
+    }
+
+    #[Test]
+    public function the_servers_table_gets_its_locks_with_it(): void
+    {
+        $table = (new \ReflectionProperty(SwooleSessionTableHolder::class, 'table'));
+        $locks = (new \ReflectionProperty(SwooleSessionTableHolder::class, 'locks'));
+        $before = [$table->getValue(), $locks->getValue()];
+        try {
+            SwooleSessionTableHolder::setTable($this->table());
+
+            $shared = SwooleSessionTableHolder::getLocks();
+            self::assertCount(SwooleSessionTableHolder::LOCK_STRIPES, $shared);
+            self::assertContainsOnlyInstancesOf(Lock::class, $shared);
+
+            // The handler without a table of its own uses them.
+            $id = str_repeat('f', 32);
+            $handler = new SwooleTableSessionHandler();
+            $handler->write($id, self::SESSION, 600);
+            $own = $shared[crc32($id) % count($shared)];
+            self::assertTrue(self::free($own));
+            $waited = microtime(true);
+            self::assertTrue($handler->writeIfHeld($id, self::SESSION, 600, self::MARKER));
+            self::assertGreaterThanOrEqual(self::LOCK_WAIT_SECONDS * 0.9, microtime(true) - $waited);
+            $own->unlock();
+        } finally {
+            $table->setValue(null, $before[0]);
+            $locks->setValue(null, $before[1]);
+        }
+    }
+
+    /** Takes $lock when nobody holds it, without waiting. */
+    private static function free(Lock $lock): bool
+    {
+        // @phpstan-ignore arguments.count (Swoole 6.1 gave lock() its operation; the stubs are 5.1's)
+        return $lock->lock(LOCK_EX | LOCK_NB);
+    }
+
+    private function table(): Table
+    {
+        $table = new Table(64);
+        $table->column('data', Table::TYPE_STRING, 256);
+        $table->column('expires_at', Table::TYPE_INT, 8);
+        $table->create();
+
+        return $table;
+    }
+}

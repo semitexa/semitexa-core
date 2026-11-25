@@ -16,10 +16,12 @@ next release tag. This file is machine-read by `update:changelog` and the OS
   was signed out. A session id a browser holds is now written only while the
   store still holds a session under it; otherwise the request stores nothing and
   sends no session cookie. In Redis the check and the write are one script. On
-  the Swoole table they are two calls: a sign-out in another worker that lands
-  exactly between them is still written over. A custom `SessionHandlerInterface`
-  gets a read followed by a write, with the same gap; implementing
-  `HeldSessionWriterInterface` closes it. To notice: a session that expired or
+  the Swoole table they are made under a lock all workers share, and so is every
+  other change of that session's row (64 locks, created with the table before
+  the workers fork; a session write waits for another only on the same lock). A
+  custom `SessionHandlerInterface` gets a read followed by a write: a sign-out
+  that lands exactly between them is still written over; implementing
+  `HeldSessionWriterInterface` closes that. To notice: a session that expired or
   was evicted while its request ran is no longer started again by that request.
 
 ### Fixed

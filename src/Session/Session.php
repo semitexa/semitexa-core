@@ -298,10 +298,13 @@ final class Session implements SessionInterface
      *
      * An id the store never held was never sent to a browser: no other
      * request can have it, and it is written as it is.
+     *
+     * A session opened on an id that was already retired writes nothing
+     * either: it is sent no cookie, so no browser would ever ask for its row.
      */
     public function save(): void
     {
-        if ($this->retiredMeanwhile) {
+        if ($this->openedOnRetiredId || $this->retiredMeanwhile) {
             return;
         }
 
@@ -358,7 +361,8 @@ final class Session implements SessionInterface
      * own expiry, so it is gone by itself.
      *
      * One step where the store has one ({@see HeldSessionWriterInterface}:
-     * a script in Redis). Elsewhere a read and then a write, and a retirement
+     * a script in Redis, a lock all workers share on the Swoole table).
+     * Elsewhere a read and then a write, and a retirement
      * that lands between the two is written over.
      *
      * @param array<string, mixed> $data
