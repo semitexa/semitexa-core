@@ -122,11 +122,13 @@ final class LintTemplatesPostFormCsrfTest extends TestCase
             . "<form method=\"post\" action=\"https://pay.example.com/\"><input type=\"{{ t }}\" formaction=\"/orders/delete\"></form>",
             [1, 2],
         ];
-        yield 'csrf_field() in a Twig tag, printed later, is the field; in a Twig comment it is not' => [
-            "<form method=\"post\">{% set f = csrf_field() %}{{ f }}</form>\n"
-            . "<form method=\"post\">{# {% set f = csrf_field() %} #}</form>\n"
-            . "<form method=\"post\">{% set f = 'csrf_field()' %}{{ f }}</form>",
-            [2, 3],
+        yield 'csrf_field() counts only where an output expression prints it, directly in the form' => [
+            "<form method=\"post\">{% set f = csrf_field() %}</form>\n"
+            . "<form method=\"post\">{% set f = csrf_field() %}{{ f }}</form>\n"
+            . "<form method=\"post\">{# {{ csrf_field() }} #}</form>\n"
+            . "<form method=\"post\">{{ 'csrf_field()' }}</form>\n"
+            . "<form method=\"post\">{{- csrf_field() -}}</form>",
+            [1, 2, 3, 4],
         ];
         yield 'of a repeated attribute the first counts, as in the browser' => [
             "<form method=\"post\" method=\"get\"></form>\n"

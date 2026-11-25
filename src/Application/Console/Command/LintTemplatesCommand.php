@@ -477,9 +477,12 @@ class LintTemplatesCommand extends BaseCommand
                 continue;
             }
 
-            // csrf_field() prints the field only as a Twig output expression; in the text of the page it is words.
+            // csrf_field() prints the field only in an output expression, {{ }}. Assigned in
+            // {% set %} it prints nothing where it stands, and an assignment is not followed to
+            // where it is printed: the field goes directly in the form. In the text of the page
+            // it is words.
             $twigString = '\'(?:[^\'\\\\]|\\\\.)*\'|"(?:[^"\\\\]|\\\\.)*"';
-            if (preg_match_all('/\{[{%]((?:' . $twigString . '|[^\'"])*?)[}%]\}/s', $body, $outputs) === false) {
+            if (preg_match_all('/\{\{((?:' . $twigString . '|[^\'"])*?)\}\}/s', $body, $outputs) === false) {
                 return null;
             }
             foreach ($outputs[1] as $expression) {

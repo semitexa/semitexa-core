@@ -32,7 +32,7 @@ next release tag. This file is machine-read by `update:changelog` and the OS
   every visitor who has one. With guest sessions created only on use, a page no
   longer shows this by itself, so the lint does, as an error. A form passes with
   `{{ csrf_field() }}` directly inside it, or an `<input>` named `_csrf`; a field
-  printed by an included template or a macro is not seen. Not checked: a GET
+  printed by an included template, a macro or a `{% set %}` variable is not seen. Not checked: a GET
   form, a form without a method, a form that posts to an absolute URL written in
   the template (`http://`, `https://`, `//`), markup in a comment or
   `{% verbatim %}`. A literal absolute URL is taken for another site: a form that
