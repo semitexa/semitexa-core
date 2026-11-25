@@ -49,13 +49,12 @@ final class SwooleTableSessionHandlerLocksASessionIdTest extends TestCase
     }
 
     /**
-     * A worker that died holding a stripe: every change of a held session on
-     * it is dropped, so nothing written without the lock can put a retired
-     * session back, and the retirement itself still goes through, so sign-in
-     * and sign-out keep working.
+     * A holder that is slow, or died: no change of a held session is made
+     * without the lock, a retirement neither. CodeRabbit on semitexa-core#274:
+     * a marker written beside a live holder was written over when it resumed.
      */
     #[Test]
-    public function without_its_lock_a_held_write_is_dropped_and_a_retirement_is_not(): void
+    public function without_its_lock_no_change_of_a_held_session_is_made(): void
     {
         $locks = SwooleSessionTableHolder::createLocks(1);
         $handler = new SwooleTableSessionHandler($this->table(), $locks);
@@ -65,13 +64,13 @@ final class SwooleTableSessionHandlerLocksASessionIdTest extends TestCase
         try {
             self::assertFalse($handler->writeIfHeld($id, ['user_id' => 8, '__flash__' => []], 600, self::MARKER), 'a save is dropped');
             self::assertSame(self::SESSION, $handler->read($id), 'and wrote nothing');
-            self::assertTrue($handler->writeIfHeld($id, self::MARKER, 10, self::MARKER), 'a retirement goes through');
-            self::assertSame(self::MARKER, $handler->read($id));
-            self::assertFalse($handler->writeIfHeld($id, self::SESSION, 600, self::MARKER), 'and nothing is written back over it');
-            self::assertSame(self::MARKER, $handler->read($id));
+            self::assertFalse($handler->writeIfHeld($id, self::MARKER, 10, self::MARKER), 'a retirement neither');
+            self::assertSame(self::SESSION, $handler->read($id), 'what the holder holds is what it read');
         } finally {
             $locks[0]->unlock();
         }
+        self::assertTrue($handler->writeIfHeld($id, self::MARKER, 10, self::MARKER), 'its lock back, the retirement is made');
+        self::assertSame(self::MARKER, $handler->read($id));
     }
 
     /** CodeRabbit on semitexa-core#274: a timed wait blocked every coroutine of the worker. */
