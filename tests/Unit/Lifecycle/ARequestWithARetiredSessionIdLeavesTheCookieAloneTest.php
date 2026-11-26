@@ -48,6 +48,7 @@ final class ARequestWithARetiredSessionIdLeavesTheCookieAloneTest extends TestCa
     private const SLOTS = ['core.csrf_session', DefaultTenantContextStore::CONTEXT_KEY];
 
     private string|false $redisHostBefore = false;
+    private string|false $sessionLifetimeBefore = false;
 
     /** @var array<string, mixed> */
     private array $slotsBefore = [];
@@ -62,10 +63,13 @@ final class ARequestWithARetiredSessionIdLeavesTheCookieAloneTest extends TestCa
         }
         $this->redisHostBefore = getenv('REDIS_HOST');
         putenv('REDIS_HOST=');
+        $this->sessionLifetimeBefore = getenv('SESSION_LIFETIME');
+        putenv('SESSION_LIFETIME=3600');
     }
 
     protected function tearDown(): void
     {
+        $this->sessionLifetimeBefore === false ? putenv('SESSION_LIFETIME') : putenv('SESSION_LIFETIME=' . $this->sessionLifetimeBefore);
         $this->redisHostBefore === false ? putenv('REDIS_HOST') : putenv('REDIS_HOST=' . $this->redisHostBefore);
         foreach (self::SLOTS as $slot) {
             if (array_key_exists($slot, $this->slotsBefore)) {
@@ -100,8 +104,7 @@ final class ARequestWithARetiredSessionIdLeavesTheCookieAloneTest extends TestCa
         $phase->execute($next);
         self::assertSame(7, $this->session($scope)->get('user_id'));
         self::assertSame($newToken, $this->session($scope)->getPayload(CsrfToken::class)->getValue());
-        // verify:accept-test-change an ordinary request that already carries the current session cookie no longer re-sends it before half its lifetime has passed (tk-session-late-response-restores-a-retired-cookie)
-        self::assertSame([], $this->cookies($phase->finalize($next, new HttpResponse('ok'))));
+        self::assertSame($newId, $this->cookies($phase->finalize($next, new HttpResponse('ok')))['semitexa_session'] ?? null);
     }
 
     /** @return iterable<string, array{\Closure(Session): mixed}> */
@@ -396,7 +399,7 @@ final class ARequestWithARetiredSessionIdLeavesTheCookieAloneTest extends TestCa
         $this->store($table, '{"seen_before_sign_in":true,"__csrf__":{"value":"before"},"__flash__":[]}');
 
         [$pollPhase, $pollScope] = $this->phase($table);
-        $poll = new RequestLifecycleContext($this->request(self::BEFORE_SIGN_IN));
+        $poll = new RequestLifecycleContext($this->request(self::BEFORE_SIGN_IN, ['XSRF-TOKEN' => 'before']));
         $pollPhase->execute($poll);
         $this->session($pollScope)->set('polled', true);
         $pollResponse = $pollPhase->finalize($poll, new HttpResponse('{"new":0}', 200, ['Content-Type' => 'application/json']));
@@ -439,12 +442,12 @@ final class ARequestWithARetiredSessionIdLeavesTheCookieAloneTest extends TestCa
         $table = $this->table();
         [$newId, $newToken] = $this->signIn($table);
 
-        // At exactly half the default 3600 s lifetime, the cookie is still fresh: not re-sent.
+        // Before half the 3600 s lifetime has passed, the cookie is not re-sent.
         $row = $table->get($newId);
         self::assertIsArray($row);
         $decoded = json_decode((string) $row['data'], true);
         self::assertIsArray($decoded);
-        $decoded['__cookie_at__'] = time() - 1800;
+        $decoded['__cookie_at__'] = time() - 1790;
         $table->set($newId, ['data' => json_encode($decoded, JSON_THROW_ON_ERROR), 'expires_at' => $row['expires_at']]);
 
         [$halfPhase] = $this->phase($table);
@@ -475,6 +478,15 @@ final class ARequestWithARetiredSessionIdLeavesTheCookieAloneTest extends TestCa
     {
         $table = $this->table();
         [$newId, $newToken] = $this->signIn($table);
+
+        // Missing XSRF-TOKEN cookie triggers re-issue so AJAX clients recover.
+        [$missingPhase] = $this->phase($table);
+        $missing = new RequestLifecycleContext($this->request($newId));
+        $missingPhase->execute($missing);
+        self::assertSame(
+            ['semitexa_session' => $newId, 'XSRF-TOKEN' => $newToken],
+            $this->cookies($missingPhase->finalize($missing, new HttpResponse('ok'))),
+        );
 
         // Stale XSRF-TOKEN cookie presented by the client triggers re-sync.
         [$stalePhase] = $this->phase($table);

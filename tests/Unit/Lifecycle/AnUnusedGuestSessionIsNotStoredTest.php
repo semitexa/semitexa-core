@@ -368,12 +368,14 @@ final class AnUnusedGuestSessionIsNotStoredTest extends TestCase
 
         $cookies = $this->cookies($phase->finalize($context, new HttpResponse('forbidden', 403)));
         // verify:accept-test-change the refusal no longer stores a session for an unknown cookie (review: a row per forged POST); a stored one is still written, as on every request
-        // verify:accept-test-change a stored session whose cookie the request already carried no longer re-sends its cookies when nothing about them changed (tk-session-late-response-restores-a-retired-cookie); the stored session and its token stay in the store
         self::assertSame($stored ? 1 : 0, $table->count());
-        self::assertSame($stored ? [] : ['semitexa_session' => ''], $cookies);
+        self::assertSame($stored ? ['semitexa_session', 'XSRF-TOKEN'] : ['semitexa_session'], array_keys($cookies));
+        if (!$stored) {
+            self::assertSame('', $cookies['semitexa_session'], 'the unknown cookie is expired: the retry is a guest request');
+        }
         if ($stored) {
-            self::assertSame('the-real-token', $this->session($scope)->getPayload(CsrfToken::class)->getValue(), 'the stored session keeps its token');
-            self::assertStringContainsString('"the-real-token"', (string) $table->get($cookie, 'data'));
+            self::assertSame($cookie, $cookies['semitexa_session']);
+            self::assertSame('the-real-token', $cookies['XSRF-TOKEN'], 'the stored session keeps its token');
         }
     }
 

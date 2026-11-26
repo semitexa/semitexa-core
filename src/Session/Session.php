@@ -483,13 +483,13 @@ final class Session implements SessionInterface
      * Whether the response should send the session cookie (and XSRF-TOKEN),
      * stamping the cookie's issue time for {@see save()} when it should.
      *
-     * Sent when the browser does not yet hold this id, when the session's CSRF
-     * token changed (or the request presented a different XSRF-TOKEN), or once
+     * Sent when the browser does not yet hold this id, when XSRF-TOKEN is
+     * missing or mismatched, when the session's CSRF token changed, or once
      * the cookie in the browser is past half its lifetime. Not re-sent on an
-     * ordinary request that already carried this id: a response that saved
-     * before a sign-in retired its id and reaches the browser after the
-     * sign-in's response then sets no cookie, and cannot put the retired cookie
-     * back in the browser.
+     * ordinary request that already carried this id and matching XSRF-TOKEN:
+     * a response that saved before a sign-in retired its id and reaches the
+     * browser after the sign-in's response then sets no cookie, and cannot put
+     * the retired cookie back in the browser.
      *
      * @internal for SessionPhase
      */
@@ -502,7 +502,7 @@ final class Session implements SessionInterface
             && $presentedId === $this->id
             && $this->storedCsrfToken !== ''
             && $csrf === $this->storedCsrfToken
-            && ($presentedXsrfToken === '' || $presentedXsrfToken === $csrf);
+            && $presentedXsrfToken === $csrf;
 
         if ($sameCookie) {
             if ($this->cookieIssuedAt === null) {
