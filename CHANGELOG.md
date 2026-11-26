@@ -5,6 +5,17 @@ Changes to `semitexa/core` that a consuming application can notice. Sections are
 next release tag. This file is machine-read by `update:changelog` and the OS
 "What's new" surface — keep entries short and operator-facing.
 
+## Unreleased
+
+### Fixed
+
+- On a full Swoole session table, making room no longer evicts a sign-in's or
+  a sign-out's retirement marker. It used to go first, since a marker expires
+  soonest, and a request still carrying the retired id was then read as
+  unknown: its response could expire the new sign-in cookie. A row replaced
+  since the scan with the same expiry is no longer deleted either: the reclaim
+  compares the data as well. `Session::RETIRED_MARKER` is public for the stores.
+
 ## 2026.11.25.2141 — 2026-11-25
 
 ### Security
