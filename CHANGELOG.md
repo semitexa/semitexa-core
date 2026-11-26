@@ -9,6 +9,12 @@ next release tag. This file is machine-read by `update:changelog` and the OS
 
 ### Fixed
 
+- Ordinary requests that already carry the current `semitexa_session` and
+  matching `XSRF-TOKEN` cookies no longer re-send them unless the cookie is
+  past half its lifetime or the CSRF token changed, so a response saved before
+  a sign-in retired its id and delivered after the sign-in's response cannot
+  restore the retired cookie in the browser.
+
 - On a full Swoole session table, making room no longer evicts a sign-in's or
   a sign-out's retirement marker. It used to go first, since a marker expires
   soonest, and a request still carrying the retired id was then read as

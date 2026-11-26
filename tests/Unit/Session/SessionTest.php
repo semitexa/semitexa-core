@@ -253,6 +253,33 @@ final class SessionTest extends TestCase
         self::assertSame(['user_id' => 7, 'cart' => 3, '__flash__' => []], $handler->store[$id]);
         self::assertSame(1800, $handler->lifetimes[$id]);
     }
+
+    #[Test]
+    public function refresh_cookie_if_due_honours_the_exact_half_lifetime_boundary(): void
+    {
+        $id = '66666666666666666666666666666666';
+        $handler = new InMemorySessionHandler();
+        $handler->store[$id] = ['__csrf__' => ['value' => 'tok'], '__flash__' => []];
+
+        $first = Session::open($id, $handler, 'semitexa_session', 3600);
+        self::assertTrue($first->refreshCookieIfDue($id, 'tok', 1000));
+        $first->save();
+        self::assertSame(1000, $handler->read($id)['__cookie_at__'] ?? null);
+
+        $rightAfter = Session::open($id, $handler, 'semitexa_session', 3600);
+        self::assertFalse($rightAfter->refreshCookieIfDue($id, 'tok', 1001));
+
+        $atHalf = Session::open($id, $handler, 'semitexa_session', 3600);
+        self::assertFalse($atHalf->refreshCookieIfDue($id, 'tok', 2800));
+
+        $pastHalf = Session::open($id, $handler, 'semitexa_session', 3600);
+        self::assertTrue($pastHalf->refreshCookieIfDue($id, 'tok', 2801));
+        $pastHalf->save();
+        self::assertSame(2801, $handler->read($id)['__cookie_at__']);
+
+        $afterRefresh = Session::open($id, $handler, 'semitexa_session', 3600);
+        self::assertFalse($afterRefresh->refreshCookieIfDue($id, 'tok', 2802));
+    }
 }
 
 final class InMemorySessionHandler implements SessionHandlerInterface

@@ -123,7 +123,9 @@ final class SessionPhase
             return $response;
         }
 
+        $cookieName = $session->getCookieName();
         $sessionPersisted = false;
+        $sendCookies = false;
 
         // A transient session (the store was unreadable) is neither saved nor
         // re-issued — a new XSRF cookie would hand open tabs a token the real
@@ -144,6 +146,10 @@ final class SessionPhase
         // the one the other request set. So it is sent none, and with no
         // cookie to find it by, what it wrote is not stored.
         if (!$session->isOnRetiredId() && $session->persists() && $session->isWorthStoring()) {
+            $sendCookies = $session->refreshCookieIfDue(
+                $request->getCookie($cookieName, ''),
+                $request->getCookie('XSRF-TOKEN', ''),
+            );
             try {
                 $session->save();
                 $sessionPersisted = !$session->isOnRetiredId();
@@ -166,8 +172,7 @@ final class SessionPhase
 
         $retiredId = $session->isOnRetiredId();
 
-        if ($sessionPersisted) {
-            $cookieName = $session->getCookieName();
+        if ($sessionPersisted && $sendCookies) {
             $baseOptions = $this->sessionCookieOptions($request);
 
             $cookieJar->set($cookieName, $session->getSessionIdForCookie(), ['httpOnly' => true] + $baseOptions);
@@ -195,7 +200,6 @@ final class SessionPhase
         // Nor for an id retired a moment ago: the browser already holds, or is
         // about to receive, the cookie that replaced it.
         if (!$sessionPersisted && !$retiredId && $session->persists() && !$session->isWorthStoring()) {
-            $cookieName = $session->getCookieName();
             $expired = ['maxAge' => 0, 'expires' => time() - 3600] + $this->sessionCookieOptions($request);
             if ($request->getCookie($cookieName, '') !== '') {
                 $cookieJar->set($cookieName, '', ['httpOnly' => true] + $expired);

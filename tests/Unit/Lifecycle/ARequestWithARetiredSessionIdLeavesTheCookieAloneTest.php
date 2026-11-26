@@ -48,6 +48,7 @@ final class ARequestWithARetiredSessionIdLeavesTheCookieAloneTest extends TestCa
     private const SLOTS = ['core.csrf_session', DefaultTenantContextStore::CONTEXT_KEY];
 
     private string|false $redisHostBefore = false;
+    private string|false $sessionLifetimeBefore = false;
 
     /** @var array<string, mixed> */
     private array $slotsBefore = [];
@@ -62,10 +63,13 @@ final class ARequestWithARetiredSessionIdLeavesTheCookieAloneTest extends TestCa
         }
         $this->redisHostBefore = getenv('REDIS_HOST');
         putenv('REDIS_HOST=');
+        $this->sessionLifetimeBefore = getenv('SESSION_LIFETIME');
+        putenv('SESSION_LIFETIME=3600');
     }
 
     protected function tearDown(): void
     {
+        $this->sessionLifetimeBefore === false ? putenv('SESSION_LIFETIME') : putenv('SESSION_LIFETIME=' . $this->sessionLifetimeBefore);
         $this->redisHostBefore === false ? putenv('REDIS_HOST') : putenv('REDIS_HOST=' . $this->redisHostBefore);
         foreach (self::SLOTS as $slot) {
             if (array_key_exists($slot, $this->slotsBefore)) {
@@ -381,6 +385,156 @@ final class ARequestWithARetiredSessionIdLeavesTheCookieAloneTest extends TestCa
             self::assertTrue($table->exists($newId), "run {$run}: the new session is stored");
             self::assertSame('{"__retired__":1}', $table->get(self::BEFORE_SIGN_IN, 'data'), "run {$run}: and the old id is still marked");
         }
+    }
+
+    /**
+     * tk-session-late-response-restores-a-retired-cookie: request A saves
+     * before sign-in B retires its id, and A's response reaches the browser
+     * after B's. A sets no Set-Cookie, so the browser keeps B's new cookie.
+     */
+    #[Test]
+    public function a_response_that_saved_before_a_sign_in_and_arrives_after_it_leaves_the_new_cookie_in_the_browser(): void
+    {
+        $table = $this->table();
+        $this->store($table, json_encode(['seen_before_sign_in' => true, '__csrf__' => ['value' => 'before'], '__cookie_at__' => time() - 5, '__flash__' => []], JSON_THROW_ON_ERROR));
+
+        [$pollPhase, $pollScope] = $this->phase($table);
+        $poll = new RequestLifecycleContext($this->request(self::BEFORE_SIGN_IN, ['XSRF-TOKEN' => 'before']));
+        $pollPhase->execute($poll);
+        $this->session($pollScope)->set('polled', true);
+        $pollResponse = $pollPhase->finalize($poll, new HttpResponse('{"new":0}', 200, ['Content-Type' => 'application/json']));
+
+        [$signInPhase, $signInScope] = $this->phase($table);
+        $signIn = new RequestLifecycleContext($this->request(self::BEFORE_SIGN_IN));
+        $signInPhase->execute($signIn);
+        $signInSession = $this->session($signInScope);
+        $signInSession->regenerate();
+        $signInSession->set('user_id', 7);
+        $signInResponse = $signInPhase->finalize($signIn, HttpResponse::redirect('/dashboard'));
+
+        $signInCookies = $this->cookies($signInResponse);
+        $newId = $signInCookies['semitexa_session'] ?? '';
+        $newToken = $signInCookies['XSRF-TOKEN'] ?? '';
+        self::assertTrue(Session::isWellFormedId($newId));
+        self::assertNotSame(self::BEFORE_SIGN_IN, $newId);
+        self::assertNotSame('', $newToken);
+
+        $jar = ['semitexa_session' => self::BEFORE_SIGN_IN, 'XSRF-TOKEN' => 'before'];
+        foreach ([$signInResponse, $pollResponse] as $delivered) {
+            foreach ($this->cookies($delivered) as $name => $value) {
+                $jar[$name] = $value;
+            }
+        }
+
+        self::assertSame(['Content-Type' => 'application/json'], $pollResponse->getHeaders());
+        self::assertSame([], $this->cookies($pollResponse));
+        self::assertSame($newId, $jar['semitexa_session']);
+        self::assertSame($newToken, $jar['XSRF-TOKEN']);
+
+        [$nextPhase, $nextScope] = $this->phase($table);
+        $nextPhase->execute(new RequestLifecycleContext($this->request($jar['semitexa_session'])));
+        self::assertSame(7, $this->session($nextScope)->get('user_id'));
+    }
+
+    #[Test]
+    public function the_session_cookie_is_refreshed_only_once_past_half_its_lifetime(): void
+    {
+        $table = $this->table();
+        [$newId, $newToken] = $this->signIn($table);
+
+        // Before half the 3600 s lifetime has passed, the cookie is not re-sent.
+        $row = $table->get($newId);
+        self::assertIsArray($row);
+        self::assertIsString($row['data'] ?? null);
+        $decoded = json_decode($row['data'], true);
+        self::assertIsArray($decoded);
+        $decoded['__cookie_at__'] = time() - 1790;
+        $table->set($newId, ['data' => json_encode($decoded, JSON_THROW_ON_ERROR), 'expires_at' => $row['expires_at']]);
+
+        [$halfPhase] = $this->phase($table);
+        $half = new RequestLifecycleContext($this->request($newId, ['XSRF-TOKEN' => $newToken]));
+        $halfPhase->execute($half);
+        self::assertSame([], $this->cookies($halfPhase->finalize($half, new HttpResponse('ok'))));
+
+        // One second past half the lifetime, the cookie is refreshed once, then stays quiet again.
+        $decoded['__cookie_at__'] = time() - 1801;
+        $table->set($newId, ['data' => json_encode($decoded, JSON_THROW_ON_ERROR), 'expires_at' => $row['expires_at']]);
+
+        [$duePhase] = $this->phase($table);
+        $due = new RequestLifecycleContext($this->request($newId, ['XSRF-TOKEN' => $newToken]));
+        $duePhase->execute($due);
+        self::assertSame(
+            ['semitexa_session' => $newId, 'XSRF-TOKEN' => $newToken],
+            $this->cookies($duePhase->finalize($due, new HttpResponse('ok'))),
+        );
+
+        [$afterPhase] = $this->phase($table);
+        $after = new RequestLifecycleContext($this->request($newId, ['XSRF-TOKEN' => $newToken]));
+        $afterPhase->execute($after);
+        self::assertSame([], $this->cookies($afterPhase->finalize($after, new HttpResponse('ok'))));
+    }
+
+    #[Test]
+    public function a_request_that_rotates_the_csrf_token_or_carries_a_stale_xsrf_cookie_still_sends_the_cookies(): void
+    {
+        $table = $this->table();
+        [$newId, $newToken] = $this->signIn($table);
+
+        // Missing XSRF-TOKEN cookie triggers re-issue so AJAX clients recover.
+        [$missingPhase] = $this->phase($table);
+        $missing = new RequestLifecycleContext($this->request($newId));
+        $missingPhase->execute($missing);
+        self::assertSame(
+            ['semitexa_session' => $newId, 'XSRF-TOKEN' => $newToken],
+            $this->cookies($missingPhase->finalize($missing, new HttpResponse('ok'))),
+        );
+
+        // Stale XSRF-TOKEN cookie presented by the client triggers re-sync.
+        [$stalePhase] = $this->phase($table);
+        $stale = new RequestLifecycleContext($this->request($newId, ['XSRF-TOKEN' => 'stale-token']));
+        $stalePhase->execute($stale);
+        self::assertSame(
+            ['semitexa_session' => $newId, 'XSRF-TOKEN' => $newToken],
+            $this->cookies($stalePhase->finalize($stale, new HttpResponse('ok'))),
+        );
+
+        // Server-side CsrfToken change triggers re-send even with a previously matching cookie.
+        [$rotatedPhase, $rotatedScope] = $this->phase($table);
+        $rotated = new RequestLifecycleContext($this->request($newId, ['XSRF-TOKEN' => $newToken]));
+        $rotatedPhase->execute($rotated);
+        $freshToken = CsrfToken::generate();
+        $this->session($rotatedScope)->setPayload($freshToken);
+        self::assertSame(
+            ['semitexa_session' => $newId, 'XSRF-TOKEN' => $freshToken->getValue()],
+            $this->cookies($rotatedPhase->finalize($rotated, new HttpResponse('ok'))),
+        );
+    }
+
+    #[Test]
+    public function a_pre_deploy_session_without_cookie_timestamp_reissues_cookies_once_then_stays_quiet(): void
+    {
+        $table = $this->table();
+        $this->store($table, '{"user_id":7,"__csrf__":{"value":"tok"},"__flash__":[]}');
+
+        [$firstPhase] = $this->phase($table);
+        $first = new RequestLifecycleContext($this->request(self::BEFORE_SIGN_IN, ['XSRF-TOKEN' => 'tok']));
+        $firstPhase->execute($first);
+        self::assertSame(
+            ['semitexa_session' => self::BEFORE_SIGN_IN, 'XSRF-TOKEN' => 'tok'],
+            $this->cookies($firstPhase->finalize($first, new HttpResponse('ok'))),
+        );
+
+        $row = $table->get(self::BEFORE_SIGN_IN);
+        self::assertIsArray($row);
+        self::assertIsString($row['data'] ?? null);
+        $decoded = json_decode($row['data'], true);
+        self::assertIsArray($decoded);
+        self::assertIsInt($decoded['__cookie_at__'] ?? null);
+
+        [$secondPhase] = $this->phase($table);
+        $second = new RequestLifecycleContext($this->request(self::BEFORE_SIGN_IN, ['XSRF-TOKEN' => 'tok']));
+        $secondPhase->execute($second);
+        self::assertSame([], $this->cookies($secondPhase->finalize($second, new HttpResponse('ok'))));
     }
 
     private function store(\Swoole\Table $table, string $data): void

@@ -42,6 +42,11 @@ final class Session implements SessionInterface
      * ({@see isWorthStoring()}).
      */
     private bool $used = false;
+    private const COOKIE_ISSUED_AT_KEY = '__cookie_at__';
+    /** When the session cookie (and XSRF-TOKEN) for this id was last sent to the browser. */
+    private ?int $cookieIssuedAt = null;
+    /** The CSRF token the stored session held when opened, '' when it had none. */
+    private string $storedCsrfToken = '';
 
     /**
      * The one shape a session id has: what {@see generateId()} mints, 32
@@ -102,6 +107,10 @@ final class Session implements SessionInterface
         $this->heldByStore = $this->data !== [];
         $this->flash = $this->data['__flash__'] ?? [];
         unset($this->data['__flash__']);
+        $cookieIssuedAt = $this->data[self::COOKIE_ISSUED_AT_KEY] ?? null;
+        $this->cookieIssuedAt = is_int($cookieIssuedAt) ? $cookieIssuedAt : null;
+        unset($this->data[self::COOKIE_ISSUED_AT_KEY]);
+        $this->storedCsrfToken = $this->heldByStore ? $this->csrfTokenForCheck() : '';
     }
 
     /**
@@ -213,6 +222,7 @@ final class Session implements SessionInterface
         $this->retiredId ??= $this->id;
         $this->regenerated = true;
         $this->used = true;
+        $this->cookieIssuedAt = null;
         $this->id = self::generateId();
         // The CSRF token must not survive a privilege change: under session fixation
         // an attacker who read the token before login would otherwise still hold a
@@ -257,17 +267,6 @@ final class Session implements SessionInterface
         if ($payloadClass === CsrfToken::class) {
             $this->used = true;
         }
-
-        return $this->hydratePayload($payloadClass);
-    }
-
-    /**
-     * @template T of object
-     * @param class-string<T> $payloadClass
-     * @return T
-     */
-    private function hydratePayload(string $payloadClass): object
-    {
         $segment = $this->getSegmentName($payloadClass);
         $arr = $this->data[$segment] ?? [];
         $dto = new $payloadClass();
@@ -275,6 +274,7 @@ final class Session implements SessionInterface
             /** @var array<string, mixed> $arr */
             PayloadSerializer::hydrate($dto, $arr);
         }
+
         return $dto;
     }
 
@@ -314,6 +314,9 @@ final class Session implements SessionInterface
 
         $data = $this->data;
         $data['__flash__'] = $this->flashNext;
+        if ($this->cookieIssuedAt !== null) {
+            $data[self::COOKIE_ISSUED_AT_KEY] = $this->cookieIssuedAt;
+        }
 
         if (!$this->heldByStore) {
             if ($this->retiredId !== null) {
@@ -395,7 +398,7 @@ final class Session implements SessionInterface
      */
     public function ensureCsrfToken(): void
     {
-        if ($this->hydratePayload(CsrfToken::class)->getValue() !== '') {
+        if ($this->csrfTokenForCheck() !== '') {
             return;
         }
         $this->data[$this->getSegmentName(CsrfToken::class)] = PayloadSerializer::toArray(CsrfToken::generate());
@@ -407,11 +410,14 @@ final class Session implements SessionInterface
      * the token nowhere, and a refused POST is no reason to store a session
      * (a POST with an invented cookie and no token left a row per request).
      *
-     * @internal for CsrfListener
+     * @internal for SessionPhase and CsrfListener
      */
     public function csrfTokenForCheck(): string
     {
-        return $this->hydratePayload(CsrfToken::class)->getValue();
+        $raw = $this->data[$this->getSegmentName(CsrfToken::class)] ?? null;
+        $value = is_array($raw) ? ($raw['value'] ?? '') : '';
+
+        return is_string($value) ? $value : '';
     }
 
     /**
@@ -471,6 +477,46 @@ final class Session implements SessionInterface
     public function getSessionIdForCookie(): string
     {
         return $this->id;
+    }
+
+    /**
+     * Whether the response should send the session cookie (and XSRF-TOKEN),
+     * stamping the cookie's issue time for {@see save()} when it should.
+     *
+     * Sent when the browser does not yet hold this id, when the cookie's issue
+     * time is not yet recorded in the session (e.g. a session stored before
+     * deploy), when XSRF-TOKEN is missing or mismatched, when the session's
+     * CSRF token changed, or once the cookie in the browser is past half its
+     * lifetime. Not re-sent on ordinary requests within that half-lifetime
+     * window, so their late responses emit no Set-Cookie; responses that do
+     * refresh Max-Age or repair XSRF-TOKEN must emit Set-Cookie (and if a
+     * sign-in runs after save(), RFC 6265 applies Set-Cookie in arrival order).
+     *
+     * @internal for SessionPhase
+     */
+    public function refreshCookieIfDue(string $presentedId, string $presentedXsrfToken = '', ?int $now = null): bool
+    {
+        $now ??= time();
+        $csrf = $this->csrfTokenForCheck();
+        $sameCookie = !$this->regenerated
+            && $this->heldByStore
+            && $presentedId === $this->id
+            && $this->storedCsrfToken !== ''
+            && $csrf === $this->storedCsrfToken
+            && $presentedXsrfToken === $csrf;
+
+        if (
+            $sameCookie
+            && $this->cookieIssuedAt !== null
+            && $this->lifetimeSeconds > 0
+            && ($now - $this->cookieIssuedAt) <= intdiv($this->lifetimeSeconds, 2)
+        ) {
+            return false;
+        }
+
+        $this->cookieIssuedAt = $now;
+
+        return true;
     }
 
     /** @param class-string $payloadClass */
