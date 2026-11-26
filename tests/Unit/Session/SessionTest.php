@@ -262,8 +262,12 @@ final class SessionTest extends TestCase
         $handler->store[$id] = ['__csrf__' => ['value' => 'tok'], '__flash__' => []];
 
         $first = Session::open($id, $handler, 'semitexa_session', 3600);
-        self::assertFalse($first->refreshCookieIfDue($id, 'tok', 1000));
+        self::assertTrue($first->refreshCookieIfDue($id, 'tok', 1000));
         $first->save();
+        self::assertSame(1000, $handler->read($id)['__cookie_at__'] ?? null);
+
+        $rightAfter = Session::open($id, $handler, 'semitexa_session', 3600);
+        self::assertFalse($rightAfter->refreshCookieIfDue($id, 'tok', 1001));
 
         $atHalf = Session::open($id, $handler, 'semitexa_session', 3600);
         self::assertFalse($atHalf->refreshCookieIfDue($id, 'tok', 2800));
@@ -271,6 +275,7 @@ final class SessionTest extends TestCase
         $pastHalf = Session::open($id, $handler, 'semitexa_session', 3600);
         self::assertTrue($pastHalf->refreshCookieIfDue($id, 'tok', 2801));
         $pastHalf->save();
+        self::assertSame(2801, $handler->read($id)['__cookie_at__']);
 
         $afterRefresh = Session::open($id, $handler, 'semitexa_session', 3600);
         self::assertFalse($afterRefresh->refreshCookieIfDue($id, 'tok', 2802));

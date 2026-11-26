@@ -483,13 +483,14 @@ final class Session implements SessionInterface
      * Whether the response should send the session cookie (and XSRF-TOKEN),
      * stamping the cookie's issue time for {@see save()} when it should.
      *
-     * Sent when the browser does not yet hold this id, when XSRF-TOKEN is
-     * missing or mismatched, when the session's CSRF token changed, or once
-     * the cookie in the browser is past half its lifetime. Not re-sent on an
-     * ordinary request that already carried this id and matching XSRF-TOKEN:
-     * a response that saved before a sign-in retired its id and reaches the
-     * browser after the sign-in's response then sets no cookie, and cannot put
-     * the retired cookie back in the browser.
+     * Sent when the browser does not yet hold this id, when the cookie's issue
+     * time is not yet recorded in the session (e.g. a session stored before
+     * deploy), when XSRF-TOKEN is missing or mismatched, when the session's
+     * CSRF token changed, or once the cookie in the browser is past half its
+     * lifetime. Not re-sent on ordinary requests within that half-lifetime
+     * window, so their late responses emit no Set-Cookie; responses that do
+     * refresh Max-Age or repair XSRF-TOKEN must emit Set-Cookie (and if a
+     * sign-in runs after save(), RFC 6265 applies Set-Cookie in arrival order).
      *
      * @internal for SessionPhase
      */
@@ -504,15 +505,13 @@ final class Session implements SessionInterface
             && $csrf === $this->storedCsrfToken
             && $presentedXsrfToken === $csrf;
 
-        if ($sameCookie) {
-            if ($this->cookieIssuedAt === null) {
-                $this->cookieIssuedAt = $now;
-
-                return false;
-            }
-            if ($this->lifetimeSeconds > 0 && ($now - $this->cookieIssuedAt) <= intdiv($this->lifetimeSeconds, 2)) {
-                return false;
-            }
+        if (
+            $sameCookie
+            && $this->cookieIssuedAt !== null
+            && $this->lifetimeSeconds > 0
+            && ($now - $this->cookieIssuedAt) <= intdiv($this->lifetimeSeconds, 2)
+        ) {
+            return false;
         }
 
         $this->cookieIssuedAt = $now;
